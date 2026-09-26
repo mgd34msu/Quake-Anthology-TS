@@ -2,6 +2,8 @@
 
 The installed executable is `b246c704`. It includes retained native return/SSE/x87 decoding, resource-name indexes, immutable collision snapshot reuse, and the earlier native execution, Q1 PUSH and completed-tick presentation changes. Matched original native ticks remain approximately 65–68 ms, above the 25 ms source interval; T10 is open. Component and native-call gains below do not establish general rendered FPS. See [execution status](../execution-status.md#installed-executable-and-recent-fixes) for delivery evidence and [tick execution](../tick-execution.md) for the cycle breakdown.
 
+Newer source reads native float vectors with one complete-range memory check and no temporary byte buffer for contiguous mappings. Classic and rerelease native integration share this operation; split mappings, aliases and live permissions remain checked. The complete original base1 comparison measured 66.14 to 64.61 ms per native call and 74.66 to 72.15 ms per application step, with matching instruction counts and final entity bytes. Focused memory, CPU, ABI and native service checks pass. This is a bounded simulation improvement; T10 remains open.
+
 The September 18 delivery reuses MD5 poses between color/shadow passes, indexes pose lookup, skips unused shadow-only color work, and replaces native interpreter canonical-address shifts with equivalent range checks. Paired component results and exact-output boundaries are recorded in [the integration evidence](integration-20260918.md#performance-changes). These gains are not additive and do not establish gameplay FPS. Native Q2 rerelease saved-world opening still took 155.206 seconds in its last actual continuation workflow; load performance needs further work.
 
 

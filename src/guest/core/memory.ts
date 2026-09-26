@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, ModuleIdentity } from "../../contracts/execution.ts";
+import type { Vec3 } from "../../contracts/math.ts";
 import type {
   GuestAccess, GuestAllocationOptions, GuestMapOptions, GuestMapping, GuestMemorySnapshot,
   GuestPermissions, GuestPointerBytes, GuestWrittenRange, MappedGuestMemory,
@@ -116,6 +117,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       readUint64Words: { value: memory.readUint64Words },
       readInt64: { value: memory.readInt64 },
       readFloat32: { value: memory.readFloat32 },
+      readFloat32Vector: { value: memory.readFloat32Vector },
       readFloat64: { value: memory.readFloat64 },
       readPointer: { value: memory.readPointer },
       writeUint8: { value: memory.writeUint8 },
@@ -382,6 +384,10 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
   readInt64(address: GuestAddress): bigint { const view = this.#readView(address, 8), offset = this.#lookupOffset; return view.getBigInt64(offset, true); }
   readFloat32(address: GuestAddress): number { const view = this.#readView(address, 4), offset = this.#lookupOffset; return view.getFloat32(offset, true); }
+  readFloat32Vector(address: GuestAddress): Vec3 {
+    const view = this.#readView(address, 12), offset = this.#lookupOffset;
+    return { x: view.getFloat32(offset, true), y: view.getFloat32(offset + 4, true), z: view.getFloat32(offset + 8, true) };
+  }
   readFloat64(address: GuestAddress): number { const view = this.#readView(address, 8), offset = this.#lookupOffset; return view.getFloat64(offset, true); }
   readPointer(address: GuestAddress): GuestAddress | null {
     return this.pointer(this.pointerBytes === 4 ? BigInt(this.readUint32(address)) : this.readUint64(address));

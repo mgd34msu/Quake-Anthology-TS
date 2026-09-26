@@ -4,6 +4,7 @@ import type {
   GuestValueLayout, ModuleIdentity, NativeAbi, NativeCallAbi,
 } from "../../contracts/execution.ts";
 import type { CallbackId } from "../../contracts/identity.ts";
+import type { Vec3 } from "../../contracts/math.ts";
 
 /** Committed bytes relative to the observer's requested start, including alias writes. */
 export interface GuestWrittenRange { readonly byteOffset: number; readonly byteLength: number; }
@@ -47,6 +48,7 @@ export interface MappedGuestMemory extends GuestMemory {
   readUint64(address: GuestAddress): bigint;
   readInt64(address: GuestAddress): bigint;
   readFloat32(address: GuestAddress): number;
+  readFloat32Vector(address: GuestAddress): Vec3;
   readFloat64(address: GuestAddress): number;
   readPointer(address: GuestAddress): GuestAddress | null;
   writeUint8(address: GuestAddress, value: number): undefined;

@@ -2,7 +2,7 @@
 
 This map follows the current original Quake II rerelease DLL path, the path behind the measured native performance problem. Q1/QW, Q2 classic and Q3 preserve their own source order and cadence; they share the surrounding application services. A simulation tick and a rendered frame are different operations. One application/input batch can contain several overdue simulation ticks.
 
-The original rerelease tick interval here is 25 ms, or 40 ticks per simulated second. Classic native Q2 uses 100 ms. The latest source comparison measured 68.49 → 66.78 ms inside native RunFrame and 77.44 → 75.28 ms for the application step, with all 495 entity records retained. Both variants execute identical per-frame instruction counts and finish with identical native entity bytes. RunFrame time includes engine callbacks invoked by the DLL. These are separate medians from a bounded comparison, not an additive phase profile or rendered FPS result.
+The original rerelease tick interval here is 25 ms, or 40 ticks per simulated second. Classic native Q2 uses 100 ms. The latest source comparison measured 66.14 → 64.61 ms inside native RunFrame and 74.66 → 72.15 ms for the application step after removing temporary native vector buffers, with all 495 entity records retained. Both variants execute identical per-frame instruction counts and finish with identical native entity bytes. RunFrame time includes engine callbacks invoked by the DLL. These are separate medians from a bounded comparison, not an additive phase profile or rendered FPS result.
 
 ## Once per application/input batch
 
@@ -60,6 +60,26 @@ Between completed catch-up ticks, a graphical native session may publish and pre
 7. Poll/queue additional input and yield between completed native ticks. Dispatch gameplay commands only at their original batch boundaries.
 
 At final batch completion, publish network/demo output, process transition intents and source/application requests, drain recording/capture, refresh changed graphics settings, advance autosave scheduling and complete due lobby/progression work. Saving itself runs only when requested/due at a safe boundary, not on every tick.
+
+## Current CPU profile
+
+A CPU sample profile on source `b72b9ad6`, before the vector-read change above, captured 3,885 samples across 50 warmed steps. The complete original base1 workload had one idle player, Q2 movement/model and Q3 weapons. Approximately 154,000 instructions execute per native tick, with 507 nested guest calls per step. Rendering and physical audio are absent from this dedicated workload.
+
+Each sample below belongs to one category. Milliseconds are estimates normalized to the unprofiled 74.66 ms application median, not separately measured phase timers. Profiling raised the application median to 82.88 ms, so the sample proportions are approximate.
+
+| Work | CPU share | Estimated ms/step |
+|---|---:|---:|
+| Interpreter dispatch, decoded operations, registers and arithmetic | 53.56% | 39.98 |
+| Guest memory mapping, permissions, address validation and byte access | 19.42% | 14.50 |
+| Native call argument/result conversion and CPU preservation | 11.71% | 8.75 |
+| Reading native entity fields into engine vectors and records | 5.02% | 3.74 |
+| Other rerelease integration and engine imports | 4.39% | 3.28 |
+| Simulation coordination and publication | 1.30% | 0.97 |
+| Shared body snapshots, ownership and links | 0.99% | 0.74 |
+| Collision and scene-query calculations | 0.89% | 0.66 |
+| Other application/world work and runtime | 2.73% | 2.04 |
+
+The largest individual costs within those categories are interpreter dispatch (6.98 ms), memory-mapping lookup (6.52), prepared instruction execution (3.77), operand-address calculation (2.95), SSE moves/logic (2.39), entity snapshot copying (2.19), address-range validation (1.75), and cached-code validation (1.66). They are already included in the table. The local profile and driver are `/tmp/quake-native-current.cpuprofile` and `/tmp/quake-native-current-profile.ts`.
 
 ## Measured costs
 

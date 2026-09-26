@@ -26,11 +26,11 @@ export class RereleasePublicEdict {
   float(name: string): number { return this.memory.readFloat32(this.address(name)); }
   pointer(name: string): GuestAddress | null { return this.memory.readPointer(this.address(name)); }
   private snapshot(address: GuestAddress, byteLength: number): DataView { const bytes = this.memory.copy(address, byteLength); return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); }
-  vector(name: string): Vec3 { return readVector(this.snapshot(this.address(name), 12), 0); }
+  vector(name: string): Vec3 { return this.memory.readFloat32Vector(this.address(name)); }
   setVector(name: string, value: Vec3): void { const at = this.address(name); this.memory.writeFloat32(at, value.x); this.memory.writeFloat32(this.memory.offset(at, 4n), value.y); this.memory.writeFloat32(this.memory.offset(at, 8n), value.z); }
   client(): GuestAddress { const address = this.pointer("client"); if (address === null) throw new Error("API2023 source slot has no public client prefix"); this.memory.check(address, clientLayout.byteLength, "read"); return address; }
   playerState(): Q2RereleasePlayerState { return readRereleasePlayerState(this.memory, this.client()); }
-  playerVelocity(): Vec3 { return readVector(this.snapshot(this.memory.offset(this.client(), BigInt(clientFields.velocity)), 12), 0); }
+  playerVelocity(): Vec3 { return this.memory.readFloat32Vector(this.memory.offset(this.client(), BigInt(clientFields.velocity))); }
   playerMovementFlags(): number { return this.memory.readUint16(this.memory.offset(this.client(), BigInt(clientFields.flags))); }
   playerView(): { readonly viewOffset: Vec3; readonly viewHeight: number; readonly movementFlags: number } {
     const view = this.snapshot(this.memory.offset(this.client(), BigInt(clientFields.flags)), clientFields.offset + 12 - clientFields.flags);

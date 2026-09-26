@@ -143,8 +143,7 @@ export class RereleaseQ2GuestHost {
   }
   #at(view: RawEntityView, name: string): GuestAddress { return this.module.memory.offset(view.address, BigInt(fieldOffset(edictLayout, name))); }
   #vector(address: GuestAddress): Vec3 {
-    const memory = this.module.memory;
-    return { x: memory.readFloat32(address), y: memory.readFloat32(memory.offset(address, 4n)), z: memory.readFloat32(memory.offset(address, 8n)) };
+    return this.module.memory.readFloat32Vector(address);
   }
   #writeVector(address: GuestAddress, vector: Vec3): void {
     const memory = this.module.memory;

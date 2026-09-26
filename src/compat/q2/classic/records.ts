@@ -35,7 +35,7 @@ export function allocateClassicString(memory: MappedGuestMemory, text: string): 
 }
 export function classicStringAllocationBytes(text: string): number { return nativeAllocationBytes(text.length + 1); }
 export function readClassicVector(memory: MappedGuestMemory, address: GuestAddress): Vec3 {
-  return { x: memory.readFloat32(address), y: memory.readFloat32(memory.offset(address, 4n)), z: memory.readFloat32(memory.offset(address, 8n)) };
+  return memory.readFloat32Vector(address);
 }
 export function writeClassicVector(memory: MappedGuestMemory, address: GuestAddress, vector: Vec3): undefined {
   const bytes = new Uint8Array(12), view = new DataView(bytes.buffer);

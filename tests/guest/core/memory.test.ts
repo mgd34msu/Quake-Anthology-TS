@@ -80,6 +80,23 @@ test("checked accesses cross adjacent mappings and reject the entire write befor
   expect(() => memory.copy(start, 1)).toThrow("permits execute");
 });
 
+test("vector reads preserve live alias changes and check the full range across mappings", () => {
+  for (const split of [false, true]) {
+    const memory = SparseGuestMemory.createManaged({ module, pointerBytes: 8 });
+    const start = memory.map({ base: 0x1000n, byteLength: split ? 5 : 12, permissions: "read-write" });
+    if (split) memory.map({ base: 0x1005n, byteLength: 7, permissions: "read-write" });
+    memory.writeFloat32(start, -0); memory.writeFloat32(memory.offset(start, 4n), 1.5); memory.writeFloat32(memory.offset(start, 8n), -2.25);
+    expect(memory.readFloat32Vector(start)).toEqual({ x: -0, y: 1.5, z: -2.25 });
+    const alias = memory.mapAlias({ base: 0x2000n, byteLength: 4, permissions: "read-write", source: memory.offset(start, 8n) });
+    memory.borrow(alias, 4).setFloat32(0, 42.5, true);
+    expect(memory.readFloat32Vector(start)).toEqual({ x: -0, y: 1.5, z: 42.5 });
+    memory.protect(memory.offset(start, 8n), 4, "execute");
+    expect(() => memory.readFloat32Vector(start)).toThrow(GuestMemoryFault);
+    memory.unmap(memory.offset(start, 8n), 4);
+    expect(() => memory.readFloat32Vector(start)).toThrow(GuestMemoryFault);
+  }
+});
+
 test("contiguous bulk writes preserve overlapping sources and notify after commit", () => {
   const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
   const base = memory.allocate({ byteLength: 8 });
