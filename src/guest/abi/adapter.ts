@@ -59,7 +59,32 @@ function writeLocations(cpu: GuestCpu, locations: readonly AbiLocation[], bytes:
     } else cpu.memory.write(guestPointer(cpu.memory, stackPointer(cpu) + BigInt(location.stackOffset)), part);
   }
 }
+function readInteger(cpu: GuestCpu, layout: GuestValueLayout, locations: readonly AbiLocation[]): GuestCallValue | null {
+  if (layout.kind !== "scalar" || layout.storage === "float32" || layout.storage === "float64") return null;
+  const location = locations.length === 1 ? locations[0] : undefined;
+  if (location === undefined || location.offset !== 0 || location.kind === "sse"
+    || (location.bytes !== 8 && location.bytes !== 4 && location.bytes !== 2 && location.bytes !== 1)) return null;
+  let raw: bigint;
+  if (location.kind === "integer") raw = cpu.state.registers.read(location.register, registerWidth(cpu));
+  else {
+    const address = guestPointer(cpu.memory, stackPointer(cpu) + BigInt(location.stackOffset));
+    raw = location.bytes === 8 ? cpu.memory.readUint64(address) : BigInt(location.bytes === 4 ? cpu.memory.readUint32(address)
+      : location.bytes === 2 ? cpu.memory.readUint16(address) : cpu.memory.readUint8(address));
+  }
+  switch (layout.storage) {
+    case "int8": return { kind: "int32", value: Number(BigInt.asIntN(8, raw)) };
+    case "uint8": return { kind: "uint32", value: Number(BigInt.asUintN(8, raw)) };
+    case "int16": return { kind: "int32", value: Number(BigInt.asIntN(16, raw)) };
+    case "uint16": return { kind: "uint32", value: Number(BigInt.asUintN(16, raw)) };
+    case "int32": return { kind: "int32", value: Number(BigInt.asIntN(32, raw)) };
+    case "uint32": return { kind: "uint32", value: Number(BigInt.asUintN(32, raw)) };
+    case "int64": return { kind: "int64", value: BigInt.asIntN(64, raw) };
+    case "uint64": return { kind: "uint64", value: BigInt.asUintN(64, raw) };
+    case "pointer": return { kind: "pointer", value: cpu.memory.pointer(BigInt.asUintN(cpu.memory.pointerBytes * 8, raw)) };
+  }
+}
 function readArgument(cpu: GuestCpu, argument: AbiArgument): GuestCallValue {
+  if (!argument.indirect) { const value = readInteger(cpu, argument.layout, argument.locations); if (value !== null) return value; }
   if (!argument.indirect) return decodeValue(argument.layout, readLocations(cpu, argument.locations, argumentBytes(argument.layout, cpu.memory.pointerBytes)).subarray(0, valueBytes(argument.layout, cpu.memory.pointerBytes)), cpu.memory);
   const pointer = decodeValue({ kind: "scalar", storage: "pointer" }, readLocations(cpu, argument.locations, cpu.memory.pointerBytes), cpu.memory);
   if (pointer.kind !== "pointer" || pointer.value === null) throw new RangeError("Indirect aggregate has a null guest address");
@@ -146,7 +171,8 @@ export class X86AbiAdapter implements GuestAbiAdapter {
     const plan = planGuestCall(signature);
     switch (plan.result.kind) {
       case "void": return { kind: "void" };
-      case "registers": return decodeValue(plan.result.layout, readLocations(cpu, plan.result.locations, valueBytes(plan.result.layout, this.abi.pointerBytes)), cpu.memory);
+      case "registers": return readInteger(cpu, plan.result.layout, plan.result.locations)
+        ?? decodeValue(plan.result.layout, readLocations(cpu, plan.result.locations, valueBytes(plan.result.layout, this.abi.pointerBytes)), cpu.memory);
       case "memory": {
         const address = guestPointer(cpu.memory, cpu.state.registers.read("rax", registerWidth(cpu)));
         return decodeValue(plan.result.layout, cpu.memory.copy(address, valueBytes(plan.result.layout, this.abi.pointerBytes)), cpu.memory);
