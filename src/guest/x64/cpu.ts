@@ -131,7 +131,7 @@ export class X64Cpu implements GuestCpu {
             else {
               const integer = cursor.plan === null ? null : prepareX64IntegerPlan(cursor.plan);
               this.#instructions.set(start, { start, decoded: prepared, plan: cursor.plan, integer,
-                managedEligible: integer !== null && !integer.original.endsBlock && x64IntegerBlockSafe(integer),
+                managedEligible: integer !== null && x64IntegerBlockSafe(integer),
                 block: null, managedBlock: null, unhookedRevision: undefined });
             }
           }
@@ -235,7 +235,7 @@ export class X64Cpu implements GuestCpu {
             else {
               const integer = cursor.plan === null ? null : prepareX64IntegerPlan(cursor.plan);
               this.#instructions.set(start, { start, decoded: prepared, plan: cursor.plan, integer,
-                managedEligible: integer !== null && !integer.original.endsBlock && x64IntegerBlockSafe(integer),
+                managedEligible: integer !== null && x64IntegerBlockSafe(integer),
                 block: null, managedBlock: null, unhookedRevision: undefined });
             }
           }
@@ -267,9 +267,7 @@ export class X64Cpu implements GuestCpu {
 
   #managedBlock(first: CachedInstruction, revision: symbol | null, memory: SparseGuestMemory): ManagedBlock | null {
     if (first.managedBlock?.revision === revision) return first.managedBlock;
-    if (first.integer === null || first.integer.original.endsBlock || !x64IntegerBlockSafe(first.integer)) return null;
-    const second = this.#instructions.get(first.integer.original.nextIP);
-    if (second?.integer === null || second === undefined || !x64IntegerBlockSafe(second.integer)) return null;
+    if (first.integer === null || !x64IntegerBlockSafe(first.integer)) return null;
     const steps: X64IntegerStep[] = [], bytes: number[] = [];
     let current: CachedInstruction | undefined = first, complete = true;
     while (current?.integer !== null && current !== undefined && x64IntegerBlockSafe(current.integer)) {
@@ -280,7 +278,7 @@ export class X64Cpu implements GuestCpu {
       current = this.#instructions.get(current.integer.original.nextIP);
       if (current === undefined) complete = false;
     }
-    if (steps.length < 2) return null;
+    if (steps.length === 0) return null;
     const unchanged = memory.retainExecutableRange(first.start, bytes);
     if (unchanged === null) return null;
     const prepared: ManagedBlock = { revision, steps, unchanged };

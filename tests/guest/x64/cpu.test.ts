@@ -546,6 +546,24 @@ test('prepared integer kernels match source ALU flags and exact register halves'
 });
 
 
+test("a warmed single conditional branch preserves a noncanonical target fault", () => {
+  const location = 0x7fffffffffe0n;
+  const generic = fixture([0x0f, 0x85, 0x30, 0, 0, 0, 0xc3], location);
+  const managed = fixture([0x0f, 0x85, 0x30, 0, 0, 0, 0xc3], location, true);
+  for (const f of [generic, managed]) {
+    f.state.flags.set("zero", true);
+    expect(f.run().kind).toBe("return");
+    f.state.instructionPointer = location; f.state.registers.write("rsp", 64, stack);
+    f.state.flags.set("zero", false);
+  }
+  const expected = generic.run(), actual = managed.run();
+  expect(actual.kind).toBe("exception"); expect(expected.kind).toBe("exception");
+  expect(actual.instructions).toBe(0); expect(expected.instructions).toBe(0);
+  expect(managed.state.instructionPointer).toBe(location);
+  expect(managed.state.registers.checkpoint()).toEqual(generic.state.registers.checkpoint());
+  expect(managed.state.flags.value).toBe(generic.state.flags.value);
+});
+
 test("managed blocks preserve warm instruction budgets, live registers and precise read faults", () => {
   // MOV EAX,7; ADD EAX,5; MOV ECX,[RBX]; ADC EAX,ECX; RET.
   const bytes = [0xb8, 7, 0, 0, 0, 0x83, 0xc0, 5, 0x8b, 0x0b, 0x11, 0xc8, 0xc3];

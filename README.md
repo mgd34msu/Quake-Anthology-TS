@@ -6,7 +6,8 @@ monsters, and equipment while retaining each selected source's behavior.
 
 The project is unfinished. Supported combinations work, but complete mod
 interoperability, content coverage, rendering fidelity, and release qualification
-remain in progress. Native DLL gameplay and saving still need performance work. See the [shared task list](docs/functional-targets/status.md)
+remain in progress. Native DLL gameplay and saving remain slow; the
+[performance notes](docs/functional-targets/performance.md) record measured improvements and limits. See the [shared task list](docs/functional-targets/status.md)
 and [installed build status](docs/execution-status.md#installed-executable-and-recent-fixes).
 
 Classic Quake and Quake II components must preserve their original gameplay,

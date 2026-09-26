@@ -53,6 +53,17 @@ The `4e82c5a` compiled mixed-game run completed 29.467 seconds of active input. 
 
 ## Current evidence and remaining work
 
+The shared native runtime now tracks writes to cached code pages, reads integer registers at their stored widths, packs integer ABI values without bytewise BigInt loops, and reads integer arguments/results without temporary byte arrays. Safe single instructions, including branches, use the existing managed block executor. Original instructions, source callbacks, entity counts, memory permissions and fault boundaries remain intact. Writable borrowed buffers and cross-page code ranges retain byte checks.
+
+The latest local comparisons use a fixed host wall-clock capability for the original DLL's random seed. Performance timers remain real. Every original frame executes the same instruction count in control and candidate, and the complete final native entity bytes match. Each run keeps all 495 records, executes 100 ticks and measures the last 50 on CPU 8.
+
+| Change | Native median, before → after | Application median, before → after |
+|---|---:|---:|
+| Read narrow registers directly | 70.43 → 67.41 ms | 80.22 → 75.85 ms |
+| Include safe single instructions in managed blocks | 68.49 → 66.78 ms | 77.44 → 75.28 ms |
+
+These are separate bounded comparisons, not additive gains or rendered FPS. Earlier page-cache and integer-normalization pairs also improved, but their varying source seeds limit direct comparison of absolute tick costs. Integer ABI reads reduced time per instruction in both earlier pairs; total native time was mixed as instruction counts differed. Exact drivers, source manifests, results and end-state hashes remain local under `.artifacts/resume-20260925/{code-write-revisions,native-normalization,direct-abi-scalars,register-width,single-instruction-blocks}/`. The composed changes pass 85 focused memory/CPU/ABI checks with 1,702 assertions. Native calls still exceed the 25 ms interval, so T10 remains open.
+
 Fixed-signature native calls now share a retained ABI plan while the signature is unchanged. Signature edits invalidate it; mutable aggregate layouts and additional variadic arguments use ordinary planning. Rerelease player appearance also retains the weapon-model list and updates it on configstring changes, restoration or map rebinding, removing an 8,191-slot scan per appearance read.
 
 The complete original base1 workload ran in control/candidate/candidate/control order, pinned to CPU 8, with 100 ticks per run and the last 50 measured. Native-call medians were 75.21/74.57/74.89/75.59 ms; application-step medians were 84.52/85.05/83.83/84.66 ms. All runs retained 495 source entity records. Native-call cost fell about 1% in each pair, but application timings overlap and the source's random evolution differs between runs. This establishes no material whole-tick or rendered FPS improvement. Focused ABI/services checks passed 35 tests with 359 assertions. Local inputs, source hashes, results and logs are in `.artifacts/resume-20260925/build-on-change/`.
