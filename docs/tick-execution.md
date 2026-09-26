@@ -2,7 +2,7 @@
 
 This map follows the current original Quake II rerelease DLL path, the path behind the measured native performance problem. Q1/QW, Q2 classic and Q3 preserve their own source order and cadence; they share the surrounding application services. A simulation tick and a rendered frame are different operations. One application/input batch can contain several overdue simulation ticks.
 
-The original rerelease tick interval here is 25 ms, or 40 ticks per simulated second. Classic native Q2 uses 100 ms. Installed `d6bcb34b` measured medians of 50.99 ms inside native RunFrame and 58.06 ms per application step over the last 20 unprofiled warm-up ticks of the complete 495-entity base1 workload. RunFrame includes engine callbacks invoked by the DLL. These are separate medians, not an additive phase profile or rendered FPS. Native execution remains over budget.
+The original rerelease tick interval here is 25 ms, or 40 ticks per simulated second. Classic native Q2 uses 100 ms. Installed `563f0a99` completed 400 native ticks in the complete 495-entity base1 workload. Ticks 331–350, before CPU profiling, measured medians of 41.23 ms inside native RunFrame and 45.55 ms per application step. Earlier portions encountered another CPU workload. RunFrame includes engine callbacks invoked by the DLL. These are separate medians, not an additive phase profile or rendered FPS. Native execution remains over budget.
 
 ## Once per application/input batch
 

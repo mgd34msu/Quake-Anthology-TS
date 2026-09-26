@@ -2,7 +2,7 @@
 
 **22/23 targets are accepted in source. T10 mod interoperability remains open.** Its remaining implementation is listed immediately below the target table. T12 is complete: selected arsenals, inventory actions, offhand source modifiers/cadence, and the original rerelease retained-map pickup lifetime are integrated. Classic and rerelease behavior remain separate.
 
-The installed executable is `d6bcb34b`. It includes the Q1 finale orb correction and current native CPU, memory, ABI and entity-data optimizations. Actual complete-base1 execution still exceeds the native tick budget; T10 remains open. See [current delivery](../execution-status.md#installed-executable-and-recent-fixes).
+The installed executable is `563f0a99`. It includes the Q1 finale orb correction and current native CPU, memory, ABI and entity-data optimizations. Actual complete-base1 execution still exceeds the native tick budget; T10 remains open. See [current delivery](../execution-status.md#installed-executable-and-recent-fixes).
 
 | Target | Function | Status | Accepted progress and remaining work |
 |---|---|---|---|
@@ -36,7 +36,9 @@ These parts describe the remaining implementation; they do not replace the T01â€
 
 | Target | Remaining part | Completion behavior |
 |---|---|---|
-| T10 | Native execution performance | Original rerelease saving still runs tens of millions of interpreted instructions. Shared CPU improvements reduced a measured level write from 62 to 25 seconds. The latest complete-base1 unprofiled warmed segment measured 50.99 ms per native tick, still above its 25 ms interval. The last actual original level write completed in 17.598 seconds while CPU-profiled; source callbacks and all entities remain intact. Further work must retain all entities, source behavior and original save callbacks. |
+| T10 | Gameplay execution | Reduce original native execution to fit its source interval. Latest late unprofiled base1 ticks measured 41.23 ms native and 45.55 ms per application step against a 25 ms native interval. All 495 entities and original callbacks remain active. |
+| T10 | Saving | Reduce the cost of original save callbacks. The current measured level write took 16.590 seconds while CPU-profiled and executed 52.4 million guest instructions. |
+| T10 | Loading and restoration | Reduce original startup and saved-world restoration cost. The last recorded full restored-world opening took 155.206 seconds; this older result needs updating after the shared interpreter changes. |
 
 Authored player body dimensions are integrated across selected Q1/QW/Q2/Q3 and qualified original native/QVM movement. Expansion and release use the selected collision owner; saves retain restoration state where original live bounds need it. Root combined strict/policy and 51 focused checks with 496 assertions pass, including actual original retail/Threewave calls. Unified peers require `qts:snapshot-v10`. This change is included in installed `f670b7e9`.
 

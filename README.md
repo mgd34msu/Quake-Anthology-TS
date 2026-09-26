@@ -7,8 +7,8 @@ monsters, and equipment while retaining each selected source's behavior.
 The project is unfinished. Supported combinations work, but complete mod
 interoperability, content coverage, rendering fidelity, and release qualification
 remain in progress. Native DLL gameplay and saving remain the active performance
-work. Native execution now reuses instruction plans, parsed format strings and
-unchanged body data. The [performance notes](docs/functional-targets/performance.md)
+work. Native execution now reuses decoded arithmetic and control flow, parsed
+format strings and unchanged body data. The [performance notes](docs/functional-targets/performance.md)
 record the remaining cost. See the [shared task list](docs/functional-targets/status.md)
 and [installed build status](docs/execution-status.md#installed-executable-and-recent-fixes).
 
