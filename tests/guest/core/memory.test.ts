@@ -305,6 +305,36 @@ test("first-fit hints revisit coalesced holes and preserve alignment after range
   expect(() => memory.map({ base: third.byteOffset + 4n, byteLength: 1, permissions: "read" })).toThrow(GuestMemoryFault);
 });
 
+test("retained executable ranges follow owned writes, borrowed backing, aliases and restoration", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+  const code = memory.map({ base: 0x10000n, byteLength: 8, permissions: "read-execute", bytes: new Uint8Array([0x90, 0xc3]) });
+  const unchanged = memory.retainExecutableRange(code.byteOffset, [0x90, 0xc3]);
+  expect(unchanged?.()).toBe(true);
+  const alias = memory.mapAlias({ base: 0x20000n, byteLength: 8, permissions: "read-write", source: code });
+  memory.writeUint8(alias, 0xcc); expect(unchanged?.()).toBe(false);
+  memory.write(alias, new Uint8Array([0x90])); expect(unchanged?.()).toBe(true);
+  memory.writeUint32(memory.offset(alias, 4n), 123); expect(unchanged?.()).toBe(true);
+  let observed: boolean | undefined;
+  const remove = memory.observeWrites(alias, 1, () => { observed = unchanged?.(); });
+  memory.writeUint8(alias, 0xcc); expect(observed).toBe(false); remove();
+  memory.writeUint8(alias, 0x90); expect(unchanged?.()).toBe(true);
+  // A borrowed subrange exposes its entire buffer, including code outside that subrange.
+  const view = memory.borrow(memory.offset(alias, 4n), 1), raw = new Uint8Array(view.buffer);
+  raw[0] = 0xcc; expect(unchanged?.()).toBe(false);
+  raw[0] = 0x90; expect(unchanged?.()).toBe(true);
+  raw[1] = 0xf4; expect(unchanged?.()).toBe(false);
+  raw[1] = 0xc3;
+  const restored = SparseGuestMemory.restore(module, memory.checkpoint());
+  const restoredRange = restored.retainExecutableRange(code.byteOffset, [0x90, 0xc3]);
+  restored.writeUint16(at(restored, alias.byteOffset), 0xf4cc); expect(restoredRange?.()).toBe(false);
+  expect(unchanged?.()).toBe(true);
+  memory.protect(code, 1, "read"); expect(unchanged?.()).toBe(false);
+  memory.unmap(code, 8);
+  memory.map({ base: code.byteOffset, byteLength: 8, permissions: "read-execute", bytes: new Uint8Array([0x90, 0xc3]) });
+  expect(unchanged?.()).toBe(false);
+  expect(memory.retainExecutableRange(code.byteOffset, [0x90, 0xc3])?.()).toBe(true);
+});
+
 test("scalar instruction fetch observes live aliases, permission changes and remapped bytes", () => {
   const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
   const code = memory.map({ base: 0x10000n, byteLength: 2, permissions: "read-write-execute", bytes: new Uint8Array([0x90, 0xc3]) });

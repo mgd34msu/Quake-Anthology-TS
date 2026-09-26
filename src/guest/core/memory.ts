@@ -37,8 +37,11 @@ function allows(permissions: GuestPermissions, access: GuestAccess): boolean {
     case "execute": return permissions === "execute" || permissions === "read-execute" || permissions === "read-write-execute";
   }
 }
+interface CodePage { revision: symbol; }
+interface BackingChanges { exposed: boolean; firstPage: number; lastPage: number; readonly pages: Map<number, CodePage>; }
 interface Mapping extends GuestMapping {
   readonly bytes: Uint8Array;
+  readonly changes: BackingChanges;
   readonly view: DataView;
   readonly end: bigint;
   readonly numericBase: number | null;
@@ -50,6 +53,12 @@ function mappedBytes(mapping: Omit<Mapping, "view" | "active" | "end" | "numeric
     numericBase: mapping.base >= 0n && end <= 0x1fffffffffffffn ? Number(mapping.base) : null, active: true };
 }
 interface Chunk { readonly mapping: Mapping; readonly offset: number; readonly byteLength: number; }
+function invalidateCode(mapping: Mapping, offset: number, byteLength: number): void {
+  if (byteLength === 0) return;
+  const changes = mapping.changes, start = mapping.bytes.byteOffset + offset;
+  const first = Math.max(changes.firstPage, Math.floor(start / 4096)), last = Math.min(changes.lastPage, Math.floor((start + byteLength - 1) / 4096));
+  for (let index = first; index <= last; index++) { const page = changes.pages.get(index); if (page !== undefined) page.revision = Symbol(); }
+}
 export interface SparseGuestMemoryOptions {
   readonly module: ModuleIdentity;
   readonly pointerBytes: GuestPointerBytes;
@@ -64,6 +73,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   readonly #limit: bigint;
   readonly #allocationBase: bigint;
   #mappings: Mapping[] = [];
+  readonly #backingChanges = new WeakMap<ArrayBufferLike, BackingChanges>();
   #mappingGeneration = 0;
   readonly #allocationHints = new Map<bigint, { readonly base: bigint; readonly byteLength: number }>();
   readonly #recentMappings = new Map<GuestAccess | null, Mapping>();
@@ -214,6 +224,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   borrow(address: GuestAddress, byteLength: number): DataView {
     const chunks = this.#chunks(address, byteLength, "write");
     const bytes = this.#contiguous(chunks, address, byteLength);
+    for (const chunk of chunks) { chunk.mapping.changes.exposed = true; chunk.mapping.changes.lastPage = -1; chunk.mapping.changes.pages.clear(); }
     return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
 
@@ -286,9 +297,19 @@ export class SparseGuestMemory implements MappedGuestMemory {
     const offset = Number(byteOffset - mapping.base);
     if (offset + bytes.length > mapping.byteLength) return null;
     const expected = bytes.slice();
+    const changes = mapping.changes;
+    const first = Math.floor((mapping.bytes.byteOffset + offset) / 4096), last = Math.floor((mapping.bytes.byteOffset + offset + bytes.length - 1) / 4096);
+    let page: CodePage | null = null;
+    if (!changes.exposed && first === last) {
+      page = changes.pages.get(first) ?? { revision: Symbol() };
+      changes.pages.set(first, page); changes.firstPage = Math.min(changes.firstPage, first); changes.lastPage = Math.max(changes.lastPage, first);
+    }
+    let checked: symbol | null = null;
     const unchanged = (): boolean => {
       if (!mapping.active) return false;
+      if (!changes.exposed && page !== null && checked === page.revision) return true;
       for (let index = 0; index < expected.length; index++) if (mapping.bytes[offset + index] !== expected[index]) return false;
+      checked = page?.revision ?? null;
       return true;
     };
     return unchanged() ? unchanged : null;
@@ -301,6 +322,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       const offset = this.#lookupOffset;
       // TypedArray.set preserves the source when the backing ranges overlap.
       mapping.bytes.set(bytes, offset);
+      if (mapping.changes.lastPage >= 0) invalidateCode(mapping, offset, bytes.byteLength);
       return this.#writeObservers.size === 0 ? undefined : this.#notifyWrite([{ mapping, offset, byteLength: bytes.byteLength }]);
     }
     const chunks = this.#chunks(address, bytes.byteLength, "write");
@@ -312,6 +334,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
     let consumed = 0;
     for (const chunk of chunks) {
       chunk.mapping.bytes.set(source.subarray(consumed, consumed + chunk.byteLength), chunk.offset);
+      if (chunk.mapping.changes.lastPage >= 0) invalidateCode(chunk.mapping, chunk.offset, chunk.byteLength);
       consumed += chunk.byteLength;
     }
     return this.#notifyWrite(chunks);
@@ -449,9 +472,11 @@ export class SparseGuestMemory implements MappedGuestMemory {
     }
     return undefined;
   }
-  #insert(mapping: Omit<Mapping, "view" | "active" | "end" | "numericBase">): undefined {
+  #insert(mapping: Omit<Mapping, "view" | "active" | "end" | "numericBase" | "changes">): undefined {
+    let changes = this.#backingChanges.get(mapping.bytes.buffer);
+    if (changes === undefined) { changes = { exposed: false, firstPage: Infinity, lastPage: -1, pages: new Map<number, CodePage>() }; this.#backingChanges.set(mapping.bytes.buffer, changes); }
     this.#mappingGeneration += 1;
-    this.#mappings.splice(this.#firstEndAfter(mapping.base), 0, mappedBytes(mapping));
+    this.#mappings.splice(this.#firstEndAfter(mapping.base), 0, mappedBytes({ ...mapping, changes }));
     return undefined;
   }
   #firstEndAfter(address: bigint): number {
@@ -604,6 +629,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
     if (mapping !== null) {
       const offset = this.#lookupOffset;
       write(mapping.view, offset);
+      if (mapping.changes.lastPage >= 0) invalidateCode(mapping, offset, byteLength);
       return this.#writeObservers.size === 0 ? undefined : this.#notifyWrite([{ mapping, offset, byteLength }]);
     }
     const chunks = this.#chunks(address, byteLength, "write"), bytes = new Uint8Array(byteLength);
