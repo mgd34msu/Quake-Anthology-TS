@@ -22,6 +22,29 @@ function fixture(abi: NativeCallAbi): { cpu: GuestCpu; memory: SparseGuestMemory
   return { cpu, memory, adapter: new X86AbiAdapter(abi) };
 }
 function signature(abi: NativeCallAbi, parameters: readonly GuestValueLayout[], result: GuestValueLayout | "void" = i32, variadic = false): GuestCallSignature { return { abi, parameters, result, variadic }; }
+
+test("retained ABI plans follow signature edits and keep variadic layouts separate", () => {
+  const parameter: { kind: "scalar"; storage: "int32" | "float32" } = { kind: "scalar", storage: "int32" };
+  const parameters: GuestValueLayout[] = [parameter];
+  const call = signature(windows64, parameters);
+  const original = planGuestCall(call);
+  expect(planGuestCall(call)).toBe(original);
+  parameter.storage = "float32";
+  const floating = planGuestCall(call);
+  expect(floating.arguments[0]?.locations[0]?.kind).toBe("sse");
+  parameters[0] = i32;
+  expect(planGuestCall(call).arguments[0]?.locations[0]?.kind).toBe("integer");
+  const variadic = signature(windows64, [pointer], "void", true);
+  const fixed = planGuestCall(variadic);
+  expect(planGuestCall(variadic, [pointer, f64]).arguments).toHaveLength(2);
+  expect(planGuestCall(variadic)).toBe(fixed);
+  const layout = { id: "test:mutable", byteLength: 4, alignment: 4, pointerBytes: 8, byteOrder: "little-endian", fields: [{ name: "value", byteOffset: 0, storage: "int32", count: 1 }] } satisfies GuestLayout;
+  const aggregate = signature(linux64, [{ kind: "aggregate", layout }]);
+  expect(planGuestCall(aggregate).arguments[0]?.locations[0]?.kind).toBe("integer");
+  layout.byteLength = 24;
+  expect(planGuestCall(aggregate).arguments[0]?.locations[0]?.kind).toBe("stack");
+});
+
 function enter(cpu: GuestCpu, adapter: X86AbiAdapter, call: GuestCallSignature, arguments_: readonly GuestCallValue[]): bigint {
   adapter.enter(cpu, guestPointer(cpu.memory, 0x1000n), call, arguments_, guestPointer(cpu.memory, 0x1001n));
   return cpu.state.registers.read("rsp", cpu.memory.pointerBytes === 4 ? 32 : 64);

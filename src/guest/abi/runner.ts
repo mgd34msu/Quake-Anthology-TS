@@ -114,7 +114,8 @@ export class GuestCallRunner {
     adapter.enter(cpu, request.target, request.signature, request.arguments, returnAddress);
     const width = cpu.memory.pointerBytes === 4 ? 32 : 64;
     const entryStack = cpu.state.registers.read("rsp", width);
-    const plan = planGuestCall(request.signature, request.arguments.map((value, index) => request.signature.parameters[index] ?? inferredLayout(value, request.signature.variadic)));
+    const plan = planGuestCall(request.signature, request.arguments.length === request.signature.parameters.length ? request.signature.parameters
+      : request.arguments.map((value, index) => request.signature.parameters[index] ?? inferredLayout(value, request.signature.variadic)));
     this.#active.push(active);
     try {
       yield* this.runSteps(active, returnAddress, slice);

@@ -103,7 +103,7 @@ locations, `llm_ask`, `llm_exec`, and command validation.
 - [Gameplay tick and optimization targets](docs/tick-execution.md)
 - [Installed executable and runtime evidence](docs/execution-status.md#installed-executable-and-recent-fixes)
 - [Architecture contracts](docs/contracts.md)
-- [Performance and fidelity](docs/functional-targets/performance.md)
+- [Performance, caching rules, and fidelity](docs/functional-targets/performance.md)
 - [Development checks](docs/getting-started.md#check-a-change)
 
 Keep this README short. Put detailed setup, commands, and feature documentation

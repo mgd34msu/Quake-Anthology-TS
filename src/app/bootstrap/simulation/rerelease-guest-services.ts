@@ -43,6 +43,8 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   }
   readonly hostOptions: RereleaseGuestServicesPort["hostOptions"];
   readonly #strings = new Map<number, string>();
+  readonly #weaponModels = new Map<number, string>();
+  private weaponModels: readonly string[] = ["weapon.md2"];
   readonly #messages: RereleaseGuestMessage[] = [];
   readonly #links = new Map<ActorId, LinkMetadata>();
   readonly #buffer = messageBuffer();
@@ -153,15 +155,25 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     return { read: () => current().read(), write: entry => current().write(entry), mutableCapacity: item => current().mutableCapacity?.(item) === true };
   }
   validateMap(binding: RereleaseGuestMapServices): void { if (binding.scene.geometry.models.length >= 8191) throw new RangeError("API2023 map exceeds model capacity"); }
-  private seedMap(): void { this.#strings.set(63, this.options.mapPath); for (let i = 1; i < this.options.scene.geometry.models.length; i++) this.#strings.set(63 + i + (i >= 254 ? 1 : 0), `*${i}`); }
+  private seedMap(): void { this.#weaponModels.clear(); this.weaponModels = ["weapon.md2"]; this.#strings.set(63, this.options.mapPath); for (let i = 1; i < this.options.scene.geometry.models.length; i++) this.#strings.set(63 + i + (i >= 254 ? 1 : 0), `*${i}`); }
   rebindWorld(binding: RereleaseGuestMapServices): void { this.validateMap(binding); this.#options = { ...this.#options, ...binding }; this.#loading = true; this.#frame = 0; this.#strings.clear(); this.#messages.length = 0; this.#links.clear(); SZ_Clear(this.#buffer); this.seedMap(); }
   completeSpawn(): void { this.#loading = false; }
   beginFrame(frame: number): void { if (!Number.isInteger(frame) || frame < 0 || frame > 0xffffffff) throw new RangeError("Invalid API2023 frame"); this.#frame = frame; for (const actor of this.#links.keys()) if (!this.options.engine.actors.isLive(actor)) this.#links.delete(actor); }
   configstrings(): ReadonlyMap<number, string> { return new Map(this.#strings); }
-  restoreConfigstrings(values: ReadonlyMap<number, string>): void { for (const [index, value] of values) this.validateConfigstring(index, value); this.#strings.clear(); for (const [index, value] of values) this.#strings.set(index, value); }
+  restoreConfigstrings(values: ReadonlyMap<number, string>): void {
+    for (const [index, value] of values) this.validateConfigstring(index, value);
+    this.#strings.clear(); this.#weaponModels.clear();
+    for (const [index, value] of values) { this.#strings.set(index, value); if (this.isWeaponModel(index, value)) this.#weaponModels.set(index, value.slice(1)); }
+    this.rebuildWeaponModels();
+  }
+  private isWeaponModel(index: number, value: string): boolean { return index > resourceRanges.model.base && index < resourceRanges.model.base + resourceRanges.model.count && value.startsWith("#"); }
+  private rebuildWeaponModels(): void { this.weaponModels = ["weapon.md2", ...[...this.#weaponModels].sort(([a], [b]) => a - b).map(([, name]) => name)]; }
   private validateConfigstring(index: number, value: string): void { if (!Number.isInteger(index) || index < 0 || index >= 12448 || value.includes("\0")) throw new RangeError("Invalid API2023 configstring"); }
   setConfigstring(index: number, value: string): undefined {
     this.validateConfigstring(index, value); if (this.#strings.get(index) === value) return undefined; this.#strings.set(index, value);
+    const removedWeapon = this.#weaponModels.delete(index);
+    if (this.isWeaponModel(index, value)) { this.#weaponModels.set(index, value.slice(1)); this.rebuildWeaponModels(); }
+    else if (removedWeapon) this.rebuildWeaponModels();
     if (index >= 10814 && index < 11070) this.options.engine.emit({ kind: "lightstyle", style: index - 10814, pattern: value });
     if (index === 1) this.options.engine.emit({ kind: "music", track: value });
     if (!this.#loading) { const buffer = messageBuffer(); MSG_WriteByte(buffer, 13); MSG_WriteShort(buffer, index); MSG_WriteString(buffer, value); this.enqueue({ kind: "multicast", origin: zero, scope: "all" }, true, buffer.data.slice(0, buffer.cursize)); }
@@ -221,9 +233,8 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   private appearance(state: ReturnType<RereleasePublicEdict["modelState"]>): ReturnType<RereleaseGuestServicesPort["modelAppearance"]> {
     if (state.modelIndexes.every(index => index !== 255)) return { path: this.resource("model", state.modelIndexes[0]), skin: state.skin, skinPath: null, attachedModels: state.modelIndexes.slice(1).map(index => this.resource("model", index)) };
     const value = this.#strings.get(11582 + (state.skin & 255)) ?? "player\\male/grunt", appearance = value.slice(value.indexOf("\\") + 1), slash = appearance.indexOf("/");
-    const model = slash < 0 ? "male" : appearance.slice(0, slash), skin = slash < 0 ? "grunt" : appearance.slice(slash + 1), weapons = ["weapon.md2"];
-    for (let index = 1; index < 8192; index++) { const name = this.resource("model", index); if (name.startsWith("#")) weapons.push(name.slice(1)); }
-    const weapon = weapons[(state.skin >>> 8) & 255] ?? "weapon.md2";
+    const model = slash < 0 ? "male" : appearance.slice(0, slash), skin = slash < 0 ? "grunt" : appearance.slice(slash + 1);
+    const weapon = this.weaponModels[(state.skin >>> 8) & 255] ?? "weapon.md2";
     return { path: state.modelIndexes[0] === 255 ? `players/${model}/tris.md2` : this.resource("model", state.modelIndexes[0]), skin: state.modelIndexes[0] === 255 ? 0 : state.skin, skinPath: state.modelIndexes[0] === 255 ? `players/${model}/${skin}.pcx` : null,
       attachedModels: state.modelIndexes.slice(1).map(index => index === 255 ? `players/${model}/${weapon}` : this.resource("model", index)) };
   }

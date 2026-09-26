@@ -73,7 +73,6 @@ function returnBuffer(cpu: GuestCpu, plan: AbiCallPlan): GuestAddress {
 }
 
 export class X86AbiAdapter implements GuestAbiAdapter {
-  readonly #argumentPlans = new WeakMap<GuestCallSignature, AbiCallPlan>();
   constructor(readonly abi: NativeCallAbi) {}
 
   #check(cpu: GuestCpu, signature: GuestCallSignature): void {
@@ -85,7 +84,8 @@ export class X86AbiAdapter implements GuestAbiAdapter {
     this.#check(cpu, signature);
     cpu.memory.check(target, 1, "execute");
     cpu.memory.check(returnAddress, 1, "execute");
-    const layouts = arguments_.map((value, index) => signature.parameters[index] ?? inferredLayout(value, signature.variadic));
+    const layouts = arguments_.length === signature.parameters.length ? signature.parameters
+      : arguments_.map((value, index) => signature.parameters[index] ?? inferredLayout(value, signature.variadic));
     const plan = planGuestCall(signature, layouts), word = this.abi.pointerBytes;
     const encoded = arguments_.map((value, index) => {
       const layout = layouts[index];
@@ -128,15 +128,14 @@ export class X86AbiAdapter implements GuestAbiAdapter {
   /** Additional variadic layouts come from the host API contract or a format-string parser. */
   arguments(cpu: GuestCpu, signature: GuestCallSignature, variadicLayouts: readonly GuestValueLayout[] = []): readonly GuestCallValue[] {
     this.#check(cpu, signature);
-    const plan = planGuestCall(signature, [...signature.parameters, ...variadicLayouts]);
+    const plan = planGuestCall(signature, variadicLayouts.length === 0 ? signature.parameters : [...signature.parameters, ...variadicLayouts]);
     return plan.arguments.map(argument => readArgument(cpu, argument));
   }
 
   argument(cpu: GuestCpu, signature: GuestCallSignature, index: number): GuestCallValue {
     this.#check(cpu, signature);
     if (!Number.isSafeInteger(index) || index < 0) throw new RangeError("Guest argument index is outside its signature");
-    let plan = this.#argumentPlans.get(signature);
-    if (plan === undefined) { plan = planGuestCall(signature); this.#argumentPlans.set(signature, plan); }
+    const plan = planGuestCall(signature);
     const argument = plan.arguments[index];
     if (argument === undefined) throw new RangeError("Guest argument index is outside its signature");
     return readArgument(cpu, argument);

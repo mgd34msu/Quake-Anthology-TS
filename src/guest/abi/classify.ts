@@ -54,7 +54,44 @@ function hiddenResult(signature: GuestCallSignature): boolean {
   return ![1, 2, 4, 8].includes(signature.result.layout.byteLength);
 }
 
+type LayoutMatch = (layout: GuestValueLayout | "void" | undefined) => boolean;
+const callPlans = new WeakMap<GuestCallSignature, { readonly unchanged: () => boolean; readonly plan: AbiCallPlan }>();
+function matchLayout(layout: GuestValueLayout | "void"): LayoutMatch | null {
+  if (layout === "void") return current => current === "void";
+  if (layout.kind === "scalar") { const storage = layout.storage; return current => current === layout && current.kind === "scalar" && current.storage === storage; }
+  const record = layout.layout;
+  if (!Object.isFrozen(record) || !Object.isFrozen(record.fields) || !record.fields.every(Object.isFrozen)) return null;
+  return current => current === layout && current.kind === "aggregate" && current.layout === record;
+}
+function retainCallPlan(signature: GuestCallSignature, plan: AbiCallPlan): void {
+  const result = matchLayout(signature.result), parameters: LayoutMatch[] = [];
+  if (result === null) return;
+  for (const layout of signature.parameters) { const match = matchLayout(layout); if (match === null) return; parameters.push(match); }
+  const { kind, call, pointerBytes } = signature.abi, variadic = signature.variadic;
+  const unchanged = (): boolean => {
+    if (signature.abi !== plan.abi || signature.abi.kind !== kind || signature.abi.call !== call || signature.abi.pointerBytes !== pointerBytes
+      || signature.variadic !== variadic || !result(signature.result) || signature.parameters.length !== parameters.length) return false;
+    for (let index = 0; index < parameters.length; index++) if (parameters[index]?.(signature.parameters[index]) !== true) return false;
+    return true;
+  };
+  for (const argument of plan.arguments) { for (const location of argument.locations) Object.freeze(location); Object.freeze(argument.locations); Object.freeze(argument); }
+  if (plan.result.kind === "registers") { for (const location of plan.result.locations) Object.freeze(location); Object.freeze(plan.result.locations); }
+  if (plan.result.kind === "memory") { for (const location of plan.result.pointer.locations) Object.freeze(location); Object.freeze(plan.result.pointer.locations); Object.freeze(plan.result.pointer); }
+  Object.freeze(plan.arguments); Object.freeze(plan.result); Object.freeze(plan);
+  callPlans.set(signature, { unchanged, plan });
+}
+
 export function planGuestCall(signature: GuestCallSignature, layouts: readonly GuestValueLayout[] = signature.parameters): AbiCallPlan {
+  if (layouts !== signature.parameters) return buildCallPlan(signature, layouts);
+  const retained = callPlans.get(signature);
+  if (retained?.unchanged()) return retained.plan;
+  callPlans.delete(signature);
+  const plan = buildCallPlan(signature, layouts);
+  retainCallPlan(signature, plan);
+  return plan;
+}
+
+function buildCallPlan(signature: GuestCallSignature, layouts: readonly GuestValueLayout[]): AbiCallPlan {
   const abi = signature.abi, word = abi.pointerBytes, hidden = hiddenResult(signature);
   if ((!signature.variadic && layouts.length !== signature.parameters.length) || layouts.length < signature.parameters.length) throw new RangeError("Call argument count differs from signature");
   for (const layout of layouts) validateValueLayout(layout, word);

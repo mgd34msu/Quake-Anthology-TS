@@ -35,6 +35,8 @@ import type { NativePickupProfile } from "../native-pickups.ts";
 import { NativePrimaryPickups, type NativePickupSupply, type NativePickupSupplyEvaluation } from "../native-pickups.ts";
 import { rereleasePickupProfile } from "./pickup-profile.ts";
 
+const boxFilterSignature = signature([{ kind: "scalar", storage: "pointer" }, { kind: "scalar", storage: "pointer" }], { kind: "scalar", storage: "int32" });
+
 export interface RereleaseActorBindings {
   readonly body: BodyStateBinding;
   readonly combat: CombatStateBinding | null;
@@ -367,7 +369,6 @@ export class RereleaseQ2GuestHost {
         if (area !== 1 && area !== 2) throw new RangeError("Q2 BoxEdicts requires AREA_SOLID or AREA_TRIGGERS");
         if (maximum < 0n || maximum > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Invalid Q2 BoxEdicts capacity");
         if (maximum > 0n && list === null) throw new Error("Q2 BoxEdicts output is null with nonzero capacity");
-        const filterSignature = signature([{ kind: "scalar", storage: "pointer" }, { kind: "scalar", storage: "pointer" }], { kind: "scalar", storage: "int32" });
         let count = 0n;
         for (const candidate of this.options.spatial.boxEdicts(min, max, area)) {
           const address = this.addressForActor(candidate);
@@ -375,7 +376,7 @@ export class RereleaseQ2GuestHost {
           if (filter !== null) {
             this.#filterDepth++;
             try {
-              const result = this.module.invoke(filter, filterSignature, [guestPointer(address), guestPointer(data)]);
+              const result = this.module.invoke(filter, boxFilterSignature, [guestPointer(address), guestPointer(data)]);
               if (result.kind !== "int32") throw new TypeError("Q2 BoxEdicts filter must return its source enum");
               outcome = result.value;
             } finally { this.#filterDepth--; }
