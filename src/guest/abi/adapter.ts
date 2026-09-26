@@ -32,7 +32,7 @@ function readLocations(cpu: GuestCpu, locations: readonly AbiLocation[], size: n
       const start = location.register * 16;
       if (start + location.bytes > cpu.state.simd.xmm.length) throw new RangeError("ABI XMM register is unavailable");
       output.set(cpu.state.simd.xmm.subarray(start, start + location.bytes), location.offset);
-    } else output.set(cpu.memory.copy(guestPointer(cpu.memory, stackPointer(cpu) + BigInt(location.stackOffset)), location.bytes), location.offset);
+    } else cpu.memory.copyInto(guestPointer(cpu.memory, stackPointer(cpu) + BigInt(location.stackOffset)), output, location.offset, location.bytes);
   }
   return output;
 }

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import type { GuestProcessorState, MappedGuestMemory } from "../core/contracts.ts";
+import type { GuestProcessorState, GuestSimdState, MappedGuestMemory } from "../core/contracts.ts";
 import type { NumericExecutionResult, NumericInstruction, NumericOperand } from "./contracts.ts";
 
 export type RawSseOperation =
   | { readonly kind: "move"; readonly registerIndex: number; readonly size: 4 | 8 | 16; readonly store: boolean; readonly aligned: boolean }
   | { readonly kind: "logic"; readonly registerIndex: number; readonly operation: "and" | "and-not" | "or" | "xor" };
 const executed: NumericExecutionResult = { kind: "executed" };
+const memoryOperands = new WeakMap<GuestSimdState, Uint8Array>();
 
 export function prepareRawSse(opcode: number, prefix: NumericInstruction["prefix"], registerIndex: number): RawSseOperation | null {
   if (opcode === 0x10 || opcode === 0x11 || (opcode === 0x28 || opcode === 0x29) && (prefix === "none" || prefix === "66")
@@ -41,15 +42,21 @@ export function executeRawSse(operation: RawSseOperation, operand: NumericOperan
       else registers.copyWithin(destination, other, other + size);
     } else if (operation.store) memory.write(operand.address, registers.subarray(destination, destination + size));
     else {
-      const bytes = memory.copy(operand.address, size);
+      memory.copyInto(operand.address, registers, destination, size);
       if (size < 16) registers.fill(0, destination + size, destination + 16);
-      registers.set(bytes, destination);
     }
     return executed;
   }
-  const right = operand.kind === "register" ? registers.subarray(operand.index * 16, operand.index * 16 + 16) : memory.copy(operand.address, 16);
+  let right: Uint8Array, rightOffset = 0;
+  if (operand.kind === "register") { right = registers; rightOffset = operand.index * 16; }
+  else {
+    let retained = memoryOperands.get(state.simd);
+    if (retained === undefined) { retained = new Uint8Array(16); memoryOperands.set(state.simd, retained); }
+    memory.copyInto(operand.address, retained);
+    right = retained;
+  }
   for (let index = 0; index < 16; index++) {
-    const leftByte = registers[destination + index], rightByte = right[index];
+    const leftByte = registers[destination + index], rightByte = right[rightOffset + index];
     if (leftByte === undefined || rightByte === undefined) throw new Error("Qualified SSE register or source range is incomplete");
     registers[destination + index] = operation.operation === "and" ? leftByte & rightByte
       : operation.operation === "and-not" ? ~leftByte & rightByte : operation.operation === "or" ? leftByte | rightByte : leftByte ^ rightByte;

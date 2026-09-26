@@ -39,6 +39,8 @@ export interface GuestMemorySnapshot {
   readonly mappings: readonly (GuestMapping & { readonly backing: number; readonly backingOffset: number })[];
 }
 export interface MappedGuestMemory extends GuestMemory {
+  /** Check the complete source range before copying into existing host storage. */
+  copyInto(address: GuestAddress, destination: Uint8Array, destinationOffset?: number, byteLength?: number): undefined;
   readUint8(address: GuestAddress): number;
   readInt8(address: GuestAddress): number;
   readUint16(address: GuestAddress): number;

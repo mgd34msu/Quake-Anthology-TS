@@ -100,6 +100,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       check: { value: memory.check },
       borrow: { value: memory.borrow },
       copy: { value: memory.copy },
+      copyInto: { value: memory.copyInto },
       fetch: { value: memory.fetch },
       fetchByte: { value: memory.fetchByte },
       fetchSequence: { value: memory.fetchSequence },
@@ -237,6 +238,28 @@ export class SparseGuestMemory implements MappedGuestMemory {
       return mapping.bytes.slice(offset, offset + byteLength);
     }
     return this.#copyChunks(this.#chunks(address, byteLength, "read"), byteLength);
+  }
+
+  copyInto(address: GuestAddress, destination: Uint8Array, destinationOffset = 0, byteLength = destination.byteLength - destinationOffset): undefined {
+    if (!Number.isSafeInteger(destinationOffset) || destinationOffset < 0 || !Number.isSafeInteger(byteLength)
+      || byteLength < 0 || destinationOffset + byteLength > destination.byteLength) throw new RangeError("Guest copy exceeds destination storage");
+    const mapping = this.#singleMapping(address, byteLength, "read");
+    if (mapping !== null) {
+      const offset = this.#lookupOffset;
+      destination.set(mapping.bytes.subarray(offset, offset + byteLength), destinationOffset);
+      return undefined;
+    }
+    const chunks = this.#chunks(address, byteLength, "read");
+    if (chunks.some(chunk => chunk.mapping.bytes.buffer === destination.buffer)) {
+      destination.set(this.#copyChunks(chunks, byteLength), destinationOffset);
+      return undefined;
+    }
+    let offset = destinationOffset;
+    for (const chunk of chunks) {
+      destination.set(chunk.mapping.bytes.subarray(chunk.offset, chunk.offset + chunk.byteLength), offset);
+      offset += chunk.byteLength;
+    }
+    return undefined;
   }
 
   fetch(address: GuestAddress, byteLength: number): Uint8Array {
