@@ -101,7 +101,12 @@ export function decodeBinary(bits: bigint, width: BinaryWidth): BinaryValue {
     denormal: exponent === 0 && coefficient !== 0n && integer === 0n };
 }
 
-function length(value: bigint): number { return value === 0n ? 0 : value.toString(2).length; }
+function length(value: bigint): number {
+  const numeric = Number(value);
+  if (numeric >= 0 && Number.isSafeInteger(numeric)) return numeric <= 0xffffffff
+    ? 32 - Math.clz32(numeric) : 64 - Math.clz32(Math.floor(numeric / 0x100000000));
+  return value.toString(2).length;
+}
 function compareScaled(left: bigint, right: bigint, shift: number): number {
   const a = shift >= 0 ? left << BigInt(shift) : left;
   const b = shift >= 0 ? right : right << BigInt(-shift);
