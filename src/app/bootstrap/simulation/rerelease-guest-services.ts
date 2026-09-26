@@ -22,9 +22,11 @@ import { RereleaseCombatBindings } from "../../../compat/q2/rerelease/combat-bin
 import { RereleaseSourceClient } from "../../../compat/q2/rerelease/source-state.ts";
 import { rereleaseInventoryItems } from "../../../compat/q2/rerelease/semantics.ts";
 import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
+import { ResourceNameIndex } from "../../../core/resource-name-index.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const resourceRanges = { model: { base: 62, count: 8192 }, sound: { base: 8254, count: 2048 }, image: { base: 10302, count: 512 } };
+const resourceKinds: readonly (keyof typeof resourceRanges)[] = ["model", "sound", "image"];
 interface LinkMetadata { readonly clusters: readonly number[] | null; readonly firstCluster: number; readonly headnode: number; readonly areas: readonly [number, number] }
 function messageBuffer(): SizeBuf { const buffer = new SizeBuf(); SZ_Init(buffer, new Uint8Array(65536), 65536); return buffer; }
 
@@ -43,6 +45,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   }
   readonly hostOptions: RereleaseGuestServicesPort["hostOptions"];
   readonly #strings = new Map<number, string>();
+  readonly #resourceNames = { model: new ResourceNameIndex(8192, [255]), sound: new ResourceNameIndex(2048), image: new ResourceNameIndex(512) };
   readonly #weaponModels = new Map<number, string>();
   private weaponModels: readonly string[] = ["weapon.md2"];
   readonly #messages: RereleaseGuestMessage[] = [];
@@ -155,7 +158,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     return { read: () => current().read(), write: entry => current().write(entry), mutableCapacity: item => current().mutableCapacity?.(item) === true };
   }
   validateMap(binding: RereleaseGuestMapServices): void { if (binding.scene.geometry.models.length >= 8191) throw new RangeError("API2023 map exceeds model capacity"); }
-  private seedMap(): void { this.#weaponModels.clear(); this.weaponModels = ["weapon.md2"]; this.#strings.set(63, this.options.mapPath); for (let i = 1; i < this.options.scene.geometry.models.length; i++) this.#strings.set(63 + i + (i >= 254 ? 1 : 0), `*${i}`); }
+  private seedMap(): void { for (const kind of resourceKinds) this.#resourceNames[kind].clear(); this.#weaponModels.clear(); this.weaponModels = ["weapon.md2"]; this.storeConfigstring(63, this.options.mapPath); for (let i = 1; i < this.options.scene.geometry.models.length; i++) this.storeConfigstring(63 + i + (i >= 254 ? 1 : 0), `*${i}`); }
   rebindWorld(binding: RereleaseGuestMapServices): void { this.validateMap(binding); this.#options = { ...this.#options, ...binding }; this.#loading = true; this.#frame = 0; this.#strings.clear(); this.#messages.length = 0; this.#links.clear(); SZ_Clear(this.#buffer); this.seedMap(); }
   completeSpawn(): void { this.#loading = false; }
   beginFrame(frame: number): void { if (!Number.isInteger(frame) || frame < 0 || frame > 0xffffffff) throw new RangeError("Invalid API2023 frame"); this.#frame = frame; for (const actor of this.#links.keys()) if (!this.options.engine.actors.isLive(actor)) this.#links.delete(actor); }
@@ -163,14 +166,22 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   restoreConfigstrings(values: ReadonlyMap<number, string>): void {
     for (const [index, value] of values) this.validateConfigstring(index, value);
     this.#strings.clear(); this.#weaponModels.clear();
-    for (const [index, value] of values) { this.#strings.set(index, value); if (this.isWeaponModel(index, value)) this.#weaponModels.set(index, value.slice(1)); }
+    for (const kind of resourceKinds) this.#resourceNames[kind].clear();
+    for (const [index, value] of values) { this.storeConfigstring(index, value); if (this.isWeaponModel(index, value)) this.#weaponModels.set(index, value.slice(1)); }
     this.rebuildWeaponModels();
   }
   private isWeaponModel(index: number, value: string): boolean { return index > resourceRanges.model.base && index < resourceRanges.model.base + resourceRanges.model.count && value.startsWith("#"); }
   private rebuildWeaponModels(): void { this.weaponModels = ["weapon.md2", ...[...this.#weaponModels].sort(([a], [b]) => a - b).map(([, name]) => name)]; }
   private validateConfigstring(index: number, value: string): void { if (!Number.isInteger(index) || index < 0 || index >= 12448 || value.includes("\0")) throw new RangeError("Invalid API2023 configstring"); }
+  private storeConfigstring(index: number, value: string): void {
+    this.#strings.set(index, value);
+    for (const kind of resourceKinds) {
+      const range = resourceRanges[kind], slot = index - range.base;
+      if (slot > 0 && slot < range.count) { this.#resourceNames[kind].set(slot, value); break; }
+    }
+  }
   setConfigstring(index: number, value: string): undefined {
-    this.validateConfigstring(index, value); if (this.#strings.get(index) === value) return undefined; this.#strings.set(index, value);
+    this.validateConfigstring(index, value); if (this.#strings.get(index) === value) return undefined; this.storeConfigstring(index, value);
     const removedWeapon = this.#weaponModels.delete(index);
     if (this.isWeaponModel(index, value)) { this.#weaponModels.set(index, value.slice(1)); this.rebuildWeaponModels(); }
     else if (removedWeapon) this.rebuildWeaponModels();
@@ -180,7 +191,12 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     return undefined;
   }
   resource(kind: "model" | "sound" | "image", index: number): string { return this.#strings.get(resourceRanges[kind].base + index) ?? ""; }
-  resourceIndex(kind: "model" | "sound" | "image", name: string): number { if (name === "") return 0; const range = resourceRanges[kind]; for (let index = 1; index < range.count; index++) { if (kind === "model" && index === 255) continue; const current = this.resource(kind, index); if (current === name) return index; if (current === "") { this.setConfigstring(range.base + index, name); return index; } } throw new RangeError(`API2023 ${kind} index overflow`); }
+  resourceIndex(kind: "model" | "sound" | "image", name: string): number {
+    const index = this.#resourceNames[kind].find(name);
+    if (index === null) throw new RangeError(`API2023 ${kind} index overflow`);
+    if (index !== 0 && this.resource(kind, index) !== name) this.setConfigstring(resourceRanges[kind].base + index, name);
+    return index;
+  }
   private inlineModel(index: number): number { const path = this.resource("model", index); if (index === 1 && path === this.options.mapPath) return 0; const model = Number(path.slice(1)); if (!path.startsWith("*") || !Number.isInteger(model) || model < 0 || model >= this.options.scene.geometry.models.length) throw new Error(`Invalid API2023 inline model ${path}`); return model; }
   private view(slot: number): RereleasePublicEdict { return new RereleasePublicEdict(this.memory, this.host.module.entities().atSlot(slot)); }
   private body(view: RereleasePublicEdict): BodyState {

@@ -52,6 +52,15 @@ test("API2023 services retain public records, ordered native messages and exact 
     expect(world.engine.bodies.read(actor.id)?.origin.x).toBe(4000);
     expect(adapter.resourceIndex("model", "*1")).toBe(2); expect(adapter.entityState(1).number).toBe(1);
     const initialStrings = adapter.configstrings();
+    adapter.setConfigstring(10303, "first"); adapter.setConfigstring(10305, "later");
+    expect(adapter.resourceIndex("image", "later")).toBe(2);
+    adapter.setConfigstring(10303, ""); expect(adapter.resourceIndex("image", "later")).toBe(1);
+    const fullModels = new Map<number, string>();
+    for (let index = 1; index <= 255; index++) fullModels.set(62 + index, `model/${index}`);
+    adapter.restoreConfigstrings(fullModels);
+    expect(adapter.resourceIndex("model", "next")).toBe(256);
+    expect(adapter.resourceIndex("model", "model/255")).toBe(257);
+    adapter.restoreConfigstrings(initialStrings);
     memory.writeInt32(view.address("s.modelindex2"), 255); memory.writeInt32(view.address("s.skinnum"), 256);
     adapter.setConfigstring(262, "#second.md2");
     expect(adapter.modelAppearance(1).attachedModels[0]).toBe("players/male/second.md2");

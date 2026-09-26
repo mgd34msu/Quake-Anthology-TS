@@ -13,9 +13,11 @@ import { createQ3Collision } from './q3/index.ts';
 import type { Q3Collision } from './q3/index.ts';
 import { traceActorBody } from './body.ts';
 import { SpatialIndex } from '../spatial/index.ts';
+import type { SharedBodyTable } from '../actors/body.ts';
 import type { ActorCollision, SpatialActor } from '../spatial/index.ts';
 export type { ActorCollision, SpatialActor } from '../spatial/index.ts';
 export { convertContents, convertSurfaceFlags } from './contents.ts';
+type ActorStateSource = SharedBodyTable | ((actor: ActorId) => BodyState | null);
 type GeometryCollision = {
     readonly kind: 'q1';
     readonly provider: Q1Collision;
@@ -42,7 +44,7 @@ function sweptBounds(query: TraceQuery): Bounds {
 export class SharedSceneQueries implements SceneQueries {
     readonly spatial: SpatialIndex;
     readonly #geometry: GeometryCollision;
-    #readActorState: ((actor: ActorId) => BodyState | null) | null = null;
+    #actorStates: ActorStateSource | null = null;
     #readActorCollision: ((actor: ActorId) => ActorCollision | null) | null = null;
     readonly #q2PortalContributions = new Map<number, { primary: boolean; count: number }>();
     nativeQ3ClipModels(): SourceClipModels | null {
@@ -71,19 +73,20 @@ export class SharedSceneQueries implements SceneQueries {
         const linked = this.spatial.get(actor);
         return linked === null ? null : this.#currentActor(linked);
     }
-    bindActorState(read: (actor: ActorId) => BodyState | null): void { this.#readActorState = read; }
+    bindActorState(source: ActorStateSource): void { this.#actorStates = source; }
     bindActorCollision(read: (actor: ActorId) => ActorCollision | null): void { this.#readActorCollision = read; }
     #currentActor(linked: SpatialActor): SpatialActor | null {
-        if (this.#readActorState === null && this.#readActorCollision === null) return linked;
+        if (this.#actorStates === null && this.#readActorCollision === null) return linked;
         const collision = this.#readActorCollision === null ? linked.collision : this.#readActorCollision(linked.body.actor);
         if (collision === null) return null;
         return this.#snapshotActor(linked, collision);
     }
     #snapshotActor(linked: SpatialActor, collision: ActorCollision): SpatialActor | null {
-        const state = this.#readActorState === null ? linked.body.state : this.#readActorState(linked.body.actor);
+        const source = this.#actorStates;
+        const state = source === null ? linked.body.state : typeof source === 'function' ? source(linked.body.actor) : source.read(linked.body.actor);
         if (state === null) return null;
         return {
-            body: { ...linked.body, state: {
+            body: { ...linked.body, state: source !== null && typeof source !== 'function' ? state : {
                 origin: { ...state.origin }, angles: { ...state.angles }, velocity: { ...state.velocity },
                 bounds: { min: { ...state.bounds.min }, max: { ...state.bounds.max } }, ground: state.ground,
             } },
@@ -93,7 +96,7 @@ export class SharedSceneQueries implements SceneQueries {
     queryActors(bounds: Bounds, role: 'solid' | 'trigger' | 'both' = 'both'): readonly SpatialActor[] {
         const actors: SpatialActor[] = [];
         for (const linked of this.spatial.query(bounds, this.#readActorCollision === null ? role : 'both')) {
-            const refresh = this.#readActorState !== null || this.#readActorCollision !== null;
+            const refresh = this.#actorStates !== null || this.#readActorCollision !== null;
             const collision = this.#readActorCollision === null ? linked.collision : this.#readActorCollision(linked.body.actor);
             if (collision === null || role !== 'both' && collision.role !== role) continue;
             const actor = refresh ? this.#snapshotActor(linked, collision) : linked;
@@ -163,7 +166,7 @@ export class SharedSceneQueries implements SceneQueries {
         if (query.policy.kind === 'q1' && query.policy.move === 'missile')
             envelope = sweptBounds({ ...query, shape: { kind: 'box', bounds: { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 15 } } } });
         for (const linked of this.spatial.query(envelope, this.#readActorCollision === null ? 'solid' : 'both')) {
-            const refresh = this.#readActorState !== null || this.#readActorCollision !== null;
+            const refresh = this.#actorStates !== null || this.#readActorCollision !== null;
             const id = linked.body.actor, collision = this.#readActorCollision === null ? linked.collision : this.#readActorCollision(id);
             if (collision === null || collision.role !== 'solid') continue;
             if (excluded.some(actor => sameActor(actor, id))) continue;

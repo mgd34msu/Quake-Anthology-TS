@@ -61,6 +61,10 @@ SSE arithmetic and x87 instructions now also retain their decoded fields. Regist
 
 The latest local comparisons use a fixed host wall-clock capability for the original DLL's random seed. Performance timers remain real. Every original frame executes the same instruction count in control and candidate, and the complete final native entity bytes match. Each run keeps all 495 records, executes 100 ticks and measures the last 50 on CPU 8.
 
+Classic and rerelease resource registration now retains model, sound and image name indexes, updated on configstring changes and rebuilt for replacement maps or restored strings. Lookups preserve first-hole allocation, duplicate-name order and source-specific reserved slots. A bounded 149,500-query component comparison with 299 populated names measured 128.21/136.18 ms for the original scan and 3.46/7.94 ms for the index, with equal returned totals. The original DLL and service checks pass; this does not measure a frame-rate gain.
+
+Collision queries reuse body snapshots already made immutable by the shared body table. External bindings still read live state, and custom readers still receive the original copy behavior. Top-level ABI calls also avoid an unused full processor snapshot; nested calls retain complete state preservation. The matched native workload retained identical instruction series and final entity bytes: native median 67.38 to 66.41 ms, application median 75.73 to 76.05 ms. These mixed timings do not establish a whole-tick gain. Combined nine-root strict/policy checks pass, alongside 57 collision/body/ABI checks and four resource/native-service checks. Local evidence is in `.artifacts/resume-20260925/{owned-body-snapshots,resource-name-index}/`. Two ABI snapshot pool designs were tried and removed after inconsistent or slower comparisons.
+
 | Change | Native median, before → after | Application median, before → after |
 |---|---:|---:|
 | Read narrow registers directly | 70.43 → 67.41 ms | 80.22 → 75.85 ms |

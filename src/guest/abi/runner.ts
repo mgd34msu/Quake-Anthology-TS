@@ -109,7 +109,8 @@ export class GuestCallRunner {
     const enclosing = this.#active.at(-1);
     const context = enclosing === undefined ? request.context : { ...request.context, parent: this.currentContext };
     const active: ActiveCall = { context, remaining: Math.min(request.instructionBudget, enclosing?.remaining ?? request.instructionBudget) };
-    const saved = captureAbiProcessorState(cpu.state), adapter = new X86AbiAdapter(request.signature.abi);
+    const callerInstruction = cpu.state.instructionPointer;
+    const saved = enclosing === undefined ? null : captureAbiProcessorState(cpu.state), adapter = new X86AbiAdapter(request.signature.abi);
     const callerStack = cpu.state.registers.read("rsp", cpu.memory.pointerBytes === 4 ? 32 : 64);
     adapter.enter(cpu, request.target, request.signature, request.arguments, returnAddress);
     const width = cpu.memory.pointerBytes === 4 ? 32 : 64;
@@ -121,10 +122,10 @@ export class GuestCallRunner {
       yield* this.runSteps(active, returnAddress, slice);
       if (cpu.state.registers.read("rsp", width) !== entryStack + BigInt(cpu.memory.pointerBytes + plan.calleePopBytes)) throw new Error("Guest returned with incorrect ABI stack cleanup");
       const result = adapter.returnValue(cpu, request.signature);
-      if (enclosing !== undefined) restoreAbiProcessorState(cpu.state, saved);
+      if (saved !== null) restoreAbiProcessorState(cpu.state, saved);
       else {
         cpu.state.registers.write("rsp", width, callerStack);
-        cpu.state.instructionPointer = saved.instructionPointer;
+        cpu.state.instructionPointer = callerInstruction;
       }
       return result;
     } finally {

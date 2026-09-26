@@ -20,6 +20,10 @@ import { classicCombatProfile } from "../../../compat/q2/classic/combat-profile.
 import { ClassicSourceInventory } from "../../../compat/q2/classic/inventory.ts";
 import { SizeBuf, SZ_Init, SZ_Clear, MSG_WriteChar, MSG_WriteByte, MSG_WriteShort, MSG_WriteLong, MSG_WriteFloat, MSG_WriteString, MSG_WritePos, MSG_WriteDir, MSG_WriteAngle } from "../../../network/q2/message.ts";
 import type { ActorCollision, SharedSceneQueries } from "../../../world/collision/index.ts";
+import { ResourceNameIndex } from "../../../core/resource-name-index.ts";
+
+const resourceBases = { model: 32, sound: 288, image: 544 };
+const resourceKinds: readonly (keyof typeof resourceBases)[] = ["model", "sound", "image"];
 
 export type ClassicGuestAudience = { readonly kind: "unicast"; readonly slot: number } | { readonly kind: "multicast"; readonly origin: Vec3; readonly scope: "all" | "phs" | "pvs" };
 export interface ClassicGuestMessage { readonly audience: ClassicGuestAudience; readonly reliable: boolean; readonly bytes: Uint8Array }
@@ -52,6 +56,7 @@ function tuple(value: Vec3): Float32Array { return new Float32Array([value.x, va
 export class ClassicGuestServices {
   readonly services: ClassicQ2EngineServices;
   readonly #configstrings = new Map<number, string>();
+  readonly #resourceNames = { model: new ResourceNameIndex(256), sound: new ResourceNameIndex(256), image: new ResourceNameIndex(256) };
   readonly #messages: ClassicGuestMessage[] = [];
   readonly #buffer = new SizeBuf();
   #host: ClassicQ2GuestHost | null = null;
@@ -75,8 +80,8 @@ export class ClassicGuestServices {
     if (options.scene.geometry.models.length > 255) throw new RangeError("API 3 map exceeds MAX_MODELS");
     options.cvars.set("maxclients", String(options.maxClients), true);
     SZ_Init(this.#buffer, new Uint8Array(1400), 1400);
-    this.#configstrings.set(33, options.mapPath);
-    for (let model = 1; model < options.scene.geometry.models.length; model++) this.#configstrings.set(33 + model, `*${model}`);
+    this.storeConfigstring(33, options.mapPath);
+    for (let model = 1; model < options.scene.geometry.models.length; model++) this.storeConfigstring(33 + model, `*${model}`);
     const owner = this;
     this.services = {
       dispose: () => { this.#combat?.close(); this.#combat = null; return undefined; },
@@ -112,8 +117,9 @@ export class ClassicGuestServices {
     const { engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance, pickups } = binding;
     this.#options = { ...this.#options, engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance, pickups };
     this.#loading = true; this.#configstrings.clear(); this.#messages.length = 0; SZ_Clear(this.#buffer);
-    this.#configstrings.set(33, binding.mapPath);
-    for (let model = 1; model < binding.scene.geometry.models.length; model++) this.#configstrings.set(33 + model, `*${model}`);
+    for (const kind of resourceKinds) this.#resourceNames[kind].clear();
+    this.storeConfigstring(33, binding.mapPath);
+    for (let model = 1; model < binding.scene.geometry.models.length; model++) this.storeConfigstring(33 + model, `*${model}`);
   }
   bindHost(host: ClassicQ2GuestHost, imageBase?: GuestAddress): void {
     if (this.#host !== null || host.memory !== this.memory) throw new Error("API 3 services already bound or guest memory mismatch");
@@ -165,20 +171,24 @@ export class ClassicGuestServices {
   }
   configstrings(): ReadonlyMap<number, string> { return new Map(this.#configstrings); }
   drainMessages(): readonly ClassicGuestMessage[] { return this.#messages.splice(0); }
-  resource(kind: "model" | "sound" | "image", index: number): string { return this.#configstrings.get((kind === "model" ? 32 : kind === "sound" ? 288 : 544) + index) ?? ""; }
+  resource(kind: "model" | "sound" | "image", index: number): string { return this.#configstrings.get(resourceBases[kind] + index) ?? ""; }
   resourceIndex(kind: "model" | "sound" | "image", name: string): number {
-    if (name === "") return 0;
-    for (let index = 1; index < 256; index++) {
-      const current = this.resource(kind, index);
-      if (current === name) return index;
-      if (current === "") { this.setConfigstring((kind === "model" ? 32 : kind === "sound" ? 288 : 544) + index, name); return index; }
+    const index = this.#resourceNames[kind].find(name);
+    if (index === null) throw new Error(`API 3 ${kind} index overflow`);
+    if (index !== 0 && this.resource(kind, index) !== name) this.setConfigstring(resourceBases[kind] + index, name);
+    return index;
+  }
+  private storeConfigstring(index: number, value: string): void {
+    this.#configstrings.set(index, value);
+    for (const kind of resourceKinds) {
+      const slot = index - resourceBases[kind];
+      if (slot > 0 && slot < 256) { this.#resourceNames[kind].set(slot, value); break; }
     }
-    throw new Error(`API 3 ${kind} index overflow`);
   }
   setConfigstring(index: number, value: string): undefined {
     if (!Number.isInteger(index) || index < 0 || index >= 2080) throw new RangeError("API 3 configstring index outside MAX_CONFIGSTRINGS");
     const text = value;
-    this.#configstrings.set(index, text);
+    this.storeConfigstring(index, text);
     if (index > 32 && index < 288) this.#host?.setModelName(index - 32, text);
     if (index >= 800 && index < 1056) this.options.engine.emit({ kind: "lightstyle", style: index - 800, pattern: text });
     if (index === 1) this.options.engine.emit({ kind: "music", track: text });

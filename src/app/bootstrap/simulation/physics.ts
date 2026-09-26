@@ -105,7 +105,7 @@ export class SharedPhysics {
       onLink: body => this.linked(body),
       onUnlink: actor => { options.scene.unlink(actor); return undefined; },
     });
-    options.scene.bindActorState(id => this.bodies.read(id));
+    options.scene.bindActorState(this.bodies);
     options.actors.onRelease(actor => { this.sources.delete(actor); this.solids.delete(actor); this.collisions.delete(actor); this.motions.delete(actor); this.flags.delete(actor); return undefined; });
   }
   private vector(x: number, y: number, z: number): Vec3 { return { x: this.n.store(x), y: this.n.store(y), z: this.n.store(z) }; }

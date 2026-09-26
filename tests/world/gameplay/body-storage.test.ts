@@ -3,6 +3,9 @@ import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { BodyState } from "../../../src/contracts/world.ts";
 import { createNumericOperations, Q3_BINARY32_PROFILE } from "../../../src/core/numeric.ts";
 import { SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
+import { createSceneQueries } from "../../../src/world/collision/index.ts";
+import { decodeQ3World } from "../../../src/formats/q3-map/index.ts";
+import { q3Fixture } from "../../formats/q3-map/fixture.ts";
 
 function state() {
   return { origin: { x: -0, y: 2, z: 3 }, angles: { x: 0, y: 0, z: 0 }, velocity: { x: 4, y: 5, z: 6 },
@@ -65,6 +68,23 @@ test("external reads and writes retain copies and callback order, including save
   expect(bodies.linkState(actor.id)).toEqual(saved);
   calls.length = 0; bodies.unlink(actor); bodies.unlink(actor);
   expect(calls).toEqual(["onUnlink"]);
+});
+
+test("collision reuses owned immutable bodies and refreshes them after writes", () => {
+  const { actors, bodies, actor } = fixture(), scene = createSceneQueries(decodeQ3World(q3Fixture()));
+  bodies.create(actor, state()); bodies.link(actor);
+  const linked = bodies.linked(actor.id), initial = bodies.read(actor.id);
+  if (linked === null || initial === null) throw Error("Body absent");
+  scene.link(linked, { family: "q3", shape: { kind: "box" }, contents: 1, owner: null, role: "solid", monster: false, deadMonster: false });
+  scene.bindActorState(bodies);
+  const before = scene.linkedActor(actor.id);
+  expect(before?.body.state).toBe(initial);
+  bodies.write(actor, { ...state(), origin: { x: 20, y: 0, z: 0 } });
+  const updated = bodies.read(actor.id);
+  if (updated === null) throw Error("Body absent after write");
+  expect(scene.linkedActor(actor.id)?.body.state).toBe(updated);
+  expect(before?.body.state.origin.x).toBe(-0);
+  actors.release(actor); expect(scene.linkedActor(actor.id)).toBeNull();
 });
 
 test("local attachments preserve old snapshots and share anchor release lifetime", () => {
