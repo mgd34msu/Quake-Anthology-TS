@@ -60,6 +60,8 @@ export class RereleaseGuestModule {
   readonly cgameImportAddress: GuestAddress;
   #game: GuestAddress | null = null;
   #cgame: GuestAddress | null = null;
+  #entityFields: { readonly base: GuestAddress; readonly stride: GuestAddress; readonly count: GuestAddress; readonly capacity: GuestAddress } | null = null;
+  #entityTable: RawEntityTable | null = null;
   #movement: { readonly address: GuestAddress; readonly binding: NativeModEntryBinding } | null = null;
   #inputMovement: { readonly boundary: (address: GuestAddress, run: (body?: MovementBodyShape) => undefined) => undefined; readonly active: () => boolean } | null = null;
   readonly #equipment: { readonly client: RawEntityView; readonly value: EquipmentMovement; applied: boolean }[] = [];
@@ -222,21 +224,29 @@ export class RereleaseGuestModule {
   }
   /** Export fields stay live: Init, spawn, load and frames can change this table. */
   entities(): RawEntityTable {
-    const table = this.bindGame();
-    const at = (name: string) => this.memory.offset(table, BigInt(fieldOffset(gameExportLayout, name)));
-    const base = this.memory.readPointer(at("edicts"));
-    const stride = this.memory.readUint64(at("edict_size"));
-    const count = this.memory.readUint32(at("num_edicts")), capacity = this.memory.readUint32(at("max_edicts"));
+    if (this.#entityFields === null) {
+      const table = this.bindGame();
+      const at = (name: string) => this.memory.offset(table, BigInt(fieldOffset(gameExportLayout, name)));
+      this.#entityFields = { base: at("edicts"), stride: at("edict_size"), count: at("num_edicts"), capacity: at("max_edicts") };
+    }
+    const fields = this.#entityFields;
+    const base = this.memory.readPointer(fields.base);
+    const stride = this.memory.readUint64(fields.stride);
+    const count = this.memory.readUint32(fields.count), capacity = this.memory.readUint32(fields.capacity);
     if (base === null) throw new Error("Q2 game edicts are not initialized");
     if (stride < BigInt(edictLayout.byteLength) || stride > BigInt(Number.MAX_SAFE_INTEGER) || count > capacity) throw new Error("Invalid Q2 rerelease edict table");
     const strideBytes = Number(stride), memory = this.memory;
+    const previous = this.#entityTable;
+    if (previous !== null && previous.base.byteOffset === base.byteOffset && previous.strideBytes === strideBytes
+      && previous.count === count && previous.capacity === capacity) return previous;
     const atSlot = (slot: number): RawEntityView => {
       if (!Number.isSafeInteger(slot) || slot < 0 || slot >= capacity) throw new RangeError("Q2 edict slot is outside source capacity");
       const address = memory.offset(base, BigInt(slot) * stride);
       return { module: memory.module, slot, address, strideBytes, publicLayout: edictLayout, bytes: memory.borrow(address, strideBytes), currentActor: () => this.options.actorAtSlot(slot) };
     };
-    return { module: memory.module, base, strideBytes, count, capacity, layout: edictLayout, atSlot,
+    this.#entityTable = { module: memory.module, base, strideBytes, count, capacity, layout: edictLayout, atSlot,
       fromPointer: address => { memory.check(address, edictLayout.byteLength, "read"); const delta = address.byteOffset - base.byteOffset; if (delta < 0n || delta % stride !== 0n || delta / stride >= BigInt(capacity)) throw new RangeError("Pointer does not identify a Q2 edict"); return atSlot(Number(delta / stride)); } };
+    return this.#entityTable;
   }
   /** Split index and server player number are independent ABI arguments. */
   drawHud(split: number, serverData: GuestAddress, viewport: readonly [number, number, number, number], safeArea: readonly [number, number, number, number], scale: number, playerNumber: number, playerState: GuestAddress): void {
