@@ -15,6 +15,7 @@ const entityFields = {
 };
 const clientFields = { velocity: fieldOffset(clientLayout, "ps.pmove.velocity"), flags: fieldOffset(clientLayout, "ps.pmove.pm_flags"), height: fieldOffset(clientLayout, "ps.pmove.viewheight"), offset: fieldOffset(clientLayout, "ps.viewoffset") };
 function readVector(view: DataView, offset: number): Vec3 { return { x: view.getFloat32(offset, true), y: view.getFloat32(offset + 4, true), z: view.getFloat32(offset + 8, true) }; }
+const snapshotBuffers = new WeakMap<MappedGuestMemory, Map<number, { readonly bytes: Uint8Array; readonly view: DataView }>>();
 
 /** API2023's published prefix only; no g_local.h private members. */
 export class RereleasePublicEdict {
@@ -25,7 +26,18 @@ export class RereleasePublicEdict {
   byte(name: string): number { return this.memory.readUint8(this.address(name)); }
   float(name: string): number { return this.memory.readFloat32(this.address(name)); }
   pointer(name: string): GuestAddress | null { return this.memory.readPointer(this.address(name)); }
-  private snapshot(address: GuestAddress, byteLength: number): DataView { const bytes = this.memory.copy(address, byteLength); return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); }
+  // Decoders consume these views synchronously and return only independent values.
+  private snapshot(address: GuestAddress, byteLength: number): DataView {
+    let buffers = snapshotBuffers.get(this.memory);
+    if (buffers === undefined) { buffers = new Map(); snapshotBuffers.set(this.memory, buffers); }
+    let buffer = buffers.get(byteLength);
+    if (buffer === undefined) {
+      const bytes = new Uint8Array(byteLength);
+      buffer = { bytes, view: new DataView(bytes.buffer) }; buffers.set(byteLength, buffer);
+    }
+    this.memory.copyInto(address, buffer.bytes);
+    return buffer.view;
+  }
   vector(name: string): Vec3 { return this.memory.readFloat32Vector(this.address(name)); }
   setVector(name: string, value: Vec3): void { const at = this.address(name); this.memory.writeFloat32(at, value.x); this.memory.writeFloat32(this.memory.offset(at, 4n), value.y); this.memory.writeFloat32(this.memory.offset(at, 8n), value.z); }
   client(): GuestAddress { const address = this.pointer("client"); if (address === null) throw new Error("API2023 source slot has no public client prefix"); this.memory.check(address, clientLayout.byteLength, "read"); return address; }
