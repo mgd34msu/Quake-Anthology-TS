@@ -44,7 +44,7 @@ export class FormatArguments {
       this.cursor = m.offset(address, BigInt(slot));
       if (this.descriptor !== null) m.writePointer(m.offset(this.descriptor, 8n), this.cursor);
     }
-    return floating ? { kind: "float", value: decodeBinary(readBits(m.copy(address, extended ? 10 : 8)), extended ? 80 : 64) }
+    return floating ? { kind: "float", value: decodeBinary(extended ? readBits(m.copy(address, 10)) : readUnsigned(m, address, 8), extended ? 80 : 64) }
       : { kind: "integer", value: readUnsigned(m, address, size) };
   }
 }

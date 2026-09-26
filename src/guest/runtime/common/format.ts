@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+import { Buffer } from "node:buffer";
 import type { GuestAddress } from "../../../contracts/execution.ts";
 import type { MappedGuestMemory } from "../../core/contracts.ts";
+import { SparseGuestMemory } from "../../core/memory.ts";
 import { readString, writeUnsigned } from "./memory.ts";
 import { FormatArguments } from "./format/arguments.ts";
 import type { FormatArgument, FormatArgumentType } from "./format/arguments.ts";
@@ -35,6 +37,24 @@ interface Conversion {
   readonly width: Amount; readonly precision: Amount | null; readonly argument: Reference | null;
 }
 type Token = { readonly kind: "literal"; readonly text: string } | Conversion;
+interface ParsedFormat { readonly tokens: readonly Token[]; readonly positional: boolean; readonly references: readonly Reference[]; }
+const parsedFormats: Record<GuestFormatRequest["dialect"], Record<4 | 8, Map<string, ParsedFormat>>> = {
+  windows: { 4: new Map(), 8: new Map() }, "system-v": { 4: new Map(), 8: new Map() },
+};
+function retainedFormat(text: string, request: GuestFormatRequest): ParsedFormat {
+  const formats = parsedFormats[request.dialect][request.memory.pointerBytes];
+  const retained = formats.get(text);
+  if (retained !== undefined) return retained;
+  const result = parse(text, request);
+  if (text.length <= 4096) {
+    if (formats.size === 256) {
+      const oldest = formats.keys().next();
+      if (!oldest.done) formats.delete(oldest.value);
+    }
+    formats.set(text, result);
+  }
+  return result;
+}
 function integerBits(length: string, request: GuestFormatRequest): number {
   switch (length) {
     case "hh": return 8;
@@ -46,7 +66,7 @@ function integerBits(length: string, request: GuestFormatRequest): number {
     default: return 32;
   }
 }
-function parse(text: string, request: GuestFormatRequest): { tokens: readonly Token[]; positional: boolean; references: readonly Reference[] } {
+function parse(text: string, request: GuestFormatRequest): ParsedFormat {
   const tokens: Token[] = [], references: Reference[] = [];
   let at = 0, sequence = 0, positional = false, sequential = false;
   const invalid = (): never => { throw new FormatFailure(22, "Invalid guest printf conversion"); };
@@ -160,6 +180,13 @@ function readonlyFormat(request: GuestFormatRequest, length: number): boolean {
 function stringArgument(request: GuestFormatRequest, address: GuestAddress | null, wide: boolean, precision: number | null): string {
   if (address === null) return precision !== null && request.dialect === "system-v" && precision < 6 ? "" : "(null)".slice(0, precision ?? 6);
   const m = request.memory, width = wide ? request.dialect === "windows" ? 2 : 4 : 1;
+  if (!wide && SparseGuestMemory.managed(m)) {
+    if (precision === 0) return "";
+    const length = m.findZero(address, precision ?? 1048576);
+    if (length < 0 && precision === null) throw new RangeError("Guest printf string exceeds runtime string limit");
+    const bytes = m.copy(address, length < 0 ? precision ?? 0 : length);
+    return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("latin1");
+  }
   let text = "";
   for (let index = 0; precision === null || text.length < precision; index++) {
     if (index >= 1048576) throw new RangeError("Guest printf string exceeds runtime string limit");
@@ -179,7 +206,7 @@ export function formatGuestBuffer(request: GuestFormatRequest): GuestFormatResul
   if (request.format === null || request.buffer === null && request.capacity !== 0n) return { result: -1, errno: 22 };
   const output = new Output(request);
   try {
-    const text = readString(request.memory, request.format), parsed = parse(text, request);
+    const text = readString(request.memory, request.format), parsed = retainedFormat(text, request);
     // A literal format need not touch a caller's otherwise unused va_list.
     const reader = parsed.references.length === 0 ? null : new FormatArguments(request.memory, request.dialect, request.arguments);
     const values = new Map<number, FormatArgument>();
