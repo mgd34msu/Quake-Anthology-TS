@@ -64,23 +64,3 @@ export async function writeContainedSave(directory: string, path: string, bytes:
     try { await rm(temporary, { force: true }); } finally { closeSync(parent.descriptor); }
   }
 }
-
-/** Elapsed playable time, with one outstanding request and no catch-up burst. */
-export class TimedAutosave {
-  private elapsed = 0;
-  private pending = false;
-  constructor(readonly intervalMilliseconds: number) {
-    if (!Number.isFinite(intervalMilliseconds) || intervalMilliseconds <= 0) throw new RangeError("Autosave interval must be positive");
-  }
-  advance(milliseconds: number, eligible: boolean): boolean {
-    if (!Number.isFinite(milliseconds) || milliseconds < 0) throw new RangeError("Autosave elapsed time must be nonnegative");
-    if (!eligible || this.pending) return false;
-    this.elapsed = Math.min(this.intervalMilliseconds, this.elapsed + milliseconds);
-    if (this.elapsed < this.intervalMilliseconds) return false;
-    this.pending = true;
-    return true;
-  }
-  /** Both success and failure wait a full interval before another attempt. */
-  completed(): void { this.elapsed = 0; this.pending = false; }
-  worldChanged(): void { this.completed(); }
-}

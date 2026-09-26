@@ -37,6 +37,10 @@ export function createStartupSource(options: ApplicationOptions, selection: Pick
   if (dialect === "q3") registerQ3ServerCvars(cvars, { maxClients, mapName: options.map });
   registerFrameTimeCvars(cvars);
   registerSourceAdministrationCvars(cvars);
+  if (!options.dedicated && options.network.kind === "offline" && dialect !== "q3") {
+    cvars.register("sv_autosave", "1", CvarFlag.Archive);
+    cvars.register("sv_autosave_interval", "0", CvarFlag.Archive);
+  }
   cvars.register("qts_weaponBehavior", "", CvarFlag.Archive);
   return cvars;
 }

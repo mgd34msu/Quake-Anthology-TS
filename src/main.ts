@@ -1,10 +1,12 @@
 import { dirname } from "node:path";
+import { version } from "../package.json";
 import { LlmSettingsService } from "./llm/settings.ts";
 import { applicationHelp, parseApplicationCommand } from "./app/bootstrap/options.ts";
 
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
   try {
     const command = parseApplicationCommand(argv);
+    if (command.kind === "version") { process.stdout.write(`Quake Anthology ${version}\n`); return 0; }
     if (command.kind === "help") { process.stdout.write(applicationHelp); return 0; }
     if (command.kind === "weapon-behavior") {
       await (await import("./app/bootstrap/weapon-behavior-tool.ts")).runWeaponBehaviorTool(command.command, text => { process.stdout.write(text); });

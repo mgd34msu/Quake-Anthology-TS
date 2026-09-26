@@ -61,6 +61,7 @@ export function liveQ2Protocol(options: Pick<ApplicationOptions, "q2Protocol">, 
 }
 
 export type ApplicationCommand = { readonly kind: "help" }
+  | { readonly kind: "version" }
   | { readonly kind: "weapon-behavior"; readonly command: WeaponBehaviorToolCommand }
   | { readonly kind: "list-content"; readonly corpusRoot: string }
   | { readonly kind: "run" | "menu"; readonly options: ApplicationOptions };
@@ -112,6 +113,7 @@ Usage: bun run src/main.ts [options]
   --frames N                 Close after N simulation steps
   --hidden                   Start a hidden native window
   --list-content             Show installed games and expansions
+  --version                  Show the application version
   weapon-behavior --help     Inspect and author mounted source behavior declarations
   --help                     Show these options
 `;
@@ -156,6 +158,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
     if (flag === "--menu") { menu = true; continue; }
     if (flag !== undefined && !["--content-root", "--user-content-root", "--renderer", "--render-worker", "--gamma", "--width", "--height", "--hidden", "--list-content"].includes(flag)) explicitLaunch = true;
     if (flag === "--help" || flag === "-h") return { kind: "help" };
+    if (flag === "--version") return { kind: "version" };
     if (flag === "--dedicated") { options = { ...options, dedicated: true }; continue; }
     if (flag === "--hidden") { options = { ...options, hidden: true }; continue; }
     if (flag === "--list-content") { list = true; continue; }

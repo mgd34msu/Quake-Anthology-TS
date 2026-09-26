@@ -4,13 +4,11 @@ Quake, Quake II, and Quake III gameplay in one engine and executable, written in
 strict TypeScript and run or compiled with Bun. Mix movement, characters, weapons,
 monsters, and equipment while retaining each selected source's behavior.
 
-The project is unfinished. Supported combinations work, but complete mod
-interoperability, content coverage, rendering fidelity, and release qualification
-remain in progress. Native DLL gameplay and saving remain the active performance
-work. Native execution now reuses decoded arithmetic and control flow, parsed
-format strings and unchanged body data. The [performance notes](docs/functional-targets/performance.md)
-record the remaining cost. See the [shared task list](docs/functional-targets/status.md)
-and [installed build status](docs/execution-status.md#installed-executable-and-recent-fixes).
+**Version 1.0.0** is available from [GitHub Releases](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.0.0),
+with a Linux x64 executable and source. See the [release notes](docs/releases/1.0.0.md).
+Native DLL gameplay can still lag in demanding scenes. That remaining performance
+work is scheduled for a patch release; saving and loading are accepted for 1.0.0.
+Supported mod interfaces and compatibility limits are documented below.
 
 Classic Quake and Quake II components must preserve their original gameplay,
 feedback, and presentation. Rerelease additions belong to the selected rerelease

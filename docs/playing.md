@@ -96,6 +96,12 @@ Right mouse is `MOUSE2`; middle mouse is `MOUSE3`. See the
 
 ## Save and load
 
+Automatic saves happen only when entering a level in a supported singleplayer
+session. The **Autosave on level load** setting controls this behavior.
+There are no timed or mid-level automatic saves. Loading an existing save does
+not overwrite it with a new autosave. The legacy `sv_autosave_interval` variable
+is accepted for old configuration files but no longer schedules saves.
+
 `save NAME` writes the shared format, including supported mixed-game state.
 For an ordinary singleplayer NetQuake source session, export original Quake saves
 with `save NAME v5` or `save NAME v6`. Mixed compositions need shared saves because

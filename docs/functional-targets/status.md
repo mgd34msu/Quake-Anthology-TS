@@ -1,8 +1,8 @@
 # Functional target status
 
-**22/23 targets are accepted in source. T10 mod interoperability remains open.** Its remaining implementation is listed immediately below the target table. T12 is complete: selected arsenals, inventory actions, offhand source modifiers/cadence, and the original rerelease retained-map pickup lifetime are integrated. Classic and rerelease behavior remain separate.
+**1.0.0 is the accepted release scope. 22/23 targets are accepted in source; T10 gameplay performance is deferred to a patch release.** Its remaining implementation is listed immediately below the target table. T12 is complete: selected arsenals, inventory actions, offhand source modifiers/cadence, and the original rerelease retained-map pickup lifetime are integrated. Classic and rerelease behavior remain separate.
 
-The installed executable is `563f0a99`. It includes the Q1 finale orb correction and current native CPU, memory, ABI and entity-data optimizations. Actual complete-base1 execution still exceeds the native tick budget; T10 remains open. See [current delivery](../execution-status.md#installed-executable-and-recent-fixes).
+Release `v1.0.0` includes the accepted runtime through `563f0a99` and level-entry-only autosaving. It includes the Q1 finale orb correction and current native CPU, memory, ABI and entity-data optimizations. Actual complete-base1 execution still exceeds the native tick budget; T10 remains open for a patch release. See [current delivery](../execution-status.md#installed-executable-and-recent-fixes).
 
 | Target | Function | Status | Accepted progress and remaining work |
 |---|---|---|---|
@@ -15,7 +15,7 @@ The installed executable is `563f0a99`. It includes the Q1 finale orb correction
 | T07 | Network connections and prediction | Complete in accepted source | Native and mixed-game connections, prediction, travel, DOSBox/native IPX and KEX 2023 lobby transport are joined. Rerelease browser/direct connections use the retail protocol and default port; explicit overrides remain available. Retail-peer interoperability and OS IPX provider coverage remain unverified. |
 | T08 | Downloads and content acquisition | Complete in accepted source | Public Q2 transfer controls/remount/fallback and QW mod-host policies passed, alongside retained Q3/QW client evidence. Accepted in the check13 composition; delivered in executable `30ea85d`. |
 | T09 | Server discovery and administration | Complete in accepted source | Browser/hosting, profiles/rotation, authenticated administration, per-seat identity settings, Q1 operators, Q2 chase HUD and Q3 pause/capture policies are joined. Wider peer and UI playthrough coverage remains deferred. |
-| T10 | Gamecode and mod execution | Active: native performance | Original QC, classic/rerelease native and QVM modules share component controls, combat, inventory, player outputs, presentation and match services across selected games. Original state, callbacks and save identity retain ownership. The remaining identified implementation work is native execution performance; supported artifact declarations and broader compatibility limits are documented below. |
+| T10 | Gamecode and mod execution | Performance deferred to patch | Original QC, classic/rerelease native and QVM modules share component controls, combat, inventory, player outputs, presentation and match services across selected games. Original state, callbacks and save identity retain ownership. The remaining identified implementation work is native execution performance; supported artifact declarations and broader compatibility limits are documented below. |
 | T11 | Collision, movement and scale | Complete in accepted source | Selected movement, corpse/gib queries, source stance/body projection and rerelease camera timing are joined. Native scale remains 1. Original closed-engine corpse fidelity and broader peer/body combinations retain explicit validation limits. |
 | T12 | Combat, rosters, pickups and equipment | Complete in accepted source | Expansion arsenal menus, Team Arena cross-arsenal supply, native/QC/QVM selected arsenals, inventory/use/drop, saved source identity, and offhand damage/cadence are integrated. The original rerelease retained-map dropped-cargo roundtrip passes. Source implementation acceptance does not claim every artifact, every campaign or acceptable native save/load performance. |
 | T13 | Bots, AI and navigation | Complete in accepted source | Native navigation queries, authored trains, goal ownership, source chat/identity, selected weapons and saved decisions have consumers. Three actual native/mixed bot save-continuation cases passed. Full-map route coverage remains unqualified. |
@@ -32,13 +32,11 @@ The installed executable is `563f0a99`. It includes the Q1 finale orb correction
 
 ### Remaining implementation within T10
 
-These parts describe the remaining implementation; they do not replace the T01–T23 acceptance targets or represent equal amounts of work.
+Gameplay lag is the only remaining identified implementation item. The user accepted saving and loading and moved the lag fix to a patch release. Autosaving now happens only on level entry. Wider compatibility and playthrough coverage below are qualification limits, not additional release blockers.
 
 | Target | Remaining part | Completion behavior |
 |---|---|---|
 | T10 | Gameplay execution | Reduce original native execution to fit its source interval. Latest late unprofiled base1 ticks measured 41.23 ms native and 45.55 ms per application step against a 25 ms native interval. All 495 entities and original callbacks remain active. |
-| T10 | Saving | Reduce the cost of original save callbacks. The current measured level write took 16.590 seconds while CPU-profiled and executed 52.4 million guest instructions. |
-| T10 | Loading and restoration | Reduce original startup and saved-world restoration cost. The last recorded full restored-world opening took 155.206 seconds; this older result needs updating after the shared interpreter changes. |
 
 Authored player body dimensions are integrated across selected Q1/QW/Q2/Q3 and qualified original native/QVM movement. Expansion and release use the selected collision owner; saves retain restoration state where original live bounds need it. Root combined strict/policy and 51 focused checks with 496 assertions pass, including actual original retail/Threewave calls. Unified peers require `qts:snapshot-v10`. This change is included in installed `f670b7e9`.
 

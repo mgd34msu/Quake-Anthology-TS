@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, symlink, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { containedSaveName, saveCommandPath, saveUnavailable, TimedAutosave, writeContainedSave } from "../../src/persistence/save-policy.ts";
+import { containedSaveName, saveCommandPath, saveUnavailable, writeContainedSave } from "../../src/persistence/save-policy.ts";
 
 test("console save names resolve in the save directory and preserve explicit import paths", async () => {
   const root = await mkdtemp(join(tmpdir(), "save-command-"));
@@ -20,19 +20,6 @@ test("console save names resolve in the save directory and preserve explicit imp
     await writeContainedSave(directory, path, Uint8Array.of(7, 3));
     expect(new Uint8Array(await readFile(saveCommandPath(directory, "quicksave")))).toEqual(Uint8Array.of(7, 3));
   } finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("timed autosave counts eligible play and retries once per interval", () => {
-  const timer = new TimedAutosave(100);
-  expect(timer.advance(60, true)).toBe(false);
-  expect(timer.advance(1000, false)).toBe(false);
-  expect(timer.advance(40, true)).toBe(true);
-  expect(timer.advance(1000, true)).toBe(false);
-  timer.completed();
-  expect(timer.advance(99, true)).toBe(false);
-  expect(timer.advance(1, true)).toBe(true);
-  timer.worldChanged();
-  expect(timer.advance(1, true)).toBe(false);
 });
 
 test("public saves reject dead players, deathmatch, intermission and network authority", () => {

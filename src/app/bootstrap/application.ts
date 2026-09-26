@@ -132,7 +132,7 @@ import type { CvarSnapshot } from "../../core/cvars/index.ts";
 import { DedicatedConsole } from "../../console/dedicated.ts";
 import { loadQ3Character } from "../../content/q3/foundation/index.ts";
 import { Q3_WEAPON_ITEMS, q3WeaponItem } from "../../content/q3/foundation/arsenal.ts";
-import { saveCommandPath, saveUnavailable, TimedAutosave, type SavePurpose } from "../../persistence/save-policy.ts";
+import { saveCommandPath, saveUnavailable, type SavePurpose } from "../../persistence/save-policy.ts";
 import { writeSavedGame } from "../../persistence/saved-game.ts";
 import { prepareApplicationSave } from "./original-save.ts";
 import { EngineSession } from "../../world/session/index.ts";
@@ -456,7 +456,6 @@ export class Application {
   private guestBrowser: LocalQ3GuestBrowser | null = null;
   private saveOperation: { readonly run: () => Promise<void>; readonly resolve: () => void; readonly reject: (error: unknown) => void } | null = null;
   private lastOutput: { readonly simulation: SharedSimulation; readonly output: SimulationOutput } | null = null;
-  private timedAutosave = new TimedAutosave(30_000);
   private campaignUnit = new CampaignUnit();
   private get saveDirectory(): string { return this.host.saveDirectory ?? join(homedir(), ".local", "share", "quake-typescript", "saves"); }
   private saveUnavailable(purpose: SavePurpose): string | null {
@@ -487,21 +486,6 @@ export class Application {
       await this.saveGame(path);
       this.host.print(`Autosaved ${path}.\n`);
     } catch (error) { this.host.print(`Autosave failed: ${error instanceof Error ? error.message : String(error)}\n`); }
-    finally { this.timedAutosave.completed(); }
-  }
-
-  private async advanceAutosave(milliseconds: number): Promise<void> {
-    const cvars = this.sourceCvars();
-    if (cvars === null) return;
-    const interval = cvars.variableValue("sv_autosave_interval") * 1000;
-    if (!Number.isFinite(interval) || interval <= 0 || cvars.variableValue("sv_autosave") === 0) return;
-    if (interval !== this.timedAutosave.intervalMilliseconds) this.timedAutosave = new TimedAutosave(interval);
-    const eligible = this.levelRecoveryAvailable(this.simulation, this.options) && this.saveUnavailable("autosave") === null
-      && this.worldOperation === "idle" && this.campaignMovie === null && this.pendingTeamArena === null && this.pendingMap === null
-      && this.pendingRestart === null && this.pendingTransition === null && this.pendingSave === null && this.saveOperation === null;
-    if (this.timedAutosave.advance(milliseconds, eligible)) {
-      try { await this.autosaveLevel(); } finally { this.timedAutosave.completed(); }
-    }
   }
 
   private saveMenu(simulation: SharedSimulation, options: ApplicationOptions): SavedGameMenuService {
@@ -1351,7 +1335,7 @@ export class Application {
       register("graphshift", "0", 0);
       if (this.levelRecoveryAvailable(simulation, this.options)) {
         register("sv_autosave", "1", CvarFlag.Archive);
-        register("sv_autosave_interval", "30", CvarFlag.Archive);
+        register("sv_autosave_interval", "0", CvarFlag.Archive);
       }
     }
     let sourceCommands: CommandBuffer | null = null;
@@ -1568,9 +1552,6 @@ export class Application {
       }
       if (source.kind === "q2-rerelease") {
         if (source.event.kind === "restart-level") { this.pendingMap = mapResourcePath(source.event.map); this.pendingQ3Map = undefined; }
-        else if (source.event.kind === "autosave") {
-          await this.autosaveLevel();
-        }
         continue;
       }
       if (source.kind !== "q3-source") continue;
@@ -2616,7 +2597,6 @@ export class Application {
       if (this.fatalWorldFailure && !this.stepping) await this.closeFailedWorld(error);
       throw error;
     }
-    this.timedAutosave.worldChanged();
     if (published !== undefined) published();
     else this.campaignUnit.stage({ content: this.content.recipe.map.geometryContent, path: this.content.recipe.map.geometry.requestedPath }, nativeTravel?.newUnit ?? false, null).commit();
     if (save === undefined) await this.autosaveLevel();
@@ -3297,7 +3277,6 @@ export class Application {
           this.campaignUnit = unit;
         }, () => { if (!this.closed) this.graphical?.input.pollLoadingEvents(); });
         this.pendingTeamArena = null; this.pendingMap = null; this.pendingQ3Map = undefined; this.pendingNativeTravel = null; this.pendingRestart = null; this.pendingTransition = null; this.pendingSave = null;
-        this.timedAutosave.worldChanged();
       } finally {
         this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve();
         if (!this.closed) this.resumeInput();
@@ -4631,7 +4610,6 @@ export class Application {
       const currentGraphics = this.graphical;
       if (currentGraphics !== null) await this.imageSettings?.refresh(currentGraphics.assets, currentGraphics.presentations, currentGraphics.rerelease, currentGraphics.renderer);
       this.sourceEvents = [...roundEvents, ...this.sourceEvents];
-      if (!paused && this.lastOutput?.simulation === this.simulation) await this.advanceAutosave(frameMilliseconds);
       if (completedLobbySimulation !== null && this.lobbyCompletion !== completedLobbySimulation && this.host.lobby !== undefined) {
         await this.host.lobby.complete();
         this.lobbyCompletion = completedLobbySimulation;

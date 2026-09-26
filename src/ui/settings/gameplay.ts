@@ -10,7 +10,7 @@ export interface GameplaySettingsSource {
 }
 export function bindGameplaySettings(source: GameplaySettingsSource): readonly SettingBinding[] {
   const settings: SettingBinding[] = [], client = source.client ?? source.cvars;
-  for (const [name, label] of [["sv_autosave", "Automatic saves"], ["cg_drawGun", "Draw weapon"], ["cg_simpleItems", "Simple items"], ["cg_marks", "Wall marks"], ["cg_drawCrosshairNames", "Target names"]]) {
+  for (const [name, label] of [["sv_autosave", "Autosave on level load"], ["cg_drawGun", "Draw weapon"], ["cg_simpleItems", "Simple items"], ["cg_marks", "Wall marks"], ["cg_drawCrosshairNames", "Target names"]]) {
     const cvars = name === "sv_autosave" ? source.cvars : client;
     if (name !== undefined && label !== undefined && cvars.find(name) !== undefined) settings.push(bindCvarSetting(cvars, { name, label, kind: "toggle", category: "accessibility", restart: null }, null));
   }
