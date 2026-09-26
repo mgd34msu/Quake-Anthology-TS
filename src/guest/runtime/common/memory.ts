@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+import { Buffer } from "node:buffer";
+import { SparseGuestMemory } from "../../core/memory.ts";
 import type { MappedGuestMemory } from "../../core/contracts.ts";
 import type { GuestAddress, GuestCallValue, GuestMemory } from "../../../contracts/execution.ts";
 
@@ -44,6 +46,12 @@ export function writePointer(memory: GuestMemory, address: GuestAddress, value: 
   writeUnsigned(memory, address, memory.pointerBytes, value?.byteOffset ?? 0n);
 }
 export function readString(memory: GuestMemory, address: GuestAddress, wide = false, maximum = 1048576): string {
+  if (!wide && memory instanceof SparseGuestMemory && SparseGuestMemory.managed(memory)) {
+    const length = memory.findZero(address, maximum);
+    if (length < 0) throw new RangeError("Guest string exceeds checked maximum");
+    const bytes = memory.copy(address, length);
+    return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("latin1");
+  }
   const width = wide ? 2 : 1;
   let value = "";
   for (let i = 0; i < maximum; i++) {

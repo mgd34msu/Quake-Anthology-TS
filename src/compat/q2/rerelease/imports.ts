@@ -3,12 +3,18 @@ import { allocateNativeMemory, nativeAllocationBytes } from "../../../guest/runt
 import type { GuestAddress, GuestCallResult } from "../../../contracts/execution.ts";
 import type { CvarRegistry, CvarSnapshot } from "../../../core/cvars/index.ts";
 import type { MappedGuestMemory } from "../../../guest/core/contracts.ts";
+import { SparseGuestMemory } from "../../../guest/core/memory.ts";
 import { integer, pointer, requiredPointer } from "../../../guest/runtime/common/memory.ts";
 import { cvarLayout, fieldOffset } from "./layouts.ts";
 import type { RereleaseImportCall } from "./module.ts";
 import { guestInt, guestPointer, MissingRereleaseImport } from "./module.ts";
 
 export function readGuestString(memory: MappedGuestMemory, address: GuestAddress, maximum = 1_048_576): string {
+  if (SparseGuestMemory.managed(memory)) {
+    const length = memory.findZero(address, maximum);
+    if (length < 0) throw new RangeError("Q2 guest string has no terminator within its source limit");
+    return new TextDecoder().decode(memory.copy(address, length));
+  }
   for (let length = 0; length < maximum; length++) if (memory.readUint8(memory.offset(address, BigInt(length))) === 0) return new TextDecoder().decode(memory.copy(address, length));
   throw new RangeError("Q2 guest string has no terminator within its source limit");
 }

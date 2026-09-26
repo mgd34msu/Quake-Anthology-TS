@@ -101,6 +101,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       borrow: { value: memory.borrow },
       copy: { value: memory.copy },
       copyInto: { value: memory.copyInto },
+      findZero: { value: memory.findZero },
       fetch: { value: memory.fetch },
       fetchByte: { value: memory.fetchByte },
       fetchSequence: { value: memory.fetchSequence },
@@ -260,6 +261,22 @@ export class SparseGuestMemory implements MappedGuestMemory {
       offset += chunk.byteLength;
     }
     return undefined;
+  }
+
+  /** Stop at the terminator without probing an unreadable following mapping. */
+  findZero(address: GuestAddress, maximum: number): number {
+    if (!Number.isSafeInteger(maximum) || maximum < 0) throw new RangeError("Invalid guest string limit");
+    let consumed = 0, cursor = address;
+    while (consumed < maximum) {
+      const mapping = this.#singleMapping(cursor, 1, "read");
+      if (mapping === null) this.#fault("unmapped", cursor.byteOffset, 1, "read", "range includes unmapped bytes");
+      const offset = this.#lookupOffset, length = Math.min(maximum - consumed, mapping.byteLength - offset);
+      const terminator = mapping.bytes.subarray(offset, offset + length).indexOf(0);
+      if (terminator >= 0) return consumed + terminator;
+      consumed += length;
+      if (consumed < maximum) cursor = this.offset(address, BigInt(consumed));
+    }
+    return -1;
   }
 
   fetch(address: GuestAddress, byteLength: number): Uint8Array {
