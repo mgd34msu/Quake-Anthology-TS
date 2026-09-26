@@ -43,7 +43,8 @@ export class IntegerRegisterFile implements GuestIntegerRegisters {
   read(register: GuestRegister, width: GuestIntegerWidth, highByte = false): bigint {
     const offset = this.#offset(register, width, highByte);
     if (width === 64) return this.#view.getBigUint64(offset, true);
-    return BigInt.asUintN(width, this.#view.getBigUint64(offset, true) >> (highByte ? 8n : 0n));
+    return BigInt(width === 32 ? this.#view.getUint32(offset, true) : width === 16
+      ? this.#view.getUint16(offset, true) : this.#view.getUint8(offset + (highByte ? 1 : 0)));
   }
   write(register: GuestRegister, width: GuestIntegerWidth, value: bigint, highByte = false): undefined {
     const offset = this.#offset(register, width, highByte);
