@@ -39,6 +39,9 @@ type Operation =
   | { readonly kind: 'lea'; readonly destination: RegisterOperand; readonly source: EffectiveAddress }
   | { readonly kind: 'alu'; readonly operation: AluOperation; readonly destination: Operand; readonly source: Source }
   | { readonly kind: 'branch'; readonly condition: number | null; readonly target: bigint }
+  | { readonly kind: 'jump' | 'call'; readonly target: Source }
+  | { readonly kind: 'push'; readonly source: Source; readonly width: 16 | 64 }
+  | { readonly kind: 'pop'; readonly destination: Operand; readonly width: 16 | 64 }
   | { readonly kind: 'return'; readonly discard: bigint };
 export interface X64IntegerPlan { readonly operation: Operation; readonly original: X64SemanticPlan; }
 export interface X64IntegerStep { readonly start: bigint; readonly integer: X64IntegerPlan; }
@@ -51,6 +54,9 @@ export function x64IntegerBlockSafe(plan: X64IntegerPlan): boolean {
   switch (operation.kind) {
     case 'move': return operation.destination.kind === 'register';
     case 'lea': case 'branch': case 'return': return true;
+    case 'jump': return true;
+    case 'call': case 'push': return false;
+    case 'pop': return operation.destination.kind === 'register';
     case 'alu': return operation.destination.kind === 'register' || operation.operation === 'cmp' || operation.operation === 'test';
   }
 }
@@ -73,6 +79,9 @@ export function prepareX64IntegerPlan(plan: X64SemanticPlan): X64IntegerPlan | n
     case 'move': return { original: plan, operation: { kind: 'move', destination: operand(op.destination), source: source(op.source) } };
     case 'alu': return { original: plan, operation: { kind: 'alu', operation: op.operation, destination: operand(op.destination), source: source(op.source) } };
     case 'branch': return { original: plan, operation: { kind: 'branch', condition: op.condition, target: plan.nextIP + op.displacement } };
+    case 'jump': case 'call': return { original: plan, operation: { kind: op.kind, target: source(op.target) } };
+    case 'push': return { original: plan, operation: { kind: 'push', source: source(op.source), width: op.width } };
+    case 'pop': return { original: plan, operation: { kind: 'pop', destination: operand(op.destination), width: op.width } };
     case 'return': return { original: plan, operation: op };
     case 'lea': {
       const destination = operand(op.destination);
@@ -94,23 +103,24 @@ export function prepareX64IntegerPlan(plan: X64SemanticPlan): X64IntegerPlan | n
 export class X64IntegerKernel {
   #low = 0;
   #high = 0;
+  #checkpoint: Uint8Array | undefined;
   readonly #memoryWords = { low: 0, high: 0 };
-  private constructor(readonly flags: ProcessorFlags, private readonly words: DataView,
+  private constructor(readonly flags: ProcessorFlags, private readonly registers: IntegerRegisterFile, private readonly words: DataView,
     private readonly state: GuestProcessorState, private readonly memory: SparseGuestMemory) {}
 
   static create(state: GuestProcessorState, memory: MappedGuestMemory): X64IntegerKernel | null {
     const managed = managedGuestProcessor(state);
     if (managed !== null && state.architecture === 'x86-64' && SparseGuestMemory.managed(memory)) {
-      return new X64IntegerKernel(managed.flags, managed.registers.integerView, state, memory);
+      return new X64IntegerKernel(managed.flags, managed.registers, managed.registers.integerView, state, memory);
     }
     if (state.architecture !== 'x86-64' || !(state.registers instanceof IntegerRegisterFile) || state.registers.architecture !== 'x86-64'
       || !originalInstance(state.registers, IntegerRegisterFile.prototype, registerMembers)
       || !(state.flags instanceof ProcessorFlags) || !originalInstance(state.flags, ProcessorFlags.prototype, flagMembers)
       || !(memory instanceof SparseGuestMemory) || !originalInstance(memory, SparseGuestMemory.prototype, memoryMembers)) return null;
-    return new X64IntegerKernel(state.flags, state.registers.integerView, state, memory);
+    return new X64IntegerKernel(state.flags, state.registers, state.registers.integerView, state, memory);
   }
 
-  /** The CPU admits pinned owners and live code once; no store or host callback can occur in this loop. */
+  /** Admit code once; a store ends the block and retains its own rollback boundary. */
   executeBlock(steps: readonly X64IntegerStep[], budget: number, returned: bigint | null): X64IntegerBlockResult {
     let instructions = 0, current = this.state.instructionPointer, next = current;
     try {
@@ -123,6 +133,22 @@ export class X64IntegerKernel {
         }
         const op = step.integer.operation, original = step.integer.original;
         next = original.nextIP;
+        if (!x64IntegerBlockSafe(step.integer)) {
+          this.state.instructionPointer = current;
+          const registers = this.registers.checkpoint(this.#checkpoint);
+          this.#checkpoint = registers;
+          const lowFlags = this.flags.lowWord, highFlags = this.flags.highWord;
+          try {
+            const flow = this.execute(step.integer);
+            if (flow.kind === 'branch') next = flow.target;
+          } catch (error) {
+            this.registers.restore(registers);
+            this.flags.restoreWords(lowFlags, highFlags);
+            throw error;
+          }
+          instructions++;
+          break;
+        }
         switch (op.kind) {
           case 'move':
             x64Lock(original.lock, null, false);
@@ -152,6 +178,18 @@ export class X64IntegerKernel {
             x64Lock(original.lock, null, false);
             next = this.#return(op.discard);
             break;
+          case 'jump':
+            x64Lock(original.lock, null, false);
+            this.#read(op.target, original.nextIP);
+            next = canonicalAddress(this.#value());
+            break;
+          case 'pop':
+            x64Lock(original.lock, null, false);
+            this.#pop(op.width);
+            this.#write(op.destination, original.nextIP);
+            break;
+          case 'push': case 'call':
+            throw new Error('A memory-writing instruction cannot run in a read-only integer block');
         }
         instructions++;
       }
@@ -202,6 +240,30 @@ export class X64IntegerKernel {
       case 'return':
         x64Lock(original.lock, null, false);
         return { kind: 'branch', target: this.#return(op.discard) };
+      case 'jump': case 'call': {
+        x64Lock(original.lock, null, false);
+        this.#read(op.target, original.nextIP);
+        const target = canonicalAddress(this.#value());
+        if (op.kind === 'call') {
+          const stack = BigInt.asUintN(64, this.words.getBigUint64(offsets.rsp, true) - 8n);
+          this.memory.writeUint64(guestAddress(this.memory, stack, 'write'), original.nextIP);
+          this.words.setBigUint64(offsets.rsp, stack, true);
+        }
+        return { kind: 'branch', target };
+      }
+      case 'push': {
+        x64Lock(original.lock, null, false);
+        this.#read(op.source, original.nextIP);
+        const stack = BigInt.asUintN(64, this.words.getBigUint64(offsets.rsp, true) - (op.width === 64 ? 8n : 2n));
+        this.#writeMemory(guestAddress(this.memory, stack, 'write'), op.width);
+        this.words.setBigUint64(offsets.rsp, stack, true);
+        return x64Advance;
+      }
+      case 'pop':
+        x64Lock(original.lock, null, false);
+        this.#pop(op.width);
+        this.#write(op.destination, original.nextIP);
+        return x64Advance;
     }
   }
 
@@ -210,6 +272,14 @@ export class X64IntegerKernel {
     const target = canonicalAddress(this.memory.readUint64(guestAddress(this.memory, stack)));
     this.words.setBigUint64(offsets.rsp, stack + 8n + discard, true);
     return target;
+  }
+
+  #value(): bigint { return (BigInt(this.#high) << 32n) | BigInt(this.#low); }
+
+  #pop(width: 16 | 64): void {
+    const stack = this.words.getBigUint64(offsets.rsp, true);
+    this.#readMemory(guestAddress(this.memory, stack), width);
+    this.words.setBigUint64(offsets.rsp, stack + (width === 64 ? 8n : 2n), true);
   }
 
   #read(value: Source, nextIP: bigint): void {

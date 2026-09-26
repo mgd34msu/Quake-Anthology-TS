@@ -49,14 +49,11 @@ export class IntegerRegisterFile implements GuestIntegerRegisters {
   write(register: GuestRegister, width: GuestIntegerWidth, value: bigint, highByte = false): undefined {
     const offset = this.#offset(register, width, highByte);
     if (width === 64) { this.#view.setBigUint64(offset, value, true); return undefined; }
-    const shift = highByte ? 8n : 0n;
     const normalized = BigInt.asUintN(width, value);
     if (width === 32) {
       this.#view.setBigUint64(offset, normalized, true);
-    } else {
-      const mask = ((1n << BigInt(width)) - 1n) << shift;
-      this.#view.setBigUint64(offset, (this.#view.getBigUint64(offset, true) & ~mask) | (normalized << shift), true);
-    }
+    } else if (width === 16) this.#view.setUint16(offset, Number(normalized), true);
+    else this.#view.setUint8(offset + (highByte ? 1 : 0), Number(normalized));
     return undefined;
   }
   checkpoint(destination?: Uint8Array): Uint8Array {

@@ -529,7 +529,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   #range(base: bigint, byteLength: number, access: GuestAccess | "map"): undefined {
     if (!Number.isSafeInteger(byteLength) || byteLength < 0) this.#fault("invalid-length", base, byteLength, access, "length must be a nonnegative safe integer");
     if (base === 0n) this.#fault("null-address", base, byteLength, access, "null is not a mapped address");
-    if (base < 0n || base >= this.#limit || base + BigInt(byteLength) > this.#limit) {
+    if (base < 0n || base >= this.#limit || byteLength !== 0 && base + BigInt(byteLength) > this.#limit) {
       this.#fault("address-overflow", base, byteLength, access, `range exceeds ${this.pointerBytes * 8}-bit address space`);
     }
     return undefined;
