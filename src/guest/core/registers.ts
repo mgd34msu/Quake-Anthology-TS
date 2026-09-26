@@ -42,13 +42,15 @@ export class IntegerRegisterFile implements GuestIntegerRegisters {
   get integerView(): DataView { return this.#view; }
   read(register: GuestRegister, width: GuestIntegerWidth, highByte = false): bigint {
     const offset = this.#offset(register, width, highByte);
+    if (width === 64) return this.#view.getBigUint64(offset, true);
     return BigInt.asUintN(width, this.#view.getBigUint64(offset, true) >> (highByte ? 8n : 0n));
   }
   write(register: GuestRegister, width: GuestIntegerWidth, value: bigint, highByte = false): undefined {
     const offset = this.#offset(register, width, highByte);
+    if (width === 64) { this.#view.setBigUint64(offset, value, true); return undefined; }
     const shift = highByte ? 8n : 0n;
     const normalized = BigInt.asUintN(width, value);
-    if (width === 32 || width === 64) {
+    if (width === 32) {
       this.#view.setBigUint64(offset, normalized, true);
     } else {
       const mask = ((1n << BigInt(width)) - 1n) << shift;

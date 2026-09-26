@@ -56,7 +56,12 @@ export function encodeValue(layout: GuestValueLayout, value: GuestCallValue, mem
   if (value.kind !== "int32" && value.kind !== "uint32" && value.kind !== "int64" && value.kind !== "uint64") throw new TypeError("Integer ABI argument requires an integer value");
   if (typeof value.value === "number" && !Number.isSafeInteger(value.value)) throw new RangeError("Integer ABI argument is not an exact integer");
   const raw = BigInt(value.value);
-  for (let index = 0; index < bytes.length; index++) bytes[index] = Number(BigInt.asUintN(8, raw >> BigInt(index * 8)));
+  switch (layout.storage) {
+    case "int8": case "uint8": view.setUint8(0, Number(BigInt.asUintN(8, raw))); break;
+    case "int16": case "uint16": view.setUint16(0, Number(BigInt.asUintN(16, raw)), true); break;
+    case "int32": case "uint32": view.setUint32(0, Number(BigInt.asUintN(32, raw)), true); break;
+    case "int64": case "uint64": view.setBigUint64(0, raw, true); break;
+  }
   return bytes;
 }
 export function decodeValue(layout: GuestValueLayout, bytes: Uint8Array, memory: GuestMemory): GuestCallValue {

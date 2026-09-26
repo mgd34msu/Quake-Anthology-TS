@@ -66,6 +66,7 @@ export interface X64DecodedInstruction {
 }
 
 export function canonicalAddress(value: bigint): bigint {
+  if (value >= 0n && value <= 0x7fffffffffffn) return value;
   const raw = BigInt.asUintN(64, value);
   if (raw > 0x7fffffffffffn && raw < 0xffff800000000000n) throw new X64ProcessorFault(13, `Noncanonical 48-bit virtual address 0x${raw.toString(16)}`);
   return raw;
