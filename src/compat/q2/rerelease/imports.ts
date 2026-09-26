@@ -27,7 +27,10 @@ export interface RereleaseCoreServices {
   invoke?(call: RereleaseImportCall): GuestCallResult | undefined;
 }
 interface Allocation { readonly address: GuestAddress; readonly size: number; readonly tag: number; }
-interface GuestCvar { readonly address: GuestAddress; readonly name: string; }
+interface GuestCvar {
+  readonly address: GuestAddress; readonly name: string;
+  readonly fields: Readonly<Record<"string" | "latched_string" | "flags" | "modified_count" | "value" | "integer", GuestAddress>>;
+}
 /** Guest cvar records mirror one session registry; tagged bytes remain source-owned. */
 export class RereleaseCoreImports {
   readonly #allocations = new Map<bigint, Allocation>();
@@ -48,20 +51,22 @@ export class RereleaseCoreImports {
     for (const record of this.#cvars.values()) { const value = this.services.cvars.get(record.name); if (value !== undefined) this.#writeCvar(record, value); }
   }
   #writeCvar(record: GuestCvar, value: CvarSnapshot): void {
-    const at = (name: string) => this.memory.offset(record.address, BigInt(fieldOffset(cvarLayout, name)));
-    this.memory.writePointer(at("string"), this.string(value.value));
-    this.memory.writePointer(at("latched_string"), value.latchedValue === undefined ? null : this.string(value.latchedValue));
-    this.memory.writeUint32(at("flags"), value.flags);
-    this.memory.writeInt32(at("modified_count"), value.modificationCount || 1);
-    this.memory.writeFloat32(at("value"), value.numericValue);
-    this.memory.writeInt32(at("integer"), value.integerValue);
+    const fields = record.fields;
+    this.memory.writePointer(fields.string, this.string(value.value));
+    this.memory.writePointer(fields.latched_string, value.latchedValue === undefined ? null : this.string(value.latchedValue));
+    this.memory.writeUint32(fields.flags, value.flags);
+    this.memory.writeInt32(fields.modified_count, value.modificationCount || 1);
+    this.memory.writeFloat32(fields.value, value.numericValue);
+    this.memory.writeInt32(fields.integer, value.integerValue);
   }
   cvar(value: CvarSnapshot | undefined): GuestAddress | null {
     if (value === undefined) return null;
     let record = this.#cvars.get(value.name);
     if (record === undefined) {
       const address = this.memory.allocate({ byteLength: cvarLayout.byteLength, alignment: 8n, label: `Q2 cvar ${value.name}` });
-      record = { name: value.name, address };
+      const at = (name: string) => this.memory.offset(address, BigInt(fieldOffset(cvarLayout, name)));
+      record = { name: value.name, address, fields: { string: at("string"), latched_string: at("latched_string"),
+        flags: at("flags"), modified_count: at("modified_count"), value: at("value"), integer: at("integer") } };
       this.memory.writePointer(address, this.string(value.name));
       this.memory.writePointer(this.memory.offset(address, BigInt(fieldOffset(cvarLayout, "next"))), this.#lastCvar);
       this.#lastCvar = address;
