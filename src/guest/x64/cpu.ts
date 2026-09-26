@@ -169,8 +169,7 @@ export class X64Cpu implements GuestCpu {
     let block: SemanticBlock | null = null, blockIndex = 0;
     for (let instructions = 0; instructions < options.instructionBudget; instructions += 1) {
       const start = state.instructionPointer;
-      const address = this.#evidenceAddress(start);
-      if (options.returnAddress?.byteOffset === start) return { kind: "return", instructions, address };
+      if (options.returnAddress?.byteOffset === start) return { kind: "return", instructions, address: this.#evidenceAddress(start) };
       const revision: symbol | null = this.#callbacks?.entryRevision ?? null;
       if (block?.revision !== revision || block.instructions[blockIndex]?.start !== start) block = null;
       let retained: CachedInstruction | undefined = block?.instructions[blockIndex] ?? this.#instructions.get(start);
@@ -206,6 +205,7 @@ export class X64Cpu implements GuestCpu {
           block = this.#block(retained, revision); blockIndex = 0;
         }
         if (block === null && (retained === undefined || !this.#entryUnhooked(retained, revision))) {
+          const address = this.#evidenceAddress(start);
           if (this.#isHostCall(address)) return { kind: "host-call", instructions, address };
           // Entry observers can run nested guest calls and replace cached code.
           retained = this.#instructions.get(start);
@@ -245,8 +245,8 @@ export class X64Cpu implements GuestCpu {
           blockIndex++;
           if (preparedInstruction?.plan?.endsBlock === true || blockIndex >= block.instructions.length) block = null;
         }
-        if (flow.kind === "halt") return { kind: "halt", instructions: instructions + 1, address };
-        if (flow.kind === "trap") return { kind: "exception", instructions: instructions + 1, exception: { kind: "processor", vector: flow.vector, errorCode: null, instruction: address, detail: "Software breakpoint" } };
+        if (flow.kind === "halt") return { kind: "halt", instructions: instructions + 1, address: this.#evidenceAddress(start) };
+        if (flow.kind === "trap") return { kind: "exception", instructions: instructions + 1, exception: { kind: "processor", vector: flow.vector, errorCode: null, instruction: this.#evidenceAddress(start), detail: "Software breakpoint" } };
       } catch (error) {
         bank.restore(registers);
         flags.restoreWords(lowFlags, highFlags);
@@ -255,8 +255,8 @@ export class X64Cpu implements GuestCpu {
           const access = error.access === "execute" || error.access === "write" ? error.access : "read";
           return { kind: "exception", instructions, exception: { kind: "memory", access, address: this.#evidenceAddress(error.address), byteLength: error.byteLength, detail: error.message } };
         }
-        if (error instanceof X64ProcessorFault) return { kind: "exception", instructions, exception: { kind: "processor", vector: error.vector, errorCode: error.vector === 13 ? 0n : null, instruction: address, detail: error.message } };
-        if (error instanceof X64Unsupported) return { kind: "unsupported", instructions, instruction: { address, bytes: new Uint8Array(cursor?.bytes ?? preparedInstruction?.decoded.bytes ?? []), mnemonic: `opcode ${(cursor?.opcode ?? preparedInstruction?.decoded.opcode)?.toString(16) ?? "unknown"}` }, detail: error.message };
+        if (error instanceof X64ProcessorFault) return { kind: "exception", instructions, exception: { kind: "processor", vector: error.vector, errorCode: error.vector === 13 ? 0n : null, instruction: this.#evidenceAddress(start), detail: error.message } };
+        if (error instanceof X64Unsupported) return { kind: "unsupported", instructions, instruction: { address: this.#evidenceAddress(start), bytes: new Uint8Array(cursor?.bytes ?? preparedInstruction?.decoded.bytes ?? []), mnemonic: `opcode ${(cursor?.opcode ?? preparedInstruction?.decoded.opcode)?.toString(16) ?? "unknown"}` }, detail: error.message };
         throw error;
       }
     }

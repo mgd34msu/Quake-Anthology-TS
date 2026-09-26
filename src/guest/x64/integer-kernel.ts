@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+import type { GuestAddress } from '../../contracts/execution.ts';
 import type { GuestIntegerWidth, GuestProcessorState, GuestRegister, MappedGuestMemory } from '../core/contracts.ts';
 import { SparseGuestMemory } from '../core/memory.ts';
 import { IntegerRegisterFile, managedGuestProcessor, ProcessorFlags } from '../core/registers.ts';
 import type { AluOperation } from '../x86/arithmetic.ts';
-import { canonicalAddress, guestAddress, operandAddress, writableOperand } from './decoder.ts';
+import { canonicalAddress, guestAddress, operandAddress } from './decoder.ts';
 import type { X64MemoryOperand, X64Operand } from './decoder.ts';
 import { x64Advance, x64Lock } from './plan.ts';
 import type { X64Flow, X64SemanticPlan } from './plan.ts';
@@ -181,10 +182,17 @@ export class X64IntegerKernel {
         const rightLow = this.#low, rightHigh = this.#high;
         const writes = op.operation !== 'cmp' && op.operation !== 'test';
         x64Lock(original.lock, op.destination.kind === 'memory' ? op.destination.source : null, writes);
-        if (writes && op.destination.kind === 'memory') writableOperand(this.memory, this.state, op.destination.source, original.nextIP);
-        this.#read(op.destination, original.nextIP);
+        const address = op.destination.kind === 'memory'
+          ? operandAddress(this.memory, this.state, op.destination.source, original.nextIP, writes ? 'write' : 'read') : null;
+        if (address !== null) {
+          if (writes) this.memory.check(address, op.destination.width / 8, 'write');
+          this.#readMemory(address, op.destination.width);
+        } else this.#read(op.destination, original.nextIP);
         this.#alu(op.operation, op.destination.width, rightLow, rightHigh);
-        if (writes) this.#write(op.destination, original.nextIP);
+        if (writes) {
+          if (address !== null) this.#writeMemory(address, op.destination.width);
+          else this.#write(op.destination, original.nextIP);
+        }
         return x64Advance;
       }
       case 'branch':
@@ -208,14 +216,7 @@ export class X64IntegerKernel {
     if (value.kind === 'immediate') { this.#low = value.low; this.#high = value.high; return; }
     if (value.kind === 'memory') {
       const address = operandAddress(this.memory, this.state, value.source, nextIP);
-      if (value.width === 64) {
-        this.memory.readUint64Words(address, this.#memoryWords);
-        this.#low = this.#memoryWords.low; this.#high = this.#memoryWords.high;
-      } else {
-        this.#low = value.width === 8 ? this.memory.readUint8(address)
-          : value.width === 16 ? this.memory.readUint16(address) : this.memory.readUint32(address);
-        this.#high = 0;
-      }
+      this.#readMemory(address, value.width);
       return;
     }
     const low = this.words.getUint32(value.offset, true);
@@ -226,16 +227,31 @@ export class X64IntegerKernel {
   #write(destination: Operand, nextIP: bigint): void {
     if (destination.kind === 'memory') {
       const address = operandAddress(this.memory, this.state, destination.source, nextIP, 'write');
-      if (destination.width === 64) this.memory.writeUint64Words(address, this.#low, this.#high);
-      else if (destination.width === 32) this.memory.writeUint32(address, this.#low);
-      else if (destination.width === 16) this.memory.writeUint16(address, this.#low);
-      else this.memory.writeUint8(address, this.#low);
+      this.#writeMemory(address, destination.width);
       return;
     }
     const offset = destination.offset;
     if (destination.width === 8) this.words.setUint8(offset + (destination.highByte ? 1 : 0), this.#low);
     else if (destination.width === 16) this.words.setUint16(offset, this.#low, true);
     else { this.words.setUint32(offset, this.#low, true); this.words.setUint32(offset + 4, destination.width === 64 ? this.#high : 0, true); }
+  }
+
+  #readMemory(address: GuestAddress, width: GuestIntegerWidth): void {
+    if (width === 64) {
+      this.memory.readUint64Words(address, this.#memoryWords);
+      this.#low = this.#memoryWords.low; this.#high = this.#memoryWords.high;
+    } else {
+      this.#low = width === 8 ? this.memory.readUint8(address)
+        : width === 16 ? this.memory.readUint16(address) : this.memory.readUint32(address);
+      this.#high = 0;
+    }
+  }
+
+  #writeMemory(address: GuestAddress, width: GuestIntegerWidth): void {
+    if (width === 64) this.memory.writeUint64Words(address, this.#low, this.#high);
+    else if (width === 32) this.memory.writeUint32(address, this.#low);
+    else if (width === 16) this.memory.writeUint16(address, this.#low);
+    else this.memory.writeUint8(address, this.#low);
   }
 
   #address(value: EffectiveAddress): void {
