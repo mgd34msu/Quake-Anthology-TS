@@ -108,6 +108,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
       retainExecutableBytes: { value: memory.retainExecutableBytes },
       retainExecutableRange: { value: memory.retainExecutableRange },
       write: { value: memory.write },
+      move: { value: memory.move },
+      fill: { value: memory.fill },
       observeWrites: { value: memory.observeWrites },
       readUint8: { value: memory.readUint8 },
       readInt8: { value: memory.readInt8 },
@@ -370,6 +372,34 @@ export class SparseGuestMemory implements MappedGuestMemory {
     const chunks = this.#chunks(address, bytes.byteLength, "write");
     // Source may itself alias guest memory. Take one snapshot before the first store.
     return this.#commitWrite(chunks, bytes.slice());
+  }
+
+  move(destination: GuestAddress, source: GuestAddress, byteLength: number): undefined {
+    const input = this.#singleMapping(source, byteLength, "read");
+    if (input === null) return this.write(destination, this.copy(source, byteLength));
+    const inputOffset = this.#lookupOffset;
+    const output = this.#singleMapping(destination, byteLength, "write");
+    if (output === null) return this.write(destination, input.bytes.slice(inputOffset, inputOffset + byteLength));
+    const outputOffset = this.#lookupOffset;
+    output.bytes.set(input.bytes.subarray(inputOffset, inputOffset + byteLength), outputOffset);
+    if (output.changes.lastPage >= 0) invalidateCode(output, outputOffset, byteLength);
+    return this.#writeObservers.size === 0 ? undefined : this.#notifyWrite([{ mapping: output, offset: outputOffset, byteLength }]);
+  }
+
+  fill(address: GuestAddress, byteLength: number, value: number): undefined {
+    const byte = value & 255, mapping = this.#singleMapping(address, byteLength, "write");
+    if (mapping !== null) {
+      const offset = this.#lookupOffset;
+      mapping.bytes.fill(byte, offset, offset + byteLength);
+      if (mapping.changes.lastPage >= 0) invalidateCode(mapping, offset, byteLength);
+      return this.#writeObservers.size === 0 ? undefined : this.#notifyWrite([{ mapping, offset, byteLength }]);
+    }
+    const chunks = this.#chunks(address, byteLength, "write");
+    for (const chunk of chunks) {
+      chunk.mapping.bytes.fill(byte, chunk.offset, chunk.offset + chunk.byteLength);
+      if (chunk.mapping.changes.lastPage >= 0) invalidateCode(chunk.mapping, chunk.offset, chunk.byteLength);
+    }
+    return this.#notifyWrite(chunks);
   }
 
   #commitWrite(chunks: readonly Chunk[], source: Uint8Array): undefined {

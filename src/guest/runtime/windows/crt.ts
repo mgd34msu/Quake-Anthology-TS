@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestCallResult, GuestStorage } from "../../../contracts/execution.ts";
-import { argument, count, integer, pointer, readPointer, readString, readUnsigned, requiredPointer, stringBytes, writePointer, writeUnsigned } from "../common/memory.ts";
+import { argument, count, fillBytes, integer, moveBytes, pointer, readPointer, readString, readUnsigned, requiredPointer, stringBytes, stringLength, writePointer, writeUnsigned } from "../common/memory.ts";
 import type { WindowsServiceHost } from "./contracts.ts";
 import { UnsupportedWindowsImport } from "./contracts.ts";
 import { installWindowsFormat } from "../common/format/services.ts";
@@ -21,10 +21,10 @@ export function installCrt(host: WindowsServiceHost): void {
   service("heap", "free", ["pointer"], "void", (_context, args) => { if (!host.free(pointer(args, 0))) throw new Error("CRT free of invalid guest allocation"); return done(); });
   service("heap", "_callnewh", [host.pointerStorage], "int32", () => zero());
   for (const name of ["memcpy", "memmove"]) service("vcruntime", name, ["pointer", "pointer", host.pointerStorage], "pointer", (_context, args) => {
-    const size = count(args, 2), destination = pointer(args, 0); if (size > 0) memory.write(requiredPointer(args, 0), memory.copy(requiredPointer(args, 1), size)); return { kind: "pointer", value: destination };
+    const size = count(args, 2), destination = pointer(args, 0); if (size > 0) moveBytes(memory, requiredPointer(args, 0), requiredPointer(args, 1), size); return { kind: "pointer", value: destination };
   });
   service("vcruntime", "memset", ["pointer", "int32", host.pointerStorage], "pointer", (_context, args) => {
-    const size = count(args, 2), destination = pointer(args, 0); if (size > 0) memory.write(requiredPointer(args, 0), new Uint8Array(size).fill(Number(integer(args, 1)) & 255)); return { kind: "pointer", value: destination };
+    const size = count(args, 2), destination = pointer(args, 0); if (size > 0) fillBytes(memory, requiredPointer(args, 0), size, Number(integer(args, 1)) & 255); return { kind: "pointer", value: destination };
   });
   service("vcruntime", "memcmp", ["pointer", "pointer", host.pointerStorage], "int32", (_context, args) => {
     const size = count(args, 2); if (size === 0) return zero(); const left = memory.copy(requiredPointer(args, 0), size), right = memory.copy(requiredPointer(args, 1), size);
@@ -34,7 +34,7 @@ export function installCrt(host: WindowsServiceHost): void {
     const size = count(args, 2); if (size === 0) return { kind: "pointer", value: null }; const address = requiredPointer(args, 0);
     const index = memory.copy(address, size).indexOf(Number(integer(args, 1)) & 255); return { kind: "pointer", value: index < 0 ? null : memory.offset(address, BigInt(index)) };
   });
-  service("string", "strlen", ["pointer"], host.pointerStorage, (_context, args) => { const value = readString(memory, requiredPointer(args, 0)).length; return host.pointerStorage === "uint64" ? { kind: "uint64", value: BigInt(value) } : { kind: "uint32", value }; });
+  service("string", "strlen", ["pointer"], host.pointerStorage, (_context, args) => { const value = stringLength(memory, requiredPointer(args, 0)); return host.pointerStorage === "uint64" ? { kind: "uint64", value: BigInt(value) } : { kind: "uint32", value }; });
   for (const name of ["strcmp", "strncmp"]) service("string", name, name === "strcmp" ? ["pointer", "pointer"] : ["pointer", "pointer", host.pointerStorage], "int32", (_context, args) => {
     const left = requiredPointer(args, 0), right = requiredPointer(args, 1), maximum = name === "strcmp" ? 1048576 : count(args, 2);
     for (let i = 0; i < maximum; i++) { const a = Number(readUnsigned(memory, memory.offset(left, BigInt(i)), 1)), b = Number(readUnsigned(memory, memory.offset(right, BigInt(i)), 1));
@@ -56,7 +56,7 @@ export function installCrt(host: WindowsServiceHost): void {
     if (begin === null || end === null || capacity === null || end.byteOffset === capacity.byteOffset) {
       const existing = begin === null || end === null ? 0 : Number(end.byteOffset - begin.byteOffset);
       const next = host.allocate(Math.max(32 * width, existing * 2)); if (next === null) return { kind: "int32", value: -1 };
-      if (begin !== null) { memory.write(next, memory.copy(begin, existing)); host.free(begin); }
+      if (begin !== null) { moveBytes(memory, next, begin, existing); host.free(begin); }
       begin = next; end = memory.offset(next, BigInt(existing)); capacity = memory.offset(next, BigInt(Math.max(32 * width, existing * 2)));
       writePointer(memory, table, begin); writePointer(memory, memory.offset(table, BigInt(width * 2)), capacity);
     }

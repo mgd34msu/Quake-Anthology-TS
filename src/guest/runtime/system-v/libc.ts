@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, GuestCallResult, GuestCallValue } from "../../../contracts/execution.ts";
-import { count, integer, pointer, readString, requiredPointer, stringBytes } from "../common/memory.ts";
+import { count, fillBytes, integer, moveBytes, pointer, readString, requiredPointer, stringBytes, stringLength } from "../common/memory.ts";
 import type { SystemVServiceHost } from "./contracts.ts";
 import { UnsupportedSystemVService } from "./contracts.ts";
 import { installSystemVFormat } from "../common/format/services.ts";
@@ -39,7 +39,7 @@ export function installLibc(host: SystemVServiceHost): void {
     const oldSize = old === null ? 0 : host.allocationSize(old);
     if (oldSize === null) throw new Error("System V realloc of non-live allocation");
     const next = host.allocate(size);
-    if (old !== null) { m.write(next, m.copy(old, Math.min(size, oldSize))); host.free(old); }
+    if (old !== null) { moveBytes(m, next, old, Math.min(size, oldSize)); host.free(old); }
     return { kind: "pointer", value: next };
   });
   for (const name of ["memcpy", "memmove", "__memcpy_chk", "__memmove_chk"]) {
@@ -50,14 +50,14 @@ export function installLibc(host: SystemVServiceHost): void {
         if (checked && BigInt(length) > integer(args, 3)) throw new Error(`${name} detected guest buffer overflow`);
         if (length !== 0) {
           if (destination === null || source === null) throw new TypeError("Nonnull guest memory arguments required");
-          m.write(destination, m.copy(source, length));
+          moveBytes(m, destination, source, length);
         }
         return { kind: "pointer", value: destination };
       });
   }
   host.service(lib, "memset", version, ["pointer", "int32", p], "pointer", (_context, args) => {
     const destination = pointer(args, 0), length = count(args, 2);
-    if (length !== 0) { if (destination === null) throw new TypeError("Nonnull memset destination required"); m.write(destination, new Uint8Array(length).fill(Number(integer(args, 1) & 255n))); }
+    if (length !== 0) { if (destination === null) throw new TypeError("Nonnull memset destination required"); fillBytes(m, destination, length, Number(integer(args, 1) & 255n)); }
     return { kind: "pointer", value: destination };
   });
   host.service(lib, "memcmp", version, ["pointer", "pointer", p], "int32", (_context, args) => {
@@ -67,13 +67,13 @@ export function installLibc(host: SystemVServiceHost): void {
     for (let index = 0; index < length; index++) { const delta = (a[index] ?? 0) - (b[index] ?? 0); if (delta !== 0) return { kind: "int32", value: delta }; }
     return { kind: "int32", value: 0 };
   });
-  host.service(lib, "strlen", version, ["pointer"], p, (_context, args) => sizeValue(host, readString(m, requiredPointer(args, 0)).length));
+  host.service(lib, "strlen", version, ["pointer"], p, (_context, args) => sizeValue(host, stringLength(m, requiredPointer(args, 0))));
   host.service(lib, "strcmp", version, ["pointer", "pointer"], "int32", (_context, args) => ({ kind: "int32", value: compare(readString(m, requiredPointer(args, 0)), readString(m, requiredPointer(args, 1))) }));
   for (const name of ["strcpy", "stpcpy", "strcat", "__strcpy_chk", "__stpcpy_chk", "__strcat_chk"]) {
     const checked = name.startsWith("__"), concatenate = name.includes("strcat"), end = name.includes("stpcpy");
     host.service(lib, name, checked ? ["GLIBC_2.3.4", null] : version, checked ? ["pointer", "pointer", p] : ["pointer", "pointer"], "pointer", (_context, args) => {
       const destination = requiredPointer(args, 0), text = readString(m, requiredPointer(args, 1));
-      const prefix = concatenate ? readString(m, destination).length : 0;
+      const prefix = concatenate ? stringLength(m, destination) : 0;
       if (checked && BigInt(prefix + text.length + 1) > integer(args, 2)) throw new Error(`${name} detected guest buffer overflow`);
       m.write(m.offset(destination, BigInt(prefix)), stringBytes(text));
       return { kind: "pointer", value: end ? m.offset(destination, BigInt(text.length)) : destination };

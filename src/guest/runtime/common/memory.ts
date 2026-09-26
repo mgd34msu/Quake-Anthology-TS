@@ -30,12 +30,28 @@ export function requiredPointer(args: readonly GuestCallValue[], index: number):
   return value;
 }
 export function readUnsigned(memory: GuestMemory, address: GuestAddress, width: number): bigint {
+  if (memory instanceof SparseGuestMemory && SparseGuestMemory.managed(memory)) {
+    switch (width) {
+      case 1: return BigInt(memory.readUint8(address));
+      case 2: return BigInt(memory.readUint16(address));
+      case 4: return BigInt(memory.readUint32(address));
+      case 8: return memory.readUint64(address);
+    }
+  }
   const bytes = memory.copy(address, width);
   let value = 0n;
   for (let i = bytes.length - 1; i >= 0; i--) value = value << 8n | BigInt(bytes[i] ?? 0);
   return value;
 }
 export function writeUnsigned(memory: GuestMemory, address: GuestAddress, width: number, value: bigint): void {
+  if (memory instanceof SparseGuestMemory && SparseGuestMemory.managed(memory)) {
+    switch (width) {
+      case 1: memory.writeUint8(address, Number(BigInt.asUintN(8, value))); return;
+      case 2: memory.writeUint16(address, Number(BigInt.asUintN(16, value))); return;
+      case 4: memory.writeUint32(address, Number(BigInt.asUintN(32, value))); return;
+      case 8: memory.writeUint64(address, value); return;
+    }
+  }
   const bytes = new Uint8Array(width);
   for (let i = 0; i < width; i++) bytes[i] = Number(value >> BigInt(i * 8) & 255n);
   memory.write(address, bytes);
@@ -45,10 +61,25 @@ export function writePointer(memory: GuestMemory, address: GuestAddress, value: 
   if (value !== null) memory.offset(value, 0n);
   writeUnsigned(memory, address, memory.pointerBytes, value?.byteOffset ?? 0n);
 }
-export function readString(memory: GuestMemory, address: GuestAddress, wide = false, maximum = 1048576): string {
-  if (!wide && memory instanceof SparseGuestMemory && SparseGuestMemory.managed(memory)) {
+export function moveBytes(memory: GuestMemory, destination: GuestAddress, source: GuestAddress, byteLength: number): void {
+  if (memory instanceof SparseGuestMemory && SparseGuestMemory.managed(memory)) memory.move(destination, source, byteLength);
+  else memory.write(destination, memory.copy(source, byteLength));
+}
+export function fillBytes(memory: GuestMemory, address: GuestAddress, byteLength: number, value: number): void {
+  if (memory instanceof SparseGuestMemory && SparseGuestMemory.managed(memory)) memory.fill(address, byteLength, value);
+  else memory.write(address, new Uint8Array(byteLength).fill(value));
+}
+export function stringLength(memory: GuestMemory, address: GuestAddress, maximum = 1048576): number {
+  if (memory instanceof SparseGuestMemory && SparseGuestMemory.managed(memory)) {
     const length = memory.findZero(address, maximum);
     if (length < 0) throw new RangeError("Guest string exceeds checked maximum");
+    return length;
+  }
+  return readString(memory, address, false, maximum).length;
+}
+export function readString(memory: GuestMemory, address: GuestAddress, wide = false, maximum = 1048576): string {
+  if (!wide && memory instanceof SparseGuestMemory && SparseGuestMemory.managed(memory)) {
+    const length = stringLength(memory, address, maximum);
     const bytes = memory.copy(address, length);
     return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("latin1");
   }
