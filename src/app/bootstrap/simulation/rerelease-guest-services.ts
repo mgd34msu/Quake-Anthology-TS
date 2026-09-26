@@ -202,8 +202,8 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   private body(view: RereleasePublicEdict): BodyState {
     const actor = view.record.currentActor(), pending = actor === null ? undefined : this.#readPlayerVelocity?.(actor);
     const motion = actor === null ? undefined : this.inputMotion.get(actor)?.read();
-    const velocity = motion?.velocity ?? pending ?? (view.record.slot > 0 && view.record.slot <= this.options.maxClients && view.pointer("client") !== null ? view.playerVelocity() : view.vector("sv.velocity"));
-    return { origin: motion?.origin ?? view.vector("s.origin"), angles: view.vector("s.angles"), velocity, bounds: { min: view.vector("mins"), max: view.vector("maxs") }, ground: null };
+    const velocity = motion?.velocity ?? pending ?? (view.record.slot > 0 && view.record.slot <= this.options.maxClients && view.pointer("client") !== null ? view.playerVelocity() : undefined);
+    return view.body(velocity, motion?.origin);
   }
   private bindEntity(record: RawEntityView, actor: OwnedActor): RereleaseActorBindings {
     const view = new RereleasePublicEdict(this.memory, record); this.#links.delete(actor.id);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, RawEntityView } from "../../../contracts/execution.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
+import type { BodyState } from "../../../contracts/world.ts";
 import type { Q2RereleaseEntityState, Q2RereleasePlayerState } from "../../../contracts/protocol.ts";
 import type { MappedGuestMemory } from "../../../guest/core/contracts.ts";
 import { clientLayout, edictLayout, entityStateLayout, fieldOffset } from "./layouts.ts";
@@ -14,11 +15,18 @@ const entityFields = {
   instanceBits: fieldOffset(entityStateLayout, "instance_bits"), loopVolume: fieldOffset(entityStateLayout, "loop_volume"), loopAttenuation: fieldOffset(entityStateLayout, "loop_attenuation"), owner: fieldOffset(entityStateLayout, "owner"), oldFrame: fieldOffset(entityStateLayout, "old_frame"),
 };
 const clientFields = { velocity: fieldOffset(clientLayout, "ps.pmove.velocity"), flags: fieldOffset(clientLayout, "ps.pmove.pm_flags"), height: fieldOffset(clientLayout, "ps.pmove.viewheight"), offset: fieldOffset(clientLayout, "ps.viewoffset") };
+const bodyFields = { velocity: fieldOffset(edictLayout, "sv.velocity"), min: fieldOffset(edictLayout, "mins"), max: fieldOffset(edictLayout, "maxs") };
 function readVector(view: DataView, offset: number): Vec3 { return { x: view.getFloat32(offset, true), y: view.getFloat32(offset + 4, true), z: view.getFloat32(offset + 8, true) }; }
+function retainVector(view: DataView, offset: number, previous: Vec3 | undefined): Vec3 {
+  const x = view.getFloat32(offset, true), y = view.getFloat32(offset + 4, true), z = view.getFloat32(offset + 8, true);
+  return previous !== undefined && Object.is(previous.x, x) && Object.is(previous.y, y) && Object.is(previous.z, z)
+    ? previous : Object.freeze({ x, y, z });
+}
 const snapshotBuffers = new WeakMap<MappedGuestMemory, Map<number, { readonly bytes: Uint8Array; readonly view: DataView }>>();
 
 /** API2023's published prefix only; no g_local.h private members. */
 export class RereleasePublicEdict {
+  #body: BodyState | null = null;
   constructor(readonly memory: MappedGuestMemory, readonly record: RawEntityView) { memory.check(record.address, edictLayout.byteLength, "read"); }
   address(name: string): GuestAddress { return this.memory.offset(this.record.address, BigInt(fieldOffset(edictLayout, name))); }
   int(name: string): number { return this.memory.readInt32(this.address(name)); }
@@ -39,6 +47,18 @@ export class RereleasePublicEdict {
     return buffer.view;
   }
   vector(name: string): Vec3 { return this.memory.readFloat32Vector(this.address(name)); }
+  body(velocity?: Vec3, origin?: Vec3): BodyState {
+    const view = this.snapshot(this.record.address, bodyFields.max + 12), previous = this.#body;
+    const nextOrigin = origin ?? retainVector(view, entityFields.origin, previous?.origin);
+    const angles = retainVector(view, entityFields.angles, previous?.angles);
+    const nextVelocity = velocity ?? retainVector(view, bodyFields.velocity, previous?.velocity);
+    const min = retainVector(view, bodyFields.min, previous?.bounds.min), max = retainVector(view, bodyFields.max, previous?.bounds.max);
+    if (previous !== null && previous.origin === nextOrigin && previous.angles === angles && previous.velocity === nextVelocity
+      && previous.bounds.min === min && previous.bounds.max === max) return previous;
+    const bounds = previous !== null && previous.bounds.min === min && previous.bounds.max === max ? previous.bounds : Object.freeze({ min, max });
+    this.#body = Object.freeze({ origin: nextOrigin, angles, velocity: nextVelocity, bounds, ground: null });
+    return this.#body;
+  }
   setVector(name: string, value: Vec3): void { const at = this.address(name); this.memory.writeFloat32(at, value.x); this.memory.writeFloat32(this.memory.offset(at, 4n), value.y); this.memory.writeFloat32(this.memory.offset(at, 8n), value.z); }
   client(): GuestAddress { const address = this.pointer("client"); if (address === null) throw new Error("API2023 source slot has no public client prefix"); this.memory.check(address, clientLayout.byteLength, "read"); return address; }
   playerState(): Q2RereleasePlayerState { return readRereleasePlayerState(this.memory, this.client()); }
