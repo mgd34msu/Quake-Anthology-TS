@@ -656,6 +656,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
   #remember(access: GuestAccess | null, mapping: Mapping): void {
     this.#recentMappings[access ?? "any"] = mapping;
+    if (this.#workingSet.includes(mapping)) return;
     this.#workingSet[this.#nextWorkingMapping] = mapping;
     this.#nextWorkingMapping = (this.#nextWorkingMapping + 1) & 7;
   }

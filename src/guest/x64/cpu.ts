@@ -188,6 +188,11 @@ export class X64Cpu implements GuestCpu {
             return { kind: "exception", instructions, exception: { kind: "memory", access, address: this.#evidenceAddress(error.address), byteLength: error.byteLength, detail: error.message } };
           }
           if (error instanceof X64ProcessorFault) return { kind: "exception", instructions, exception: { kind: "processor", vector: error.vector, errorCode: error.vector === 13 ? 0n : null, instruction: this.#evidenceAddress(state.instructionPointer), detail: error.message } };
+          if (error instanceof X64Unsupported) {
+            const decoded = this.#instructions.get(state.instructionPointer)?.decoded;
+            return { kind: "unsupported", instructions, instruction: { address: this.#evidenceAddress(state.instructionPointer),
+              bytes: new Uint8Array(decoded?.bytes ?? []), mnemonic: `opcode ${decoded?.opcode.toString(16) ?? "unknown"}` }, detail: error.message };
+          }
           throw error;
         }
         instructions--;

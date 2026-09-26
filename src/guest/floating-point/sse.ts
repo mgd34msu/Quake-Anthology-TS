@@ -11,14 +11,20 @@ import type { BinaryResult, BinaryValue } from "./binary.ts";
 
 class UnsupportedSse extends Error {}
 const registerNames: readonly GuestRegister[] = ["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"];
+const registerViews = new WeakMap<Uint8Array, Uint8Array[]>();
 function generalRegister(index: number): GuestRegister {
   const name = registerNames[index];
   if (name === undefined) throw new UnsupportedSse("Invalid general register index");
   return name;
 }
 function xmm(context: NumericExecutionContext, index: number): Uint8Array {
-  if (!Number.isInteger(index) || index < 0 || (index + 1) * 16 > context.state.simd.xmm.length) throw new UnsupportedSse("Invalid XMM register index");
-  return context.state.simd.xmm.subarray(index * 16, index * 16 + 16);
+  const registers = context.state.simd.xmm;
+  if (!Number.isInteger(index) || index < 0 || (index + 1) * 16 > registers.length) throw new UnsupportedSse("Invalid XMM register index");
+  let views = registerViews.get(registers);
+  if (views === undefined) { views = []; registerViews.set(registers, views); }
+  let view = views[index];
+  if (view === undefined) { view = registers.subarray(index * 16, index * 16 + 16); views[index] = view; }
+  return view;
 }
 function operand(context: NumericExecutionContext): NumericOperand {
   if (context.instruction.operand === null) throw new UnsupportedSse("SSE instruction requires an operand");
@@ -41,7 +47,7 @@ function signal(context: NumericExecutionContext, flags: number): void {
 function sourceValue(context: NumericExecutionContext, bytes: Uint8Array, width: 32 | 64, offset: number): BinaryValue {
   const value = width === 32
     ? decodeBinary32(((bytes[offset] ?? 0) | (bytes[offset + 1] ?? 0) << 8 | (bytes[offset + 2] ?? 0) << 16 | (bytes[offset + 3] ?? 0) << 24) >>> 0)
-    : decodeBinary(readBits(bytes.subarray(offset, offset + 8)), 64);
+    : decodeBinary(new DataView(bytes.buffer, bytes.byteOffset + offset, 8).getBigUint64(0, true), 64);
   return value.kind === "finite" && value.denormal && (context.state.simd.mxcsr & 64) !== 0 ? zero(value.sign) : value;
 }
 function finish(context: NumericExecutionContext, result: BinaryResult): BinaryResult {
@@ -51,8 +57,26 @@ function finish(context: NumericExecutionContext, result: BinaryResult): BinaryR
   }
   return result;
 }
-function lane(bytes: Uint8Array, index: number, width: number): bigint { return readBits(bytes.subarray(index * width / 8, (index + 1) * width / 8)); }
-function setLane(bytes: Uint8Array, index: number, width: number, value: bigint): void { bytes.set(writeBits(BigInt.asUintN(width, value), width / 8), index * width / 8); }
+function lane(bytes: Uint8Array, index: number, width: number): bigint {
+  const offset = index * width / 8;
+  switch (width) {
+    case 8: return BigInt(bytes[offset] ?? 0);
+    case 16: return BigInt((bytes[offset] ?? 0) | (bytes[offset + 1] ?? 0) << 8);
+    case 32: return BigInt(((bytes[offset] ?? 0) | (bytes[offset + 1] ?? 0) << 8 | (bytes[offset + 2] ?? 0) << 16 | (bytes[offset + 3] ?? 0) << 24) >>> 0);
+    case 64: return new DataView(bytes.buffer, bytes.byteOffset + offset, 8).getBigUint64(0, true);
+    default: return readBits(bytes.subarray(offset, offset + width / 8));
+  }
+}
+function setLane(bytes: Uint8Array, index: number, width: number, value: bigint): void {
+  const offset = index * width / 8;
+  if (width === 8) bytes[offset] = Number(BigInt.asUintN(8, value));
+  else if (width === 16 || width === 32 || width === 64) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset + offset, width / 8);
+    if (width === 16) view.setUint16(0, Number(BigInt.asUintN(16, value)), true);
+    else if (width === 32) view.setUint32(0, Number(BigInt.asUintN(32, value)), true);
+    else view.setBigUint64(0, value, true);
+  } else bytes.set(writeBits(BigInt.asUintN(width, value), width / 8), offset);
+}
 function integerSource(context: NumericExecutionContext, width: 32 | 64): bigint {
   const source = operand(context);
   return BigInt.asIntN(width, source.kind === "register" ? context.state.registers.read(generalRegister(source.index), width) : readBits(context.memory.copy(source.address, width / 8)));

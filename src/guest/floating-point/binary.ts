@@ -33,12 +33,38 @@ export function quiet(value: BinaryValue): BinaryValue {
 }
 
 export function readBits(bytes: Uint8Array): bigint {
+  switch (bytes.byteLength) {
+    case 1: return BigInt(bytes[0] ?? 0);
+    case 2: return BigInt((bytes[0] ?? 0) | (bytes[1] ?? 0) << 8);
+    case 4: return BigInt(((bytes[0] ?? 0) | (bytes[1] ?? 0) << 8 | (bytes[2] ?? 0) << 16 | (bytes[3] ?? 0) << 24) >>> 0);
+    case 8: return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(0, true);
+    case 10: {
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      return view.getBigUint64(0, true) | BigInt(view.getUint16(8, true)) << 64n;
+    }
+    case 16: {
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      return view.getBigUint64(0, true) | view.getBigUint64(8, true) << 64n;
+    }
+  }
   let result = 0n;
   for (let index = bytes.length - 1; index >= 0; index--) result = (result << 8n) | BigInt(bytes[index] ?? 0);
   return result;
 }
 export function writeBits(value: bigint, byteLength: number): Uint8Array {
   const result = new Uint8Array(byteLength);
+  if (byteLength === 1) { result[0] = Number(BigInt.asUintN(8, value)); return result; }
+  if (byteLength === 2 || byteLength === 4 || byteLength === 8 || byteLength === 10 || byteLength === 16) {
+    const view = new DataView(result.buffer);
+    if (byteLength === 2) view.setUint16(0, Number(BigInt.asUintN(16, value)), true);
+    else if (byteLength === 4) view.setUint32(0, Number(BigInt.asUintN(32, value)), true);
+    else {
+      view.setBigUint64(0, value, true);
+      if (byteLength === 10) view.setUint16(8, Number(BigInt.asUintN(16, value >> 64n)), true);
+      else if (byteLength === 16) view.setBigUint64(8, value >> 64n, true);
+    }
+    return result;
+  }
   for (let index = 0; index < byteLength; index++) result[index] = Number((value >> BigInt(index * 8)) & 255n);
   return result;
 }

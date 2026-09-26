@@ -6,8 +6,8 @@ import { IntegerRegisterFile, managedGuestProcessor, ProcessorFlags } from '../c
 import type { AluOperation } from '../x86/arithmetic.ts';
 import { canonicalAddress, guestAddress, operandAddress } from './decoder.ts';
 import type { X64MemoryOperand, X64Operand } from './decoder.ts';
-import { x64Advance, x64Lock } from './plan.ts';
-import type { X64Flow, X64SemanticPlan } from './plan.ts';
+import { executeX64Plan, x64Advance, x64Lock } from './plan.ts';
+import type { X64Flow, X64PlanOperation, X64SemanticPlan } from './plan.ts';
 
 const registerMembers = Object.getOwnPropertyNames(IntegerRegisterFile.prototype);
 const flagMembers = Object.getOwnPropertyNames(ProcessorFlags.prototype);
@@ -26,6 +26,8 @@ interface MemoryOperand { readonly kind: 'memory'; readonly source: X64MemoryOpe
 type Operand = RegisterOperand | MemoryOperand;
 interface Immediate { readonly kind: 'immediate'; readonly low: number; readonly high: number; }
 type Source = Operand | Immediate;
+interface ConstantTarget { readonly kind: 'constant'; readonly value: bigint; readonly canonical: boolean; }
+type ControlTarget = Operand | ConstantTarget;
 interface EffectiveAddress {
   readonly base: number | null;
   readonly index: number | null;
@@ -41,10 +43,11 @@ type Operation =
   | { readonly kind: 'increment'; readonly destination: Operand; readonly subtract: boolean }
   | { readonly kind: 'lea'; readonly destination: RegisterOperand; readonly source: EffectiveAddress }
   | { readonly kind: 'alu'; readonly operation: AluOperation; readonly destination: Operand; readonly source: Source }
-  | { readonly kind: 'branch'; readonly condition: number | null; readonly target: bigint }
-  | { readonly kind: 'jump' | 'call'; readonly target: Source }
+  | { readonly kind: 'branch'; readonly condition: number | null; readonly target: ConstantTarget }
+  | { readonly kind: 'jump' | 'call'; readonly target: ControlTarget }
   | { readonly kind: 'push'; readonly source: Source; readonly width: 16 | 64 }
   | { readonly kind: 'pop'; readonly destination: Operand; readonly width: 16 | 64 }
+  | Extract<X64PlanOperation, { kind: 'raw-sse' }>
   | { readonly kind: 'return'; readonly discard: bigint };
 export interface X64IntegerPlan { readonly operation: Operation; readonly original: X64SemanticPlan; }
 export interface X64IntegerStep { readonly start: bigint; readonly integer: X64IntegerPlan; }
@@ -57,6 +60,7 @@ export function x64IntegerBlockSafe(plan: X64IntegerPlan): boolean {
   switch (operation.kind) {
     case 'nop': case 'extend': return true;
     case 'increment': return operation.destination.kind === 'register';
+    case 'raw-sse': return operation.operation.kind !== 'move' || !operation.operation.store || operation.operand.kind !== 'memory';
     case 'move': return operation.destination.kind === 'register';
     case 'lea': case 'branch': case 'return': return true;
     case 'jump': return true;
@@ -76,12 +80,16 @@ function source(value: X64Operand | bigint): Source {
   const word = BigInt.asUintN(64, value);
   return { kind: 'immediate', low: Number(word & 0xffffffffn), high: Number(word >> 32n) };
 }
+function constantTarget(value: bigint): ConstantTarget {
+  const raw = BigInt.asUintN(64, value);
+  return { kind: 'constant', value: raw, canonical: raw <= 0x7fffffffffffn || raw >= 0xffff800000000000n };
+}
 
 /** Preparation only reduces static instruction fields; no guest data or source functions execute here. */
 export function prepareX64IntegerPlan(plan: X64SemanticPlan): X64IntegerPlan | null {
   const op = plan.operation;
   switch (op.kind) {
-    case 'nop': return { original: plan, operation: op };
+    case 'nop': case 'raw-sse': return { original: plan, operation: op };
     case 'extend': {
       const destination = operand(op.destination);
       if (destination.kind !== 'register') return null;
@@ -90,8 +98,8 @@ export function prepareX64IntegerPlan(plan: X64SemanticPlan): X64IntegerPlan | n
     case 'increment': return { original: plan, operation: { kind: 'increment', destination: operand(op.destination), subtract: op.subtract } };
     case 'move': return { original: plan, operation: { kind: 'move', destination: operand(op.destination), source: source(op.source) } };
     case 'alu': return { original: plan, operation: { kind: 'alu', operation: op.operation, destination: operand(op.destination), source: source(op.source) } };
-    case 'branch': return { original: plan, operation: { kind: 'branch', condition: op.condition, target: plan.nextIP + op.displacement } };
-    case 'jump': case 'call': return { original: plan, operation: { kind: op.kind, target: source(op.target) } };
+    case 'branch': return { original: plan, operation: { kind: 'branch', condition: op.condition, target: constantTarget(plan.nextIP + op.displacement) } };
+    case 'jump': case 'call': return { original: plan, operation: { kind: op.kind, target: typeof op.target === 'bigint' ? constantTarget(op.target) : operand(op.target) } };
     case 'push': return { original: plan, operation: { kind: 'push', source: source(op.source), width: op.width } };
     case 'pop': return { original: plan, operation: { kind: 'pop', destination: operand(op.destination), width: op.width } };
     case 'return': return { original: plan, operation: op };
@@ -162,6 +170,7 @@ export class X64IntegerKernel {
           break;
         }
         switch (op.kind) {
+          case 'raw-sse': executeX64Plan(original, this.memory, this.state); break;
           case 'nop': x64Lock(original.lock, null, false); break;
           case 'extend':
             x64Lock(original.lock, null, false);
@@ -198,7 +207,7 @@ export class X64IntegerKernel {
           }
           case 'branch':
             x64Lock(original.lock, null, false);
-            if (op.condition === null || this.#condition(op.condition)) next = canonicalAddress(op.target);
+            if (op.condition === null || this.#condition(op.condition)) next = this.#target(op.target, original.nextIP);
             break;
           case 'return':
             x64Lock(original.lock, null, false);
@@ -206,8 +215,7 @@ export class X64IntegerKernel {
             break;
           case 'jump':
             x64Lock(original.lock, null, false);
-            this.#read(op.target, original.nextIP);
-            next = canonicalAddress(this.#value());
+            next = this.#target(op.target, original.nextIP);
             break;
           case 'pop':
             x64Lock(original.lock, null, false);
@@ -230,6 +238,7 @@ export class X64IntegerKernel {
   execute(plan: X64IntegerPlan): X64Flow {
     const op = plan.operation, original = plan.original;
     switch (op.kind) {
+      case 'raw-sse': return executeX64Plan(original, this.memory, this.state);
       case 'nop': x64Lock(original.lock, null, false); return x64Advance;
       case 'extend':
         x64Lock(original.lock, null, false);
@@ -281,14 +290,13 @@ export class X64IntegerKernel {
       case 'branch':
         x64Lock(original.lock, null, false);
         return op.condition === null || this.#condition(op.condition)
-          ? { kind: 'branch', target: canonicalAddress(op.target) } : x64Advance;
+          ? { kind: 'branch', target: this.#target(op.target, original.nextIP) } : x64Advance;
       case 'return':
         x64Lock(original.lock, null, false);
         return { kind: 'branch', target: this.#return(op.discard) };
       case 'jump': case 'call': {
         x64Lock(original.lock, null, false);
-        this.#read(op.target, original.nextIP);
-        const target = canonicalAddress(this.#value());
+        const target = this.#target(op.target, original.nextIP);
         if (op.kind === 'call') {
           const stack = BigInt.asUintN(64, this.words.getBigUint64(offsets.rsp, true) - 8n);
           this.memory.writeUint64(guestAddress(this.memory, stack, 'write'), original.nextIP);
@@ -319,7 +327,13 @@ export class X64IntegerKernel {
     return target;
   }
 
-  #value(): bigint { return (BigInt(this.#high) << 32n) | BigInt(this.#low); }
+  #target(target: ControlTarget, nextIP: bigint): bigint {
+    if (target.kind === 'constant') return target.canonical ? target.value : canonicalAddress(target.value);
+    if (target.width === 64) return canonicalAddress(target.kind === 'register' ? this.words.getBigUint64(target.offset, true)
+      : this.memory.readUint64(operandAddress(this.memory, this.state, target.source, nextIP)));
+    this.#read(target, nextIP);
+    return BigInt(this.#low);
+  }
 
   #extend(operation: Extract<Operation, { kind: 'extend' }>, nextIP: bigint): void {
     this.#read(operation.source, nextIP);
