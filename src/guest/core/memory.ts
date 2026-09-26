@@ -65,6 +65,11 @@ export interface SparseGuestMemoryOptions {
   readonly pointerBytes: GuestPointerBytes;
   readonly allocationBase?: bigint;
 }
+export interface GuestExecutableBlock {
+  readonly unchanged: () => boolean;
+  /** Valid only after admission, while no host callback or borrowed-memory owner can run. */
+  readonly afterStore: () => boolean;
+}
 
 /** Only mapped regions allocate host bytes; high guest addresses never become JS indices. */
 export class SparseGuestMemory implements MappedGuestMemory {
@@ -107,6 +112,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       fetchSequence: { value: memory.fetchSequence },
       retainExecutableBytes: { value: memory.retainExecutableBytes },
       retainExecutableRange: { value: memory.retainExecutableRange },
+      retainExecutableBlock: { value: memory.retainExecutableBlock },
       write: { value: memory.write },
       move: { value: memory.move },
       fill: { value: memory.fill },
@@ -232,7 +238,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   borrow(address: GuestAddress, byteLength: number): DataView {
     const chunks = this.#chunks(address, byteLength, "write");
     const bytes = this.#contiguous(chunks, address, byteLength);
-    for (const chunk of chunks) { chunk.mapping.changes.exposed = true; chunk.mapping.changes.lastPage = -1; chunk.mapping.changes.pages.clear(); }
+    for (const chunk of chunks) chunk.mapping.changes.exposed = true;
     return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
 
@@ -359,6 +365,33 @@ export class SparseGuestMemory implements MappedGuestMemory {
       return true;
     };
     return unchanged() ? unchanged : null;
+  }
+
+  /** Borrowed bytes are checked at entry; managed stores then invalidate their backing pages. */
+  retainExecutableBlock(byteOffset: bigint, bytes: readonly number[]): GuestExecutableBlock | null {
+    const unchanged = this.retainExecutableRange(byteOffset, bytes);
+    if (unchanged === null) return null;
+    const mapping = this.#mappings[this.#firstEndAfter(byteOffset)];
+    if (mapping === undefined) return null;
+    const start = mapping.bytes.byteOffset + Number(byteOffset - mapping.base);
+    const first = Math.floor(start / 4096), last = Math.floor((start + bytes.length - 1) / 4096);
+    const changes = mapping.changes;
+    const pages: { readonly page: CodePage; checked: symbol }[] = [];
+    for (let index = first; index <= last; index++) {
+      const page = changes.pages.get(index) ?? { revision: Symbol() };
+      changes.pages.set(index, page);
+      pages.push({ page, checked: page.revision });
+    }
+    changes.firstPage = Math.min(changes.firstPage, first);
+    changes.lastPage = Math.max(changes.lastPage, last);
+    return {
+      unchanged: () => {
+        if (!unchanged()) return false;
+        for (const tracked of pages) tracked.checked = tracked.page.revision;
+        return true;
+      },
+      afterStore: () => mapping.active && pages.every(tracked => tracked.checked === tracked.page.revision),
+    };
   }
 
 

@@ -10,7 +10,7 @@ import { canonicalAddress, guestAddress, readMemory, writeMemory, X64DecodeCurso
 import type { X64DecodedInstruction, X64Operand } from "./decoder.ts";
 import { executeX64Plan, makeX64Plan, x64Advance as advance, x64Lock } from "./plan.ts";
 import type { X64Flow as Flow, X64PlanOperation, X64SemanticPlan } from "./plan.ts";
-import { prepareX64IntegerPlan, X64IntegerKernel } from './integer-kernel.ts';
+import { prepareX64IntegerPlan, X64IntegerKernel, x64IntegerBlockSafe } from './integer-kernel.ts';
 import type { X64IntegerPlan, X64IntegerStep } from './integer-kernel.ts';
 import { GuestCallbackTable } from "../core/callbacks.ts";
 import { managedGuestProcessor } from "../core/registers.ts";
@@ -40,6 +40,7 @@ interface ManagedBlock {
   readonly revision: symbol | null;
   readonly steps: readonly X64IntegerStep[];
   readonly unchanged: () => boolean;
+  readonly afterStore: () => boolean;
 }
 const arithmetic: readonly AluOperation[] = ["add", "or", "adc", "sbb", "and", "sub", "xor", "cmp"];
 const shifts: readonly ShiftOperation[] = ["rol", "ror", "rcl", "rcr", "shl", "shr", "shl", "sar"];
@@ -177,7 +178,7 @@ export class X64Cpu implements GuestCpu {
       if (prepared !== null && !prepared.unchanged()) {
         if (first !== undefined) first.managedBlock = null;
       } else if (prepared !== null && bank.attached()) {
-        const result = kernel.executeBlock(prepared.steps, options.instructionBudget - instructions, options.returnAddress?.byteOffset ?? null);
+        const result = kernel.executeBlock(prepared.steps, options.instructionBudget - instructions, options.returnAddress?.byteOffset ?? null, prepared.afterStore);
         instructions += result.instructions;
         block = null;
         if (result.kind === "return") return { kind: "return", instructions, address: this.#evidenceAddress(state.instructionPointer) };
@@ -274,16 +275,17 @@ export class X64Cpu implements GuestCpu {
     let current: CachedInstruction | undefined = first, complete = true;
     while (current?.integer !== null && current !== undefined) {
       if (!this.#entryUnhooked(current, revision)) break;
-      steps.push({ start: current.start, integer: current.integer });
+      steps.push({ start: current.start, integer: current.integer, safe: x64IntegerBlockSafe(current.integer) });
       bytes.push(...current.decoded.bytes);
-      if (current.integer.original.endsBlock || steps.length === 16) break;
+      const kind = current.integer.operation.kind;
+      if (kind === 'branch' || kind === 'jump' || kind === 'call' || kind === 'return' || steps.length === 16) break;
       current = this.#instructions.get(current.integer.original.nextIP);
       if (current === undefined) complete = false;
     }
     if (steps.length === 0) return null;
-    const unchanged = memory.retainExecutableRange(first.start, bytes);
-    if (unchanged === null) return null;
-    const prepared: ManagedBlock = { revision, steps, unchanged };
+    const code = memory.retainExecutableBlock(first.start, bytes);
+    if (code === null) return null;
+    const prepared: ManagedBlock = { revision, steps, ...code };
     if (complete) first.managedBlock = prepared;
     return prepared;
   }

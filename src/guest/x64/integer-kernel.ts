@@ -54,7 +54,7 @@ type Operation =
   | Extract<X64PlanOperation, { kind: 'raw-sse' }>
   | { readonly kind: 'return'; readonly discard: bigint };
 export interface X64IntegerPlan { readonly operation: Operation; readonly original: X64SemanticPlan; }
-export interface X64IntegerStep { readonly start: bigint; readonly integer: X64IntegerPlan; }
+export interface X64IntegerStep { readonly start: bigint; readonly integer: X64IntegerPlan; readonly safe: boolean; }
 export type X64IntegerBlockResult =
   | { readonly kind: 'complete' | 'return'; readonly instructions: number }
   | { readonly kind: 'fault'; readonly instructions: number; readonly error: unknown };
@@ -160,8 +160,8 @@ export class X64IntegerKernel {
     return words === null ? null : new X64IntegerKernel(state.flags, state.registers, state.registers.integerView, words, state, memory);
   }
 
-  /** Admit code once; a store ends the block and retains its own rollback boundary. */
-  executeBlock(steps: readonly X64IntegerStep[], budget: number, returned: bigint | null): X64IntegerBlockResult {
+  /** Stores retain rollback boundaries and continue only while admitted code remains unchanged. */
+  executeBlock(steps: readonly X64IntegerStep[], budget: number, returned: bigint | null, afterStore: () => boolean): X64IntegerBlockResult {
     let instructions = 0, current = this.state.instructionPointer, next = current;
     try {
       for (const step of steps) {
@@ -173,27 +173,30 @@ export class X64IntegerKernel {
         }
         const op = step.integer.operation, original = step.integer.original;
         next = original.nextIP;
-        if (!x64IntegerBlockSafe(step.integer)) {
+        if (!step.safe) {
           this.state.instructionPointer = current;
-          if (!this.memory.hasWriteObservers && op.kind !== 'pop') {
+          const observed = this.memory.hasWriteObservers;
+          if (!observed && op.kind !== 'pop') {
             const flow = this.execute(step.integer);
-            if (flow.kind === 'branch') next = flow.target;
             instructions++;
-            break;
+            if (flow.kind === 'branch') { next = flow.target; break; }
+            if (!afterStore()) break;
+            continue;
           }
           const registers = this.registers.checkpoint(this.#checkpoint);
           this.#checkpoint = registers;
           const lowFlags = this.flags.lowWord, highFlags = this.flags.highWord;
           try {
             const flow = this.execute(step.integer);
-            if (flow.kind === 'branch') next = flow.target;
+            if (flow.kind === 'branch') { next = flow.target; instructions++; break; }
           } catch (error) {
             this.registers.restore(registers);
             this.flags.restoreWords(lowFlags, highFlags);
             throw error;
           }
           instructions++;
-          break;
+          if (observed || !afterStore()) break;
+          continue;
         }
         switch (op.kind) {
           case 'register-move':
