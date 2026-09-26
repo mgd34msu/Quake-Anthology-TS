@@ -564,6 +564,36 @@ test("a warmed single conditional branch preserves a noncanonical target fault",
   expect(managed.state.flags.value).toBe(generic.state.flags.value);
 });
 
+test("prepared numeric instructions read live operands and preserve memory fault boundaries", () => {
+  for (const managed of [false, true]) {
+    const sse = fixture([0xf3, 0x0f, 0x58, 0x03, 0xc3], base, managed);
+    const input = sse.memory.map({ base: 0x50000n, byteLength: 4, permissions: "read-write" });
+    const xmm = new DataView(sse.state.simd.xmm.buffer, sse.state.simd.xmm.byteOffset, sse.state.simd.xmm.byteLength);
+    sse.state.registers.write("rbx", 64, input.byteOffset);
+    for (const value of [2.25, 3.5, -1.5]) {
+      sse.state.instructionPointer = base; sse.state.registers.write("rsp", 64, stack);
+      sse.memory.writeFloat32(input, value); xmm.setFloat32(0, 1.5, true);
+      expect(sse.run().kind).toBe("return"); expect(xmm.getFloat32(0, true)).toBe(1.5 + value);
+    }
+    sse.memory.protect(input, 4, "execute"); sse.state.instructionPointer = base;
+    const sseFault = sse.run();
+    expect(sseFault.kind).toBe("exception"); expect(sseFault.instructions).toBe(0);
+    expect(xmm.getFloat32(0, true)).toBe(0); expect(sse.state.instructionPointer).toBe(base);
+    const x87 = fixture([0xd9, 0x03, 0xd9, 0x5b, 4, 0xc3], base, managed);
+    const values = x87.memory.map({ base: 0x50000n, byteLength: 8, permissions: "read-write" });
+    x87.state.registers.write("rbx", 64, values.byteOffset);
+    for (const value of [2.25, -3.5, 7.5]) {
+      x87.state.instructionPointer = base; x87.state.registers.write("rsp", 64, stack);
+      x87.memory.writeFloat32(values, value);
+      expect(x87.run().kind).toBe("return"); expect(x87.memory.readFloat32(x87.memory.offset(values, 4n))).toBe(value);
+    }
+    x87.memory.protect(x87.memory.offset(values, 4n), 4, "read"); x87.state.instructionPointer = base;
+    const x87Fault = x87.run();
+    expect(x87Fault.kind).toBe("exception"); expect(x87Fault.instructions).toBe(1);
+    expect(x87.state.instructionPointer).toBe(base + 2n);
+  }
+});
+
 test("prepared returns preserve stack adjustment and precise target and stack faults", () => {
   for (const managed of [false, true]) for (const discard of [0, 32]) {
     const f = fixture(discard === 0 ? [0xc3] : [0xc2, discard, 0], base, managed);

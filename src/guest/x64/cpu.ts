@@ -3,7 +3,7 @@ import type { GuestAddress } from "../../contracts/execution.ts";
 import type { GuestCpu, GuestExecutionStop, GuestProcessorState, MappedGuestMemory } from "../core/contracts.ts";
 import { GuestMemoryFault, SparseGuestMemory } from "../core/memory.ts";
 import { prepareRawSse } from "../floating-point/raw-sse.ts";
-import { executeNumericInstruction } from "../floating-point/index.ts";
+import type { NumericInstruction } from "../floating-point/contracts.ts";
 import { alu, condition, resultFlags, shift, signedMultiply } from "../x86/arithmetic.ts";
 import type { AluOperation, ShiftOperation } from "../x86/arithmetic.ts";
 import { canonicalAddress, guestAddress, readMemory, registerName, writeMemory, X64DecodeCursor, X64ProcessorFault, X64Unsupported } from "./decoder.ts";
@@ -800,13 +800,12 @@ export class X64Cpu implements GuestCpu {
       }
     }
     const immediate = secondaryOpcode === 0x70 || secondaryOpcode === 0x71 || secondaryOpcode === 0x72 || secondaryOpcode === 0x73 || secondaryOpcode === 0xc2 || secondaryOpcode === 0xc4 || secondaryOpcode === 0xc5 || secondaryOpcode === 0xc6 ? cursor.readByte() : null;
-    const result = executeNumericInstruction({ state: this.state, memory: this.memory, instruction: {
+    const instruction: Omit<NumericInstruction, "operand"> = {
       opcode: cursor.opcode, secondaryOpcode, modrm: decoded?.byte ?? null,
-      operand: decoded === null ? null : decoded.rm.kind === "memory" ? { kind: "memory", address: cursor.address(decoded.rm) } : { kind: "register", index: decoded.rmIndex },
       registerIndex: decoded?.registerIndex ?? 0, prefix: cursor.numericPrefix, operandBits: cursor.width, immediate,
-    } });
-    if (result.kind === "exception") throw new X64ProcessorFault(result.vector, result.detail);
-    if (result.kind === "unsupported") throw new X64Unsupported(result.detail);
+    };
+    this.#planned(cursor, decoded?.rm.kind === "memory" ? { kind: "numeric-memory", instruction, operand: decoded.rm }
+      : { kind: "numeric", instruction: { ...instruction, operand: decoded === null ? null : { kind: "register", index: decoded.rmIndex } } });
     return undefined;
   }
 }
