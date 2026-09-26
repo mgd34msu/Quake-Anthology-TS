@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestProcessorState, MappedGuestMemory } from "../core/contracts.ts";
-import { alu, condition } from "../x86/arithmetic.ts";
-import type { AluOperation } from "../x86/arithmetic.ts";
+import { alu, condition, shift, signedMultiply } from "../x86/arithmetic.ts";
+import type { AluOperation, ShiftOperation } from "../x86/arithmetic.ts";
 import { canonicalAddress, effectiveOperandOffset, guestAddress, operandAddress, readOperand, writeOperand, writableOperand, X64ProcessorFault, X64Unsupported } from "./decoder.ts";
 import type { X64MemoryOperand, X64Operand, X64RegisterOperand } from "./decoder.ts";
 import { executeRawSse } from "../floating-point/raw-sse.ts";
@@ -19,6 +19,10 @@ export type X64PlanOperation =
   | { readonly kind: "move"; readonly destination: X64Operand; readonly source: X64PlanSource }
   | { readonly kind: "extend"; readonly destination: X64RegisterOperand; readonly source: X64Operand; readonly signed: boolean }
   | { readonly kind: "increment"; readonly destination: X64Operand; readonly subtract: boolean }
+  | { readonly kind: "shift"; readonly destination: X64Operand; readonly operation: ShiftOperation; readonly count: number | "cl" }
+  | { readonly kind: "multiply"; readonly destination: X64RegisterOperand; readonly left: X64Operand; readonly right: X64PlanSource }
+  | { readonly kind: "conditional-move"; readonly destination: X64RegisterOperand; readonly source: X64Operand; readonly condition: number }
+  | { readonly kind: "set-condition"; readonly destination: X64Operand; readonly condition: number }
   | { readonly kind: "lea"; readonly destination: X64RegisterOperand; readonly source: X64MemoryOperand }
   | { readonly kind: "alu"; readonly operation: AluOperation; readonly destination: X64Operand; readonly source: X64PlanSource }
   | { readonly kind: "branch"; readonly condition: number | null; readonly displacement: bigint }
@@ -43,6 +47,7 @@ export function makeX64Plan(operation: X64PlanOperation, nextIP: bigint, lock: b
     || operation.kind === "call" || operation.kind === "jump" || operation.kind === "push"
     || operation.kind === "pop" && operation.destination.kind === "memory"
     || operation.kind === "increment" && operation.destination.kind === "memory"
+    || (operation.kind === "shift" || operation.kind === "set-condition") && operation.destination.kind === "memory"
     || operation.kind === "raw-sse" && operation.operation.kind === "move" && operation.operation.store && operation.operand.kind === "memory"
     || (operation.kind === "move" || operation.kind === "alu")
     && operation.destination.kind === "memory" && (operation.kind !== "alu" || operation.operation !== "cmp" && operation.operation !== "test");
@@ -52,6 +57,32 @@ export function executeX64Plan(plan: X64SemanticPlan, memory: MappedGuestMemory,
   const operation = plan.operation;
   switch (operation.kind) {
     case "nop": x64Lock(plan.lock, null, false); return x64Advance;
+    case "shift": {
+      const count = operation.count === "cl" ? Number(state.registers.read("rcx", 8)) : operation.count;
+      x64Lock(plan.lock, null, false);
+      writableOperand(memory, state, operation.destination, plan.nextIP);
+      const result = shift(operation.operation, operation.destination.width, readOperand(memory, state, operation.destination, plan.nextIP), count, state.flags);
+      writeOperand(memory, state, operation.destination, plan.nextIP, result);
+      return x64Advance;
+    }
+    case "multiply": {
+      x64Lock(plan.lock, null, false);
+      const left = readOperand(memory, state, operation.left, plan.nextIP);
+      const right = typeof operation.right === "bigint" ? operation.right : readOperand(memory, state, operation.right, plan.nextIP);
+      writeOperand(memory, state, operation.destination, plan.nextIP, signedMultiply(operation.destination.width, left, right, state.flags));
+      return x64Advance;
+    }
+    case "conditional-move": {
+      x64Lock(plan.lock, null, false);
+      const value = readOperand(memory, state, operation.source, plan.nextIP);
+      if (condition(operation.condition, state.flags)) writeOperand(memory, state, operation.destination, plan.nextIP, value);
+      else if (operation.destination.width === 32) writeOperand(memory, state, operation.destination, plan.nextIP, readOperand(memory, state, operation.destination, plan.nextIP));
+      return x64Advance;
+    }
+    case "set-condition":
+      x64Lock(plan.lock, null, false);
+      writeOperand(memory, state, operation.destination, plan.nextIP, condition(operation.condition, state.flags) ? 1n : 0n);
+      return x64Advance;
     case "extend": {
       x64Lock(plan.lock, null, false);
       const value = readOperand(memory, state, operation.source, plan.nextIP);

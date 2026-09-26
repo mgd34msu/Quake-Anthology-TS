@@ -94,17 +94,35 @@ export function shift(operation: ShiftOperation, width: GuestIntegerWidth, value
   }
   const sign = 1n << BigInt(width - 1), originalSign = (result & sign) !== 0n;
   let carry = flags.get("carry");
-  for (let step = 0; step < effective; step++) {
-    const high = (result & sign) !== 0n, low = (result & 1n) !== 0n;
-    switch (operation) {
-      case "rol": result = BigInt.asUintN(width, (result << 1n) | (high ? 1n : 0n)); carry = high; break;
-      case "ror": result = (result >> 1n) | (low ? sign : 0n); carry = low; break;
-      case "rcl": result = BigInt.asUintN(width, (result << 1n) | (carry ? 1n : 0n)); carry = high; break;
-      case "rcr": result = (result >> 1n) | (carry ? sign : 0n); carry = low; break;
-      case "shl": result = BigInt.asUintN(width, result << 1n); carry = high; break;
-      case "shr": result >>= 1n; carry = low; break;
-      case "sar": result = (result >> 1n) | (high ? sign : 0n); carry = low; break;
+  const amount = BigInt(effective);
+  switch (operation) {
+    case "rol":
+      result = BigInt.asUintN(width, (result << amount) | (result >> BigInt(width - effective)));
+      carry = (result & 1n) !== 0n;
+      break;
+    case "ror":
+      result = BigInt.asUintN(width, (result >> amount) | (result << BigInt(width - effective)));
+      carry = (result & sign) !== 0n;
+      break;
+    case "rcl": case "rcr": {
+      const extended = (result << 1n) | (carry ? 1n : 0n), other = BigInt(width + 1 - effective);
+      const rotated = BigInt.asUintN(width + 1, operation === "rcl"
+        ? (extended << amount) | (extended >> other) : (extended >> amount) | (extended << other));
+      result = rotated >> 1n; carry = (rotated & 1n) !== 0n;
+      break;
     }
+    case "shl":
+      if (effective < width) carry = ((result >> BigInt(width - effective)) & 1n) !== 0n;
+      result = BigInt.asUintN(width, result << amount);
+      break;
+    case "shr":
+      if (effective < width) carry = ((result >> (amount - 1n)) & 1n) !== 0n;
+      result >>= amount;
+      break;
+    case "sar":
+      carry = effective >= width ? originalSign : ((result >> (amount - 1n)) & 1n) !== 0n;
+      result = BigInt.asUintN(width, BigInt.asIntN(width, result) >> amount);
+      break;
   }
   if (rotate || effective < width || operation === "sar") flags.set("carry", carry);
   if (!rotate) resultFlags(width, result, flags);

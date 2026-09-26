@@ -45,6 +45,8 @@ type Operation =
   | { readonly kind: 'register-alu'; readonly destination: WordDestination; readonly source: WordSource; readonly operation: AluOperation }
   | { readonly kind: 'extend'; readonly destination: RegisterOperand; readonly source: Operand; readonly signed: boolean }
   | { readonly kind: 'increment'; readonly destination: Operand; readonly subtract: boolean }
+  | { readonly kind: 'conditional-move'; readonly destination: RegisterOperand; readonly source: Operand; readonly condition: number }
+  | { readonly kind: 'set-condition'; readonly destination: Operand; readonly condition: number }
   | { readonly kind: 'lea'; readonly destination: RegisterOperand; readonly source: EffectiveAddress }
   | { readonly kind: 'alu'; readonly operation: AluOperation; readonly destination: Operand; readonly source: Source }
   | { readonly kind: 'branch'; readonly condition: number | null; readonly target: ConstantTarget }
@@ -52,6 +54,7 @@ type Operation =
   | { readonly kind: 'push'; readonly source: Source; readonly width: 16 | 64 }
   | { readonly kind: 'pop'; readonly destination: Operand; readonly width: 16 | 64 }
   | Extract<X64PlanOperation, { kind: 'raw-sse' }>
+  | Extract<X64PlanOperation, { kind: 'numeric' | 'numeric-memory' | 'shift' | 'multiply' }>
   | { readonly kind: 'return'; readonly discard: bigint };
 export interface X64IntegerPlan { readonly operation: Operation; readonly original: X64SemanticPlan; }
 export interface X64IntegerStep { readonly start: bigint; readonly integer: X64IntegerPlan; readonly safe: boolean; }
@@ -62,7 +65,15 @@ export type X64IntegerBlockResult =
 export function x64IntegerBlockSafe(plan: X64IntegerPlan): boolean {
   const operation = plan.operation;
   switch (operation.kind) {
-    case 'nop': case 'extend': case 'register-move': case 'register-alu': return true;
+    case 'nop': case 'extend': case 'register-move': case 'register-alu': case 'conditional-move': return true;
+    case 'set-condition': return operation.destination.kind === 'register';
+    case 'shift': return operation.destination.kind === 'register';
+    case 'multiply': return true;
+    case 'numeric': case 'numeric-memory': {
+      const instruction = operation.instruction;
+      return instruction.opcode === 0x0f && instruction.secondaryOpcode !== null
+        && [0x2a, 0x2c, 0x2d, 0x2e, 0x2f, 0x50, 0x51, 0x58, 0x59, 0x5a, 0x5b, 0x5c, 0x5d, 0x5e, 0x5f, 0xc2, 0xe6].includes(instruction.secondaryOpcode);
+    }
     case 'increment': return operation.destination.kind === 'register';
     case 'raw-sse': return operation.operation.kind !== 'move' || !operation.operation.store || operation.operand.kind !== 'memory';
     case 'move': return operation.destination.kind === 'register';
@@ -99,7 +110,13 @@ function registerOperation(destination: Operand, source: Source): { readonly des
 export function prepareX64IntegerPlan(plan: X64SemanticPlan): X64IntegerPlan | null {
   const op = plan.operation;
   switch (op.kind) {
-    case 'nop': case 'raw-sse': return { original: plan, operation: op };
+    case 'nop': case 'raw-sse': case 'numeric': case 'numeric-memory': case 'shift': case 'multiply': return { original: plan, operation: op };
+    case 'conditional-move': {
+      const destination = operand(op.destination);
+      if (destination.kind !== 'register') return null;
+      return { original: plan, operation: { kind: 'conditional-move', destination, source: operand(op.source), condition: op.condition } };
+    }
+    case 'set-condition': return { original: plan, operation: { kind: 'set-condition', destination: operand(op.destination), condition: op.condition } };
     case 'extend': {
       const destination = operand(op.destination);
       if (destination.kind !== 'register') return null;
@@ -176,7 +193,7 @@ export class X64IntegerKernel {
         if (!step.safe) {
           this.state.instructionPointer = current;
           const observed = this.memory.hasWriteObservers;
-          if (!observed && op.kind !== 'pop') {
+          if (!observed && op.kind !== 'pop' && op.kind !== 'numeric' && op.kind !== 'numeric-memory' && op.kind !== 'shift' && op.kind !== 'multiply') {
             const flow = this.execute(step.integer);
             instructions++;
             if (flow.kind === 'branch') { next = flow.target; break; }
@@ -206,7 +223,16 @@ export class X64IntegerKernel {
           case 'register-alu':
             this.#registerAlu(op.operation, op.destination, op.source, original.lock);
             break;
+          case 'conditional-move':
+            this.#conditionalMove(op, original);
+            break;
+          case 'set-condition':
+            x64Lock(original.lock, null, false);
+            this.#low = this.#condition(op.condition) ? 1 : 0; this.#high = 0;
+            this.#write(op.destination, original.nextIP);
+            break;
           case 'raw-sse': executeX64Plan(original, this.memory, this.state); break;
+          case 'numeric': case 'numeric-memory': case 'shift': case 'multiply': executeX64Plan(original, this.memory, this.state); break;
           case 'nop': x64Lock(original.lock, null, false); break;
           case 'extend':
             x64Lock(original.lock, null, false);
@@ -281,6 +307,13 @@ export class X64IntegerKernel {
       case 'register-alu':
         this.#registerAlu(op.operation, op.destination, op.source, original.lock);
         return x64Advance;
+      case 'conditional-move': this.#conditionalMove(op, original); return x64Advance;
+      case 'set-condition':
+        x64Lock(original.lock, null, false);
+        this.#low = this.#condition(op.condition) ? 1 : 0; this.#high = 0;
+        this.#write(op.destination, original.nextIP);
+        return x64Advance;
+      case 'numeric': case 'numeric-memory': case 'shift': case 'multiply': return executeX64Plan(original, this.memory, this.state);
       case 'raw-sse': return executeX64Plan(original, this.memory, this.state);
       case 'nop': x64Lock(original.lock, null, false); return x64Advance;
       case 'extend':
@@ -387,6 +420,16 @@ export class X64IntegerKernel {
       if (width !== 64) this.#high = this.#low >= 0x80000000 ? 0xffffffff : 0;
     }
     this.#write(operation.destination, nextIP);
+  }
+
+  #conditionalMove(operation: Extract<Operation, { kind: 'conditional-move' }>, original: X64SemanticPlan): void {
+    x64Lock(original.lock, null, false);
+    this.#read(operation.source, original.nextIP);
+    if (this.#condition(operation.condition)) this.#write(operation.destination, original.nextIP);
+    else if (operation.destination.width === 32) {
+      this.#read(operation.destination, original.nextIP);
+      this.#write(operation.destination, original.nextIP);
+    }
   }
 
   #pop(width: 16 | 64): void {

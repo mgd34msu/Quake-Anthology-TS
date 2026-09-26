@@ -4,7 +4,7 @@ import type { GuestCpu, GuestExecutionStop, GuestProcessorState, MappedGuestMemo
 import { GuestMemoryFault, SparseGuestMemory } from "../core/memory.ts";
 import { prepareRawSse } from "../floating-point/raw-sse.ts";
 import type { NumericInstruction } from "../floating-point/contracts.ts";
-import { alu, condition, resultFlags, shift, signedMultiply } from "../x86/arithmetic.ts";
+import { alu, resultFlags } from "../x86/arithmetic.ts";
 import type { AluOperation, ShiftOperation } from "../x86/arithmetic.ts";
 import { canonicalAddress, guestAddress, readMemory, writeMemory, X64DecodeCursor, X64ProcessorFault, X64Unsupported } from "./decoder.ts";
 import type { X64DecodedInstruction, X64Operand } from "./decoder.ts";
@@ -393,8 +393,7 @@ export class X64Cpu implements GuestCpu {
         this.#lock(cursor, null, false);
         const decoded = cursor.decodeModRM(width);
         const immediate = op === 0x6b ? cursor.readSigned(1) : cursor.immediate(width);
-        cursor.write(decoded.reg, signedMultiply(width, cursor.read(decoded.rm), immediate, this.state.flags));
-        return advance;
+        return this.#planned(cursor, { kind: "multiply", destination: decoded.reg, left: decoded.rm, right: immediate });
       }
       case 0x80: case 0x81: case 0x83: {
         const decoded = cursor.decodeModRM(op === 0x80 ? 8 : width);
@@ -474,13 +473,10 @@ export class X64Cpu implements GuestCpu {
       case 0xc0: case 0xc1: case 0xd0: case 0xd1: case 0xd2: case 0xd3: {
         const bits = (op & 1) === 0 ? 8 : width;
         const decoded = cursor.decodeModRM(bits);
-        const count = op < 0xd0 ? cursor.readByte() : op < 0xd2 ? 1 : Number(this.state.registers.read("rcx", 8));
-        this.#lock(cursor, null, false);
+        const count = op < 0xd0 ? cursor.readByte() : op < 0xd2 ? 1 : "cl";
         const operation = shifts[decoded.extension];
         if (operation === undefined) throw new X64ProcessorFault(6, "Invalid shift group");
-        cursor.writable(decoded.rm);
-        cursor.write(decoded.rm, shift(operation, bits, cursor.read(decoded.rm), count, this.state.flags));
-        return advance;
+        return this.#planned(cursor, { kind: "shift", destination: decoded.rm, operation, count });
       }
       case 0xc2: case 0xc3: {
         this.#lock(cursor, null, false);
@@ -632,16 +628,12 @@ export class X64Cpu implements GuestCpu {
     if (op >= 0x40 && op <= 0x4f) {
       this.#lock(cursor, null, false);
       const decoded = cursor.decodeModRM(cursor.width);
-      const source = cursor.read(decoded.rm);
-      if (condition(op & 15, this.state.flags)) cursor.write(decoded.reg, source);
-      else if (cursor.width === 32) cursor.write(decoded.reg, cursor.read(decoded.reg));
-      return advance;
+      return this.#planned(cursor, { kind: "conditional-move", destination: decoded.reg, source: decoded.rm, condition: op & 15 });
     }
     if (op >= 0x90 && op <= 0x9f) {
       this.#lock(cursor, null, false);
       const decoded = cursor.decodeModRM(8);
-      cursor.write(decoded.rm, condition(op & 15, this.state.flags) ? 1n : 0n);
-      return advance;
+      return this.#planned(cursor, { kind: "set-condition", destination: decoded.rm, condition: op & 15 });
     }
     if (op >= 0xc8 && op <= 0xcf) {
       this.#lock(cursor, null, false);
@@ -684,8 +676,7 @@ export class X64Cpu implements GuestCpu {
       case 0xaf: {
         this.#lock(cursor, null, false);
         const decoded = cursor.decodeModRM(cursor.width);
-        cursor.write(decoded.reg, signedMultiply(cursor.width, cursor.read(decoded.reg), cursor.read(decoded.rm), this.state.flags));
-        return advance;
+        return this.#planned(cursor, { kind: "multiply", destination: decoded.reg, left: decoded.reg, right: decoded.rm });
       }
       case 0xb6: case 0xb7: case 0xbe: case 0xbf: {
         this.#lock(cursor, null, false);
