@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestProcessorState, GuestSimdState, MappedGuestMemory } from "../core/contracts.ts";
+import { SparseGuestMemory } from "../core/memory.ts";
 import type { NumericExecutionResult, NumericInstruction, NumericOperand } from "./contracts.ts";
 
 export type RawSseOperation =
@@ -7,6 +8,7 @@ export type RawSseOperation =
   | { readonly kind: "logic"; readonly registerIndex: number; readonly operation: "and" | "and-not" | "or" | "xor" };
 const executed: NumericExecutionResult = { kind: "executed" };
 const memoryOperands = new WeakMap<GuestSimdState, Uint8Array>();
+const scalarRegisters = new WeakMap<Uint8Array, { readonly view: DataView; low: number; high: number }>();
 
 export function prepareRawSse(opcode: number, prefix: NumericInstruction["prefix"], registerIndex: number): RawSseOperation | null {
   if (opcode === 0x10 || opcode === 0x11 || (opcode === 0x28 || opcode === 0x29) && (prefix === "none" || prefix === "66")
@@ -36,7 +38,30 @@ export function executeRawSse(operation: RawSseOperation, operand: NumericOperan
   if (operand.kind === "register" && !validRegister(registers, operand.index)) return { kind: "unsupported", detail: "Invalid XMM register index" };
   if (operation.kind === "move") {
     const size = operation.size;
-    if (operand.kind === "register") {
+    if (operand.kind === "memory" && size < 16 && SparseGuestMemory.managed(memory)) {
+      let scalar = scalarRegisters.get(registers);
+      if (scalar === undefined) {
+        scalar = { view: new DataView(registers.buffer, registers.byteOffset, registers.byteLength), low: 0, high: 0 };
+        scalarRegisters.set(registers, scalar);
+      }
+      if (operation.store) {
+        const low = scalar.view.getUint32(destination, true);
+        if (size === 4) memory.writeUint32(operand.address, low);
+        else memory.writeUint64Words(operand.address, low, scalar.view.getUint32(destination + 4, true));
+      } else {
+        if (size === 4) {
+          const value = memory.readUint32(operand.address);
+          scalar.view.setUint32(destination, value, true);
+          scalar.view.setUint32(destination + 4, 0, true);
+        } else {
+          memory.readUint64Words(operand.address, scalar);
+          scalar.view.setUint32(destination, scalar.low, true);
+          scalar.view.setUint32(destination + 4, scalar.high, true);
+        }
+        scalar.view.setUint32(destination + 8, 0, true);
+        scalar.view.setUint32(destination + 12, 0, true);
+      }
+    } else if (operand.kind === "register") {
       const other = operand.index * 16;
       if (operation.store) registers.copyWithin(other, destination, destination + size);
       else registers.copyWithin(destination, other, other + size);
