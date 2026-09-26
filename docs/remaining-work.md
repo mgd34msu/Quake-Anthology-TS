@@ -4,7 +4,7 @@ Current source summary: 22 of the T01–T23 targets are accepted. T10 remains op
 
 | Area | Targets | Remaining work |
 |---|---|---|
-| Native gameplay throughput | T10 | Reduce original DLL tick cost. The matched complete-base1 sample is about 74.6 ms per call against its 25 ms interval. Preserve original instructions, actor order and all simulation work. |
+| Native gameplay throughput | T10 | Reduce original DLL tick cost. Recent matched complete-base1 samples take about 65–68 ms per call against the 25 ms interval. Preserve original instructions, actor order and all simulation work. |
 | Saving and loading | T10, T16 | Improve original save serialization, restoration and world startup. Current original level writing takes about 24.4 seconds. The older complete saved-world loading result remains slow and needs a fresh measurement after changes. |
 | Whole-game performance | T03, T10, T11, T13 | Diagnose remaining freezes, input latency and expensive rendering/simulation scenes, including `end`. Measure complete frame cost and long stalls. Component speedups do not establish acceptable gameplay FPS. |
 | Wider mod compatibility | T10, T12 | Qualify more original Q1/Q2/Q3, expansion and rerelease artifacts and simultaneous cross-game components. Private interfaces still need declarations. Discovery does not make every package compatible, and arbitrary private-layout discovery is not implemented. |
