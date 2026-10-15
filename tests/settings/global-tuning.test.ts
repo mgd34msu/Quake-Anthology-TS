@@ -6,7 +6,10 @@ import { FrontendPreferences } from "../../src/app/bootstrap/frontend-preference
 import { defaultGamepadTuning } from "../../src/input/gamepad.ts";
 import { defaultMouseTuning } from "../../src/input/mouse.ts";
 import { ConfigStore, parseGlobalInputTuning, type SeatSettings } from "../../src/settings/config.ts";
-import type { SettingBinding } from "../../src/ui/settings/index.ts";
+import { bindGamepadSettings, bindMouseMotionSettings, bindPrimaryInputSettings, type SettingBinding } from "../../src/ui/settings/index.ts";
+import { createIdentityOwner } from "../../src/contracts/identity.ts";
+import { CommandBuffer } from "../../src/core/commands/index.ts";
+import { SeatInput } from "../../src/input/seat.ts";
 
 function control(bindings: readonly SettingBinding[], id: string): SettingBinding {
   const binding = bindings.find(binding => binding.id === `ui:input:${id}`);
@@ -52,6 +55,22 @@ test("global tuning wins over per-product seat values and survives product switc
     const reopenedRun = control(reopenedBindings, "always-run"); if (reopenedRun.kind !== "toggle") throw new Error("Expected toggle");
     expect(reopenedRun.read()).toBe(true);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("input bindings declare submenu groups", () => {
+  const primary = { sensitivity: 3, pitch: 0.022, yaw: 0.022, invertMouse: false, alwaysRun: false };
+  const mouse = bindPrimaryInputSettings({ read: () => primary, write: () => {} });
+  expect(mouse.find(binding => binding.id === "ui:input:sensitivity")?.group).toBe("Mouse");
+  expect(mouse.find(binding => binding.id === "ui:input:always-run")?.group).toBe("Movement");
+  const motion = bindMouseMotionSettings({ read: () => ({ acceleration: 0, filter: false, freeLook: true, lookSpring: false, lookStrafe: false }), write: () => {} });
+  expect(motion.find(binding => binding.id === "ui:input:filter")?.group).toBe("Mouse");
+  expect(motion.find(binding => binding.id === "ui:input:freelook")?.group).toBe("Movement");
+  const identity = createIdentityOwner("global-tuning-test"), seat = identity.seat(0);
+  const context = { session: identity.session, origin: { kind: "local-seat", seat, client: identity.client(0, 0) } } satisfies ConstructorParameters<typeof CommandBuffer>[0]["context"];
+  const input = new SeatInput({ seat, dialect: "q3", context, commands: new CommandBuffer({ dialect: "q3", context }), uiEvent: () => true });
+  const gamepad = bindGamepadSettings(input);
+  expect(gamepad.length).toBeGreaterThan(10);
+  expect(gamepad.every(binding => binding.group === "Gamepad")).toBe(true);
 });
 
 test("binding writes notify one coalesced immediate persist", async () => {

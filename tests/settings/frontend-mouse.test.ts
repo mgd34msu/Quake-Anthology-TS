@@ -100,18 +100,19 @@ test("startup reads selected product profiles, preserves other seats through pla
     } throw new Error(`Unreachable ${id}`); };
     const read = (id: string): number | boolean => { const binding = control(startup.preferences.bindings(), id);
       if (binding.kind !== "slider" && binding.kind !== "toggle") throw new Error("Missing mouse value"); return binding.read(); };
-    expect(startup.preferences.values).toEqual({}); expect(read("sensitivity")).toBe(7.5); expect(read("acceleration")).toBe(0.75);
+    expect(startup.preferences.values.sensitivity).toBe(7.5); expect(read("sensitivity")).toBe(7.5); expect(read("acceleration")).toBe(0.75);
     focus("ui:startup:options"); key(KeyCode.Enter); focus("ui:startup:controls"); key(KeyCode.Enter);
     expect(read("mouse-pitch")).toBeCloseTo(50); expect(read("mouse-yaw")).toBeCloseTo(150);
     expect(read("invert-mouse")).toBe(true); expect(read("filter")).toBe(true); expect(read("freelook")).toBe(false);
-    focus("ui:input:acceleration"); key(KeyCode.Right); expect(startup.preferences.values).toEqual({ acceleration: 0.8 });
+    focus("ui:settings:group:input:mouse"); key(KeyCode.Enter);
+    focus("ui:input:acceleration"); key(KeyCode.Right); expect(startup.preferences.values.acceleration).toBe(0.8);
     startup.model.select("product", "q2-classic-baseq2"); await startup.step();
-    expect(read("sensitivity")).toBe(9); expect(read("filter")).toBe(false); expect(read("acceleration")).toBe(0.8);
+    expect(read("sensitivity")).toBe(7.5); expect(read("filter")).toBe(true); expect(read("acceleration")).toBe(0.8);
     startup.model.select("product", "q1-classic-id1"); await startup.step();
     expect(read("sensitivity")).toBe(7.5); expect(read("filter")).toBe(true);
     const capture = startup.captureNextFrame(); await startup.step();
     await Bun.write("/tmp/frontend-mouse-baseline.png", encodePng(640, 480, await capture));
-    key(KeyCode.Escape); key(KeyCode.Escape); focus("ui:startup:multi"); key(KeyCode.Enter); focus("ui:startup:play"); key(KeyCode.Enter);
+    key(KeyCode.Escape); key(KeyCode.Escape); key(KeyCode.Escape); focus("ui:startup:multi"); key(KeyCode.Enter); focus("ui:startup:play"); key(KeyCode.Enter);
     await startup.step();
     const result = opened.mock.results.at(-1); if (result?.type !== "return") throw new Error(`Game did not open: ${prints.join("")}`);
     const input = await result.value;
@@ -161,9 +162,13 @@ for (const width of [320, 640]) test(`startup Controls at ${width} reaches share
       expect(row.rect.y).toBeGreaterThanOrEqual(0);
       if (row.enabled && row.visible) focus(row.id);
     }
-    focus("ui:input:filter"); key(KeyCode.Enter); expect(startup.preferences.values).toEqual({ filter: true });
+    focus("ui:settings:group:input:mouse"); key(KeyCode.Enter); expect(controller.activeMenu).toBe("menu:settings:input:mouse");
+    focus("ui:input:filter"); key(KeyCode.Enter); expect(startup.preferences.values.filter).toBe(true);
     focus("ui:input:acceleration"); key(KeyCode.Right); expect(startup.preferences.values.acceleration).toBe(0.05);
+    key(KeyCode.Escape); expect(controller.activeMenu).toBe("menu:settings:input:0");
+    focus("ui:settings:group:input:movement"); key(KeyCode.Enter); expect(controller.activeMenu).toBe("menu:settings:input:movement");
     focus("ui:input:freelook"); key(KeyCode.Enter); expect(startup.preferences.values.freeLook).toBe(false);
+    key(KeyCode.Escape); expect(controller.activeMenu).toBe("menu:settings:input:0");
     const first = startup.captureNextFrame(); await startup.step();
     await Bun.write(`/tmp/frontend-mouse-${width}-controls.png`, encodePng(width, height, await first));
     expect(controller.activeMenu).toBe("menu:settings:input:0");

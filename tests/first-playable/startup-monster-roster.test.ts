@@ -79,6 +79,14 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     const key = (code: number): void => {
       for (const down of [true, false]) menu.input({ seat, timeMilliseconds: 0, kind: "key", code, down, repeat: false });
     };
+    const focusControl = (id: string): void => {
+      for (let i = 0; i < 80; i++) {
+        const current = menu.controller.state().focus;
+        if (current.kind === "menu" && current.control === id) return;
+        key(KeyCode.Tab);
+      }
+      throw new Error(`Unreachable control ${id}`);
+    };
     for (const [familyIndex, family] of ["q1", "q2", "q3"].entries()) {
       for (const [editionIndex, edition] of (family === "q3" ? ["classic"] : ["classic", "rerelease"]).entries()) {
         const presets = model.presets().filter(preset => preset.family === family && preset.edition === edition);
@@ -120,18 +128,19 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
     key(KeyCode.Enter);
     expect(menu.controller.activeMenu).toBe("menu:startup:session");
-    click(100, 368);
+    click(450, 407);
     expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
     key(KeyCode.Escape);
     expect(menu.controller.activeMenu).toBe("menu:startup:main");
-    click(100, 130); click(100, 300); click(100, 198); click(100, 164);
+    click(100, 130); click(100, 300);
+    focusControl("ui:startup:enemies"); key(KeyCode.Enter);
     await capture("roster-combat-source-presets");
     const preset = model.rows().find(row => row.id === "enemies")?.choices.findIndex(option => option.id === "q1:monsters/classic/id1") ?? -1;
     expect(preset).toBeGreaterThanOrEqual(0); click(100, 130 + preset * 34);
     expect(model.monsterSourceRow().value).toBe("q1:monsters/classic/id1");
     expect(model.rows().find(row => row.id === "enemies")?.value).toBe("q1:monsters/classic/id1");
     await capture("roster-selected-preset-summary");
-    click(100, 164); await capture("roster-selected-preset-choice"); click(100, 164);
+    focusControl("ui:startup:enemies"); key(KeyCode.Enter); await capture("roster-selected-preset-choice"); click(100, 164);
     for (let attempt = 0; attempt < 100 && menu.controller.activeMenu !== "menu:startup:roster"; attempt++) await Bun.sleep(1);
     expect(menu.controller.activeMenu).toBe("menu:startup:roster");
     await source("q1:monsters/classic/id1", "roster-source-choice");

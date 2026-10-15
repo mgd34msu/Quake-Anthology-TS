@@ -151,6 +151,12 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
   try {
     click(2); click(2);
     expect(menu.controller.activeMenu).toBe("menu:settings:input:0");
+    for (let i = 0; i < 80; i++) {
+      const current = menu.controller.state().focus;
+      if (current.kind === "menu" && current.control === "ui:startup:bindings") break;
+      menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 9, down: true, repeat: false });
+      menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 9, down: false, repeat: false });
+    }
     menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 13, down: true, repeat: false });
     menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 13, down: false, repeat: false });
     expect(menu.controller.activeMenu).toBe("menu:bindings:0");

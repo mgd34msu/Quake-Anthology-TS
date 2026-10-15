@@ -22,7 +22,7 @@ export * from "./services.ts";
 export * from "./input-routing.ts";
 
 export type SettingCategory = "display" | "video" | "audio" | "input" | "network" | "accessibility" | "language";
-interface SettingBase { readonly id: UiControlId; readonly label: string; readonly category: SettingCategory; readonly enabled: () => boolean; }
+interface SettingBase { readonly id: UiControlId; readonly label: string; readonly category: SettingCategory; readonly enabled: () => boolean; /** Optional submenu title inside the category page. */ readonly group?: string; }
 export type SettingBinding = SettingBase & (
   | { readonly kind: "toggle"; readonly read: () => boolean; readonly write: (value: boolean) => void }
   | { readonly kind: "slider"; readonly formatValue?: (value: number) => string; readonly read: () => number; readonly write: (value: number) => void; readonly minimum: number; readonly maximum: number; readonly step: number }
@@ -47,7 +47,7 @@ export function settingControl(binding: SettingBinding, rect: Rect, seat: SeatId
   }
 }
 
-interface CvarSettingBase { readonly name: string; readonly label: string; readonly category: SettingCategory; readonly restart: RestartKind | null; }
+interface CvarSettingBase { readonly name: string; readonly label: string; readonly category: SettingCategory; readonly restart: RestartKind | null; readonly group?: string; }
 export type CvarSettingSpec = CvarSettingBase & (
   | { readonly kind: "toggle" }
   | { readonly kind: "slider"; readonly minimum: number; readonly maximum: number; readonly step: number }
@@ -69,7 +69,7 @@ export function bindCvarSetting(registry: SettingCvars, spec: CvarSettingSpec, r
     if (spec.restart !== null) restarts?.request(spec.restart);
   };
   const id: UiControlId = `ui:settings:${spec.name}`;
-  const base = { id, label: spec.label, category: spec.category, enabled: () => {
+  const base = { id, label: spec.label, category: spec.category, ...(spec.group === undefined ? {} : { group: spec.group }), enabled: () => {
     const cvar = registry.find(spec.name);
     const readonlyFlags = registry.dialect === "q3" ? CvarFlag.ReadOnly | CvarFlag.Init : registry.dialect.startsWith("q2") ? Q2CvarFlag.NoSet : 0;
     return cvar !== undefined && (cvar.flags & readonlyFlags) === 0;
@@ -107,16 +107,37 @@ export function registerSettingsMenus(controller: NativeUiController, bindings: 
   if (llmMenu !== null) disposers.push(llmMenu.dispose);
   const back = (): UiControl => ({ id: "ui:settings:back", kind: "button", label: "Back", rect: menuRow(11), enabled: true, visible: true,
     activate: () => controller.closeMenu() });
-  for (const category of categories) {
-    const selected = bindings.filter(binding => binding.category === category.id);
-    if (selected.length === 0) continue;
-    const id: UiMenuId = `menu:settings:${category.id}:0`;
+  const slug = (group: string): string => group.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const page = (id: UiMenuId, title: string, selected: readonly SettingBinding[]): void => {
     disposers.push(controller.register(id, () => {
       const controls = selected.map((binding, index) => settingControl(binding, menuRow(index, { width: 496 }), controller.seat));
-      return { id, title: category.label, fullScreen: false,
+      return { id, title, fullScreen: false,
         scroll: { rect: { x: 64, y: 92, width: 512, height: 300 }, contentHeight: selected.length * 28, controls: controls.map(control => control.id) },
         controls: [...controls, back()], open: () => undefined, close: () => {
           for (const binding of selected) if (binding.kind === "text-entry") binding.commit?.cancel();
+          return undefined;
+        } };
+    }));
+  };
+  for (const category of categories) {
+    const selected = bindings.filter(binding => binding.category === category.id);
+    if (selected.length === 0) continue;
+    const groupOrder = ["Mouse", "Movement", "Gamepad", "Output", "Music"];
+    const groups = [...new Set(selected.flatMap(binding => binding.group === undefined ? [] : [binding.group]))]
+      .sort((a, b) => (groupOrder.indexOf(a) === -1 ? groupOrder.length : groupOrder.indexOf(a)) - (groupOrder.indexOf(b) === -1 ? groupOrder.length : groupOrder.indexOf(b)));
+    const direct = selected.filter(binding => binding.group === undefined);
+    const id: UiMenuId = `menu:settings:${category.id}:0`;
+    if (groups.length === 0) { page(id, category.label, selected); continue; }
+    for (const group of groups) page(`menu:settings:${category.id}:${slug(group)}`, group, selected.filter(binding => binding.group === group));
+    disposers.push(controller.register(id, () => {
+      const groupControls: UiControl[] = groups.map((group, index) => ({ id: `ui:settings:group:${category.id}:${slug(group)}`, kind: "button", label: group,
+        rect: menuRow(index, { width: 496 }), enabled: true, visible: true, activate: () => controller.openMenu(`menu:settings:${category.id}:${slug(group)}`) }));
+      const controls = direct.map((binding, index) => settingControl(binding, menuRow(groups.length + index, { width: 496 }), controller.seat));
+      const scrolled = [...groupControls, ...controls];
+      return { id, title: category.label, fullScreen: false,
+        scroll: { rect: { x: 64, y: 92, width: 512, height: 300 }, contentHeight: scrolled.length * 28, controls: scrolled.map(control => control.id) },
+        controls: [...scrolled, back()], open: () => undefined, close: () => {
+          for (const binding of direct) if (binding.kind === "text-entry") binding.commit?.cancel();
           return undefined;
         } };
     }));
@@ -131,26 +152,26 @@ export function registerSettingsMenus(controller: NativeUiController, bindings: 
   return { root, dispose() { for (const dispose of disposers.reverse()) dispose(); } };
 }
 
-function numeric(id: string, label: string, minimum: number, maximum: number, step: number, read: () => number, write: (value: number) => void): Extract<SettingBinding, { readonly kind: "slider" }> {
-  return { id: `ui:input:${id}`, label, category: "input", kind: "slider", enabled: () => true, minimum, maximum, step, read, write };
+function numeric(id: string, label: string, minimum: number, maximum: number, step: number, read: () => number, write: (value: number) => void, group?: string): Extract<SettingBinding, { readonly kind: "slider" }> {
+  return { id: `ui:input:${id}`, label, category: "input", kind: "slider", enabled: () => true, minimum, maximum, step, read, write, ...(group === undefined ? {} : { group }) };
 }
-function toggle(id: string, label: string, read: () => boolean, write: (value: boolean) => void): SettingBinding {
-  return { id: `ui:input:${id}`, label, category: "input", kind: "toggle", enabled: () => true, read, write };
+function toggle(id: string, label: string, read: () => boolean, write: (value: boolean) => void, group?: string): SettingBinding {
+  return { id: `ui:input:${id}`, label, category: "input", kind: "toggle", enabled: () => true, read, write, ...(group === undefined ? {} : { group }) };
 }
 export interface PrimaryInputSettings { readonly sensitivity: number; readonly pitch: number; readonly yaw: number; readonly invertMouse: boolean; readonly alwaysRun: boolean; }
 export type MouseMotionSettings = Pick<MouseTuning, "acceleration" | "filter" | "freeLook" | "lookSpring" | "lookStrafe">;
 export interface ControllerVibrationSettings { readonly controllerVibration: boolean; readonly controllerVibrationStrength: number; }
 export function bindControllerVibration(service: SettingsValueService<ControllerVibrationSettings>): readonly SettingBinding[] {
   return [toggle("controller-vibration", "Controller vibration", () => service.read().controllerVibration,
-    value => service.write({ controllerVibration: value })),
+    value => service.write({ controllerVibration: value }), "Gamepad"),
     numeric("controller-vibration-strength", "Vibration strength", 0, 1, 0.05, () => service.read().controllerVibrationStrength,
-      value => service.write({ controllerVibrationStrength: value }))];
+      value => service.write({ controllerVibrationStrength: value }), "Gamepad")];
 }
 export interface AudioSettings { readonly effectsVolume: number; readonly musicVolume: number; }
 export interface SettingsValueService<T> { read(): T; write(values: Partial<T>): void; }
 function mouseAxis(service: SettingsValueService<PrimaryInputSettings>, axis: "pitch" | "yaw", name: string): SettingBinding {
   const read = (): number => Math.abs(service.read()[axis]) / defaultMouseTuning[axis] * 100;
-  return { id: `ui:input:mouse-${axis}`, label: name, category: "input",
+  return { id: `ui:input:mouse-${axis}`, label: name, category: "input", group: "Mouse",
     kind: "slider", enabled: () => true, minimum: 0, maximum: 200, step: 1, read, formatValue: value => `${Number(value.toFixed(2))}%`,
     write: value => {
       const current = service.read()[axis];
@@ -159,18 +180,18 @@ function mouseAxis(service: SettingsValueService<PrimaryInputSettings>, axis: "p
     } };
 }
 export function bindPrimaryInputSettings(service: SettingsValueService<PrimaryInputSettings>): readonly SettingBinding[] {
-  return [numeric("sensitivity", "Mouse sensitivity", 0.1, 20, 0.1, () => service.read().sensitivity, value => service.write({ sensitivity: value })),
+  return [numeric("sensitivity", "Mouse sensitivity", 0.1, 20, 0.1, () => service.read().sensitivity, value => service.write({ sensitivity: value }), "Mouse"),
     mouseAxis(service, "yaw", "Horizontal sensitivity"), mouseAxis(service, "pitch", "Vertical sensitivity"),
-    toggle("invert-mouse", "Invert mouse", () => service.read().invertMouse, value => service.write({ invertMouse: value })),
-    toggle("always-run", "Always run", () => service.read().alwaysRun, value => service.write({ alwaysRun: value }))];
+    toggle("invert-mouse", "Invert mouse", () => service.read().invertMouse, value => service.write({ invertMouse: value }), "Mouse"),
+    toggle("always-run", "Always run", () => service.read().alwaysRun, value => service.write({ alwaysRun: value }), "Movement")];
 }
 export function bindMouseMotionSettings(service: SettingsValueService<MouseMotionSettings>, springAvailable: () => boolean = () => true): readonly SettingBinding[] {
-  return [numeric("acceleration", "Mouse acceleration", 0, 2, 0.05, () => service.read().acceleration, value => service.write({ acceleration: value })),
-    toggle("filter", "Mouse smoothing", () => service.read().filter, value => service.write({ filter: value })),
-    { ...toggle("lookspring", "Look spring", () => service.read().lookSpring === true, value => service.write({ lookSpring: value })),
+  return [numeric("acceleration", "Mouse acceleration", 0, 2, 0.05, () => service.read().acceleration, value => service.write({ acceleration: value }), "Mouse"),
+    toggle("filter", "Mouse smoothing", () => service.read().filter, value => service.write({ filter: value }), "Mouse"),
+    { ...toggle("lookspring", "Look spring", () => service.read().lookSpring === true, value => service.write({ lookSpring: value }), "Movement"),
       enabled: () => springAvailable() && !service.read().freeLook },
-    toggle("lookstrafe", "Look strafe", () => service.read().lookStrafe === true, value => service.write({ lookStrafe: value })),
-    toggle("freelook", "Free look", () => service.read().freeLook, value => service.write({ freeLook: value }))];
+    toggle("lookstrafe", "Look strafe", () => service.read().lookStrafe === true, value => service.write({ lookStrafe: value }), "Movement"),
+    toggle("freelook", "Free look", () => service.read().freeLook, value => service.write({ freeLook: value }), "Movement")];
 }
 export interface AudioOutputSettings {
   readonly format?: { read(): AudioOutputFormat; select(format: AudioOutputFormat): void };
@@ -181,9 +202,9 @@ export interface AudioOutputSettings {
 }
 export function bindMusicPlaylistSettings(registry: SettingCvars | null, tracks?: () => readonly string[]): readonly SettingBinding[] {
   if (registry === null) return [];
-  const settings: SettingBinding[] = [{ id: "ui:audio:shuffle", label: "Shuffle Quake II gameplay music", category: "audio", kind: "toggle", enabled: () => true,
+  const settings: SettingBinding[] = [{ id: "ui:audio:shuffle", label: "Shuffle Quake II gameplay music", category: "audio", group: "Music", kind: "toggle", enabled: () => true,
     read: () => registry.variableValue("music_shuffle") !== 0, write: value => { registry.set("music_shuffle", value ? "1" : "0"); } }];
-  if (tracks !== undefined) settings.push({ id: "ui:audio:menu-track", label: "Menu music", category: "audio", kind: "choice", enabled: () => true,
+  if (tracks !== undefined) settings.push({ id: "ui:audio:menu-track", label: "Menu music", category: "audio", group: "Music", kind: "choice", enabled: () => true,
     read: () => registry.find("music_menu_track")?.value ?? "auto", write: value => { registry.set("music_menu_track", value); },
     choices: () => { const current = registry.find("music_menu_track")?.value ?? "auto", names = new Set(tracks());
       if (current !== "auto" && current !== "0") names.add(current);
@@ -195,7 +216,7 @@ export function bindAudioGeometrySettings(registry: SettingCvars | null): readon
     read: () => registry.variableValue("s_geometryAcoustics") !== 0, write: value => { registry.set("s_geometryAcoustics", value ? "1" : "0"); } }];
 }
 export function bindAudioSettings(service: SettingsValueService<AudioSettings>, output?: AudioOutputSettings): readonly SettingBinding[] {
-  const device: SettingBinding[] = output === undefined ? [] : [{ id: "ui:audio:device", label: "Output device", category: "audio", kind: "choice", enabled: () => true,
+  const device: SettingBinding[] = output === undefined ? [] : [{ id: "ui:audio:device", label: "Output device", category: "audio", group: "Output", kind: "choice", enabled: () => true,
     read: () => output.selected() === null ? "default" : `device:${output.selected()}`,
     choices: () => { const names = new Set(output.devices()); const current = output.selected(); if (current !== null) names.add(current);
       return [{ id: "default", label: "System default" }, ...[...names].map(name => ({ id: `device:${name}`, label: name }))]; },
@@ -209,7 +230,7 @@ export function bindAudioSettings(service: SettingsValueService<AudioSettings>, 
     { id: "ui:audio:bits", label: "Output sample bits", field: "sampleBits", values: [8, 16] },
     { id: "ui:audio:channels", label: "Output channels", field: "channels", values: [1, 2] },
   ] satisfies readonly { readonly id: UiControlId; readonly label: string; readonly field: keyof AudioOutputFormat; readonly values: readonly number[] }[]).map(spec => ({
-    id: spec.id, label: spec.label, category: "audio", kind: "choice", enabled: () => true,
+    id: spec.id, label: spec.label, category: "audio", group: "Output", kind: "choice", enabled: () => true,
     read: () => String(format.read()[spec.field]),
     choices: () => [...new Set([...spec.values, format.read()[spec.field]])].map(value => ({ id: String(value),
       label: spec.field === "sampleRate" ? `${value} Hz` : spec.field === "sampleBits" ? `${value}-bit` : value === 1 ? "Mono" : "Stereo" })),
@@ -281,7 +302,7 @@ export function bindGamepadSettings(input: SeatInput | (() => SeatInput)): reado
   const tuning: SettingBinding[] = [];
   for (const stick of ["move", "look"] satisfies readonly ("move" | "look")[]) {
     const name = stick === "move" ? "Move" : "Look";
-    tuning.push({ id: `ui:input:${stick}-curve-type`, label: `${name} deadzone shape`, category: "input", kind: "choice", enabled: () => true,
+    tuning.push({ id: `ui:input:${stick}-curve-type`, label: `${name} deadzone shape`, category: "input", group: "Gamepad", kind: "choice", enabled: () => true,
       read: () => pad().tuning[stick].kind, choices: () => [{ id: "radial", label: "Radial" }, { id: "axial", label: "Axial" }],
       write: value => { if (value !== "radial" && value !== "axial") throw new Error("Unknown controller curve");
         const previous = pad().tuning[stick]; curve(stick, value === "radial"
@@ -289,26 +310,26 @@ export function bindGamepadSettings(input: SeatInput | (() => SeatInput)): reado
           : { kind: value, deadzone: previous.deadzone, exponent: previous.exponent }); } });
     const outer = numeric(`${stick}-outer`, `${name} outer threshold`, 0, 0.49, 0.01,
       () => { const selected = pad().tuning[stick]; return selected.kind === "radial" ? selected.outerThreshold : 0; },
-      value => { const selected = pad().tuning[stick]; if (selected.kind === "radial") curve(stick, { ...selected, outerThreshold: Math.min(value, 0.999 - selected.deadzone) }); });
+      value => { const selected = pad().tuning[stick]; if (selected.kind === "radial") curve(stick, { ...selected, outerThreshold: Math.min(value, 0.999 - selected.deadzone) }); }, "Gamepad");
     tuning.push({ ...outer, enabled: () => pad().tuning[stick].kind === "radial" });
     for (const component of ["x", "y"] satisfies readonly ("x" | "y")[]) {
       const preview = numeric(`${stick}-preview-${component}`, `${name} ${component.toUpperCase()} live`, -1, 1, 0.01,
-        () => pad().preview()[stick].curved[component], () => {});
+        () => pad().preview()[stick].curved[component], () => {}, "Gamepad");
       tuning.push({ ...preview, enabled: () => false, formatValue: value => `Raw ${pad().preview()[stick].raw[component].toFixed(2)} / ${value.toFixed(2)}` });
     }
   }
   return [
-    toggle("invert-controller", "Invert controller", () => pad().tuning.invertPitch, value => { update({ invertPitch: value }); }),
-    toggle("swap-sticks", "Swap controller sticks", () => pad().tuning.swapSticks, value => { update({ swapSticks: value }); }),
-    numeric("look-speed", "Controller turn speed", 30, 720, 10, () => pad().tuning.yawDegreesPerSecond, value => { update({ yawDegreesPerSecond: value }); }),
-    numeric("pitch-speed", "Controller look speed", 30, 720, 10, () => pad().tuning.pitchDegreesPerSecond, value => { update({ pitchDegreesPerSecond: value }); }),
-    numeric("move-deadzone", "Move stick deadzone", 0, 0.5, 0.01, () => pad().tuning.move.deadzone, value => { const selected = pad().tuning.move; curve("move", { ...selected, deadzone: selected.kind === "radial" ? Math.min(value, 0.999 - selected.outerThreshold) : value }); }),
-    numeric("look-deadzone", "Look stick deadzone", 0, 0.5, 0.01, () => pad().tuning.look.deadzone, value => { const selected = pad().tuning.look; curve("look", { ...selected, deadzone: selected.kind === "radial" ? Math.min(value, 0.999 - selected.outerThreshold) : value }); }),
-    numeric("look-curve", "Look response curve", 0.5, 4, 0.1, () => pad().tuning.look.exponent, value => { curve("look", { ...pad().tuning.look, exponent: value }); }),
-    numeric("trigger", "Trigger threshold", 0.05, 0.95, 0.05, () => pad().tuning.triggerThreshold, value => { update({ triggerThreshold: value }); }),
-    numeric("move-curve", "Move response curve", 0.5, 4, 0.1, () => pad().tuning.move.exponent, value => curve("move", { ...pad().tuning.move, exponent: value })),
-    numeric("forward-sensitivity", "Forward controller sensitivity", 0, 3, 0.05, () => pad().tuning.forwardSensitivity, value => update({ forwardSensitivity: value })),
-    numeric("side-sensitivity", "Side controller sensitivity", 0, 3, 0.05, () => pad().tuning.sideSensitivity, value => update({ sideSensitivity: value })),
+    toggle("invert-controller", "Invert controller", () => pad().tuning.invertPitch, value => { update({ invertPitch: value }); }, "Gamepad"),
+    toggle("swap-sticks", "Swap controller sticks", () => pad().tuning.swapSticks, value => { update({ swapSticks: value }); }, "Gamepad"),
+    numeric("look-speed", "Controller turn speed", 30, 720, 10, () => pad().tuning.yawDegreesPerSecond, value => { update({ yawDegreesPerSecond: value }); }, "Gamepad"),
+    numeric("pitch-speed", "Controller look speed", 30, 720, 10, () => pad().tuning.pitchDegreesPerSecond, value => { update({ pitchDegreesPerSecond: value }); }, "Gamepad"),
+    numeric("move-deadzone", "Move stick deadzone", 0, 0.5, 0.01, () => pad().tuning.move.deadzone, value => { const selected = pad().tuning.move; curve("move", { ...selected, deadzone: selected.kind === "radial" ? Math.min(value, 0.999 - selected.outerThreshold) : value }); }, "Gamepad"),
+    numeric("look-deadzone", "Look stick deadzone", 0, 0.5, 0.01, () => pad().tuning.look.deadzone, value => { const selected = pad().tuning.look; curve("look", { ...selected, deadzone: selected.kind === "radial" ? Math.min(value, 0.999 - selected.outerThreshold) : value }); }, "Gamepad"),
+    numeric("look-curve", "Look response curve", 0.5, 4, 0.1, () => pad().tuning.look.exponent, value => { curve("look", { ...pad().tuning.look, exponent: value }); }, "Gamepad"),
+    numeric("trigger", "Trigger threshold", 0.05, 0.95, 0.05, () => pad().tuning.triggerThreshold, value => { update({ triggerThreshold: value }); }, "Gamepad"),
+    numeric("move-curve", "Move response curve", 0.5, 4, 0.1, () => pad().tuning.move.exponent, value => curve("move", { ...pad().tuning.move, exponent: value }), "Gamepad"),
+    numeric("forward-sensitivity", "Forward controller sensitivity", 0, 3, 0.05, () => pad().tuning.forwardSensitivity, value => update({ forwardSensitivity: value }), "Gamepad"),
+    numeric("side-sensitivity", "Side controller sensitivity", 0, 3, 0.05, () => pad().tuning.sideSensitivity, value => update({ sideSensitivity: value }), "Gamepad"),
     ...tuning,
   ];
 }

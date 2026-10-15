@@ -189,12 +189,17 @@ async function openMenu(config: ConfigStore) {
   expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
   key(KeyCode.Enter, true); key(KeyCode.Enter, false);
   expect(menu.controller.activeMenu).toBe("menu:startup:session");
-  click(100, 368);
+  click(450, 407);
   expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
   click(100, 436);
   expect(menu.controller.activeMenu).toBe("menu:startup:main");
   click(100, 130); click(100, 300);
-  click(100, 400);
+  for (let i = 0; i < 80; i++) {
+    const current = menu.controller.state().focus;
+    if (current.kind === "menu" && current.control === "ui:startup:browse") break;
+    key(KeyCode.Tab, true); key(KeyCode.Tab, false);
+  }
+  key(KeyCode.Enter, true); key(KeyCode.Enter, false);
   expect(menu.controller.activeMenu).toBe("menu:startup:servers");
   click(400, 122);
   expect(browser.protocol).toBe("q2");
