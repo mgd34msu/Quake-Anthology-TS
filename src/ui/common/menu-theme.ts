@@ -7,8 +7,8 @@ export const menuTitleFont: ResourceId = "resource:engine-menu:title";
 /**
  * The frontend type scale. Every text draw in the startup menu uses one of
  * these sizes; body matches the controller skin so custom-drawn text and
- * control text render at the same size. Values use body, falling back to the
- * single compact grade when a long name cannot fit its row.
+ * control text render at the same size. Dense label/value pages (the custom
+ * game builder) use the single field size for labels and values alike.
  */
 export const menuText = {
   mainTitle: 6,
@@ -16,8 +16,7 @@ export const menuText = {
   section: 1.7,
   label: 1.8,
   body: 2.6,
-  valueCompact: 2.05,
-  item: 2.4,
+  field: 2.05,
   small: 1.5,
 } as const;
 export function menuSkin(font: ResourceId): UiSkin {

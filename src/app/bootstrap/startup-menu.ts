@@ -200,13 +200,13 @@ export class StartupMenu {
         let x = 64;
         for (const entry of sessionEntries) {
           const width = entry.width === 0 ? 512 - fixed - gaps : entry.width;
-          controls.push({ ...entry.control, rect: { x, y: 392, width, height: 24 }, enabled: spec.dropdown === null && entry.control.enabled });
+          controls.push({ ...entry.control, rect: { x, y: 390, width, height: 27 }, enabled: spec.dropdown === null && entry.control.enabled });
           x += width + 8;
         }
       }
       controls.push(
-        { ...this.button("back", "Back", 0, () => this.controller.closeMenu()), rect: { x: 64, y: 422, width: 248, height: 28 }, enabled: spec.dropdown === null },
-        { ...this.button("play", options.model.hosting().kind === "offline" ? "Play" : "Start server", 0, options.play), rect: { x: 328, y: 422, width: 248, height: 28 }, enabled: spec.dropdown === null },
+        { ...this.button("back", "Back", 0, () => this.controller.closeMenu()), rect: { x: 64, y: 421, width: 248, height: 29 }, enabled: spec.dropdown === null },
+        { ...this.button("play", options.model.hosting().kind === "offline" ? "Play" : "Start server", 0, options.play), rect: { x: 328, y: 421, width: 248, height: 29 }, enabled: spec.dropdown === null },
       );
       return { id: session, title: "", fullScreen: false, controls, open: () => undefined, close: () => undefined };
     }));
@@ -403,12 +403,6 @@ export class StartupMenu {
     }
     return low;
   }
-  /** Builder values render at body size, or the single compact grade when a long name needs the room. */
-  private valueScale(value: string, width: number): number {
-    if (this.measure(value, menuText.body) <= width) return menuText.body;
-    if (this.measure(value, menuText.valueCompact) <= width) return menuText.valueCompact;
-    return this.fitScale(value, width, menuText.valueCompact);
-  }
   private prepareBuilderDropdownPage(page: number): void {
     if (this.builderDropdown === null) return;
     this.builderDropdown = { field: this.builderDropdown.field, page };
@@ -430,7 +424,7 @@ export class StartupMenu {
       readonly value: { readonly text: string; readonly width: number } | null }[];
     readonly heads: readonly { readonly x: number; readonly y: number; readonly label: string }[];
     readonly dropdown: { readonly x: number; readonly title: string; readonly page: number; readonly pages: number; readonly itemScale: number;
-      readonly items: readonly { readonly control: UiControl; readonly label: string; readonly selected: boolean }[] } | null;
+      readonly items: readonly { readonly control: UiControl; readonly label: string; readonly selected: boolean; readonly unavailable: string | null }[] } | null;
   } {
     const all = new Map(this.safeRows().map(row => [row.id, row]));
     const dropdown = this.builderDropdown;
@@ -473,7 +467,7 @@ export class StartupMenu {
         const row = all.get(spec.field);
         if (row === undefined) return;
         const rect = { x: section.x, y: section.startY + 20 + index * 28, width: 248, height: 26 };
-        const valueWidth = rect.width - this.measure(spec.label, menuText.label) - 34;
+        const valueWidth = rect.width - this.measure(spec.label, menuText.field) - 34;
         const enabled = !this.busy && dropdown === null;
         if (spec.picker) {
           const selected = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
@@ -484,30 +478,29 @@ export class StartupMenu {
               this.builderDropdown = { field: spec.field, page: Math.floor(selectedIndex / 8) };
               if (spec.field === "map") this.prepareBuilderDropdownPage(this.builderDropdown.page);
             }), rect, enabled }, rect, label: spec.label, value: { text: `${display} >`, width: valueWidth } });
-        } else if (row.id === "grenades") {
-          const base = this.row(row, 0);
-          fields.push({ control: { ...base, label: "", rect, enabled: enabled && base.enabled }, rect, label: spec.label, value: null });
         } else {
-          fields.push({ control: { id: `ui:startup:${row.id}`, kind: "choice", label: "", rect, visible: true, enabled,
-            selected: row.value, choices: row.choices.filter(choice => choice.unavailable === null)
-              .map(choice => ({ id: choice.id, label: this.fit(choice.label, valueWidth, menuText.body) })),
-            select: (_seat, value) => { this.options.model.select(spec.field, value); return undefined; } }, rect, label: spec.label, value: null });
+          const available = row.choices.filter(choice => choice.unavailable === null);
+          const fieldEnabled = row.id === "grenades" ? enabled && (row.value === "enabled" || available.some(choice => choice.id === "enabled")) : enabled;
+          const selected = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
+          fields.push({ control: { id: `ui:startup:${row.id}`, kind: "choice", label: "", rect, visible: true, enabled: fieldEnabled,
+            selected: row.value, choices: available.map(choice => ({ id: choice.id, label: "" })),
+            select: (_seat, value) => { this.options.model.select(spec.field, value); return undefined; } }, rect, label: spec.label,
+            value: { text: row.id === "grenades" ? (row.value === "enabled" ? "On" : "Off") : selected, width: valueWidth } });
         }
       });
     }
     let dropdownSpec: { x: number; title: string; page: number; pages: number; itemScale: number;
-      items: { control: UiControl; label: string; selected: boolean }[] } | null = null;
+      items: { control: UiControl; label: string; selected: boolean; unavailable: string | null }[] } | null = null;
     if (dropdown !== null) {
       const row = all.get(dropdown.field);
       if (row === undefined) this.builderDropdown = null;
       else {
         const pages = Math.max(1, Math.ceil(row.choices.length / 8));
         const page = Math.min(dropdown.page, pages - 1);
-        let itemScale: number = menuText.item;
+        let itemScale: number = menuText.field;
         for (const choice of row.choices)
-          itemScale = Math.min(itemScale, this.fitScale(choice.label, 224, menuText.item));
-        itemScale = Math.max(menuText.valueCompact, itemScale);
-        const items: { control: UiControl; label: string; selected: boolean }[] = row.choices.slice(page * 8, page * 8 + 8).map((choice, index) => {
+          itemScale = Math.min(itemScale, this.fitScale(choice.label, 224, menuText.field));
+        const items: { control: UiControl; label: string; selected: boolean; unavailable: string | null }[] = row.choices.slice(page * 8, page * 8 + 8).map((choice, index) => {
           const rect = { x: panelX, y: 138 + index * 27, width: 248, height: 26 };
           const selected = row.value === choice.id;
           const control: UiControl = { id: selected ? `ui:startup:${row.id}` : `ui:startup:choice:${choice.id}`, kind: "button", label: "", rect,
@@ -518,12 +511,12 @@ export class StartupMenu {
               if (dropdown.field === "enemies" && choice.id === "custom") this.openRoster();
               return undefined;
             } };
-          return { control, label: `${selected ? "> " : ""}${choice.label}`, selected };
+          return { control, label: `${selected ? "> " : ""}${choice.label}`, selected, unavailable: choice.unavailable };
         });
         if (pages > 1) {
           items.push(
-            { control: { ...this.button("previous", "< Prev", 0, () => this.prepareBuilderDropdownPage((page + pages - 1) % pages)), rect: { x: panelX, y: 357, width: 120, height: 21 } }, label: "", selected: false },
-            { control: { ...this.button("next", "Next >", 0, () => this.prepareBuilderDropdownPage((page + 1) % pages)), rect: { x: panelX + 128, y: 357, width: 120, height: 21 } }, label: "", selected: false },
+            { control: { ...this.button("previous", "< Prev", 0, () => this.prepareBuilderDropdownPage((page + pages - 1) % pages)), rect: { x: panelX, y: 356, width: 120, height: 24 } }, label: "", selected: false, unavailable: null },
+            { control: { ...this.button("next", "Next >", 0, () => this.prepareBuilderDropdownPage((page + 1) % pages)), rect: { x: panelX + 128, y: 356, width: 120, height: 24 } }, label: "", selected: false, unavailable: null },
           );
         }
         dropdownSpec = { x: panelX, title: row.label, page, pages, itemScale, items };
@@ -673,11 +666,10 @@ export class StartupMenu {
       for (const head of spec.heads) text(head.label, head.x, head.y, menuText.section, true);
       overlay = true;
       for (const field of spec.fields) {
-        text(field.label, field.rect.x + 10, field.rect.y + 6, menuText.label, focusedId === field.control.id);
+        text(field.label, field.rect.x + 10, field.rect.y + 5, menuText.field, focusedId === field.control.id);
         if (field.value === null) continue;
-        const scale = this.valueScale(field.value.text, field.value.width);
-        const shown = this.measure(field.value.text, scale) <= field.value.width ? field.value.text : this.fit(field.value.text, field.value.width, scale);
-        text(shown, field.rect.x + field.rect.width - 10 - this.measure(shown, scale), field.rect.y + 5, scale, focusedId === field.control.id);
+        const scale = this.fitScale(field.value.text, field.value.width, menuText.field);
+        text(field.value.text, field.rect.x + field.rect.width - 10 - this.measure(field.value.text, scale), field.rect.y + 5, scale, focusedId === field.control.id);
       }
       if (spec.dropdown !== null) {
         for (const item of spec.dropdown.items) {
@@ -710,6 +702,11 @@ export class StartupMenu {
     }
     overlay = false;
     if (this.status.length !== 0) text(this.fit(this.status, 512, menuText.small), 64, 450, menuText.small, true);
+    else if (active === session) {
+      const spec = this.builderLayout(), cursor = this.controller.state().cursor;
+      const hoveredItem = spec.dropdown?.items.find(item => contains(item.control.rect, cursor));
+      if (hoveredItem?.unavailable) text(this.fit(hoveredItem.unavailable, 512, menuText.small), 64, 450, menuText.small, true);
+    }
     renderUiCommands(context, [backdrop, panel, ...commands.map(command => transformUi(command, transform))], { text: this.text, white: this.options.art.white,
       picture: resource => this.options.art.picture(resource), emit, material });
     renderUiCommands(context, this.controller.draw(context), { text: this.text, white: this.options.art.white,
