@@ -102,6 +102,7 @@ export class StartupMenu {
   private nativeArena: string | undefined;
   private hostDraft: StartupHosting = { kind: "offline", port: 27910, q1Protocol: null };
   private hostPort = "27910";
+  private builderDropdown: { readonly field: StartupSelectionField; page: number } | null = null;
 
   constructor(private readonly options: StartupMenuOptions) {
     this.text = new UiTextRenderer(options.seat);
@@ -184,7 +185,7 @@ export class StartupMenu {
       // Two-column create-game screen: every field on one page. Section
       // heads, the column divider, and picker values are drawn in draw().
       const spec = this.builderLayout();
-      const controls: UiControl[] = spec.fields.map(field => field.control);
+      const controls: UiControl[] = [...(spec.dropdown?.items.map(item => item.control) ?? []), ...spec.fields.map(field => field.control)];
       const sessionEntries: { readonly control: UiControl; readonly width: number }[] = [
         { control: this.button("hosting", options.model.hosting().kind === "offline" ? "Network: local only" : "Network: hosting", 0, () => {
           this.hostDraft = options.model.hosting(); this.hostPort = String(this.hostDraft.port); this.status = ""; this.controller.openMenu(hostingMenu);
@@ -199,13 +200,13 @@ export class StartupMenu {
         let x = 64;
         for (const entry of sessionEntries) {
           const width = entry.width === 0 ? 512 - fixed - gaps : entry.width;
-          controls.push({ ...entry.control, rect: { x, y: 392, width, height: 24 } });
+          controls.push({ ...entry.control, rect: { x, y: 392, width, height: 24 }, enabled: spec.dropdown === null && entry.control.enabled });
           x += width + 8;
         }
       }
       controls.push(
-        { ...this.button("back", "Back", 0, () => this.controller.closeMenu()), rect: { x: 64, y: 422, width: 248, height: 28 } },
-        { ...this.button("play", options.model.hosting().kind === "offline" ? "Play" : "Start server", 0, options.play), rect: { x: 328, y: 422, width: 248, height: 28 } },
+        { ...this.button("back", "Back", 0, () => this.controller.closeMenu()), rect: { x: 64, y: 422, width: 248, height: 28 }, enabled: spec.dropdown === null },
+        { ...this.button("play", options.model.hosting().kind === "offline" ? "Play" : "Start server", 0, options.play), rect: { x: 328, y: 422, width: 248, height: 28 }, enabled: spec.dropdown === null },
       );
       return { id: session, title: "", fullScreen: false, controls, open: () => undefined, close: () => undefined };
     }));
@@ -392,18 +393,42 @@ export class StartupMenu {
       this.rosterPage = 0; this.setStatus(""); this.controller.openMenu(rosterMenu);
     }).catch((error: unknown) => this.setStatus(error instanceof Error ? error.message : String(error)));
   }
-  /** Compact value label for builder rows; pickers still show full names. */
-  private shortValue(label: string): string {
-    return label.replace("Quake III Arena", "Q3A").replace("Quake II", "Q2").replace(/^Quake(?= |$)/, "Q1")
-      .replace(" (classic)", " classic").replace(" (rerelease)", " rerelease").replace(" authored monsters", " monsters").replace(/ monsters$/, "");
+  /** Largest scale at or below `maximum` that keeps text inside width (no truncation). */
+  private fitScale(value: string, width: number, maximum: number): number {
+    if (this.measure(value, maximum) <= width) return maximum;
+    let low = 1.2, high = maximum;
+    for (let iteration = 0; iteration < 12; iteration++) {
+      const middle = (low + high) / 2;
+      if (this.measure(value, middle) <= width) low = middle; else high = middle;
+    }
+    return low;
   }
-  /** One-page create-game layout: two columns of label/value field rows. */
+  private prepareBuilderDropdownPage(page: number): void {
+    if (this.builderDropdown === null) return;
+    this.builderDropdown = { field: this.builderDropdown.field, page };
+    if (this.builderDropdown.field !== "map") return;
+    const preparation = this.options.model.prepareMapChoices(page * 8, 8);
+    if (preparation === null) return;
+    this.setStatus("Checking map rules...", true);
+    void preparation.then(() => this.setStatus(""))
+      .catch((error: unknown) => this.setStatus(error instanceof Error ? error.message : String(error)));
+  }
+  /**
+   * One-page create-game layout: two columns of label/value rows. Long lists
+   * open as a dropdown panel in the opposite column on this same screen;
+   * short lists cycle inline. Section heads, labels, values, and dropdown
+   * item text are drawn in draw().
+   */
   private builderLayout(): {
     readonly fields: readonly { readonly control: UiControl; readonly rect: { x: number; y: number; width: number; height: number }; readonly label: string;
-      readonly picker: { readonly rect: { x: number; y: number; width: number; height: number }; readonly value: string } | null }[];
+      readonly value: { readonly text: string; readonly width: number } | null }[];
     readonly heads: readonly { readonly x: number; readonly y: number; readonly label: string }[];
+    readonly dropdown: { readonly x: number; readonly title: string; readonly page: number; readonly pages: number;
+      readonly items: readonly { readonly control: UiControl; readonly label: string; readonly selected: boolean }[] } | null;
   } {
     const all = new Map(this.safeRows().map(row => [row.id, row]));
+    const dropdown = this.builderDropdown;
+    const panelX = dropdown === null ? -1 : ["product", "mapProduct", "map", "character", "model", "movement", "weapons"].includes(dropdown.field) ? 328 : 64;
     const sections: readonly { readonly title: string; readonly x: number; readonly startY: number;
       readonly fields: readonly { readonly field: StartupSelectionField; readonly label: string; readonly picker: boolean }[] }[] = [
       { title: "WORLD", x: 64, startY: 116, fields: [
@@ -412,28 +437,29 @@ export class StartupMenu {
         { field: "map", label: "Map", picker: true },
       ] },
       { title: "PLAYER", x: 64, startY: 226, fields: [
-        { field: "character", label: "Character", picker: false },
+        { field: "character", label: "Character", picker: true },
         { field: "model", label: "Model", picker: true },
-        { field: "movement", label: "Movement", picker: false },
-        { field: "weapons", label: "Weapons", picker: false },
+        { field: "movement", label: "Movement", picker: true },
+        { field: "weapons", label: "Weapons", picker: true },
       ] },
       { title: "MATCH", x: 328, startY: 116, fields: [
         { field: "enemies", label: "Monsters", picker: true },
         { field: "seats", label: "Players", picker: false },
         { field: "mode", label: "Mode", picker: false },
-        { field: "rules", label: "Rules", picker: false },
+        { field: "rules", label: "Rules", picker: true },
         { field: "skill", label: "Difficulty", picker: false },
       ] },
       { title: "KIT", x: 328, startY: 282, fields: [
         { field: "grapple", label: "Hook", picker: false },
-        { field: "grappleStyle", label: "Hook style", picker: false },
+        { field: "grappleStyle", label: "Hook style", picker: true },
         { field: "grenades", label: "Grenades", picker: false },
       ] },
     ];
     const fields: { control: UiControl; rect: { x: number; y: number; width: number; height: number }; label: string;
-      picker: { rect: { x: number; y: number; width: number; height: number }; value: string } | null }[] = [];
+      value: { text: string; width: number } | null }[] = [];
     const heads: { x: number; y: number; label: string }[] = [];
     for (const section of sections) {
+      if (section.x === panelX) continue;
       const present = section.fields.filter(spec => all.has(spec.field));
       if (present.length === 0) continue;
       heads.push({ x: section.x, y: section.startY, label: section.title });
@@ -441,22 +467,59 @@ export class StartupMenu {
         const row = all.get(spec.field);
         if (row === undefined) return;
         const rect = { x: section.x, y: section.startY + 20 + index * 28, width: 248, height: 26 };
-        const valueWidth = rect.width - this.measure(spec.label, 1.8) - 46;
+        const valueWidth = rect.width - this.measure(spec.label, 1.8) - 34;
+        const enabled = !this.busy && dropdown === null;
         if (spec.picker) {
           const selected = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
-          fields.push({ control: { ...this.row(row, 0), label: "", rect }, rect, label: spec.label,
-            picker: { rect, value: `${this.fit(this.shortValue(selected), valueWidth - 14, 2.2)} >` } });
+          const display = spec.field === "enemies" ? selected.replace(" authored monsters", "")
+            : spec.field === "weapons" ? selected.replace(/ weapons$/, "") : selected;
+          fields.push({ control: { ...this.button(row.id, "", 0, () => {
+              const selectedIndex = Math.max(0, row.choices.findIndex(choice => choice.id === row.value));
+              this.builderDropdown = { field: spec.field, page: Math.floor(selectedIndex / 8) };
+              if (spec.field === "map") this.prepareBuilderDropdownPage(this.builderDropdown.page);
+            }), rect, enabled }, rect, label: spec.label, value: { text: `${display} >`, width: valueWidth } });
         } else if (row.id === "grenades") {
-          fields.push({ control: { ...this.row(row, 0), label: "", rect }, rect, label: spec.label, picker: null });
+          const base = this.row(row, 0);
+          fields.push({ control: { ...base, label: "", rect, enabled: enabled && base.enabled }, rect, label: spec.label, value: null });
         } else {
-          fields.push({ control: { id: `ui:startup:${row.id}`, kind: "choice", label: "", rect, visible: true, enabled: !this.busy,
+          fields.push({ control: { id: `ui:startup:${row.id}`, kind: "choice", label: "", rect, visible: true, enabled,
             selected: row.value, choices: row.choices.filter(choice => choice.unavailable === null)
-              .map(choice => ({ id: choice.id, label: this.fit(this.shortValue(choice.label), valueWidth, 2.6) })),
-            select: (_seat, value) => { this.options.model.select(spec.field, value); return undefined; } }, rect, label: spec.label, picker: null });
+              .map(choice => ({ id: choice.id, label: this.fit(choice.label, valueWidth, 2.6) })),
+            select: (_seat, value) => { this.options.model.select(spec.field, value); return undefined; } }, rect, label: spec.label, value: null });
         }
       });
     }
-    return { fields, heads };
+    let dropdownSpec: { x: number; title: string; page: number; pages: number;
+      items: { control: UiControl; label: string; selected: boolean }[] } | null = null;
+    if (dropdown !== null) {
+      const row = all.get(dropdown.field);
+      if (row === undefined) this.builderDropdown = null;
+      else {
+        const pages = Math.max(1, Math.ceil(row.choices.length / 8));
+        const page = Math.min(dropdown.page, pages - 1);
+        const items: { control: UiControl; label: string; selected: boolean }[] = row.choices.slice(page * 8, page * 8 + 8).map((choice, index) => {
+          const rect = { x: panelX, y: 140 + index * 26, width: 248, height: 24 };
+          const selected = row.value === choice.id;
+          const control: UiControl = { id: selected ? `ui:startup:${row.id}` : `ui:startup:choice:${choice.id}`, kind: "button", label: "", rect,
+            visible: true, enabled: choice.unavailable === null && !this.busy,
+            activate: () => {
+              this.options.model.select(dropdown.field, choice.id);
+              this.status = ""; this.builderDropdown = null;
+              if (dropdown.field === "enemies" && choice.id === "custom") this.openRoster();
+              return undefined;
+            } };
+          return { control, label: `${selected ? "> " : ""}${choice.label}${choice.unavailable === null ? "" : " (unavailable)"}`, selected };
+        });
+        if (pages > 1) {
+          items.push(
+            { control: { ...this.button("previous", "< Prev", 0, () => this.prepareBuilderDropdownPage((page + pages - 1) % pages)), rect: { x: panelX, y: 352, width: 120, height: 22 } }, label: "", selected: false },
+            { control: { ...this.button("next", "Next >", 0, () => this.prepareBuilderDropdownPage((page + 1) % pages)), rect: { x: panelX + 128, y: 352, width: 120, height: 22 } }, label: "", selected: false },
+          );
+        }
+        dropdownSpec = { x: panelX, title: row.label, page, pages, items };
+      }
+    }
+    return { fields, heads, dropdown: dropdownSpec };
   }
   private row(row: StartupSelectionRow, index: number): UiControl {
     const rect = { x: 64, y: 118 + index * 34, width: 512, height: 30 };
@@ -513,6 +576,15 @@ export class StartupMenu {
   setStatus(text: string, busy = false): void { this.status = text; this.busy = busy; }
   input(event: SeatInputEvent): boolean {
     if (this.busy) return true;
+    if (this.controller.activeMenu === session && this.builderDropdown !== null) {
+      if (event.kind === "key" && event.code === KeyCode.Escape) { this.builderDropdown = null; return true; }
+      if (event.kind === "mouse-wheel" && event.delta.y !== 0) {
+        const row = this.safeRows().find(candidate => candidate.id === this.builderDropdown?.field);
+        const pages = Math.max(1, Math.ceil((row?.choices.length ?? 0) / 8));
+        this.prepareBuilderDropdownPage(Math.max(0, Math.min(pages - 1, this.builderDropdown.page + (event.delta.y < 0 ? 1 : -1))));
+        return true;
+      }
+    }
     if (event.kind === "mouse-wheel" && event.delta.y !== 0 && this.controller.activeMenu === selectMenu) {
       const choices = this.selectionRow()?.choices ?? [];
       this.prepareChoicePage(Math.max(0, Math.min(Math.ceil(choices.length / 7) - 1, this.page + (event.delta.y < 0 ? 1 : -1))));
@@ -571,16 +643,38 @@ export class StartupMenu {
 
     if (active === session) {
       const spec = this.builderLayout();
-      commands.push({ kind: "fill", rect: { x: 320, y: 120, width: 1, height: 264 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.3 } });
-      for (const head of spec.heads) text(head.label, head.x, head.y, 1.7, true);
-      overlay = true;
       const focus = this.controller.state().focus;
       const focusedId = focus.kind === "menu" ? focus.control : null;
+      if (spec.dropdown === null) {
+        commands.push({ kind: "fill", rect: { x: 320, y: 120, width: 1, height: 264 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.3 } });
+      } else {
+        const panelColor = { x: 0.6, y: 0.39, z: 0.18, w: 0.55 };
+        commands.push({ kind: "fill", rect: { x: spec.dropdown.x - 8, y: 110, width: 264, height: 272 }, color: { x: 0.02, y: 0.03, z: 0.04, w: 0.97 } },
+          { kind: "fill", rect: { x: spec.dropdown.x - 8, y: 110, width: 264, height: 1 }, color: panelColor },
+          { kind: "fill", rect: { x: spec.dropdown.x - 8, y: 381, width: 264, height: 1 }, color: panelColor },
+          { kind: "fill", rect: { x: spec.dropdown.x - 8, y: 110, width: 1, height: 272 }, color: panelColor },
+          { kind: "fill", rect: { x: spec.dropdown.x + 255, y: 110, width: 1, height: 272 }, color: panelColor });
+        text(spec.dropdown.title.toUpperCase(), spec.dropdown.x, 116, 1.7, true);
+        if (spec.dropdown.pages > 1) {
+          const pageLabel = `${spec.dropdown.page + 1}/${spec.dropdown.pages}`;
+          text(pageLabel, spec.dropdown.x + 248 - this.measure(pageLabel, 1.7), 116, 1.7);
+        }
+      }
+      for (const head of spec.heads) text(head.label, head.x, head.y, 1.7, true);
+      overlay = true;
       for (const field of spec.fields) {
         text(field.label, field.rect.x + 10, field.rect.y + 6, 1.8, focusedId === field.control.id);
-        if (field.picker === null) continue;
-        const { rect, value } = field.picker;
-        text(value, rect.x + rect.width - 10 - this.measure(value, 2.2), rect.y + 5, 2.2, focusedId === field.control.id);
+        if (field.value === null) continue;
+        const scale = this.fitScale(field.value.text, field.value.width, 2.6);
+        text(field.value.text, field.rect.x + field.rect.width - 10 - this.measure(field.value.text, scale), field.rect.y + 5, scale, focusedId === field.control.id);
+      }
+      if (spec.dropdown !== null) {
+        for (const item of spec.dropdown.items) {
+          if (item.label === "") continue;
+          const rect = item.control.rect, scale = this.fitScale(item.label, rect.width - 20, 2.4);
+          overlayCommands.push({ kind: "text", origin: { x: rect.x + 10, y: rect.y + 5 }, text: item.label, font: this.options.art.skin.font, scale,
+            color: item.selected ? colors.accent : item.control.enabled ? colors.text : colors.disabled, align: "left", shadow: true });
+        }
       }
       overlay = false;
     }
