@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { open, readdir, stat } from "node:fs/promises";
-import { relative } from "node:path";
+import { mkdir, open, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { dirname, relative, resolve } from "node:path";
+import { defaultUserContentRoot } from "../user-data.ts";
 import { createContentDigest, createResourceId } from "../../contracts/content.ts";
 import type { ArchiveMount, ContentDigest, ContentMount, LooseMount, MountId, MountPlanId, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../../contracts/content.ts";
 import { FileSource } from "../archive/source.ts";
@@ -15,20 +16,89 @@ export function digestBytes(bytes: Uint8Array): ContentDigest {
   return createContentDigest(createHash("sha256").update(bytes).digest("hex"));
 }
 
+interface DigestFingerprint { readonly size: number; readonly mtimeMs: number; readonly ctimeMs: number; readonly ino: number; readonly digest: string; }
+
+/**
+ * Archive digests are cached by stat fingerprint (size, mtime, ctime, inode):
+ * rehashing gigabytes of retail archives on every launch dominated startup.
+ * A rewritten archive changes its fingerprint and is hashed again. The cache
+ * is best-effort; QTS_NO_DIGEST_CACHE=1 forces full hashing everywhere.
+ */
+const digestCacheEnabled = process.env["QTS_NO_DIGEST_CACHE"] === undefined;
+const verifiedDigests = new Map<string, DigestFingerprint>();
+let diskDigests: Promise<Map<string, DigestFingerprint>> | null = null;
+let diskSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function digestCacheFile(): string { return resolve(defaultUserContentRoot(), "..", "cache", "archive-digests.json"); }
+
+function loadDiskDigests(): Promise<Map<string, DigestFingerprint>> {
+  diskDigests ??= (async () => {
+    const entries = new Map<string, DigestFingerprint>();
+    try {
+      const parsed: unknown = JSON.parse(await readFile(digestCacheFile(), "utf8"));
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        for (const [path, value] of Object.entries(parsed)) {
+          if (typeof value !== "object" || value === null) continue;
+          const { size, mtimeMs, ctimeMs, ino, digest } = value as Record<string, unknown>;
+          if (typeof size === "number" && typeof mtimeMs === "number" && typeof ctimeMs === "number"
+            && typeof ino === "number" && typeof digest === "string") entries.set(path, { size, mtimeMs, ctimeMs, ino, digest });
+        }
+      }
+    } catch { /* Missing or unreadable cache: start empty. */ }
+    return entries;
+  })();
+  return diskDigests;
+}
+
+function scheduleDiskDigestSave(): void {
+  if (diskSaveTimer !== null) return;
+  diskSaveTimer = setTimeout(() => {
+    diskSaveTimer = null;
+    void (async () => {
+      try {
+        const entries = await loadDiskDigests();
+        for (const [path, fingerprint] of verifiedDigests) entries.set(path, fingerprint);
+        const file = digestCacheFile();
+        await mkdir(dirname(file), { recursive: true });
+        await writeFile(`${file}.tmp`, JSON.stringify(Object.fromEntries(entries)));
+        await rename(`${file}.tmp`, file);
+      } catch { /* The cache is an optimization only. */ }
+    })();
+  }, 250);
+  diskSaveTimer.unref();
+}
+
 export async function digestFile(path: string): Promise<ContentDigest> {
+  const info = await stat(path);
+  const fingerprint = { size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, ino: info.ino };
+  const matches = (entry: DigestFingerprint | undefined): entry is DigestFingerprint => entry !== undefined
+    && entry.size === fingerprint.size && entry.mtimeMs === fingerprint.mtimeMs
+    && entry.ctimeMs === fingerprint.ctimeMs && entry.ino === fingerprint.ino;
+  if (digestCacheEnabled) {
+    const memory = verifiedDigests.get(path);
+    if (matches(memory)) return createContentDigest(memory.digest);
+    const disk = (await loadDiskDigests()).get(path);
+    if (matches(disk)) { verifiedDigests.set(path, disk); return createContentDigest(disk.digest); }
+  }
   const hash = createHash("sha256");
   const file = await open(path, "r");
+  let digest: string;
   try {
-    const bytes = new Uint8Array(1024 * 1024);
+    const bytes = new Uint8Array(4 * 1024 * 1024);
     while (true) {
       const read = await file.read(bytes);
       if (read.bytesRead === 0) break;
       hash.update(bytes.subarray(0, read.bytesRead));
     }
-    return createContentDigest(hash.digest("hex"));
+    digest = hash.digest("hex");
   } finally {
     await file.close();
   }
+  if (digestCacheEnabled) {
+    verifiedDigests.set(path, { ...fingerprint, digest });
+    scheduleDiskDigestSave();
+  }
+  return createContentDigest(digest);
 }
 
 export interface ResourceLink {
@@ -434,10 +504,7 @@ export class MountPreparationScope {
   private async openVerified(mount: ArchiveMount): Promise<ArchiveHandle> {
     const storage = new FileSource(mount.archivePath);
     try {
-      const hash = createHash("sha256");
-      for (let offset = 0; offset < storage.byteLength; offset += 1024 * 1024)
-        hash.update(await storage.read(offset, Math.min(1024 * 1024, storage.byteLength - offset)));
-      if (createContentDigest(hash.digest("hex")) !== mount.archiveDigest) throw new Error(`Archive bytes changed before mount: ${mount.archivePath}`);
+      if (await digestFile(mount.archivePath) !== mount.archiveDigest) throw new Error(`Archive bytes changed before mount: ${mount.archivePath}`);
       this.assertOpen();
       return await openArchiveSource(storage, mount.format);
     } catch (error) { storage.close(); throw error; }

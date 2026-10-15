@@ -1,4 +1,5 @@
 import { CleanupStack } from "../../foundation/cleanup.ts";
+import { startupStamp } from "./startup-timing.ts";
 import { ApplicationLocalLobby } from "./local-lobby.ts";
 import { LocalLobbyService } from "../../network/services/online.ts";
 import type { Lobby } from "../../network/services/online.ts";
@@ -203,8 +204,8 @@ export class StartupApplication {
   }
 
   static async open(options: ApplicationOptions, host: ApplicationHost & { readonly localLobbies?: LocalLobbyService }, saveDirectory = join(homedir(), ".local", "share", "quake-typescript", "saves"), entry: "menu" | "run" = "menu"): Promise<StartupApplication> {
-    const application = new StartupApplication(await createStartupSelection(options), host, saveDirectory, entry);
-    try { application.browser = await StartupServerBrowser.open(new ConfigStore(join(saveDirectory, "..", "settings"))); await application.openGraphics(); return application; }
+    const application = new StartupApplication(await createStartupSelection(options), host, saveDirectory, entry); startupStamp("selection+catalog");
+    try { application.browser = await StartupServerBrowser.open(new ConfigStore(join(saveDirectory, "..", "settings"))); startupStamp("server-browser"); await application.openGraphics(); startupStamp("openGraphics"); return application; }
     catch (error) { await application.close(); throw error; }
   }
 
@@ -260,14 +261,14 @@ export class StartupApplication {
   }
 
   private async openGraphics(): Promise<StartupGraphics> {
-    await this.refreshPreferenceBaseline(true);
+    await this.refreshPreferenceBaseline(true); startupStamp("preference-baseline");
     if (this.model.options.rendererSelection === "default") {
       const selected = (await this.preferenceStore?.loadText("renderer"))?.trim();
       if (selected === "cpu" || selected === "gl") this.model.select("renderer", selected);
     }
     let options = this.model.options;
     const identity = this.identity, session = this.session;
-    const configuration = await openInitialConfigurationContent(options, undefined, this.model.catalog);
+    const configuration = await openInitialConfigurationContent(options, undefined, this.model.catalog); startupStamp("initial-configuration-content");
     const settings = configurationStore(options, configuration, configuration.selection.engineBehavior.content);
     const localSeats = new Map<ClientId, SessionSeat>();
     let initial: Awaited<ReturnType<typeof prepareInitialConfiguration>>;
@@ -276,7 +277,7 @@ export class StartupApplication {
         ["source", configuration.selection.source.content, configuration.selection.source.provider], configurationDialect(configuration));
       initial = await prepareInitialConfiguration(options, configuration, session, identity, localSeats, settings, this.host, archive,
         options.mode === "singleplayer" ? configuration.catalog.product(configuration.selection.engineBehavior.content).expectation.family === "q3" ? 8 : options.seats : 16,
-        async () => { await Bun.sleep(0); }, prepared => this.bindDemoCommands(prepared));
+        async () => { await Bun.sleep(0); }, prepared => this.bindDemoCommands(prepared)); startupStamp("prepare-initial-configuration");
     } catch (error) { await session.close(); configuration.close(); throw error; }
     if (!initial.prepared.pending) this.initialConfiguration = false;
     this.scripts = initial.scripts;
@@ -294,7 +295,7 @@ export class StartupApplication {
     const product = installed.find(product => product.expectation.id === options.product) ?? installed[0];
     if (product === undefined) throw new Error(`No installed game data found in ${options.corpusRoot}; a game charset is required for the startup menu`);
     const mounts = await this.model.catalog.mountsFor(product.id);
-    const mounted = await openMountPlan({ id: createMountPlanId("startup", "font"), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+    const mounted = await openMountPlan({ id: createMountPlanId("startup", "font"), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] }); startupStamp("font-mounts");
     let themeMounts: Awaited<ReturnType<typeof openMountPlan>> | null = null;
     let audio: StartupAudio | null = null;
     let inputDevices: InputDevices | null = null;
@@ -306,12 +307,12 @@ export class StartupApplication {
       const imageSettings = initial.image;
       const devices = new InputDevices(imageSettings.cvars, inputDeviceStore(options.userContentRoot), this.host.print);
       inputDevices = devices;
-      font = await loadMenuFont({ catalog: this.model.catalog, mounts: mounted, family: product.expectation.family, rerelease: product.expectation.edition === "rerelease", images, imagePolicy: imageSettings.policy });
-      typography = await loadMenuTypography(this.model.catalog, images, font.font.classic, imageSettings.policy);
+      font = await loadMenuFont({ catalog: this.model.catalog, mounts: mounted, family: product.expectation.family, rerelease: product.expectation.edition === "rerelease", images, imagePolicy: imageSettings.policy }); startupStamp("menu-font");
+      typography = await loadMenuTypography(this.model.catalog, images, font.font.classic, imageSettings.policy); startupStamp("typography");
       const fontSource = font.font.classic.picture.image.source;
       if (fontSource.kind !== "resource") throw new Error("Startup font has no mounted resource identity");
-      art = await loadNativeUiArt(fontSource.resource.id, images, loadMenuArtImage);
-      renderer = await NativeRenderer.open({ ...options, renderWorker: imageSettings.cvars.variableValue("r_smp") !== 0 }, owner, images);
+      art = await loadNativeUiArt(fontSource.resource.id, images, loadMenuArtImage); startupStamp("ui-art");
+      renderer = await NativeRenderer.open({ ...options, renderWorker: imageSettings.cvars.variableValue("r_smp") !== 0 }, owner, images); startupStamp("renderer");
       const native = renderer;
       await imageSettings.refreshDisplay(renderer);
       controllers = SdlControllers.open();
@@ -324,7 +325,7 @@ export class StartupApplication {
       audio = await StartupAudio.open({ musicControls: this.musicControls, theme: themeProduct === undefined || themeMounts === null ? null : { source: { content: themeProduct.id, ...themeProduct.expectation }, mounts: themeMounts }, mounts: mounted, source: { content: product.id, ...product.expectation }, seat, print: this.host.print,
         preferences: { ...this.preferences.audioBaseline, ...this.preferences.audioValues, ...readMusicSettings(imageSettings.cvars), outputFormat: readAudioOutputCvars(imageSettings.cvars) } });
       audio.openOutput(this.preferences.audioBaseline.deviceName ?? null, this.host.print);
-      audio.bindOutputCvars(imageSettings.cvars);
+      audio.bindOutputCvars(imageSettings.cvars); startupStamp("audio");
       const activeAudio = audio;
       const currentAudio = (): StartupAudio["engine"] => this.client?.output.current ?? activeAudio.engine;
       const accessibility = new SeatUiPreferences(seat, imageSettings.cvars);

@@ -5,7 +5,8 @@ import { LlmSettingsService } from "./llm/settings.ts";
 import { applicationHelp, parseApplicationCommand } from "./app/bootstrap/options.ts";
 import { defaultUserContentRoot } from "./content/user-data.ts";
 import { BoundedQueue } from "./foundation/bounded-queue.ts";
-import { openSplash, type SplashScreen } from "./app/bootstrap/splash.ts";
+import { openSplash, runSplashChild, type SplashScreen } from "./app/bootstrap/splash.ts";
+import { startupStamp } from "./app/bootstrap/startup-timing.ts";
 
 /** Recent console output retained so a fatal error leaves a diagnosable log on disk. */
 const recentOutput = new BoundedQueue<string>(256);
@@ -25,6 +26,10 @@ export function writeCrashLog(error: unknown, argv: readonly string[], directory
 export function llmSettingsDirectory(): string { return resolve(dirname(defaultUserContentRoot()), "settings"); }
 
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
+  if (argv[0] === "--splash-child") {
+    const width = Number(argv[1]), height = Number(argv[2]);
+    return Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0 ? runSplashChild(width, height) : 1;
+  }
   let splash: SplashScreen | null = null;
   process.on("unhandledRejection", error => { writeCrashLog(error, argv); process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`); process.exit(1); });
   process.on("uncaughtException", error => { writeCrashLog(error, argv); process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`); process.exit(1); });
@@ -42,7 +47,7 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
       for (const product of catalog.products) process.stdout.write(`${product.expectation.id}\t${product.availability.kind}\t${product.expectation.title}\n`);
       return 0;
     }
-    splash = command.options.dedicated || command.options.hidden ? null : await openSplash(command.options.width, command.options.height);
+    splash = command.options.dedicated || command.options.hidden ? null : await openSplash(command.options.width, command.options.height); startupStamp("splash");
     // LLM credentials are user settings, not game data: the executable folder
     // (game files) may be read-only, so they live with the other shared settings.
     const llmDirectory = llmSettingsDirectory();
@@ -63,6 +68,7 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
       } },
       baseDirectory: llmDirectory,
     });
+    startupStamp("llm-settings");
     try {
       const host = { ...(llm === undefined ? {} : { llm }), print: (text: string): undefined => { recentOutput.push(text); process.stdout.write(text); return undefined; } };
       const application = command.options.dedicated

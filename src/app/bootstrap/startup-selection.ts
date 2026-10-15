@@ -1,4 +1,5 @@
 import { MountPreparationScope } from "../../content/mounts/index.ts";
+import { startupStamp } from "./startup-timing.ts";
 import { applicationModChoices, applyApplicationMods, type ApplicationModChoice } from "./mod-selection.ts";
 import { ModSelectionSet } from "../../content/mods/selection.ts";
 import { modSelectionKey, readModSelection } from "../../contracts/mods.ts";
@@ -739,6 +740,7 @@ export class StartupSelectionModel {
 }
 export async function createStartupSelection(options: ApplicationOptions): Promise<StartupSelectionModel> {
   const model = new StartupSelectionModel(await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: true }), options);
+  startupStamp("discover-installed-content");
   await model.prepareMaps();
   return model;
 }

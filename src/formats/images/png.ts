@@ -17,12 +17,15 @@ function paeth(a: number, b: number, c: number): number {
   return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
 }
 
+const crcTable = new Uint32Array(256);
+for (let value = 0; value < 256; value++) {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit++) crc = crc >>> 1 ^ ((crc & 1) === 0 ? 0 : 0xedb88320);
+  crcTable[value] = crc >>> 0;
+}
 function crc32(bytes: Uint8Array): number {
   let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) crc = crc >>> 1 ^ ((crc & 1) === 0 ? 0 : 0xedb88320);
-  }
+  for (let index = 0; index < bytes.length; index++) crc = (crcTable[(crc ^ (bytes[index] ?? 0)) & 0xff] ?? 0) ^ crc >>> 8;
   return (crc ^ 0xffffffff) >>> 0;
 }
 
@@ -87,6 +90,36 @@ export function decodePng(bytes: Uint8Array, source = "<png>"): PngImage {
   const transparentView = transparency === null ? null : new DataView(transparency.buffer, transparency.byteOffset, transparency.byteLength);
   if (transparency !== null && (colorType === 0 && transparency.length !== 2 || colorType === 2 && transparency.length !== 6
     || colorType === 3 && transparency.length > (palette?.length ?? 0) / 3 || colorType === 4 || colorType === 6)) fail(8, "invalid transparency chunk");
+  if (bitDepth === 8 && interlace === 0 && (colorType === 2 || colorType === 6)) {
+    // Fast path for the common 8-bit RGB/RGBA case: direct typed-array
+    // unfilter and expansion, no DataView or per-pixel closures.
+    const stride = channels, rowLength = width * stride;
+    const transparentRed = transparentView !== null && colorType === 2 ? transparentView.getUint16(0) : -1;
+    const transparentGreen = transparentView !== null && colorType === 2 ? transparentView.getUint16(2) : -1;
+    const transparentBlue = transparentView !== null && colorType === 2 ? transparentView.getUint16(4) : -1;
+    let offset = 0;
+    for (let py = 0; py < height; py++) {
+      const filter = raw[offset++] ?? 0;
+      if (filter > 4) fail(8, `unknown scanline filter ${filter}`);
+      const outRow = py * width * 4;
+      for (let byte = 0; byte < rowLength; byte++) {
+        const a = byte >= stride ? (raw[offset + byte - stride] ?? 0) : 0;
+        const b = py > 0 ? (raw[offset + byte - rowLength - 1] ?? 0) : 0;
+        const c = py > 0 && byte >= stride ? (raw[offset + byte - rowLength - 1 - stride] ?? 0) : 0;
+        const prediction = filter === 0 ? 0 : filter === 1 ? a : filter === 2 ? b : filter === 3 ? (a + b) >> 1 : paeth(a, b, c);
+        raw[offset + byte] = (raw[offset + byte] ?? 0) + prediction;
+      }
+      for (let px = 0; px < width; px++) {
+        const source = offset + px * stride, out = outRow + px * 4;
+        const r = raw[source] ?? 0, g = raw[source + 1] ?? 0, b = raw[source + 2] ?? 0;
+        pixels[out] = r; pixels[out + 1] = g; pixels[out + 2] = b;
+        pixels[out + 3] = colorType === 6 ? (raw[source + 3] ?? 0)
+          : r === transparentRed && g === transparentGreen && b === transparentBlue ? 0 : 255;
+      }
+      offset += rowLength;
+    }
+    return { width, height, pixels, bitDepth, colorType, gamma, srgbIntent, indexed: null };
+  }
   let rawOffset = 0;
   for (const [x, y, dx, dy] of passes) {
     const w = Math.max(0, Math.ceil((width - x) / dx)), h = Math.max(0, Math.ceil((height - y) / dy));

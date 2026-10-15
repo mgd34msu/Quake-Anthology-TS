@@ -30,14 +30,73 @@ export function scaleCover(image: PngImage, width: number, height: number): Uint
   return out;
 }
 
+/**
+ * Splash child process body (`--splash-child <width> <height>`). Runs in its
+ * own process so its SDL event pump stays responsive while the parent's main
+ * thread is blocked loading; a same-process splash never answers the
+ * compositor and gets flagged "not responding". Exits when the user closes
+ * the window or the parent closes the stdin pipe (including parent death).
+ */
+export async function runSplashChild(width: number, height: number): Promise<number> {
+  const [{ SdlWindow }, { decodePng }] = await Promise.all([import("../../platform/sdl.ts"), import("../../formats/images/png.ts")]);
+  const image = decodePng(await Bun.file(titleImage).bytes(), "assets/ui/title.png");
+  const window = SdlWindow.open({ title: "Quake Anthology", width, height, backend: "cpu" });
+  let parentGone = false;
+  void (async () => {
+    try { for await (const _chunk of Bun.stdin.stream()) { /* Parent sends nothing; EOF is the signal. */ } }
+    catch { /* A broken pipe is the same signal. */ }
+    parentGone = true;
+  })();
+  try {
+    window.present(scaleCover(image, width, height));
+    process.stdout.write("ready\n");
+    let ticks = 0;
+    for (;;) {
+      if (parentGone) break;
+      const events = window.pollEvents();
+      if (events.some(event => event.kind === "quit")) break;
+      if (++ticks % 30 === 0) process.stdout.write(`tick ${Date.now()}\n`);
+      await Bun.sleep(16);
+    }
+  } finally { window.close(); }
+  return 0;
+}
+
 /** Best-effort title splash shown while the application loads; failures never block launch. */
 export async function openSplash(width: number, height: number): Promise<SplashScreen | null> {
+  if (process.env["QTS_SPLASH_CHILD"] !== undefined) return null; // A splash child never spawns its own splash.
   try {
-    const [{ SdlWindow }, { decodePng }] = await Promise.all([import("../../platform/sdl.ts"), import("../../formats/images/png.ts")]);
-    const image = decodePng(await Bun.file(titleImage).bytes(), "assets/ui/title.png");
-    const window = SdlWindow.open({ title: "Quake Anthology", width, height, backend: "cpu" });
-    try { window.present(scaleCover(image, width, height)); }
-    catch { window.close(); return null; }
-    return { close: () => { try { window.close(); } catch { /* Already closed. */ } } };
+    const compiled = Bun.main.startsWith("/$bunfs/") || Bun.main.startsWith("B:/~BUN/");
+    const command = compiled
+      ? [process.execPath, "--splash-child", String(width), String(height)]
+      : [process.execPath, Bun.main, "--splash-child", String(width), String(height)];
+    const child = Bun.spawn(command, { stdin: "pipe", stdout: "pipe", stderr: "ignore", env: { ...process.env, QTS_SPLASH_CHILD: "1" } });
+    const closed = { value: false };
+    const splash: SplashScreen = {
+      close: () => {
+        if (closed.value) return;
+        closed.value = true;
+        try { child.stdin.end(); } catch { /* Already closed. */ }
+        setTimeout(() => { try { child.kill(); } catch { /* Already exited. */ } }, 300).unref();
+      },
+    };
+    // Drain the child's pipe (discarding ticks) and wait briefly for its
+    // first presented frame so the splash is up before loading starts.
+    let signalReady: (presented: boolean) => void = () => {};
+    const ready = new Promise<boolean>(resolveReady => { signalReady = resolveReady; });
+    void (async () => {
+      const decoder = new TextDecoder();
+      let pending = "";
+      let presented = false;
+      for await (const chunk of child.stdout) {
+        pending += decoder.decode(chunk, { stream: true });
+        if (!presented && pending.includes("ready\n")) { presented = true; signalReady(true); }
+        if (pending.length > 4096) pending = pending.slice(-1024);
+      }
+      signalReady(presented);
+    })();
+    const presented = await Promise.race([ready, Bun.sleep(5000).then(() => false), child.exited.then(() => false)]);
+    if (!presented && child.exitCode !== null) return null;
+    return splash;
   } catch { return null; }
 }
