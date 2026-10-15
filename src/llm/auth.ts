@@ -1,5 +1,6 @@
 import { LlmSettingsError } from "./errors.ts";
 import { createHash, randomBytes } from "node:crypto";
+import { Worker } from "node:worker_threads";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 export interface SubscriptionCredential {
@@ -87,32 +88,52 @@ export async function loginSubscription(options: SubscriptionAuthOptions, signal
   const callback = new Promise<string>((resolve, reject) => { resolveCode = resolve; rejectCode = reject; });
   // Attach the rejection handler before browser startup, which can itself fail.
   const codeResult = callback.then(code => ({ code }), (error: unknown) => ({ error: error instanceof Error ? error : new LlmSettingsError("Sign-in failed.") }));
-  const server = startListener({ hostname: "127.0.0.1", port: options.callbackPort ?? 1455,
-    fetch(request) {
-      const url = new URL(request.url);
-      if (url.pathname !== "/auth/callback") return new Response("Not found", { status: 404 });
-      if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
-      if (url.searchParams.get("state") !== state) {
-        rejectCode(new LlmSettingsError("Subscription sign-in state mismatch."));
-        return new Response("Sign-in failed. State mismatch.", { status: 400 });
+  let resolveReady = (_port: number): void => {};
+  let rejectReady = (_error: Error): void => {};
+  const ready = new Promise<number>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+  void ready.catch(() => undefined);
+  let resolveStopped = (): void => {};
+  const stopped = new Promise<void>(resolve => { resolveStopped = resolve; });
+  const listenFailure = (): LlmSettingsError => new LlmSettingsError("Could not open the local sign-in callback. Close other sign-in windows or applications using port 1455, then retry.");
+  // The loopback listener runs on its own thread: the game loop can block in
+  // native rendering calls while the browser is in front, which would leave
+  // an in-process server accepting connections it never answers.
+  const worker = new Worker(new URL("./auth-worker.ts", import.meta.url), { workerData: { port: options.callbackPort ?? 1455, state } });
+  let terminating: Promise<number> | null = null;
+  const terminate = (): Promise<number> => { terminating ??= worker.terminate(); return terminating; };
+  worker.on("message", (value: unknown) => {
+    if (!isRecord(value) || typeof value["kind"] !== "string") { rejectReady(new LlmSettingsError("Sign-in failed.")); rejectCode(new LlmSettingsError("Sign-in failed.")); return; }
+    switch (value["kind"]) {
+      case "ready": {
+        const readyPort = value["port"];
+        if (typeof readyPort === "number" && Number.isInteger(readyPort) && readyPort > 0 && readyPort <= 65535) resolveReady(readyPort);
+        else { rejectReady(listenFailure()); rejectCode(listenFailure()); }
+        return;
       }
-      const code = url.searchParams.get("code");
-      if (url.searchParams.has("error") || !code) {
-        rejectCode(new LlmSettingsError("Subscription sign-in was not authorized."));
-        return new Response("Sign-in was not authorized.", { status: 400 });
+      case "listen-error": rejectReady(listenFailure()); rejectCode(listenFailure()); return;
+      case "code": {
+        const code = value["code"];
+        if (typeof code === "string" && code !== "") resolveCode(code);
+        else rejectCode(new LlmSettingsError("Subscription sign-in was not authorized."));
+        return;
       }
-      resolveCode(code);
-      return new Response("Authorization received. You can return to the game.", { headers: { Connection: "close" } });
-    },
+      case "state-mismatch": rejectCode(new LlmSettingsError("Subscription sign-in state mismatch.")); return;
+      case "denied": rejectCode(new LlmSettingsError("Subscription sign-in was not authorized.")); return;
+      case "stopped": resolveStopped(); return;
+      default: rejectReady(new LlmSettingsError("Sign-in failed.")); rejectCode(new LlmSettingsError("Sign-in failed.")); return;
+    }
   });
-  const redirect = `http://localhost:${server.port}/auth/callback`;
+  worker.on("error", () => { rejectReady(new LlmSettingsError("Sign-in failed.")); rejectCode(new LlmSettingsError("Sign-in failed.")); resolveStopped(); });
+  worker.on("exit", () => { rejectReady(new LlmSettingsError("Sign-in failed.")); rejectCode(new LlmSettingsError("Sign-in failed.")); resolveStopped(); });
   const controller = new AbortController();
-  const stop = (): void => { controller.abort(); rejectCode(cancelled()); void server.stop(true); };
+  const stop = (): void => { controller.abort(); rejectReady(cancelled()); rejectCode(cancelled()); };
   signal.addEventListener("abort", stop, { once: true });
   if (signal.aborted) stop();
   let timedOut = false;
-  const timeout = setTimeout(() => { timedOut = true; controller.abort(); rejectCode(new LlmSettingsError("Subscription sign-in timed out.")); void server.stop(true); }, options.callbackTimeoutMs ?? 180_000);
+  const timeout = setTimeout(() => { timedOut = true; controller.abort(); rejectReady(new LlmSettingsError("Subscription sign-in timed out.")); rejectCode(new LlmSettingsError("Subscription sign-in timed out.")); }, options.callbackTimeoutMs ?? 180_000);
   try {
+    const callbackPort = await ready;
+    const redirect = `http://localhost:${callbackPort}/auth/callback`;
     const url = new URL(options.authorizeUrl ?? "https://auth.openai.com/oauth/authorize");
     for (const [key, value] of Object.entries({ response_type: "code", client_id: CLIENT_ID, redirect_uri: redirect,
       scope: "openid profile email offline_access", state, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256",
@@ -125,7 +146,8 @@ export async function loginSubscription(options: SubscriptionAuthOptions, signal
     if ("error" in result) throw result.error;
     clearTimeout(timeout);
     controller.abort();
-    await server.stop(false);
+    worker.postMessage({ kind: "stop" });
+    await Promise.race([stopped, Bun.sleep(2000)]);
     checkAbort(signal);
     return await tokenRequest(options, new URLSearchParams({ grant_type: "authorization_code", client_id: CLIENT_ID, redirect_uri: redirect, code: result.code, code_verifier: verifier }), signal);
   } catch (error) {
@@ -133,14 +155,15 @@ export async function loginSubscription(options: SubscriptionAuthOptions, signal
     if (timedOut) throw new LlmSettingsError("Subscription sign-in timed out. Try again.");
     if (error instanceof LlmSettingsError) throw error;
     throw new LlmSettingsError("Subscription sign-in failed. Try again.");
-  } finally { clearTimeout(timeout); signal.removeEventListener("abort", stop); await server.stop(true); }
+  } finally {
+    clearTimeout(timeout); signal.removeEventListener("abort", stop);
+    // Termination alone leaves the worker's listening socket open in this process.
+    worker.postMessage({ kind: "stop", force: true });
+    await Promise.race([stopped, Bun.sleep(500)]);
+    await terminate();
+  }
 }
 
 export function refreshSubscription(options: SubscriptionAuthOptions, credential: SubscriptionCredential, signal: AbortSignal): Promise<SubscriptionCredential> {
   return tokenRequest(options, new URLSearchParams({ grant_type: "refresh_token", client_id: CLIENT_ID, refresh_token: credential.refreshToken }), signal, credential);
-}
-
-function startListener(options: { hostname: string; port: number; fetch: (request: Request) => Response }): Bun.Server<undefined> {
-  try { return Bun.serve(options); }
-  catch { throw new LlmSettingsError("Could not open the local sign-in callback. Close other sign-in windows or applications using port 1455, then retry."); }
 }

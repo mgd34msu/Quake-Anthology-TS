@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, constants, copyFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { version } from "../package.json";
 import { LlmSettingsService } from "./llm/settings.ts";
@@ -20,6 +20,9 @@ export function writeCrashLog(error: unknown, argv: readonly string[], directory
   } catch { /* The stderr report below is the fallback. */ }
 }
 
+/** LLM credentials live with the other shared user settings, never beside the executable. */
+export function llmSettingsDirectory(): string { return resolve(dirname(defaultUserContentRoot()), "settings"); }
+
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
   process.on("unhandledRejection", error => { writeCrashLog(error, argv); process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`); process.exit(1); });
   process.on("uncaughtException", error => { writeCrashLog(error, argv); process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`); process.exit(1); });
@@ -37,13 +40,25 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
       for (const product of catalog.products) process.stdout.write(`${product.expectation.id}\t${product.availability.kind}\t${product.expectation.title}\n`);
       return 0;
     }
+    // LLM credentials are user settings, not game data: the executable folder
+    // (game files) may be read-only, so they live with the other shared settings.
+    const llmDirectory = llmSettingsDirectory();
+    const legacyLlmDirectory = Bun.main.startsWith("/$bunfs/") || Bun.main.startsWith("B:/~BUN/") ? dirname(process.execPath) : process.cwd();
+    if (legacyLlmDirectory !== llmDirectory) {
+      try {
+        mkdirSync(llmDirectory, { recursive: true });
+        for (const name of ["llm.json", "chatgpt.key", "other.key", "other.service"]) {
+          try { copyFileSync(resolve(legacyLlmDirectory, name), resolve(llmDirectory, name), constants.COPYFILE_EXCL); } catch { /* Missing legacy file or already migrated. */ }
+        }
+      } catch { /* The settings service reports save failures with context. */ }
+    }
     const llm = command.kind !== "menu" && command.options.dedicated ? undefined : await LlmSettingsService.open({
       auth: { openBrowser: async (url, signal) => {
         if (signal.aborted) return;
         const { openSdlUrl } = await import("./platform/sdl.ts");
         if (!signal.aborted) openSdlUrl(url);
       } },
-      baseDirectory: Bun.main.startsWith("/$bunfs/") || Bun.main.startsWith("B:/~BUN/") ? dirname(process.execPath) : process.cwd(),
+      baseDirectory: llmDirectory,
     });
     try {
       const host = { ...(llm === undefined ? {} : { llm }), print: (text: string): undefined => { recentOutput.push(text); process.stdout.write(text); return undefined; } };

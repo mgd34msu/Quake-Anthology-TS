@@ -171,6 +171,23 @@ describe("subscription OAuth", () => {
     expect(service.read().providers["chatgpt-subscription"].configured).toBe(true);
   });
 
+  test("callback listener answers while the game thread is blocked", async () => {
+    let callbackStatus = 0;
+    const { service } = await fixture({ callbackPort: 0, callbackTimeoutMs: 8_000, fetch: async () => tokens(), openBrowser: async url => {
+      const target = callbackUrl(url).toString();
+      const browser = Bun.spawn(["bash", "-c", `sleep 0.3; curl -sS -m 1 -o /dev/null -w %{http_code} "${target}"`], { stdout: "pipe", stderr: "pipe" });
+      const answered = (async () => { callbackStatus = Number(await new Response(browser.stdout).text()); await browser.exited; })();
+      const blockedUntil = performance.now() + 2000;
+      let sink = 0;
+      while (performance.now() < blockedUntil) sink += Math.sqrt(sink + 1);
+      if (sink === -1) throw new Error("unreachable");
+      await answered;
+    } });
+    await service.signInSubscription();
+    expect(callbackStatus).toBe(200);
+    expect(service.read().providers["chatgpt-subscription"].configured).toBe(true);
+  });
+
   test("successful callback sends the browser its full response before closing the listener", async () => {
     const launched = Promise.withResolvers<string>();
     const { service } = await fixture({ callbackPort: 0, fetch: async () => tokens(), openBrowser: async url => { launched.resolve(url); } });
