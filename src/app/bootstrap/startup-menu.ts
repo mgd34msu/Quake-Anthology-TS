@@ -181,59 +181,32 @@ export class StartupMenu {
     const mods = registerModMenu(this.controller, options.model.mods);
     this.disposers.push(mods.dispose);
     this.disposers.push(this.controller.register(session, () => {
-      // Sentence builder: every field on one screen; connectives are drawn in draw().
-      const all = new Map(this.safeRows().map(row => [row.id, row]));
-      const token = (field: StartupSelectionField, rect: { x: number; y: number; width: number }, picker: boolean): UiControl[] => {
-        const row = all.get(field); if (row === undefined) return [];
-        const full = { ...rect, height: 30 };
-        if (!picker && row.id !== "grenades") return [{ id: `ui:startup:${row.id}`, kind: "choice", label: "", rect: full, visible: true, enabled: !this.busy,
-          selected: row.value, choices: row.choices.filter(choice => choice.unavailable === null)
-            .map(choice => ({ id: choice.id, label: this.fit(choice.label, rect.width - 16, 2.2) })),
-          select: (_seat, value) => { this.options.model.select(field, value); return undefined; } }];
-        const control = this.row(row, 0);
-        const selected = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
-        return [{ ...control, label: row.id === "grenades" ? "" : this.fit(selected, rect.width - 16, 2.2), rect: full }];
-      };
-      const line = (rowIndex: number): number => 112 + rowIndex * 38;
+      // Two-column create-game screen: every field on one page. Section
+      // heads, the column divider, and picker values are drawn in draw().
+      const spec = this.builderLayout();
+      const controls: UiControl[] = spec.fields.map(field => field.control);
       const sessionEntries: { readonly control: UiControl; readonly width: number }[] = [
         { control: this.button("hosting", options.model.hosting().kind === "offline" ? "Network: local only" : "Network: hosting", 0, () => {
           this.hostDraft = options.model.hosting(); this.hostPort = String(this.hostDraft.port); this.status = ""; this.controller.openMenu(hostingMenu);
         }), width: 0 },
-        { control: this.button("mods", "Mods", 0, () => this.controller.openMenu(mods.root)), width: 80 },
-        ...(options.browser === undefined ? [] : [{ control: this.button("browse", "Find servers", 0, () => this.controller.openMenu(browserMenu)), width: 104 }]),
-        ...(lobby === null ? [] : [{ control: this.button("local-lobby", "Local lobby", 0, () => this.controller.openMenu(lobby.root)), width: 112 }]),
+        { control: this.button("mods", "Mods", 0, () => this.controller.openMenu(mods.root)), width: 72 },
+        ...(options.browser === undefined ? [] : [{ control: this.button("browse", "Find servers", 0, () => this.controller.openMenu(browserMenu)), width: 118 }]),
+        ...(lobby === null ? [] : [{ control: this.button("local-lobby", "Local lobby", 0, () => this.controller.openMenu(lobby.root)), width: 102 }]),
       ];
-      const sessionButtons: UiControl[] = [];
       {
         const gaps = (sessionEntries.length - 1) * 8;
         const fixed = sessionEntries.reduce((sum, entry) => sum + entry.width, 0);
         let x = 64;
         for (const entry of sessionEntries) {
           const width = entry.width === 0 ? 512 - fixed - gaps : entry.width;
-          sessionButtons.push({ ...entry.control, rect: { x, y: line(7), width, height: 30 } });
+          controls.push({ ...entry.control, rect: { x, y: 392, width, height: 24 } });
           x += width + 8;
         }
       }
-      const controls: UiControl[] = [
-        ...token("product", { x: 128, y: line(0), width: 448 }, true),
-        ...token("mapProduct", { x: 184, y: line(1), width: 196 }, true),
-        ...token("map", { x: 420, y: line(1), width: 156 }, true),
-        ...token("character", { x: 216, y: line(2), width: 196 }, false),
-        ...token("model", { x: 428, y: line(2), width: 148 }, true),
-        ...token("movement", { x: 196, y: line(3), width: 176 }, false),
-        ...token("weapons", { x: 428, y: line(3), width: 148 }, false),
-        ...token("enemies", { x: 156, y: line(4), width: 264 }, true),
-        ...token("seats", { x: 428, y: line(4), width: 56 }, false),
-        ...token("mode", { x: 96, y: line(5), width: 150 }, false),
-        ...token("rules", { x: 296, y: line(5), width: 124 }, false),
-        ...token("skill", { x: 452, y: line(5), width: 124 }, false),
-        ...token("grapple", { x: 112, y: line(6), width: 110 }, false),
-        ...token("grappleStyle", { x: 278, y: line(6), width: 130 }, false),
-        ...token("grenades", { x: 520, y: line(6), width: 56 }, true),
-        ...sessionButtons,
-        { ...this.button("play", options.model.hosting().kind === "offline" ? "Play" : "Start server", 0, options.play), rect: { x: 64, y: line(8), width: 248, height: 30 } },
-        { ...this.button("back", "Back", 0, () => this.controller.closeMenu()), rect: { x: 328, y: line(8), width: 248, height: 30 } },
-      ];
+      controls.push(
+        { ...this.button("back", "Back", 0, () => this.controller.closeMenu()), rect: { x: 64, y: 422, width: 248, height: 28 } },
+        { ...this.button("play", options.model.hosting().kind === "offline" ? "Play" : "Start server", 0, options.play), rect: { x: 328, y: 422, width: 248, height: 28 } },
+      );
       return { id: session, title: "", fullScreen: false, controls, open: () => undefined, close: () => undefined };
     }));
     this.register(hostingMenu, () => [
@@ -419,6 +392,72 @@ export class StartupMenu {
       this.rosterPage = 0; this.setStatus(""); this.controller.openMenu(rosterMenu);
     }).catch((error: unknown) => this.setStatus(error instanceof Error ? error.message : String(error)));
   }
+  /** Compact value label for builder rows; pickers still show full names. */
+  private shortValue(label: string): string {
+    return label.replace("Quake III Arena", "Q3A").replace("Quake II", "Q2").replace(/^Quake(?= |$)/, "Q1")
+      .replace(" (classic)", " classic").replace(" (rerelease)", " rerelease").replace(" authored monsters", " monsters").replace(/ monsters$/, "");
+  }
+  /** One-page create-game layout: two columns of label/value field rows. */
+  private builderLayout(): {
+    readonly fields: readonly { readonly control: UiControl; readonly rect: { x: number; y: number; width: number; height: number }; readonly label: string;
+      readonly picker: { readonly rect: { x: number; y: number; width: number; height: number }; readonly value: string } | null }[];
+    readonly heads: readonly { readonly x: number; readonly y: number; readonly label: string }[];
+  } {
+    const all = new Map(this.safeRows().map(row => [row.id, row]));
+    const sections: readonly { readonly title: string; readonly x: number; readonly startY: number;
+      readonly fields: readonly { readonly field: StartupSelectionField; readonly label: string; readonly picker: boolean }[] }[] = [
+      { title: "WORLD", x: 64, startY: 116, fields: [
+        { field: "product", label: "Game", picker: true },
+        { field: "mapProduct", label: "Map set", picker: true },
+        { field: "map", label: "Map", picker: true },
+      ] },
+      { title: "PLAYER", x: 64, startY: 226, fields: [
+        { field: "character", label: "Character", picker: false },
+        { field: "model", label: "Model", picker: true },
+        { field: "movement", label: "Movement", picker: false },
+        { field: "weapons", label: "Weapons", picker: false },
+      ] },
+      { title: "MATCH", x: 328, startY: 116, fields: [
+        { field: "enemies", label: "Monsters", picker: true },
+        { field: "seats", label: "Players", picker: false },
+        { field: "mode", label: "Mode", picker: false },
+        { field: "rules", label: "Rules", picker: false },
+        { field: "skill", label: "Difficulty", picker: false },
+      ] },
+      { title: "KIT", x: 328, startY: 282, fields: [
+        { field: "grapple", label: "Hook", picker: false },
+        { field: "grappleStyle", label: "Hook style", picker: false },
+        { field: "grenades", label: "Grenades", picker: false },
+      ] },
+    ];
+    const fields: { control: UiControl; rect: { x: number; y: number; width: number; height: number }; label: string;
+      picker: { rect: { x: number; y: number; width: number; height: number }; value: string } | null }[] = [];
+    const heads: { x: number; y: number; label: string }[] = [];
+    for (const section of sections) {
+      const present = section.fields.filter(spec => all.has(spec.field));
+      if (present.length === 0) continue;
+      heads.push({ x: section.x, y: section.startY, label: section.title });
+      present.forEach((spec, index) => {
+        const row = all.get(spec.field);
+        if (row === undefined) return;
+        const rect = { x: section.x, y: section.startY + 20 + index * 28, width: 248, height: 26 };
+        const valueWidth = rect.width - this.measure(spec.label, 1.8) - 46;
+        if (spec.picker) {
+          const selected = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
+          fields.push({ control: { ...this.row(row, 0), label: "", rect }, rect, label: spec.label,
+            picker: { rect, value: `${this.fit(this.shortValue(selected), valueWidth - 14, 2.2)} >` } });
+        } else if (row.id === "grenades") {
+          fields.push({ control: { ...this.row(row, 0), label: "", rect }, rect, label: spec.label, picker: null });
+        } else {
+          fields.push({ control: { id: `ui:startup:${row.id}`, kind: "choice", label: "", rect, visible: true, enabled: !this.busy,
+            selected: row.value, choices: row.choices.filter(choice => choice.unavailable === null)
+              .map(choice => ({ id: choice.id, label: this.fit(this.shortValue(choice.label), valueWidth, 2.6) })),
+            select: (_seat, value) => { this.options.model.select(spec.field, value); return undefined; } }, rect, label: spec.label, picker: null });
+        }
+      });
+    }
+    return { fields, heads };
+  }
   private row(row: StartupSelectionRow, index: number): UiControl {
     const rect = { x: 64, y: 118 + index * 34, width: 512, height: 30 };
     if (row.id === "grapple") return {
@@ -531,17 +570,19 @@ export class StartupMenu {
     commands.push({ kind: "fill", rect: { x: 64, y: 104, width: active === main ? 224 : 512, height: 1 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.65 } });
 
     if (active === session) {
-      const line = (rowIndex: number): number => 112 + rowIndex * 38 + 6;
-      const word = (value: string, x: number, rowIndex: number): void => text(value, x, line(rowIndex), 2, true);
-      word("Play", 64, 0);
-      word("maps from", 64, 1); word("on", 390, 1);
-      word("character from", 64, 2); word(":", 416, 2);
-      word("moving like", 64, 3); word("with", 382, 3);
-      word("against", 64, 4); word("players", 492, 4);
-      word("in", 64, 5); word("with", 254, 5); word("at", 428, 5);
-      word("hook", 64, 6);
-      if (this.safeRows().some(row => row.id === "grappleStyle")) word("style", 230, 6);
-      word("grenades", 416, 6);
+      const spec = this.builderLayout();
+      commands.push({ kind: "fill", rect: { x: 320, y: 120, width: 1, height: 264 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.3 } });
+      for (const head of spec.heads) text(head.label, head.x, head.y, 1.7, true);
+      overlay = true;
+      const focus = this.controller.state().focus;
+      const focusedId = focus.kind === "menu" ? focus.control : null;
+      for (const field of spec.fields) {
+        text(field.label, field.rect.x + 10, field.rect.y + 6, 1.8, focusedId === field.control.id);
+        if (field.picker === null) continue;
+        const { rect, value } = field.picker;
+        text(value, rect.x + rect.width - 10 - this.measure(value, 2.2), rect.y + 5, 2.2, focusedId === field.control.id);
+      }
+      overlay = false;
     }
     if (active === browserMenu && this.options.browser !== undefined && this.status.length === 0) {
       const browser = this.options.browser, selected = browser.rows().find(entry => addressKey(entry.address) === browser.selected);
