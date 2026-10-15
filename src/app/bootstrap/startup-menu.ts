@@ -24,7 +24,7 @@ import type { SeatInputEvent, UiControl, UiDrawCommand, UiDrawContext, UiMenuId 
 import { KeyCode } from "../../input/key-codes.ts";
 import { NativeUiController, menuRow, renderUiCommands } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
-import { menuBackdrop, menuPanel, menuSkin, menuTitleFont } from "../../ui/common/menu-theme.ts";
+import { menuBackdrop, menuPanel, menuSkin, menuText, menuTitleFont } from "../../ui/common/menu-theme.ts";
 import { contains, fitUi, transformUi } from "../../ui/common/layout.ts";
 import { registerSettingsMenus, settingControl } from "../../ui/settings/index.ts";
 import type { SettingBinding } from "../../ui/settings/index.ts";
@@ -152,7 +152,7 @@ export class StartupMenu {
     }));
     this.register(nativeCampaignMenu, () => [
       ...this.nativeCampaigns().map((preset, index) => ({
-        ...this.button(`preset:${preset.id}`, this.fit(`${preset.label}${preset.unavailable === null ? "" : " (unavailable)"}`, 486, 2.6), index, () => {
+        ...this.button(`preset:${preset.id}`, this.fit(`${preset.label}${preset.unavailable === null ? "" : " (unavailable)"}`, 486, menuText.body), index, () => {
           this.nativePreset = preset; this.nativeSkill = preset.defaultSkill; this.nativeArena = undefined; this.status = "";
           if (preset.id !== "q3-baseq3") { this.controller.openMenu(nativeDifficultyMenu); return; }
           this.setStatus("Loading arenas...", true);
@@ -260,7 +260,7 @@ export class StartupMenu {
       const choices = row?.choices ?? [], pages = Math.max(1, Math.ceil(choices.length / 7));
       this.page = Math.min(this.page, pages - 1);
       const controls = choices.slice(this.page * 7, this.page * 7 + 7).map((choice, index) => {
-        const control = this.button(`choice:${choice.id}`, `${row?.value === choice.id ? "> " : ""}${this.fit(`${choice.label}${choice.unavailable === null ? "" : " (unavailable)"}`, 466, 2.6)}`, index, () => {
+        const control = this.button(`choice:${choice.id}`, `${row?.value === choice.id ? "> " : ""}${this.fit(`${choice.label}${choice.unavailable === null ? "" : " (unavailable)"}`, 466, menuText.body)}`, index, () => {
           if (this.monsterField.kind === "class") options.model.selectMonster(this.monsterField.classname, choice.id);
           else if (this.monsterField.kind === "source") options.model.selectMonsterSource(choice.id);
           else options.model.select(this.field, choice.id);
@@ -278,13 +278,13 @@ export class StartupMenu {
       this.rosterPage = Math.min(this.rosterPage, pages - 1);
       const source = options.model.monsterSourceRow(), sourceLabel = source.choices.find(choice => choice.id === source.value)?.label ?? source.value;
       const controls = rows.slice(this.rosterPage * 7, this.rosterPage * 7 + 7).map((row, index) => {
-        return this.button(`monster:${row.classname ?? "default"}`, this.fit(`${row.label}: ${row.effectiveLabel}`, 486, 2.6), index, () => {
+        return this.button(`monster:${row.classname ?? "default"}`, this.fit(`${row.label}: ${row.effectiveLabel}`, 486, menuText.body), index, () => {
           this.monsterField = { kind: "class", classname: row.classname }; this.page = 0; this.controller.openMenu(selectMenu);
         }, true);
       });
       if (pages > 1) controls.push(this.button("previous", "Previous page", 7, () => { this.rosterPage = (this.rosterPage + pages - 1) % pages; }, true),
         this.button("next", `Next page (${this.rosterPage + 1}/${pages})`, 8, () => { this.rosterPage = (this.rosterPage + 1) % pages; }, true));
-      return [{ ...this.button("monster-source", this.fit(`Monster source: ${sourceLabel}`, 486, 2.6), 0, () => {
+      return [{ ...this.button("monster-source", this.fit(`Monster source: ${sourceLabel}`, 486, menuText.body), 0, () => {
         this.monsterField = { kind: "source" }; this.page = 0; this.controller.openMenu(selectMenu);
       }, true), rect: { x: 64, y: 78, width: 512, height: 26 } }, ...controls, this.back()];
     });
@@ -292,7 +292,7 @@ export class StartupMenu {
       const saves = options.saves(), pages = Math.max(1, Math.ceil(saves.rows.length / 5));
       this.savePage = Math.min(this.savePage, pages - 1);
       return [...saves.rows.slice(this.savePage * 5, this.savePage * 5 + 5).map((save, index) => ({
-        ...this.button(`save:${save.id}`, this.fit(`${save.label}  -  ${save.map}`, 486, 2.6), index, () => options.load(save.id), true),
+        ...this.button(`save:${save.id}`, this.fit(`${save.label}  -  ${save.map}`, 486, menuText.body), index, () => options.load(save.id), true),
         rect: { x: 64, y: 118 + index * 46, width: 512, height: 42 },
         enabled: save.unavailable === null && !this.busy,
       })), ...(pages > 1 ? [this.button("older-saves", "Older saves", 7, () => { this.savePage = (this.savePage + 1) % pages; }, true)] : []),
@@ -340,7 +340,7 @@ export class StartupMenu {
       text("server-filter", "Filter", browser.filter, 216, value => { browser.filter = value; this.page = 0; }, () => undefined, 320),
       button("server-sort-filter", browser.hideEmpty || browser.hideFull ? "Filters on" : "Sort/filter", 400, 216, 176, () => this.controller.openMenu(browserOptionsMenu)),
       ...entries.slice(this.page * 3, this.page * 3 + 3).map((entry, index) => button(`server:${addressKey(entry.address)}`,
-        this.fit(`${entry.sources.includes("favorite") ? "* " : ""}${entry.status?.name || browserAddress(entry.address)}  ${entry.status === null ? "?" : `${entry.status.players}/${entry.status.maxPlayers}`}  ${entry.pingMilliseconds === null ? "" : `${Math.round(entry.pingMilliseconds)}ms`}`, 490, 2.6),
+        this.fit(`${entry.sources.includes("favorite") ? "* " : ""}${entry.status?.name || browserAddress(entry.address)}  ${entry.status === null ? "?" : `${entry.status.players}/${entry.status.maxPlayers}`}  ${entry.pingMilliseconds === null ? "" : `${Math.round(entry.pingMilliseconds)}ms`}`, 490, menuText.body),
         64, 252 + index * 34, 512, () => browser.select(addressKey(entry.address)))),
       button("server-page", `Page ${this.page + 1}/${pages}`, 64, 358, 240, () => { this.page = (this.page + 1) % pages; }),
       button("server-favorites", browser.favoritesOnly ? "Favorites only" : "All servers", 320, 358, 256, () => { browser.favoritesOnly = !browser.favoritesOnly; this.page = 0; }),
@@ -403,6 +403,12 @@ export class StartupMenu {
     }
     return low;
   }
+  /** Builder values render at body size, or the single compact grade when a long name needs the room. */
+  private valueScale(value: string, width: number): number {
+    if (this.measure(value, menuText.body) <= width) return menuText.body;
+    if (this.measure(value, menuText.valueCompact) <= width) return menuText.valueCompact;
+    return this.fitScale(value, width, menuText.valueCompact);
+  }
   private prepareBuilderDropdownPage(page: number): void {
     if (this.builderDropdown === null) return;
     this.builderDropdown = { field: this.builderDropdown.field, page };
@@ -423,7 +429,7 @@ export class StartupMenu {
     readonly fields: readonly { readonly control: UiControl; readonly rect: { x: number; y: number; width: number; height: number }; readonly label: string;
       readonly value: { readonly text: string; readonly width: number } | null }[];
     readonly heads: readonly { readonly x: number; readonly y: number; readonly label: string }[];
-    readonly dropdown: { readonly x: number; readonly title: string; readonly page: number; readonly pages: number;
+    readonly dropdown: { readonly x: number; readonly title: string; readonly page: number; readonly pages: number; readonly itemScale: number;
       readonly items: readonly { readonly control: UiControl; readonly label: string; readonly selected: boolean }[] } | null;
   } {
     const all = new Map(this.safeRows().map(row => [row.id, row]));
@@ -467,7 +473,7 @@ export class StartupMenu {
         const row = all.get(spec.field);
         if (row === undefined) return;
         const rect = { x: section.x, y: section.startY + 20 + index * 28, width: 248, height: 26 };
-        const valueWidth = rect.width - this.measure(spec.label, 1.8) - 34;
+        const valueWidth = rect.width - this.measure(spec.label, menuText.label) - 34;
         const enabled = !this.busy && dropdown === null;
         if (spec.picker) {
           const selected = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
@@ -484,12 +490,12 @@ export class StartupMenu {
         } else {
           fields.push({ control: { id: `ui:startup:${row.id}`, kind: "choice", label: "", rect, visible: true, enabled,
             selected: row.value, choices: row.choices.filter(choice => choice.unavailable === null)
-              .map(choice => ({ id: choice.id, label: this.fit(choice.label, valueWidth, 2.6) })),
+              .map(choice => ({ id: choice.id, label: this.fit(choice.label, valueWidth, menuText.body) })),
             select: (_seat, value) => { this.options.model.select(spec.field, value); return undefined; } }, rect, label: spec.label, value: null });
         }
       });
     }
-    let dropdownSpec: { x: number; title: string; page: number; pages: number;
+    let dropdownSpec: { x: number; title: string; page: number; pages: number; itemScale: number;
       items: { control: UiControl; label: string; selected: boolean }[] } | null = null;
     if (dropdown !== null) {
       const row = all.get(dropdown.field);
@@ -497,8 +503,12 @@ export class StartupMenu {
       else {
         const pages = Math.max(1, Math.ceil(row.choices.length / 8));
         const page = Math.min(dropdown.page, pages - 1);
+        let itemScale: number = menuText.item;
+        for (const choice of row.choices)
+          itemScale = Math.min(itemScale, this.fitScale(choice.label, 224, menuText.item));
+        itemScale = Math.max(menuText.valueCompact, itemScale);
         const items: { control: UiControl; label: string; selected: boolean }[] = row.choices.slice(page * 8, page * 8 + 8).map((choice, index) => {
-          const rect = { x: panelX, y: 140 + index * 26, width: 248, height: 24 };
+          const rect = { x: panelX, y: 138 + index * 27, width: 248, height: 26 };
           const selected = row.value === choice.id;
           const control: UiControl = { id: selected ? `ui:startup:${row.id}` : `ui:startup:choice:${choice.id}`, kind: "button", label: "", rect,
             visible: true, enabled: choice.unavailable === null && !this.busy,
@@ -508,15 +518,15 @@ export class StartupMenu {
               if (dropdown.field === "enemies" && choice.id === "custom") this.openRoster();
               return undefined;
             } };
-          return { control, label: `${selected ? "> " : ""}${choice.label}${choice.unavailable === null ? "" : " (unavailable)"}`, selected };
+          return { control, label: `${selected ? "> " : ""}${choice.label}`, selected };
         });
         if (pages > 1) {
           items.push(
-            { control: { ...this.button("previous", "< Prev", 0, () => this.prepareBuilderDropdownPage((page + pages - 1) % pages)), rect: { x: panelX, y: 352, width: 120, height: 22 } }, label: "", selected: false },
-            { control: { ...this.button("next", "Next >", 0, () => this.prepareBuilderDropdownPage((page + 1) % pages)), rect: { x: panelX + 128, y: 352, width: 120, height: 22 } }, label: "", selected: false },
+            { control: { ...this.button("previous", "< Prev", 0, () => this.prepareBuilderDropdownPage((page + pages - 1) % pages)), rect: { x: panelX, y: 357, width: 120, height: 21 } }, label: "", selected: false },
+            { control: { ...this.button("next", "Next >", 0, () => this.prepareBuilderDropdownPage((page + 1) % pages)), rect: { x: panelX + 128, y: 357, width: 120, height: 21 } }, label: "", selected: false },
           );
         }
-        dropdownSpec = { x: panelX, title: row.label, page, pages, items };
+        dropdownSpec = { x: panelX, title: row.label, page, pages, itemScale, items };
       }
     }
     return { fields, heads, dropdown: dropdownSpec };
@@ -534,7 +544,7 @@ export class StartupMenu {
       checked: row.value === "enabled", change: (_seat, enabled) => { this.options.model.select("grenades", enabled ? "enabled" : "disabled"); return undefined; },
     };
     const selected = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
-    return this.button(row.id, this.fit(`${row.label}: ${selected}`, 486, 2.6), index, () => { this.monsterField = { kind: "none" }; this.field = row.id; this.controller.openMenu(selectMenu); this.prepareChoicePage(0); }, true);
+    return this.button(row.id, this.fit(`${row.label}: ${selected}`, 486, menuText.body), index, () => { this.monsterField = { kind: "none" }; this.field = row.id; this.controller.openMenu(selectMenu); this.prepareChoicePage(0); }, true);
   }
   private prepareChoicePage(page: number): void {
     this.page = page;
@@ -613,7 +623,7 @@ export class StartupMenu {
     const colors = accessibleColors(menuSkin(this.options.art.skin.font).colors, appearance);
     const active = this.controller.activeMenu, transform = fitUi(context.binding.safeArea, appearance.menuScale), commands: UiDrawCommand[] = [], overlayCommands: UiDrawCommand[] = [];
     let overlay = false;
-    const text = (value: string, x: number, y: number, scale = 2.2, accent = false, heading = false): void => {
+    const text = (value: string, x: number, y: number, scale: number = menuText.body, accent = false, heading = false): void => {
       (overlay ? overlayCommands : commands).push({ kind: "text", origin: { x, y }, text: value, font: heading ? menuTitleFont : this.options.art.skin.font, scale,
         color: accent ? colors.accent : colors.text, align: "left", shadow: true });
     };
@@ -625,20 +635,20 @@ export class StartupMenu {
       : active === nativeDifficultyMenu ? "Difficulty"
       : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
       : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === browserDetailsMenu ? "Server details" : active === browserOptionsMenu ? "Server filters" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
-    if (!active?.startsWith("menu:settings:") && !active?.startsWith("menu:library:") && !active?.startsWith("menu:bindings:") && !active?.startsWith("menu:mods:") && !active?.startsWith("menu:settings:llm") && !active?.startsWith("menu:settings:display:") && !active?.startsWith("menu:settings:input:") && !active?.startsWith("menu:settings:accessibility:")) text(title, 64, 44, active === main ? 6 : 4, true, true);
-    if (active === this.bindingMenu) text(this.fit(`Player 1 - ${this.options.model.catalog.product(this.options.model.options.product).expectation.title}`, 512, 1.4), 64, 458, 1.4);
+    if (!active?.startsWith("menu:settings:") && !active?.startsWith("menu:library:") && !active?.startsWith("menu:bindings:") && !active?.startsWith("menu:mods:") && !active?.startsWith("menu:settings:llm") && !active?.startsWith("menu:settings:display:") && !active?.startsWith("menu:settings:input:") && !active?.startsWith("menu:settings:accessibility:")) text(title, 64, 44, active === main ? menuText.mainTitle : menuText.title, true, true);
+    if (active === this.bindingMenu) text(this.fit(`Player 1 - ${this.options.model.catalog.product(this.options.model.options.product).expectation.title}`, 512, menuText.small), 64, 458, menuText.small);
 
-    if (active === nativeDifficultyMenu && this.nativePreset !== null) text(this.fit(this.nativePreset.label, 512, 1.6), 64, 86, 1.6);
+    if (active === nativeDifficultyMenu && this.nativePreset !== null) text(this.fit(this.nativePreset.label, 512, menuText.label), 64, 86, menuText.label);
     if (active === nativeCampaignMenu) {
       const unavailable = this.nativeCampaigns().find(preset => preset.unavailable !== null);
-      if (unavailable?.unavailable) text(this.fit(unavailable.unavailable, 512, 1.8), 64, 395, 1.8, true);
+      if (unavailable?.unavailable) text(this.fit(unavailable.unavailable, 512, menuText.label), 64, 395, menuText.label, true);
     }
     if (active === selectMenu && this.status === "") {
       const cursor = this.controller.state().cursor;
       const hovered = this.selectionRow()?.choices.slice(this.page * 7, this.page * 7 + 7).find((_choice, index) => contains(menuRow(index), cursor));
-      if (hovered?.unavailable) text(this.fit(hovered.unavailable, 512, 1.5), 64, 458, 1.5, true);
+      if (hovered?.unavailable) text(this.fit(hovered.unavailable, 512, menuText.small), 64, 458, menuText.small, true);
     }
-    if (active === rosterMenu) text("Map counts shown. * Custom override.", 64, 460, 1.5);
+    if (active === rosterMenu) text("Map counts shown. * Custom override.", 64, 460, menuText.small);
     commands.push({ kind: "fill", rect: { x: 64, y: 104, width: active === main ? 224 : 512, height: 1 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.65 } });
 
     if (active === session) {
@@ -654,25 +664,27 @@ export class StartupMenu {
           { kind: "fill", rect: { x: spec.dropdown.x - 8, y: 381, width: 264, height: 1 }, color: panelColor },
           { kind: "fill", rect: { x: spec.dropdown.x - 8, y: 110, width: 1, height: 272 }, color: panelColor },
           { kind: "fill", rect: { x: spec.dropdown.x + 255, y: 110, width: 1, height: 272 }, color: panelColor });
-        text(spec.dropdown.title.toUpperCase(), spec.dropdown.x, 116, 1.7, true);
+        text(spec.dropdown.title.toUpperCase(), spec.dropdown.x, 116, menuText.section, true);
         if (spec.dropdown.pages > 1) {
           const pageLabel = `${spec.dropdown.page + 1}/${spec.dropdown.pages}`;
-          text(pageLabel, spec.dropdown.x + 248 - this.measure(pageLabel, 1.7), 116, 1.7);
+          text(pageLabel, spec.dropdown.x + 248 - this.measure(pageLabel, menuText.section), 116, menuText.section);
         }
       }
-      for (const head of spec.heads) text(head.label, head.x, head.y, 1.7, true);
+      for (const head of spec.heads) text(head.label, head.x, head.y, menuText.section, true);
       overlay = true;
       for (const field of spec.fields) {
-        text(field.label, field.rect.x + 10, field.rect.y + 6, 1.8, focusedId === field.control.id);
+        text(field.label, field.rect.x + 10, field.rect.y + 6, menuText.label, focusedId === field.control.id);
         if (field.value === null) continue;
-        const scale = this.fitScale(field.value.text, field.value.width, 2.6);
-        text(field.value.text, field.rect.x + field.rect.width - 10 - this.measure(field.value.text, scale), field.rect.y + 5, scale, focusedId === field.control.id);
+        const scale = this.valueScale(field.value.text, field.value.width);
+        const shown = this.measure(field.value.text, scale) <= field.value.width ? field.value.text : this.fit(field.value.text, field.value.width, scale);
+        text(shown, field.rect.x + field.rect.width - 10 - this.measure(shown, scale), field.rect.y + 5, scale, focusedId === field.control.id);
       }
       if (spec.dropdown !== null) {
         for (const item of spec.dropdown.items) {
           if (item.label === "") continue;
-          const rect = item.control.rect, scale = this.fitScale(item.label, rect.width - 20, 2.4);
-          overlayCommands.push({ kind: "text", origin: { x: rect.x + 10, y: rect.y + 5 }, text: item.label, font: this.options.art.skin.font, scale,
+          const rect = item.control.rect, scale = spec.dropdown.itemScale;
+          const itemText = this.measure(item.label, scale) <= rect.width - 20 ? item.label : this.fit(item.label, rect.width - 20, scale);
+          overlayCommands.push({ kind: "text", origin: { x: rect.x + 10, y: rect.y + 5 }, text: itemText, font: this.options.art.skin.font, scale,
             color: item.selected ? colors.accent : item.control.enabled ? colors.text : colors.disabled, align: "left", shadow: true });
         }
       }
@@ -680,24 +692,24 @@ export class StartupMenu {
     }
     if (active === browserMenu && this.options.browser !== undefined && this.status.length === 0) {
       const browser = this.options.browser, selected = browser.rows().find(entry => addressKey(entry.address) === browser.selected);
-      if (browser.rows().length === 0) text(browser.emptyMessage, 64, 430, 1.5);
-      text(this.fit(selected?.status === null || selected === undefined ? browser.status : `${selected.status.map} — ${browser.status}`, 512, 1.8), 64, 450, 1.8);
+      if (browser.rows().length === 0) text(browser.emptyMessage, 64, 430, menuText.small);
+      text(this.fit(selected?.status === null || selected === undefined ? browser.status : `${selected.status.map} — ${browser.status}`, 512, menuText.label), 64, 450, menuText.label);
     }
     if (active === loadMenu) {
       const saves = this.options.saves();
-      if (saves.rows.length === 0) { text("No saved games", 64, 138, 2.5); text("Your saved games will appear here.", 64, 174, 1.8); }
+      if (saves.rows.length === 0) { text("No saved games", 64, 138, menuText.body); text("Your saved games will appear here.", 64, 174, menuText.label); }
       overlay = true;
       const rows = saves.rows.slice(this.savePage * 5, this.savePage * 5 + 5), state = this.controller.state();
       for (const [index, save] of rows.entries()) {
         const stamp = new Date(save.savedAtMilliseconds).toLocaleString();
-        text(this.fit(`${save.game}  -  ${stamp}`, 486, 1.6), 74, 144 + index * 46, 1.6);
+        text(this.fit(`${save.game}  -  ${stamp}`, 486, menuText.small), 74, 144 + index * 46, menuText.small);
         if (save.unavailable !== null && contains({ x: 64, y: 118 + index * 46, width: 512, height: 42 }, state.cursor))
-          text(this.fit(save.unavailable, 512, 1.6), 64, 360, 1.6, true);
+          text(this.fit(save.unavailable, 512, menuText.small), 64, 360, menuText.small, true);
       }
-      if (saves.error !== null) text(this.fit(saves.error, 512, 1.5), 64, 390, 1.5);
+      if (saves.error !== null) text(this.fit(saves.error, 512, menuText.small), 64, 390, menuText.small);
     }
     overlay = false;
-    if (this.status.length !== 0) text(this.fit(this.status, 512, 1.5), 64, 450, 1.5, true);
+    if (this.status.length !== 0) text(this.fit(this.status, 512, menuText.small), 64, 450, menuText.small, true);
     renderUiCommands(context, [backdrop, panel, ...commands.map(command => transformUi(command, transform))], { text: this.text, white: this.options.art.white,
       picture: resource => this.options.art.picture(resource), emit, material });
     renderUiCommands(context, this.controller.draw(context), { text: this.text, white: this.options.art.white,

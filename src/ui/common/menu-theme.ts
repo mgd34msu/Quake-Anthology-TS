@@ -4,8 +4,24 @@ import type { UiSkin } from "./skin.ts";
 import { fitUi, transformUi } from "./layout.ts";
 
 export const menuTitleFont: ResourceId = "resource:engine-menu:title";
+/**
+ * The frontend type scale. Every text draw in the startup menu uses one of
+ * these sizes; body matches the controller skin so custom-drawn text and
+ * control text render at the same size. Values use body, falling back to the
+ * single compact grade when a long name cannot fit its row.
+ */
+export const menuText = {
+  mainTitle: 6,
+  title: 4,
+  section: 1.7,
+  label: 1.8,
+  body: 2.6,
+  valueCompact: 2.05,
+  item: 2.4,
+  small: 1.5,
+} as const;
 export function menuSkin(font: ResourceId): UiSkin {
-  return { font, titleFont: menuTitleFont, titleScale: 4, fontScale: 2.6, lineHeight: 24,
+  return { font, titleFont: menuTitleFont, titleScale: menuText.title, fontScale: menuText.body, lineHeight: 24,
     background: null, panel: null, focus: null, button: null,
     colors: { text: { x: 0.9, y: 0.92, z: 0.94, w: 1 }, disabled: { x: 0.48, y: 0.5, z: 0.53, w: 1 },
       accent: { x: 1, y: 0.73, z: 0.35, w: 1 }, panel: { x: 0, y: 0, z: 0, w: 0 },
