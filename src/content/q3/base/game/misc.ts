@@ -1,7 +1,7 @@
 // Ported from id Software's code/game/g_misc.c teleport and portal handlers,
 // and code/game/g_utils.c:G_KillBox. GPL-2.0-or-later, id Software 1999-2005.
 import { add3, normalize3, scale3, sub3, vec3 } from "../../../../core/math.ts";
-import { qvmAngleVectors } from "../../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import type { ServerWorld } from "../world.ts";
 import { EntityEvent, EntityType, Team } from "../shared/definitions.ts";

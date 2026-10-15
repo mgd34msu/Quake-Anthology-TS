@@ -1,7 +1,7 @@
 import type { UiModelPaintRequest, UiRuntimeCinematics, UiCinematicAsset } from "../../../ui/common/legacy/runtime.ts";
 import type { TextDrawSink } from "../../../text/draw2d.ts";
 import { vec3 } from "../../../core/math.ts";
-import { qvmAnglesToAxis } from "../../../core/qvm-math.ts";
+import { qvmAnglesToAxis } from "../../../core/math.ts";
 import { modelBounds } from "./model-access.ts";
 import { createModelEntity, RF_LIGHTING_ORIGIN, RF_NOSHADOW } from "./ref-entity.ts";
 import { createRefdef, RDF_NOWORLDMODEL } from "./refdef.ts";

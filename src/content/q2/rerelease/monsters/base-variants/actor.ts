@@ -1,8 +1,9 @@
 // Rerelease m_actor.cpp. ZeniMax Media, GPL-2.0.
 import { actorDefinition, actorName } from "../../../base/monsters/actor.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../../core/math.ts";
 import { add, integerField, movedir, normalize, numberField, scale, subtract, zero } from "../../../foundation/fields.ts";
 import type { Q2SpawnModule, Q2Touch, Q2Use } from "../../../foundation/host.ts";
-import { anglesVectors, enemyBody, health, vectorAngles } from "../../../foundation/monsters/ai.ts";
+import { enemyBody, health } from "../../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../../foundation/monsters/index.ts";
 import { muzzleOffset } from "../../../foundation/monsters/muzzle.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../../foundation/monsters/types.ts";
@@ -24,7 +25,7 @@ export function createRereleaseActorModule(monsters: Q2Monsters): { readonly def
     if (target === null || target.classname !== "target_actor") {
       game.host.diagnostic(`misc_actor has bad target ${entity.target}`); entity.target = ""; context.state.pauseTime = holdForever; return context.stand();
     }
-    context.state.idealYaw = vectorAngles(subtract(game.body(target).origin, game.body(entity).origin)).y;
+    context.state.idealYaw = vectorToAnglesRule(subtract(game.body(target).origin, game.body(entity).origin), "native-ai").y;
     game.move(entity, { angles: { ...game.body(entity).angles, y: context.state.idealYaw } });
     context.walk(); entity.target = ""; return undefined;
   };
@@ -51,7 +52,7 @@ export function createRereleaseActorModule(monsters: Q2Monsters): { readonly def
     context.state.moveTarget = game.pickTarget(self.target)?.actor.id ?? null; actor.goal ??= context.state.moveTarget;
     if (context.state.moveTarget === null && actor.enemy === null) { context.state.pauseTime = holdForever; return context.stand(); }
     const goal = game.entity(context.state.moveTarget);
-    if (goal !== null && actor.goal === goal.actor.id) context.state.idealYaw = vectorAngles(subtract(game.body(goal).origin, game.body(actor).origin)).y;
+    if (goal !== null && actor.goal === goal.actor.id) context.state.idealYaw = vectorToAnglesRule(subtract(game.body(goal).origin, game.body(actor).origin), "native-ai").y;
     return undefined;
   };
   return {
@@ -72,7 +73,7 @@ export function createRereleaseActorModule(monsters: Q2Monsters): { readonly def
         state.painTime = game.host.now() + 3;
         if (reaction.attacker !== null && game.host.isPlayer(reaction.attacker) && game.host.random() < 0.4) {
           const other = game.host.bodies.read(reaction.attacker);
-          if (other !== null) state.idealYaw = vectorAngles(subtract(other.origin, game.body(entity).origin)).y;
+          if (other !== null) state.idealYaw = vectorToAnglesRule(subtract(other.origin, game.body(entity).origin), "native-ai").y;
           context.setMove(game.host.random() < 0.5 ? "actor_move_flipoff" : "actor_move_taunt");
           const message = recordAt(["Watch it", "#$@*&", "Idiot", "Check your targets"], Math.floor(game.host.random() * 4));
           return game.host.emit({ kind: "print", actor: reaction.attacker, level: "chat", text: `${actorName(entity, game)}: ${message}!\n` });
@@ -82,7 +83,7 @@ export function createRereleaseActorModule(monsters: Q2Monsters): { readonly def
       callbacks: {
         ...actorDefinition.callbacks, actor_dead: dead,
         actor_fire(context) {
-          const { entity, game, state } = context, body = game.body(entity), axes = anglesVectors(body.angles), offset = muzzleOffset("rerelease", 63), enemy = enemyBody(context);
+          const { entity, game, state } = context, body = game.body(entity), axes = angleVectorsRule(body.angles, "native"), offset = muzzleOffset("rerelease", 63), enemy = enemyBody(context);
           const start = add(add(add(body.origin, scale(axes.forward, offset.x)), scale(axes.right, offset.y)), { x: 0, y: 0, z: offset.z });
           let direction = axes.forward;
           if (enemy !== null) {

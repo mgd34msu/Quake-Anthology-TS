@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import type { MovementBodyShape } from "../../movement/body-shape.ts";
 import type { ActorId } from "../../contracts/identity.ts";
@@ -25,7 +26,7 @@ const proceed = (call: QvmFunctionCall): QvmSystemCallResult => call.execution =
 
 /** Equipment changes the original movement decision; source timers, input and weapon dispatch still execute. */
 export class QvmEquipmentMovement {
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly bodyScratch: number;
   private readonly frames: (Frame | null)[] = [];
   constructor(private readonly game: Pick<QvmGame, "module" | "data">, artifact: QvmModuleOptions["artifact"],
@@ -147,5 +148,5 @@ export class QvmEquipmentMovement {
     const result = proceed(call);
     return typeof result === "number" ? finish(result) : result.then(finish);
   }
-  close(): void { for (const remove of this.removals.splice(0).reverse()) remove(); }
+  close(): void { this.removals.runReverse(); }
 }

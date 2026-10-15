@@ -1,6 +1,7 @@
 /* Original Rogue m_soldier.c behavior. ZeniMax Media, GPL-2.0-or-later. */
 import { add, dot, normalize, scale, subtract } from "../../foundation/fields.ts";
-import { anglesVectors, enemyBody, enemyEye, finishDodge, health, projectFlash, targetDistance, vectorAngles, visible } from "../../foundation/monsters/ai.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
+import { enemyBody, enemyEye, finishDodge, health, projectFlash, targetDistance, visible } from "../../foundation/monsters/ai.ts";
 import { soldierCallbacks, soldierDie, soldierRun, soldierStand, soldierWalk } from "../../foundation/monsters/soldier.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
@@ -22,13 +23,13 @@ function fire(context: MonsterContext, input: number): undefined {
   if (enemyBody(context) === null) { state.holdFrame = false; return undefined; }
   const index = Math.abs(input), flash = recordAt(entity.skin < 2 ? blasterFlashes : entity.skin < 4 ? shotgunFlashes : machinegunFlashes, index);
   const start = projectFlash(context, muzzleOffset(game.options.edition, flash));
-  let aim = anglesVectors(game.body(entity).angles).forward;
+  let aim = angleVectorsRule(game.body(entity).angles, "native").forward;
   if (index !== 5 && index !== 6) {
     const eye = enemyEye(context);
     if (eye === null) return undefined;
     const direction = subtract(eye, start);
     if (input < 0 && dot(normalize(direction), aim) < 0.9) return undefined;
-    const axes = anglesVectors(vectorAngles(direction)), spread = game.options.skill < 2 ? 1000 : 500;
+    const axes = angleVectorsRule(vectorToAnglesRule(direction, "native-ai"), "native"), spread = game.options.skill < 2 ? 1000 : 500;
     aim = normalize(add(scale(axes.forward, 8192), add(scale(axes.right, (game.host.random() * 2 - 1) * spread), scale(axes.up, (game.host.random() * 2 - 1) * spread * 0.5))));
     const trace = game.host.trace({ start, end: eye, bounds: null, ignore: entity.actor.id, mask: 0x6000003 });
     if (trace.hit.kind === "actor" && trace.hit.actor !== entity.enemy) return undefined;

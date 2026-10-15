@@ -1,4 +1,5 @@
 import type { ProjectileRole, WeaponTrajectoryUpdate } from "../../../../contracts/weapon-behavior.ts";
+import { angleVectorsRule, vectorToAnglesRule, lerpAngleRule } from "../../../../core/math.ts";
 import type { Q2WeaponsCheckpoint } from "./checkpoint.ts";
 import { restoreQ2Actor } from "../checkpoint.ts";
 import type { Q2WeaponOwner } from "./types.ts";
@@ -11,7 +12,7 @@ import type { TraceResult } from "../../../../contracts/scene.ts";
 import type { TouchContact } from "../../../../contracts/world.ts";
 import { add, dot, length, normalize, scale, subtract, zero } from "../fields.ts";
 import type { Q2Entity, Q2GameServices, Q2Think, Q2Touch } from "../host.ts";
-import { angleVectors, lerpAngle, vectorAngles } from "./vectors.ts";
+
 import { q2ActorShotMask } from "./projection.ts";
 import { freeQ2Entity as free } from "../callbacks.ts";
 import type { Q2CallbackDefinitions } from "../callbacks.ts";
@@ -149,7 +150,7 @@ export class Q2Ballistics {
     if (target === null || !game.host.isMonster(target) || (game.host.combat.read(target)?.health ?? 0) <= 0) return undefined;
     const body = game.host.bodies.read(target);
     if (body === null) return undefined;
-    if (dot(normalize(subtract(game.body(self).origin, body.origin)), angleVectors(body.angles).forward) <= 0.3) return undefined;
+    if (dot(normalize(subtract(game.body(self).origin, body.origin)), angleVectorsRule(body.angles, "native").forward) <= 0.3) return undefined;
     return this.hooks.dodge(target, self.actor.id, (length(subtract(trace.end, start)) - body.bounds.max.x) / speed, trace);
   }
 
@@ -165,7 +166,7 @@ export class Q2Ballistics {
   private fireLead(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, kick: number, horizontalSpread: number, verticalSpread: number, mod: number, impact: string): undefined {
     const rerelease = game.options.edition === "rerelease", shotMask = this.shotMask(self, game);
     const spread = (origin: Vec3, aim: Vec3, factor: number): Vec3 => {
-      const axes = angleVectors(vectorAngles(aim));
+      const axes = angleVectorsRule(vectorToAnglesRule(aim, "native"), "native");
       const r = (game.host.random() * 2 - 1) * horizontalSpread * factor;
       const u = (game.host.random() * 2 - 1) * verticalSpread * factor;
       return add(add(add(origin, scale(axes.forward, 8192)), scale(axes.right, r)), scale(axes.up, u));
@@ -270,7 +271,7 @@ export class Q2Ballistics {
       if (!canHurt(game, actor)) return false;
       target = game.host.isMonster(actor) || game.host.isPlayer(actor) ? enemy : actor;
     }
-    const axes = angleVectors(body.angles), impact = add(add(add(body.origin, scale(axes.forward, range)), scale(axes.right, side)), scale(axes.up, aim.z));
+    const axes = angleVectorsRule(body.angles, "native"), impact = add(add(add(body.origin, scale(axes.forward, range)), scale(axes.right, side)), scale(axes.up, aim.z));
     game.damage(target, self, self.actor.id, damage, Math.trunc(kick / 2), subtract(impact, targetBody.origin), impact, zero, MOD.hit, 8);
     if (!game.host.isMonster(target) && !game.host.isPlayer(target)) return false;
     const owned = game.host.actors.resolveOwned(enemy), current = game.host.bodies.read(enemy);
@@ -293,7 +294,7 @@ export class Q2Ballistics {
     projectile.clipMask = clipMask; projectile.projectile = true;
     projectile.dodgeable = game.options.edition === "rerelease";
     projectile.movedir = direction;
-    game.move(projectile, { origin: start, angles: vectorAngles(direction), velocity: scale(direction, speed), bounds: { min: zero, max: zero } }, false);
+    game.move(projectile, { origin: start, angles: vectorToAnglesRule(direction, "native"), velocity: scale(direction, speed), bounds: { min: zero, max: zero } }, false);
     return projectile;
   }
 
@@ -336,7 +337,7 @@ export class Q2Ballistics {
   }
 
   private launchGrenade(owner: ActorId, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, timer: number, radius: number, hand: boolean, held: boolean, monster: boolean, ownerGravity: number, clipMask: number, adjustment?: Q2GrenadeAdjustment): Q2Entity {
-    const rerelease = game.options.edition === "rerelease", axes = angleVectors(vectorAngles(direction));
+    const rerelease = game.options.edition === "rerelease", axes = angleVectorsRule(vectorToAnglesRule(direction, "native"), "native");
     const model = hand ? rerelease ? "grenade3" : "grenade2" : rerelease && !monster ? "grenade4" : "grenade";
     const grenade = this.projectileForActor(owner, game, hand ? rerelease ? "hand_grenade" : "hgrenade" : "grenade", start, direction, speed, `models/objects/${model}/tris.md2`, 32 + (rerelease && monster && !hand ? 2 ** 37 : 0), clipMask);
     grenade.damageRadius = radius; grenade.damage = damage; grenade.speed = speed; grenade.spawnflags = hand ? held ? 3 : 1 : 0;
@@ -349,7 +350,7 @@ export class Q2Ballistics {
     if (rerelease && !hand && !monster) {
       grenade.timestamp = game.host.now() + timer;
       grenade.renderFlags |= 1;
-      game.move(grenade, { angles: vectorAngles(game.body(grenade).velocity) }, false);
+      game.move(grenade, { angles: vectorToAnglesRule(game.body(grenade).velocity, "native") }, false);
       game.schedule(grenade, game.host.frameSeconds(), this.grenadeUpdate);
     } else game.schedule(grenade, Math.max(0, timer), this.grenadeExplode);
     if (hand) this.loop(grenade, game, "weapons/hgrenc1b.wav", true);
@@ -432,8 +433,8 @@ export class Q2Ballistics {
         const body = current.body(entity), velocitySquared = dot(body.velocity, body.velocity);
         if (velocitySquared !== 0) {
           const fraction = Math.min(1, velocitySquared / (entity.speed * entity.speed));
-          const angles = vectorAngles(body.velocity);
-          current.move(entity, { angles: { x: lerpAngle(body.angles.x, angles.x, fraction), y: angles.y, z: body.angles.z + current.host.frameSeconds() * 360 * fraction } });
+          const angles = vectorToAnglesRule(body.velocity, "native");
+          current.move(entity, { angles: { x: lerpAngleRule(body.angles.x, angles.x, fraction, "delta"), y: angles.y, z: body.angles.z + current.host.frameSeconds() * 360 * fraction } });
         }
         return current.schedule(entity, current.host.frameSeconds(), this.grenadeUpdate);
 

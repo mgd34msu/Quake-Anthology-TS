@@ -1,7 +1,8 @@
 // Rerelease m_parasite.cpp. ZeniMax Media, GPL-2.0.
 import { parasiteDefinition } from "../../../base/monsters/parasite.ts";
+import { angleVectorsRule } from "../../../../../core/math.ts";
 import { add, scale } from "../../../foundation/fields.ts";
-import { anglesVectors, clearShot, corpse, health, runAi } from "../../../foundation/monsters/ai.ts";
+import { clearShot, corpse, health, runAi } from "../../../foundation/monsters/ai.ts";
 import { throwGib } from "../../../foundation/monsters/gibs.ts";
 import type { Q2Monsters } from "../../../foundation/monsters/index.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../../foundation/monsters/types.ts";
@@ -11,7 +12,7 @@ import { createProboscis } from "./proboscis.ts";
 
 function startRun(context: MonsterContext): undefined { return context.setMove(context.state.standGround ? "parasite_move_stand" : "parasite_move_start_run"); }
 function jump(context: MonsterContext, up: boolean): undefined {
-  const body = context.game.body(context.entity), axes = anglesVectors(body.angles);
+  const body = context.game.body(context.entity), axes = angleVectorsRule(body.angles, "native");
   return context.game.move(context.entity, { velocity: add(body.velocity, add(scale(axes.forward, up ? 200 : 100), scale(axes.up, up ? 450 : 300))) });
 }
 export function createRereleaseParasiteDefinition(monsters: Q2Monsters): Q2MonsterDefinition {

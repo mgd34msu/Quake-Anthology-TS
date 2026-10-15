@@ -4,6 +4,7 @@ import { argument, count, fillBytes, integer, moveBytes, pointer, readPointer, r
 import type { WindowsServiceHost } from "./contracts.ts";
 import { UnsupportedWindowsImport } from "./contracts.ts";
 import { installWindowsFormat } from "../common/format/services.ts";
+import { float32Bits, float32FromBits } from "../../../foundation/binary.ts";
 
 export function installCrt(host: WindowsServiceHost): void {
   const memory = host.memory, width = memory.pointerBytes;
@@ -125,9 +126,9 @@ function installMath(host: WindowsServiceHost, service: (family: string, name: s
   service("math", "pow", ["float64", "float64"], "float64", (_context, args) => ({ kind: "float64", value: Math.pow(real(args, 0), real(args, 1)) }));
   service("math", "nextafterf", ["float32", "float32"], "float32", (_context, args) => {
     const a = Math.fround(real(args, 0)), b = Math.fround(real(args, 1)); if (Number.isNaN(a) || Number.isNaN(b)) return { kind: "float32", value: a + b }; if (a === b) return { kind: "float32", value: b };
-    const view = new DataView(new ArrayBuffer(4)); view.setFloat32(0, a, true); let bits = view.getUint32(0, true);
+    let bits = float32Bits(a);
     if (a === 0) bits = b < 0 ? 0x80000001 : 1; else bits = (bits + ((b > a) === (a > 0) ? 1 : -1)) >>> 0;
-    view.setUint32(0, bits, true); return { kind: "float32", value: view.getFloat32(0, true) };
+    return { kind: "float32", value: float32FromBits(bits) };
   });
   service("math", "modf", ["float64", "pointer"], "float64", (_context, args) => {
     const a = real(args, 0), whole = Math.trunc(a), bytes = new Uint8Array(8); new DataView(bytes.buffer).setFloat64(0, whole, true); host.memory.write(requiredPointer(args, 1), bytes);

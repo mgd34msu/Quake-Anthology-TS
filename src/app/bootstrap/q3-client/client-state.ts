@@ -13,6 +13,7 @@ import type { ApplicationQ3ClientSource } from "../q3-client.ts";
 export interface LocalQ3ClientBindings {
   assertCurrent(): void;
   actorAt(number: number): ActorId;
+  soundActor?(number: number): ActorId | null;
   systemInfo(info: string): void | Promise<void>;
   mapRestart(): void;
   levelShot(): void;
@@ -60,6 +61,7 @@ export class LocalQ3ClientState implements Q3ClientState {
       systemInfo: () => { this.assertCurrent(); return this.gameState.get(1) ?? ""; },
       getServerCommand: number => this.getServerCommand(number),
       actorAt: number => { this.assertCurrent(); return bindings.actorAt(number); },
+      ...(bindings.soundActor === undefined ? {} : { soundActor: (number: number) => { this.assertCurrent(); const soundActor = bindings.soundActor; return soundActor === undefined ? null : soundActor(number); } }),
       snapshotPing: number => this.snapshotPing(number),
     };
   }

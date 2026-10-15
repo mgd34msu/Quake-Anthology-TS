@@ -1,8 +1,9 @@
 /* Quake II rogue/m_carrier.c. ZeniMax Media, GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule, vectorToAnglesRule, angleModScaled } from "../../../../core/math.ts";
 import type { Bounds } from "../../../../contracts/math.ts";
 import { add, dot, normalize, scale, subtract } from "../../foundation/fields.ts";
-import { anglesVectors, enemyBody, enemyEye, health, inFront, projectFlash, targetDistance, vectorAngles } from "../../foundation/monsters/ai.ts";
+import { enemyBody, enemyEye, health, inFront, projectFlash, targetDistance } from "../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
 import { recordAt } from "../../foundation/monsters/types.ts";
@@ -19,17 +20,16 @@ function relation(context: MonsterContext, actor: ActorId): { readonly front: bo
   const target = context.game.host.bodies.read(actor);
   if (target === null) return { front: false, back: false, below: false };
   const body = context.game.body(context.entity), direction = normalize(subtract(target.origin, body.origin));
-  const forward = dot(direction, anglesVectors(body.angles).forward);
+  const forward = dot(direction, angleVectorsRule(body.angles, "native").forward);
   return { front: forward > 0.3, back: forward < -0.3, below: -direction.z > 0.95 };
 }
-function anglemod(angle: number): number { return (Math.trunc(angle * 65536 / 360) & 65535) * 360 / 65536; }
 
 export function createCarrierDefinition(monsters: Q2Monsters, services: Q2MissionPackMonsterServices): Q2MonsterDefinition {
   function rocket(context: MonsterContext): undefined {
     const { entity, game } = context, enemy = enemyBody(context);
     if (enemy === null || entity.enemy === null) return undefined;
     const predictive = game.host.isPlayer(entity.enemy) && game.host.random() < 0.5;
-    const right = anglesVectors(game.body(entity).angles).right;
+    const right = angleVectorsRule(game.body(entity).angles, "native").right;
     for (let index = 0; index < 4; index++) {
       const flash = 191 + index, start = projectFlash(context, muzzleOffset(game.options.edition, flash));
       const spread = recordAt([0.4, 0.025, -0.025, -0.4], index);
@@ -148,7 +148,7 @@ export function createCarrierDefinition(monsters: Q2Monsters, services: Q2Missio
         }
       }
       const direction = relation(context, entity.enemy), distance = targetDistance(context);
-      state.idealYaw = vectorAngles(subtract(enemy.origin, game.body(entity).origin)).y;
+      state.idealYaw = vectorToAnglesRule(subtract(enemy.origin, game.body(entity).origin), "native-ai").y;
       if ((direction.back || !direction.front && direction.below) && game.host.now() >= entity.wait) {
         entity.wait = game.host.now() + 2; context.attack(); state.attackState = game.host.random() < 0.6 ? "sliding" : "straight"; return true;
       }
@@ -183,7 +183,7 @@ export function createCarrierDefinition(monsters: Q2Monsters, services: Q2Missio
         const { entity, game } = context, direction = game.host.random() < 0.5 ? -1 : 1, time = Math.trunc((game.host.now() - entity.timestamp) / 0.4);
         const rightSpread = time === 0 ? 0.15 * direction : time === 2 ? -0.15 * direction : 0;
         const upSpread = time === 0 ? 0.1 - 0.1 * direction : time === 2 ? 0.1 + 0.1 * direction : time === 1 || time === 3 ? 0.1 : 0;
-        const start = projectFlash(context, muzzleOffset(game.options.edition, 140)), axes = anglesVectors(game.body(entity).angles);
+        const start = projectFlash(context, muzzleOffset(game.options.edition, 140)), axes = angleVectorsRule(game.body(entity).angles, "native");
         const aim = add(add(normalize(subtract(enemy.origin, start)), scale(axes.right, rightSpread)), scale(axes.up, upSpread));
         const clipped = { ...aim, z: Math.max(-0.5, Math.min(0.15, aim.z)) };
         context.weapons.fireGrenade(entity, game, start, clipped, 50, 600, 2.5, 90, false, false, true);
@@ -205,13 +205,13 @@ export function createCarrierDefinition(monsters: Q2Monsters, services: Q2Missio
       carrier_prep_spawn(context) { coopCheck(context); context.state.manualSteering = true; context.entity.timestamp = context.game.host.now(); context.state.yawSpeed = 10; return machineGun(context); },
       carrier_start_spawn(context) {
         coopCheck(context); const enemy = enemyBody(context); if (enemy === null) return undefined;
-        const time = Math.trunc((context.game.host.now() - context.entity.timestamp) / 0.5), yaw = vectorAngles(subtract(enemy.origin, context.game.body(context.entity).origin)).y;
-        if (time >= 0 && time <= 2) context.state.idealYaw = anglemod(yaw + (time - 1) * 30);
+        const time = Math.trunc((context.game.host.now() - context.entity.timestamp) / 0.5), yaw = vectorToAnglesRule(subtract(enemy.origin, context.game.body(context.entity).origin), "native-ai").y;
+        if (time >= 0 && time <= 2) context.state.idealYaw = angleModScaled(yaw + (time - 1) * 30);
         return machineGun(context);
       },
       carrier_ready_spawn(context) {
         coopCheck(context); machineGun(context);
-        if (Math.abs(anglemod(context.game.body(context.entity).angles.y) - context.state.idealYaw) > 0.1) { context.state.holdFrame = true; context.entity.timestamp += 0.1; return undefined; }
+        if (Math.abs(angleModScaled(context.game.body(context.entity).angles.y) - context.state.idealYaw) > 0.1) { context.state.holdFrame = true; context.entity.timestamp += 0.1; return undefined; }
         context.state.holdFrame = false;
         const point = findRogueSpawnPoint(context.game, projectFlash(context, { x: 105, y: 0, z: -58 }), flyerBounds, 32);
         if (point !== null) rogueSpawnGrow(context.game, point, 0);

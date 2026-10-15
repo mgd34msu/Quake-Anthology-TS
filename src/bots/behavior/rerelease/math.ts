@@ -1,16 +1,10 @@
-// Lifted from quake-1-re-ts src/lib/bot_brain/math.ts at commit f57aadb (U20), the
-// game-agnostic bot brain. Verbatim apart from this line, the import paths
-// that changed with the directory, and the three parameterizations listed
-// in src/server/bots/nav_adapter.ts's header (NAV2-specific graph
-// construction, run/walk speeds, weapon-selection command).
-// Vector and angle arithmetic for the game-agnostic bot brain.
-//
-// A file under src/lib imports nothing from src/ outside src/lib
-// (ARCHITECTURE.md, "Source layout"), so the brain cannot use
-// src/common/mathlib.ts's `Vec3 = Float32Array`. `BotVec3` below is
-// structurally identical to src/lib/nav.ts's `NavVec3`, so a parsed NAV2
-// node position is a `BotVec3` with no conversion; the game binding
-// converts at its own boundary.
+import { add3Double, angleVectorsRule, distance3Double, dot3Double, length3Double, ma3Double, normalize3DoubleOrZero, scale3Double, sub3Double, vectorToAnglesRule } from "../../../core/math.ts";
+// Vector and angle arithmetic for the game-agnostic bot brain, delegating
+// to the unified engine math in src/core/math.ts (double-precision helpers
+// and the "bot" angle rules, bit-identical to the former local formulas).
+// `BotVec3` below is structurally identical to the navigation node vector,
+// so a parsed NAV2 node position is a `BotVec3` with no conversion; the
+// game binding converts at its own boundary.
 
 export interface BotVec3 {
   x: number;
@@ -26,37 +20,23 @@ export function bvecCopy(v: BotVec3): BotVec3 {
   return { x: v.x, y: v.y, z: v.z };
 }
 
-export function bvecAdd(a: BotVec3, b: BotVec3): BotVec3 {
-  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
-}
+export const bvecAdd = add3Double;
 
-export function bvecSub(a: BotVec3, b: BotVec3): BotVec3 {
-  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
-}
+export const bvecSub = sub3Double;
 
-export function bvecScale(v: BotVec3, s: number): BotVec3 {
-  return { x: v.x * s, y: v.y * s, z: v.z * s };
-}
+export const bvecScale = scale3Double;
 
-export function bvecMA(base: BotVec3, scale: number, dir: BotVec3): BotVec3 {
-  return { x: base.x + dir.x * scale, y: base.y + dir.y * scale, z: base.z + dir.z * scale };
-}
+export const bvecMA = ma3Double;
 
-export function bvecDot(a: BotVec3, b: BotVec3): number {
-  return a.x * b.x + a.y * b.y + a.z * b.z;
-}
+export const bvecDot = dot3Double;
 
-export function bvecLength(v: BotVec3): number {
-  return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-}
+export const bvecLength = length3Double;
 
 export function bvecLength2D(v: BotVec3): number {
   return Math.sqrt(v.x * v.x + v.y * v.y);
 }
 
-export function bvecDistance(a: BotVec3, b: BotVec3): number {
-  return bvecLength(bvecSub(a, b));
-}
+export const bvecDistance = distance3Double;
 
 export function bvecDistance2D(a: BotVec3, b: BotVec3): number {
   const dx = a.x - b.x;
@@ -65,11 +45,7 @@ export function bvecDistance2D(a: BotVec3, b: BotVec3): number {
 }
 
 /** Returns a unit-length copy; a zero vector comes back as (0,0,0). */
-export function bvecNormalized(v: BotVec3): BotVec3 {
-  const len = bvecLength(v);
-  if (len === 0) return bvec();
-  return { x: v.x / len, y: v.y / len, z: v.z / len };
-}
+export const bvecNormalized = normalize3DoubleOrZero;
 
 /** Wraps an angle into [0, 360), matching mathlib.ts's anglemod. */
 export function angleMod(a: number): number {
@@ -84,34 +60,19 @@ export function angleDelta(from: number, to: number): number {
 }
 
 const RAD_TO_DEG = 180 / Math.PI;
-const DEG_TO_RAD = Math.PI / 180;
 
 /**
  * The pitch/yaw a view must hold to look along `dir`. Quake's convention:
  * pitch is negative looking up, angles are (pitch, yaw, roll) in degrees.
  */
 export function vectorToAngles(dir: BotVec3): { pitch: number; yaw: number } {
-  if (dir.x === 0 && dir.y === 0) return { pitch: dir.z > 0 ? -90 : 90, yaw: 0 };
-  const yaw = angleMod(Math.atan2(dir.y, dir.x) * RAD_TO_DEG);
-  const forward = Math.sqrt(dir.x * dir.x + dir.y * dir.y);
-  const pitch = -Math.atan2(dir.z, forward) * RAD_TO_DEG;
-  return { pitch, yaw };
+  const angles = vectorToAnglesRule(dir, "bot");
+  return { pitch: angles.x, yaw: angles.y };
 }
 
 /** mathlib.ts's AngleVectors, in this module's own vector type. */
 export function angleVectors(pitch: number, yaw: number, roll: number): { forward: BotVec3; right: BotVec3; up: BotVec3 } {
-  const sy = Math.sin(yaw * DEG_TO_RAD);
-  const cy = Math.cos(yaw * DEG_TO_RAD);
-  const sp = Math.sin(pitch * DEG_TO_RAD);
-  const cp = Math.cos(pitch * DEG_TO_RAD);
-  const sr = Math.sin(roll * DEG_TO_RAD);
-  const cr = Math.cos(roll * DEG_TO_RAD);
-
-  return {
-    forward: { x: cp * cy, y: cp * sy, z: -sp },
-    right: { x: -sr * sp * cy + cr * sy, y: -sr * sp * sy - cr * cy, z: -sr * cp },
-    up: { x: cr * sp * cy + sr * sy, y: cr * sp * sy - sr * cy, z: cr * cp },
-  };
+  return angleVectorsRule({ x: pitch, y: yaw, z: roll }, "bot");
 }
 
 /** The angle, in degrees, between `dir` and the view direction (pitch, yaw). */

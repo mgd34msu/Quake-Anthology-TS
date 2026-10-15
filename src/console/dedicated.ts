@@ -1,3 +1,4 @@
+import { EventRing } from "../foundation/event-ring.ts";
 import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import type { CommandBuffer } from "../core/commands/index.ts";
@@ -6,7 +7,7 @@ import type { CommandBuffer } from "../core/commands/index.ts";
 export class DedicatedConsole {
   private readonly decoder = new StringDecoder("utf8");
   private pending = "";
-  private readonly lines: string[] = [];
+  private readonly lines = new EventRing<string>(16384);
   private ended = false;
   private closed = false;
   private error: Error | null = null;
@@ -16,7 +17,7 @@ export class DedicatedConsole {
   };
   private readonly onEnd = (): void => {
     this.pending += this.decoder.end(); this.split();
-    if (this.pending !== "") this.lines.push(this.pending);
+    if (this.pending !== "") this.lines.admit(this.pending);
     this.pending = ""; this.ended = true;
   };
   private readonly onError = (error: Error): void => { this.error = error; };
@@ -26,15 +27,15 @@ export class DedicatedConsole {
   private split(): void {
     let index = this.pending.indexOf("\n");
     while (index >= 0) {
-      this.lines.push(this.pending.slice(0, index).replace(/\r$/, "")); this.pending = this.pending.slice(index + 1);
+      this.lines.admit(this.pending.slice(0, index).replace(/\r$/, "")); this.pending = this.pending.slice(index + 1);
       index = this.pending.indexOf("\n");
     }
   }
-  get eof(): boolean { return this.ended && this.lines.length === 0; }
+  get eof(): boolean { return this.ended && this.lines.live === 0; }
   drain(commands: CommandBuffer): number {
     if (this.closed) throw new Error("Dedicated console is closed");
     if (this.error !== null) throw this.error;
-    const lines = this.lines.splice(0);
+    const lines = this.lines.drainAll();
     for (const line of lines) commands.append(`${line}\n`);
     return lines.length;
   }

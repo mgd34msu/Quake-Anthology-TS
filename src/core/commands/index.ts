@@ -1,3 +1,4 @@
+import { EventRing } from "../../foundation/event-ring.ts";
 import type { ClientId } from "../../contracts/identity.ts";
 /* Shared command storage and dispatch adapted from quake-3-ts/core/commands.ts.
  * Family rules follow Quake/QW cmd.c and Quake II qcommon/cmd.c.
@@ -77,14 +78,21 @@ interface TextChunk { readonly dialect: CommandDialect; readonly kind: "text"; r
 type CommandChunk = TextChunk | { readonly kind: "completion"; readonly event: ScriptCompletion; readonly dialect: CommandDialect; readonly textMode: CommandTextMode };
 interface ExecutionFrame { readonly dialect: CommandDialect; readonly source: CommandContext; readonly direct: boolean; readonly textMode: CommandTextMode; readonly parent: ExecutionFrame | undefined; active: boolean; }
 interface ProgramTail {
-  readonly chunks: CommandChunk[]; readonly deferred: CommandChunk[];
+  readonly chunks: EventRing<CommandChunk>; readonly deferred: EventRing<CommandChunk>;
   readonly waitFrames: number; readonly waitDialect: CommandDialect | undefined; readonly waitSource: CommandContext | undefined;
   readonly scriptRead: ScriptRead | undefined; readonly tokens: readonly string[];
   readonly aliasCount: number; readonly startupCommandText: string | undefined;
   readonly preparationTail: ProgramTail | undefined;
 }
+const CHUNK_RING_CAPACITY = 32768;
+function chunkRing(records?: Iterable<CommandChunk, undefined, unknown>): EventRing<CommandChunk> {
+  const ring = new EventRing<CommandChunk>(CHUNK_RING_CAPACITY);
+  if (records !== undefined) for (const record of records) ring.admit(record);
+  return ring;
+}
+function cloneChunks(ring: EventRing<CommandChunk>): EventRing<CommandChunk> { return chunkRing(ring.snapshot()); }
 function cloneProgramTail(tail: ProgramTail | undefined): ProgramTail | undefined {
-  return tail === undefined ? undefined : { ...tail, chunks: [...tail.chunks], deferred: [...tail.deferred], preparationTail: cloneProgramTail(tail.preparationTail) };
+  return tail === undefined ? undefined : { ...tail, chunks: cloneChunks(tail.chunks), deferred: cloneChunks(tail.deferred), preparationTail: cloneProgramTail(tail.preparationTail) };
 }
 interface ScriptRead {
   readonly dialect: CommandDialect;
@@ -156,9 +164,9 @@ export class CommandBuffer {
   readonly context: CommandContext;
   private handlers: RegisteredEntry | undefined;
   private readonly aliases: AliasEntry[] = [];
-  private chunks: CommandChunk[] = [];
+  private chunks = chunkRing();
   private preparationTail: ProgramTail | undefined;
-  private deferred: CommandChunk[] = [];
+  private deferred = chunkRing();
   private waitFrames = 0;
   private startupCommandText: string | undefined;
   private aliasCount = 0;
@@ -187,12 +195,12 @@ export class CommandBuffer {
   get hasPreparationPrefix(): boolean { return this.preparationTail !== undefined; }
   get preparationComplete(): boolean {
     return this.frame === undefined && !this.asyncDraining && this.batchBudget === undefined && this.scriptRead === undefined
-      && this.chunks.length === 0 && this.deferred.length === 0 && this.waitFrames === 0;
+      && this.chunks.live === 0 && this.deferred.live === 0 && this.waitFrames === 0;
   }
   async advanceProgramFrame(): Promise<void> {
     if (this.frame !== undefined || this.asyncDraining || this.batchBudget !== undefined) throw new Error("Command program is already executing");
-    if (this.deferred.length !== 0) this.insertFromDefer();
-    if (this.chunks.length === 0 && this.scriptRead === undefined && this.waitFrames !== 0) {
+    if (this.deferred.live !== 0) this.insertFromDefer();
+    if (this.chunks.live === 0 && this.scriptRead === undefined && this.waitFrames !== 0) {
       this.programRevision++; this.waitFrames = (this.waitFrames - 1) | 0; return;
     }
     await this.executeScriptsAsync(async () => {});
@@ -249,7 +257,7 @@ export class CommandBuffer {
         aliasCount: commands.aliasCount, startupCommandText: commands.startupCommandText, preparationTail: commands.preparationTail };
       phase = "preparing";
       commands.preparationTail = pending;
-      commands.chunks = []; commands.deferred = []; commands.waitFrames = 0;
+      commands.chunks = chunkRing(); commands.deferred = chunkRing(); commands.waitFrames = 0;
       commands.waitDialect = undefined; commands.waitSource = undefined; commands.scriptRead = undefined; commands.tokens = [];
       commands.aliasCount = 0; commands.startupCommandText = options.startupCommandText; commands.inheritedAsyncDrain = false;
       try {
@@ -278,7 +286,7 @@ export class CommandBuffer {
   }
 
   private copyProgramState(previous: CommandBuffer): void {
-    this.chunks = [...previous.chunks]; this.deferred = [...previous.deferred];
+    this.chunks = cloneChunks(previous.chunks); this.deferred = cloneChunks(previous.deferred);
     this.preparationTail = cloneProgramTail(previous.preparationTail);
     this.waitFrames = previous.waitFrames; this.waitDialect = previous.waitDialect;
     this.waitSource = previous.waitSource;
@@ -316,19 +324,22 @@ export class CommandBuffer {
       if (read === undefined || !retired(read.source)) return read;
       read.cancel(); return undefined;
     };
-    const discardTail = (tail: ProgramTail | undefined): ProgramTail | undefined => tail === undefined ? undefined : {
-      ...tail, chunks: tail.chunks.filter(retained), deferred: tail.deferred.filter(retained), scriptRead: discardRead(tail.scriptRead),
+    const discardTail = (tail: ProgramTail | undefined): ProgramTail | undefined => {
+      if (tail === undefined) return undefined;
+      tail.chunks.filterLive(retained); tail.deferred.filterLive(retained);
+      return {
+      ...tail, scriptRead: discardRead(tail.scriptRead),
       ...(tail.waitSource !== undefined && retired(tail.waitSource) ? { waitFrames: 0, waitDialect: undefined, waitSource: undefined } : {}),
       preparationTail: discardTail(tail.preparationTail),
-    };
-    this.chunks = this.chunks.filter(retained); this.deferred = this.deferred.filter(retained);
+    }; };
+    this.chunks.filterLive(retained); this.deferred.filterLive(retained);
     this.scriptRead = discardRead(this.scriptRead); this.preparationTail = discardTail(this.preparationTail);
     if (this.waitSource !== undefined && retired(this.waitSource)) { this.waitFrames = 0; this.waitDialect = undefined; this.waitSource = undefined; }
     this.programRevision++;
   }
   producerPending(instance: symbol): boolean {
     const owns = (source: CommandContext | undefined): boolean => source?.producer?.instance === instance;
-    const pending = (chunks: readonly CommandChunk[]): boolean => chunks.some(chunk => owns(chunk.kind === "text" ? chunk.source : chunk.event.source));
+    const pending = (chunks: EventRing<CommandChunk>): boolean => chunks.someLive(chunk => owns(chunk.kind === "text" ? chunk.source : chunk.event.source));
     if (owns(this.frame?.source) || owns(this.waitSource) || owns(this.scriptRead?.source) || pending(this.chunks) || pending(this.deferred)) return true;
     for (let tail = this.preparationTail; tail !== undefined; tail = tail.preparationTail)
       if (owns(tail.waitSource) || owns(tail.scriptRead?.source) || pending(tail.chunks) || pending(tail.deferred)) return true;
@@ -365,7 +376,7 @@ export class CommandBuffer {
       const instance = source?.producer?.instance;
       if (instance !== undefined && this.retiredProducers.has(instance)) retired.add(instance);
     };
-    const scan = (chunks: readonly CommandChunk[]): void => { for (const chunk of chunks) remember(chunk.kind === "text" ? chunk.source : chunk.event.source); };
+    const scan = (chunks: EventRing<CommandChunk>): void => { chunks.forEachLive(chunk => { remember(chunk.kind === "text" ? chunk.source : chunk.event.source); }); };
     scan(this.chunks); scan(this.deferred); remember(this.waitSource); remember(this.scriptRead?.source);
     for (let tail = this.preparationTail; tail !== undefined; tail = tail.preparationTail) {
       scan(tail.chunks); scan(tail.deferred); remember(tail.waitSource); remember(tail.scriptRead?.source);
@@ -375,11 +386,13 @@ export class CommandBuffer {
     for (const client of clients) this.discardClient(client);
   }
 
-  get hasPendingCommands(): boolean { return this.preparationTail !== undefined || this.chunks.length > 0 || this.scriptRead !== undefined; }
+  get hasPendingCommands(): boolean { return this.preparationTail !== undefined || this.chunks.live > 0 || this.scriptRead !== undefined; }
   private programText(kind: "chunks" | "deferred"): string {
-    const parts = [this[kind]];
-    for (let tail = this.preparationTail; tail !== undefined; tail = tail.preparationTail) parts.push(tail[kind]);
-    return parts.flatMap(chunks => chunks.map(chunk => chunk.kind === "text" ? chunk.text : "")).join("");
+    let text = "";
+    const collect = (chunks: EventRing<CommandChunk>): void => { chunks.forEachLive(chunk => { if (chunk.kind === "text") text += chunk.text; }); };
+    collect(this[kind]);
+    for (let tail = this.preparationTail; tail !== undefined; tail = tail.preparationTail) collect(tail[kind]);
+    return text;
   }
   get pendingText(): string { return this.programText("chunks"); }
   get deferredText(): string { return this.programText("deferred"); }
@@ -534,7 +547,7 @@ export class CommandBuffer {
     const target = !preparation && this.frame === undefined && tail !== undefined ? tail.chunks : this.chunks;
     const text = sourceCommandText(input);
     if (this.pendingText.length + text.length >= (this.options.maxBufferLength ?? (dialect === "q3" ? 16384 : 8192))) { this.print("Cbuf_AddText: overflow\n"); return; }
-    if (text.length > 0) { target.push({ kind: "text", text, source, direct, textMode, dialect }); this.programRevision++; }
+    if (text.length > 0) { target.admit({ kind: "text", text, source, direct, textMode, dialect }); this.programRevision++; }
   }
   private insertFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script", completion?: ScriptCompletion, textMode = this.inputTextMode(source, direct), dialect = this.executionDialect): void {
     const text = sourceCommandText(input) + (dialect === "q1-quakeworld" || dialect === "q3" ? "\n" : "");
@@ -546,21 +559,21 @@ export class CommandBuffer {
       if (this.pendingText.length + text.length > limit) throw new RangeError("Cbuf_InsertText overflows source sizebuf");
     }
     if (completion !== undefined || text.length > 0) this.programRevision++;
-    if (completion !== undefined) this.chunks.unshift({ kind: "completion", event: completion, dialect, textMode });
-    if (text.length > 0) this.chunks.unshift({ kind: "text", text, source, direct, textMode, dialect });
+    if (completion !== undefined) this.chunks.prepend([{ kind: "completion", event: completion, dialect, textMode }]);
+    if (text.length > 0) this.chunks.prepend([{ kind: "text", text, source, direct, textMode, dialect }]);
   }
   copyToDefer(): void {
     if (!isQ2(this.executionDialect)) throw new Error("Deferred command buffers belong to Quake II");
     this.programRevision++;
     this.deferred = this.chunks;
-    this.chunks = [];
+    this.chunks = chunkRing();
   }
   insertFromDefer(): void {
     if (!isQ2(this.executionDialect)) throw new Error("Deferred command buffers belong to Quake II");
     if (this.pendingText.length + this.deferredText.length > this.maximumBuffer) throw new RangeError("Deferred commands overflow source sizebuf");
     this.programRevision++;
-    this.chunks = [...this.deferred, ...this.chunks];
-    this.deferred = [];
+    this.chunks.prepend(this.deferred.snapshot());
+    this.deferred = chunkRing();
   }
 
   execute(): number {
@@ -603,21 +616,21 @@ export class CommandBuffer {
 
   private *drain(resetAliases = true, shouldContinue?: () => boolean): Generator<number, void, void> {
     if (resetAliases) this.aliasCount = 0;
-    while ((this.chunks.length > 0 || this.scriptRead !== undefined) && shouldContinue?.() !== false) {
+    while ((this.chunks.live > 0 || this.scriptRead !== undefined) && shouldContinue?.() !== false) {
       const script = this.scriptRead;
       if (script !== undefined) {
         if (script.result.kind === "pending") return;
         this.programRevision++; this.scriptRead = undefined;
         if (script.result.kind === "failed") {
           this.print(`couldn't exec ${script.name}: ${script.result.error instanceof Error ? script.result.error.message : String(script.result.error)}\n`, script.source);
-          this.chunks.unshift({ kind: "completion", event: this.scriptCompletion(script.name, script.source, { kind: "failed", error: script.result.error }), dialect: script.dialect, textMode: script.textMode });
+          this.chunks.prepend([{ kind: "completion", event: this.scriptCompletion(script.name, script.source, { kind: "failed", error: script.result.error }), dialect: script.dialect, textMode: script.textMode }]);
         }
         else this.insertScript(script.name, script.result.text, script.source, script.dialect, script.textMode);
         continue;
       }
       if (this.waitDialect === "q3" && this.waitFrames !== 0) { this.programRevision++; this.waitFrames = (this.waitFrames - 1) | 0; break; }
-      const first = this.chunks[0];
-      if (first === undefined) break;
+      const first = this.chunks.head();
+      if (first === null) break;
       if (first.kind === "completion") {
         this.programRevision++; this.chunks.shift();
         const frame: ExecutionFrame = { dialect: first.dialect, source: first.event.source, direct: false,
@@ -669,7 +682,7 @@ export class CommandBuffer {
     } finally { restore(); }
   }
   private completeBatch(): void {
-    if (this.chunks.length > 0 || this.deferred.length > 0 || this.scriptRead !== undefined || this.waitFrames !== 0)
+    if (this.chunks.live > 0 || this.deferred.live > 0 || this.scriptRead !== undefined || this.waitFrames !== 0)
       throw new Error("Command batch paused or deferred execution; remaining batch discarded. Use immediate commands.");
   }
   private beginBatch(text: string, source: CommandContext, signal?: AbortSignal, append = true): () => void {
@@ -685,7 +698,7 @@ export class CommandBuffer {
     if (this.batchBudget !== undefined) throw new Error("Nested command batches are not supported.");
     const saved = { chunks: this.chunks, deferred: this.deferred, waitFrames: this.waitFrames, waitDialect: this.waitDialect, waitSource: this.waitSource, aliasCount: this.aliasCount, tokens: this.tokens, scriptRead: this.scriptRead };
     this.scriptRead = undefined;
-    this.chunks = []; this.deferred = []; this.waitFrames = 0; this.waitSource = undefined; this.aliasCount = 0;
+    this.chunks = chunkRing(); this.deferred = chunkRing(); this.waitFrames = 0; this.waitSource = undefined; this.aliasCount = 0;
     this.batchBudget = { remaining: 128, signal };
     if (append) this.appendFor(value, context, false, undefined, undefined, true);
     return () => {
@@ -701,7 +714,9 @@ export class CommandBuffer {
     let text = "";
     let origin = first.source.origin;
     let resumedCaller = false;
-    for (const chunk of this.chunks) {
+    for (let id = this.chunks.first; ; id++) {
+      const chunk = this.chunks.at(id);
+      if (chunk === null) break;
       if (chunk.dialect !== first.dialect || chunk.textMode !== first.textMode) break;
       if (!sameProducer(first.source, chunk.kind === "text" ? chunk.source : chunk.event.source)) break;
       if (chunk.kind === "completion") {
@@ -721,14 +736,14 @@ export class CommandBuffer {
     if (count > 0) this.programRevision++;
     let index = 0;
     while (count > 0) {
-      const chunk = this.chunks[index];
-      if (chunk === undefined) return;
+      const chunk = this.chunks.atOffset(index);
+      if (chunk === null) return;
       if (chunk.kind === "completion") { index++; continue; }
       if (chunk.text.length > count) {
-        this.chunks[index] = { ...chunk, text: chunk.text.slice(count) };
+        this.chunks.replaceAtOffset(index, { ...chunk, text: chunk.text.slice(count) });
         return;
       }
-      this.chunks.splice(index, 1);
+      this.chunks.removeAtOffset(index);
       count -= chunk.text.length;
     }
   }
@@ -826,7 +841,7 @@ export class CommandBuffer {
   private insertScript(filename: string, file: string | undefined, caller: CommandContext, dialect = this.executionDialect, textMode = this.frame?.textMode ?? "source"): void {
     if (file === undefined) {
       this.print(`couldn't exec ${filename}\n`, caller);
-      this.chunks.unshift({ kind: "completion", event: this.scriptCompletion(filename, caller, { kind: "missing" }), dialect, textMode });
+      this.chunks.prepend([{ kind: "completion", event: this.scriptCompletion(filename, caller, { kind: "missing" }), dialect, textMode }]);
       return;
     }
     this.print(`execing ${filename}\n`, caller);

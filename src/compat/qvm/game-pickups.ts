@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { QvmInventoryWord } from "./game-inventory.ts";
 import type { ItemId } from "../../contracts/gameplay.ts";
 import type { ModuleIdentity, QvmAbiProfile } from "../../contracts/execution.ts";
@@ -84,7 +85,7 @@ function proceed(call: QvmFunctionCall): QvmSystemCallResult { return call.execu
 /** Original Touch_Item keeps its caller stack, feedback, targets and item lifecycle. */
 export class QvmPrimaryPickups {
   private readonly frames: Frame[] = [];
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly items: readonly QvmCatalogRecord[] | null;
   private readonly returns = new Map<QvmPickupGrant, number>();
   private readonly returnPCs = new Map<number, number>();
@@ -308,6 +309,6 @@ export class QvmPrimaryPickups {
     for (const frame of [...this.frames].reverse()) if (frame.itemPointer === pointer || frame.recipientPointer === pointer) { frame.invalid = true; this.cancel(frame, control); }
   }
   assertIdle(): void { if (this.frames.length !== 0) throw new Error("Cannot save during original QVM pickup execution"); }
-  private dispose(): void { for (const remove of this.removals.splice(0)) remove(); }
+  private dispose(): void { this.removals.runAll(); }
   close(): void { this.closed = true; if (this.frames.length === 0) this.dispose(); }
 }

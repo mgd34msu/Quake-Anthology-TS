@@ -1,6 +1,6 @@
 import type { Vec3 } from "../../../contracts/math.ts";
+import { angleVectorsRule } from "../../../core/math.ts";
 import { dot, normalize, subtract, zero } from "../foundation/fields.ts";
-import { angleVectors } from "../foundation/weapons/vectors.ts";
 import type { Q2CharacterContext, Q2PlayerContext, Q2PlayerView } from "../base/player/types.ts";
 import { q2BuildView, q2DamageFeedback } from "../base/player/view.ts";
 import type { Q2RereleasePlayerState } from "./types.ts";
@@ -27,7 +27,7 @@ export function q2RereleaseDamageFeedback(context: Q2PlayerContext, extra: Q2Rer
     state.damageBlend = normalize({ x: armor / total + (blood !== 0 ? Math.max(15, blood / total) : 0), y: (power + armor) / total, z: armor / total });
     const health = game.host.combat.read(entity.actor.id)?.health ?? 0;
     if (kick !== 0 && health > 0) {
-      const amount = clamp(Math.abs(kick) * 100 / health, count * 0.5, 50), direction = normalize(subtract(state.damageFrom, game.body(entity).origin)), vectors = angleVectors(context.movement.viewAngles);
+      const amount = clamp(Math.abs(kick) * 100 / health, count * 0.5, 50), direction = normalize(subtract(state.damageFrom, game.body(entity).origin)), vectors = angleVectorsRule(context.movement.viewAngles, "native");
       state.damageRoll = amount * dot(direction, vectors.right) * 0.3; state.damagePitch = -amount * dot(direction, vectors.forward) * 0.3;
       state.damageTime = now + 0.5 + (0.1 - game.host.frameSeconds());
     }
@@ -48,7 +48,7 @@ export function q2RereleaseBuildView(context: Q2PlayerContext, extra: Q2Rereleas
   const alpha = state.damageAlpha, bonus = state.bonusAlpha, base = q2BuildView(shared, flashes, intermission);
   state.damageAlpha = Math.max(0, alpha - dt * 0.6); state.bonusAlpha = Math.max(0, bonus - dt);
   if (intermission) return { ...base, offset: zero };
-  const body = game.body(entity), weapon = context.weaponState(), vectors = angleVectors(movement.viewAngles);
+  const body = game.body(entity), weapon = context.weaponState(), vectors = angleVectorsRule(movement.viewAngles, "native");
   const speed = Math.hypot(body.velocity.x, body.velocity.y), duck = movement.ducked && movement.grounded;
   const bobTime = state.bobTime * (duck ? 4 : 1), cycle = Math.trunc(bobTime), bob = Math.abs(Math.sin(bobTime * Math.PI));
   const sign = (cycle & 1) !== 0 ? -1 : 1, fall = kickRatio(state.fallTime, now, 0.3, 0.1 - dt);

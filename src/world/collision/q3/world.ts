@@ -1,3 +1,4 @@
+import { StampSet } from "../../../foundation/stamp.ts";
 /* Collision tracing translated from id Software's cm_trace.c and cm_test.c.
  * Copyright (C) 1999-2005 Id Software, Inc. SPDX-License-Identifier: GPL-2.0-or-later */
 import { add3, sub3, scale3, dot3, lerp3, vec3, anglesToAxis } from "../../../core/math.ts";
@@ -138,12 +139,14 @@ export class CollisionWorld {
   readonly #debug: CollisionDebugSurface | null;
   #settings: CollisionMapSettings | null;
   #sourceModels: SourceClipModels | null = null;
+  readonly #mediaBrushStamps: StampSet;
 
   constructor(map: CollisionMapData, debug: CollisionWorldProfile = { kind: "disabled" },
     readonly counters = new CollisionCounters()) {
     this.#debug = debug.kind === "shared" ? debug.owner : null;
     this.#settings = debug.kind === "shared" ? debug.settings : null;
     this.#map = map;
+    this.#mediaBrushStamps = new StampSet(map.brushes.length);
     this.#topology = new CollisionTopology(map, counters);
   }
 
@@ -298,11 +301,10 @@ export class CollisionWorld {
       const leaf = at(map.leaves, leafIndex);
       for (let index = 0; index < leaf.brushCount; index++) candidates.push(map.leafBrushes.at(leaf.firstBrush + index));
     });
+    const seen = this.#mediaBrushStamps; seen.begin();
     function* brushes(): Generator<MediumBrush, undefined, unknown> {
-      const seen = new Set<number>();
       for (const index of candidates) {
-        if (seen.has(index)) continue;
-        seen.add(index);
+        if (!seen.mark(index)) continue;
         const brush = at(map.brushes, index);
         if (convertContents(brush.contents, 'q3', 'q1') === -1) continue;
         yield { contents: brush.contents, planes: Array.from({ length: brush.sideCount }, (_, side) =>

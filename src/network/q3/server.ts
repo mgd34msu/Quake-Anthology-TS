@@ -1,3 +1,4 @@
+import { EventRing } from "../../foundation/event-ring.ts";
 // SV_ExecuteClientMessage, SV_UserMove and SV_SendMessageToClient source ordering.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { Q3ConnectionIdentity } from "./client.ts";
@@ -49,7 +50,7 @@ export class Q3ServerConnection {
   readonly channel: Netchannel;
   readonly reliable = new ServerReliableCommands();
   readonly sourceState: SourceMessageState;
-  private readonly queuedMessages: Uint8Array[] = [];
+  private readonly queuedMessages = new EventRing<Uint8Array>(4096);
   phase: "connected" | "primed" | "active" | "zombie" = "connected";
   lastClientCommand = 0;
   lastClientCommandString = "";
@@ -143,7 +144,7 @@ export class Q3ServerConnection {
     writer.writeByte(ServerOpcode.Eof);
     const plaintext = writer.toBytes();
     if (this.channel.hasUnsentFragments) {
-      this.queuedMessages.push(plaintext);
+      this.queuedMessages.admit(plaintext);
       // This source path advances one old fragment without dequeuing at its end.
       this.channel.transmitNextFragment(delivery);
     }
@@ -184,7 +185,7 @@ export class Q3ServerConnection {
     this.channel.transmitNextFragment(delivery);
     if (!this.channel.hasUnsentFragments) {
       const next = this.queuedMessages.shift();
-      if (next !== undefined) this.channel.beginTransmit(xorServerMessage(next, this.challenge, this.channel.outgoingSequence, this.lastClientCommandString), delivery);
+      if (next !== null) this.channel.beginTransmit(xorServerMessage(next, this.challenge, this.channel.outgoingSequence, this.lastClientCommandString), delivery);
     }
   }
   async verifyPure(server: Q3PureServer, argv: readonly string[], sendRejectedSnapshot: () => void): Promise<Q3PureResult> {

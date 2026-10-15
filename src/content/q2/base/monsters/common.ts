@@ -1,8 +1,9 @@
 /* Shared source monster callbacks. id Software Quake II, GPL-2.0-or-later. */
 import type { Bounds, Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { DeathReaction } from "../../../../contracts/world.ts";
 import { add, normalize, scale, subtract } from "../../foundation/fields.ts";
-import { anglesVectors, enemyBody, enemyEye, health, projectFlash } from "../../foundation/monsters/ai.ts";
+import { enemyBody, enemyEye, health, projectFlash } from "../../foundation/monsters/ai.ts";
 import { throwGib, throwHead } from "../../foundation/monsters/gibs.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
 import type { MonsterContext, MonsterHandler } from "../../foundation/monsters/types.ts";
@@ -27,7 +28,7 @@ export function shot(context: MonsterContext, flash: number, lead = 0): { readon
   return { start, direction: normalize(subtract(add(eye, scale(enemy.velocity, lead)), start)) };
 }
 export function forwardShot(context: MonsterContext, flash: number): { readonly start: Vec3; readonly direction: Vec3 } {
-  return { start: projectFlash(context, muzzleOffset(context.game.options.edition, flash)), direction: anglesVectors(context.game.body(context.entity).angles).forward };
+  return { start: projectFlash(context, muzzleOffset(context.game.options.edition, flash)), direction: angleVectorsRule(context.game.body(context.entity).angles, "native").forward };
 }
 export function standardGib(context: MonsterContext, reaction: DeathReaction, bones = 2, meats = 4, head = "models/objects/gibs/head2/tris.md2", attenuation = 1): boolean {
   const { state, game, entity } = context;

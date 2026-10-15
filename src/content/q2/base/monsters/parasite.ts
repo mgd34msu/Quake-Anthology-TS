@@ -1,7 +1,8 @@
 /* Quake II m_parasite.c. id Software, GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
+import { vectorToAnglesRule } from "../../../../core/math.ts";
 import { length, subtract, zero } from "../../foundation/fields.ts";
-import { enemyBody, MASK_SHOT, projectFlash, vectorAngles } from "../../foundation/monsters/ai.ts";
+import { enemyBody, MASK_SHOT, projectFlash } from "../../foundation/monsters/ai.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
 import { beginDeath, damagedSkin, finishCorpse, move, sound } from "./common.ts";
 import { parasiteFrame, parasiteMoves } from "./tables/parasite.ts";
@@ -11,7 +12,7 @@ function startRun(context: MonsterContext): undefined { return context.setMove(c
 export function parasiteDrainReachable(start: Vec3, end: Vec3): boolean {
   const direction = subtract(start, end);
   if (length(direction) > 256) return false;
-  let pitch = vectorAngles(direction).x;
+  let pitch = vectorToAnglesRule(direction, "native-ai").x;
   if (pitch < -180) pitch += 360;
   return Math.abs(pitch) <= 30;
 }

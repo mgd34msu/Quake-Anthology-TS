@@ -152,9 +152,9 @@ function objectEntries(value: unknown): [string, unknown][] | null {
 
 /** Optional scale failures are diagnostics, matching q2repro's fallback to unit scales. */
 function parseScales(source: Md5ScaleSource | null, hierarchy: readonly Md5HierarchyJoint[], frameCount: number): {
-  readonly hierarchy: readonly Md5HierarchyJoint[]; readonly scales: ReadonlyMap<string, number>; readonly diagnostics: readonly string[];
+  readonly hierarchy: readonly Md5HierarchyJoint[]; readonly scales: ReadonlyMap<number, number>; readonly diagnostics: readonly string[];
 } {
-  const scales = new Map<string, number>();
+  const scales = new Map<number, number>();
   const scalePositions = new Set<number>();
   const diagnostics: string[] = [];
   if (source !== null) {
@@ -172,7 +172,7 @@ function parseScales(source: Md5ScaleSource | null, hierarchy: readonly Md5Hiera
         else {
           const frame = Number(key);
           if (key.length > 0 && Number.isInteger(frame) && frame >= 0 && frame < frameCount && typeof value === "number" && Number.isFinite(Math.fround(value))) {
-            scales.set(`${frame}:${joint}`, Math.fround(value));
+            scales.set(frame * hierarchy.length + joint, Math.fround(value));
           } else diagnostics.push(`${source.source}: Invalid frame scale ${name}/${key}`);
         }
       }
@@ -223,7 +223,7 @@ export function parseMd5Anim(text: string, source = "<md5anim>", scaleSource: Md
       const animated = (bit: number, fallback: number): number => (info.flags & bit) === 0 ? fallback : at(components, component++, "animated component");
       const position = vec3(animated(1, base.position.x), animated(2, base.position.y), animated(4, base.position.z));
       const orientation = md5Quaternion(vec3(animated(8, base.orientation.x), animated(16, base.orientation.y), animated(32, base.orientation.z)));
-      const scale = scales.get(`${frame}:${i}`) ?? 1;
+      const scale = scales.get(frame * hierarchy.length + i) ?? 1;
       localJoints.push({ position, orientation, scale });
       const scaledPosition = info.scalePositions ? scale3(position, scale) : position;
       if (info.parent < 0) joints.push({ position: scaledPosition, orientation, scale });

@@ -3,7 +3,7 @@ import type { ArsenalAmmoWarning, WeaponHudStatus } from "../../../contracts/ui.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { PcmSound } from "../../../audio/wav.ts";
 import { dot3, length3, sub3, vec3 } from "../../../core/math.ts";
-import { qvmAngleVectors } from "../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../core/math.ts";
 import type { SceneShader } from "./ref-entity.ts";
 import { GameType, MoveType, PersistentIndex as P, Powerup, Team, Weapon, statSchema, weaponCount } from "../base/shared/definitions.ts";
 import type { SourcePlayerState } from "../base/shared/player-state.ts";

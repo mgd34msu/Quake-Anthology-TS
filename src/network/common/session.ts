@@ -1,3 +1,4 @@
+import { EventRing } from "../../foundation/event-ring.ts";
 import { createHash } from "node:crypto";
 import { createContentDigest } from "../../contracts/content.ts";
 import type { ContentDigest, ExecutableRecipe } from "../../contracts/content.ts";
@@ -78,7 +79,7 @@ export interface SessionClient {
   readonly connectedAt: number;
   readonly lastReceivedAt: number;
 }
-interface ClientRecord { value: SessionClient; readonly events: SimulationEvent[]; }
+interface ClientRecord { value: SessionClient; readonly events: EventRing<SimulationEvent>; }
 
 /** Session identity authority stays with the engine. This table accepts caller-issued ClientIds. */
 export class NetworkSession {
@@ -113,7 +114,7 @@ export class NetworkSession {
     }
     const result = admitWire(this.identity, wire, this.source);
     if (result.kind === "unsupported") return result;
-    this.clients.set(id.slot, { value: { id, attachment, wire, phase: "connected", connectedAt: now, lastReceivedAt: now }, events: [] });
+    this.clients.set(id.slot, { value: { id, attachment, wire, phase: "connected", connectedAt: now, lastReceivedAt: now }, events: new EventRing<SimulationEvent>(8192) });
     return result;
   }
   get(id: ClientId): SessionClient { return this.record(id).value; }
@@ -141,10 +142,10 @@ export class NetworkSession {
       const { id, attachment } = record.value, audience = event.audience;
       if (audience.kind === "world" || (audience.kind === "client" && id.equals(audience.client))
         || (audience.kind === "seat" && ((attachment.kind === "local" && attachment.seat.equals(audience.seat))
-          || (attachment.kind === "remote" && attachment.remoteSeats.some(seat => seat.seat.equals(audience.seat)))))) record.events.push(event);
+          || (attachment.kind === "remote" && attachment.remoteSeats.some(seat => seat.seat.equals(audience.seat)))))) record.events.admit(event);
     }
   }
-  drain(id: ClientId): readonly SimulationEvent[] { return this.record(id).events.splice(0); }
+  drain(id: ClientId): readonly SimulationEvent[] { return this.record(id).events.drainAll(); }
   expired(now: number, timeoutMilliseconds: number): readonly ClientId[] {
     return this.list().filter(client => client.attachment.kind !== "local" && now - client.lastReceivedAt > timeoutMilliseconds).map(client => client.id);
   }

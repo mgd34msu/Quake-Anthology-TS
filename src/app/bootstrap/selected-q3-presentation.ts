@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import { freemem } from "node:os";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { ContentId } from "../../contracts/content.ts";
@@ -43,7 +44,8 @@ export class ApplicationSelectedQ3Presentation {
   private readonly generation: number;
   private readonly transport: ApplicationQ3Source;
   private readonly generations = new Map<number, ActorId>();
-  private readonly audio: Q3SeatAudioOperation[] = [];
+  private readonly audio = new EventRing<Q3SeatAudioOperation>(4096);
+  private readonly audioCursor: EventCursor = this.audio.openCursor();
   private readonly light: ModelLightSampler;
   private media: ApplicationQ3Assets | null = null;
   private services: ApplicationQ3Services | null = null;
@@ -97,12 +99,10 @@ export class ApplicationSelectedQ3Presentation {
       owner: source.source.host.provider, seat, viewport: presentation.viewport, queries: o.queries, clock: o.clock,
       actorAt: number => {
         this.assertCurrent();
-        const actor = source.source.actor(number);
-        if (actor === null) throw new Error(`Selected Q3 sound slot ${number} has no source actor`);
-        return actor;
+        return source.source.actor(number);
       }, output: { scene: reject, command: reject, text: reject, listener: reject, audio: operation => {
         if (this.closed && operation.kind === "clear-loops") return;
-        this.assertCurrent(); this.audio.push(operation);
+        this.assertCurrent(); this.audio.admit(operation);
       } } });
     this.assertCurrent();
     const media = this.media, services = this.services, transport = this.transport;
@@ -136,8 +136,8 @@ export class ApplicationSelectedQ3Presentation {
   }
   private flushAudio(): void {
     this.assertCurrent();
-    if (this.audio.length !== 0) this.options.audio.receiveCgameFrame({ content: this.source.content,
-      owner: this.source.source.host.provider, seat: this.presentation.local.player.seat.id, operations: this.audio.splice(0) });
+    if (this.audio.pending(this.audioCursor) !== 0) { const operations = this.audio.take(this.audioCursor); this.audio.retire(); this.options.audio.receiveCgameFrame({ content: this.source.content,
+      owner: this.source.source.host.provider, seat: this.presentation.local.player.seat.id, operations }); }
   }
   async prepare(source: SelectedQ3Presentation, events: readonly SimulationPresentationEvent[], frame: number): Promise<void> {
     this.assertCurrent(); if (!this.owns(source, this.presentation) || this.busy) throw new Error("Selected Q3 scene source changed or is already preparing");
@@ -167,7 +167,7 @@ export class ApplicationSelectedQ3Presentation {
   }
   close(): void {
     if (this.closed) return;
-    this.closed = true; this.audio.length = 0; this.scene = null;
+    this.closed = true; this.audio.reset(); this.scene = null;
     const failures: unknown[] = [];
     for (const cleanup of [this.unbind, () => this.game?.close(), () => this.renderer?.close(), () => this.services?.cinematics.close(), () => this.media?.close(),
       () => this.options.audio.receiveCgameFrame({ content: this.source.content, owner: this.source.source.host.provider,

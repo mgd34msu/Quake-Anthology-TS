@@ -4,7 +4,7 @@
  * Copyright (C) 1999-2005 Id Software, Inc. SPDX-License-Identifier: GPL-2.0-or-later
  */
 import { cross3, dot3, normalize3OrZero, perpendicularVector, scale3, sub3, vec2, vec3, type Vec3, type Vec4 } from "../../../core/math.ts";
-import { qvmRotatePointAroundVector } from "../../../core/qvm-math.ts";
+import { qvmRotatePointAroundVector } from "../../../core/math.ts";
 import type { BspMarkProjector } from "./mark-projector.ts";
 import type { RefPoly, RefPolyVertex, SceneShader } from "./ref-entity.ts";
 

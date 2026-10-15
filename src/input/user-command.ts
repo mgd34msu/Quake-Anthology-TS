@@ -134,7 +134,7 @@ export class InputCommandBuilder {
       pitch = Math.max(previousPitch - 90, Math.min(previousPitch + 90, pitch));
     } else {
       if (pressed("attack") && (frame.kind === "q1-netquake" || frame.kind === "q1-quakeworld" || frame.attackAllowed)) buttons |= 1;
-      if (q1 && pressed("jump") || !q1 && pressed("use")) buttons |= 2;
+      if (q1 && (pressed("jump") || pressed("move-up")) || !q1 && pressed("use")) buttons |= 2;
       if (!q1 && any && sample.focus.kind === "game") buttons |= 128;
       if (frame.kind === "q2-rerelease") {
         if (pressed("holster")) buttons |= 4;

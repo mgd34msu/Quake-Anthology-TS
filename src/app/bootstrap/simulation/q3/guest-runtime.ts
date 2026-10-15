@@ -1,3 +1,4 @@
+import { BoundedQueue } from "../../../../foundation/bounded-queue.ts";
 import type { ArsenalState } from "../../../../contracts/movement.ts";
 import { Q3GuestBots, type Q3GuestBotOptions } from './guest-bots.ts';
 import { tokenizeCommand } from '../../../../core/commands/index.ts';
@@ -116,7 +117,7 @@ export class Q3QvmServerGame {
   private botPreparation: Q3GuestBotPreparation | null = null;
   private readonly botClients = new Set<number>();
   private readonly pendingBotAdmissions = new Set<number>();
-  private readonly botMessages = new Map<number, string[]>();
+  private readonly botMessages = new Map<number, BoundedQueue<string>>();
   private readonly services: QvmServerGameServices;
   private readonly common: Extract<QvmCommonServices, { readonly role: 'qagame' }>;
   private lifecycle: Lifecycle = { kind: 'created' };
@@ -197,7 +198,7 @@ export class Q3QvmServerGame {
       getUserinfo: slot => this.state.getUserinfo(slot) ?? '', setUserinfo: (slot, value) => this.state.setUserinfo(slot, value),
       getUserCommand: slot => this.state.getUserCommand(slot) ?? { serverTime: 0, angles: [0, 0, 0], buttons: 0, weapon: 0, forwardmove: 0, rightmove: 0, upmove: 0 }, dropClient: (slot, reason) => this.drop(slot, reason),
       sendServerCommand: (slot, text) => {
-        for (const [client, messages] of this.botMessages) if (slot === -1 || slot === client) { messages.push(text); if (messages.length > 64) messages.shift(); }
+        for (const [client, messages] of this.botMessages) if (slot === -1 || slot === client) messages.push(text);
         if (this.botClients.has(slot)) return;
         return this.output().sendServerCommand(slot, text);
       },
@@ -219,7 +220,7 @@ export class Q3QvmServerGame {
             const client = preparation.createClient(slot); if (client === null) continue;
             this.records.entity(slot).s.number = slot;
             const player = { client, actor: this.records.actor(slot).id, sourceEntity: slot };
-            this.validateClient(client); this.clients.set(slot, { player, phase: { kind: 'active' } }); this.botClients.add(slot); this.pendingBotAdmissions.add(slot); this.botMessages.set(slot, []); return slot;
+            this.validateClient(client); this.clients.set(slot, { player, phase: { kind: 'active' } }); this.botClients.add(slot); this.pendingBotAdmissions.add(slot); this.botMessages.set(slot, new BoundedQueue<string>(64)); return slot;
           }
           return -1;
         },
@@ -255,7 +256,7 @@ export class Q3QvmServerGame {
     return { state: { module: this.game.module.profile.module, format: 'q3:qagame-host', bytes: encodeCheckpointValue({
       version: 1, maxClients: this.game.data.numClients, data: this.game.data.checkpoint(), server: this.state.captureSaveState(),
       entityText: this.cursor.source, cursor: this.cursor.offset, parser: this.parser.captureSaveState(),
-      bots: this.bots?.checkpoint() ?? null, botClients: [...this.botClients], botMessages: [...this.botMessages].map(([slot, messages]) => ({ slot, messages })),
+      bots: this.bots?.checkpoint() ?? null, botClients: [...this.botClients], botMessages: [...this.botMessages].map(([slot, messages]) => ({ slot, messages: messages.toArray() })),
       records: this.records.captureCheckpoint(), portals: this.portalWorld().capturePortalCheckpoint(), files: this.files.captureCheckpoint(),
       clients: [...this.clients.values()].map(entry => ({ sourceEntity: entry.player.sourceEntity,
         client: { slot: entry.player.client.slot, generation: entry.player.client.generation },
@@ -312,7 +313,9 @@ export class Q3QvmServerGame {
     const messages = reader.field('botMessages');
     if (messages.value !== undefined) for (const entry of messages.list(cell => ({ slot: cell.field('slot').integer(0), messages: cell.field('messages').list(text => text.string()) }))) {
       if (!this.botClients.has(entry.slot) || this.botMessages.has(entry.slot)) throw new Error('Invalid saved guest bot message owner');
-      this.botMessages.set(entry.slot, [...entry.messages]);
+      const restored = new BoundedQueue<string>(64);
+      for (const text of entry.messages) restored.push(text);
+      this.botMessages.set(entry.slot, restored);
     }
   }
 
@@ -402,7 +405,7 @@ export class Q3QvmServerGame {
       for (const entry of start.clients) {
         this.reconnecting.set(entry.client.slot, entry);
         this.state.setUserinfo(entry.client.slot, entry.userinfo);
-        if (entry.bot === true) { this.botClients.add(entry.client.slot); this.botMessages.set(entry.client.slot, []); }
+        if (entry.bot === true) { this.botClients.add(entry.client.slot); this.botMessages.set(entry.client.slot, new BoundedQueue<string>(64)); }
       }
     }
     if (this.bots === null && this.state.cvars.variableValue('bot_enable') !== 0) throw new Error('Q3 guest bot services must be attached before initialization');

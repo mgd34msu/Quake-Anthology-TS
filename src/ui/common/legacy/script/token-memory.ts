@@ -1,4 +1,8 @@
 import { SaveReader } from "../../../../persistence/value.ts";
+import { float64Bits } from "../../../../foundation/binary.ts";
+
+/** Retained round-trip check word for readFloat; consumed synchronously. */
+const floatCheck = new DataView(new ArrayBuffer(10));
 /*
  * Retained token_t storage from Quake III Arena botlib/l_script.h and l_script.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -54,9 +58,7 @@ function tokenSubtype(token: ScriptToken): number {
 /** The supported numeric profile is binary64. Its value is represented exactly
  * in the Linux i386 ten-byte x87 value; the two ABI padding bytes are untouched. */
 function writeFloat(view: DataView, value: number, offset = FLOAT): void {
-  const binary = new DataView(new ArrayBuffer(8));
-  binary.setFloat64(0, value, true);
-  const bits = binary.getBigUint64(0, true);
+  const bits = float64Bits(value);
   const sign = Number(bits >> 63n) << 15;
   const exponent = Number((bits >> 52n) & 0x7ffn);
   const fraction = bits & 0xfffffffffffffn;
@@ -91,7 +93,7 @@ function readFloat(view: DataView): number {
     ? fraction * 2 ** (power + 1022) * 2 ** -1022
     : fraction * 2 ** power;
   const value = negative ? -magnitude : magnitude;
-  const check = new DataView(new ArrayBuffer(10));
+  const check = floatCheck;
   writeFloat(check, value, 0);
   if (check.getBigUint64(0, true) !== significand || check.getUint16(8, true) !== word) {
     throw new RangeError("token_t long double exceeds the supported binary64 numeric profile");

@@ -1,9 +1,10 @@
 /* Original Rogue m_widow.c and g_newai.c. ZeniMax Media, GPL-2.0-or-later. */
 import type { ActorId } from "../../../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../../../core/math.ts";
 import type { Bounds, Vec3 } from "../../../../../contracts/math.ts";
 import { add, scale } from "../../../foundation/fields.ts";
 import type { Q2Entity, Q2GameServices, Q2Think } from "../../../foundation/host.ts";
-import { anglesVectors, health, visible } from "../../../foundation/monsters/ai.ts";
+import { health, visible } from "../../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../../foundation/monsters/index.ts";
 import type { MonsterContext } from "../../../foundation/monsters/types.ts";
 import { recordAt } from "../../../foundation/monsters/types.ts";
@@ -14,7 +15,7 @@ import type { Q2MissionPackMonsterServices } from "../types.ts";
 
 const stalkerBounds: Bounds = { min: { x: -28, y: -28, z: -18 }, max: { x: 28, y: 28, z: 18 } };
 export function widowProject(entity: Q2Entity, game: Q2GameServices, offset: Vec3): Vec3 {
-  const body = game.body(entity), axes = anglesVectors(body.angles);
+  const body = game.body(entity), axes = angleVectorsRule(body.angles, "native");
   return add(body.origin, add(scale(axes.forward, offset.x), add(scale(axes.right, offset.y), scale(axes.up, offset.z))));
 }
 export function widowSlots(context: MonsterContext): undefined {

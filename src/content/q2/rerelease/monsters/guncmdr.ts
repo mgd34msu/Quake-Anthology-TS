@@ -1,7 +1,8 @@
 // Rerelease m_guncmdr.cpp. ZeniMax Media, GPL-2.0.
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import { add, dot, length, normalize, numberField, scale, subtract } from "../../foundation/fields.ts";
-import { anglesVectors, clearShot, corpse, enemyBody, finishDodge, health, projectFlash, setDuck, targetDistance, visible } from "../../foundation/monsters/ai.ts";
+import { clearShot, corpse, enemyBody, finishDodge, health, projectFlash, setDuck, targetDistance, visible } from "../../foundation/monsters/ai.ts";
 import { throwGib } from "../../foundation/monsters/gibs.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -17,10 +18,10 @@ function behind(context: MonsterContext, actor: ActorId | null): boolean {
   const other = actor === null ? null : context.game.host.bodies.read(actor);
   if (other === null) return false;
   const body = context.game.body(context.entity), delta = subtract(other.origin, body.origin);
-  return dot(normalize({ ...delta, z: 0 }), anglesVectors(body.angles).forward) < -0.4;
+  return dot(normalize({ ...delta, z: 0 }), angleVectorsRule(body.angles, "native").forward) < -0.4;
 }
 function canAdvance(context: MonsterContext): boolean {
-  const body = context.game.body(context.entity), end = add(body.origin, scale(anglesVectors(body.angles).forward, 8));
+  const body = context.game.body(context.entity), end = add(body.origin, scale(angleVectorsRule(body.angles, "native").forward, 8));
   return context.game.host.trace({ start: body.origin, end, bounds: body.bounds, ignore: context.entity.actor.id, mask: 0x2020003 }).fraction === 1;
 }
 function fireChain(context: MonsterContext, immediate = true): undefined {
@@ -41,7 +42,7 @@ function attack(context: MonsterContext): undefined {
   return undefined;
 }
 function jump(context: MonsterContext, high: boolean): undefined {
-  const body = context.game.body(context.entity), axes = anglesVectors(body.angles);
+  const body = context.game.body(context.entity), axes = angleVectorsRule(body.angles, "native");
   return context.game.move(context.entity, { velocity: add(body.velocity, add(scale(axes.forward, high ? 150 : 100), scale(axes.up, high ? 400 : 300))) });
 }
 function sidestep(context: MonsterContext): boolean {
@@ -153,7 +154,7 @@ export function createGunCommanderDefinition(weapons: Q2MissionPackMonsterWeapon
         const shot = shots.find(candidate => candidate.frame === entity.frame); if (shot === undefined) return undefined;
         const target = state.manualSteering && !visible(context) ? state.blindFireTarget : enemy.origin;
         if (state.manualSteering && !visible(context) && length(target) === 0) return undefined;
-        const body = game.body(entity), axes = anglesVectors(body.angles), start = projectFlash(context, muzzleOffset("rerelease", shot.id));
+        const body = game.body(entity), axes = angleVectorsRule(body.angles, "native"), start = projectFlash(context, muzzleOffset("rerelease", shot.id));
         let delta = subtract(target, body.origin), pitch = 0;
         if (shot.kind !== "crouch") {
           const distance = length(delta); if (distance > 512 && delta.z < 64 && delta.z > -64) delta = { ...delta, z: delta.z + distance - 512 };
@@ -186,7 +187,7 @@ export function createGunCommanderDefinition(weapons: Q2MissionPackMonsterWeapon
       guncmdr_jump_now: context => jump(context, false), guncmdr_jump2_now: context => jump(context, true),
       guncmdr_jump_wait_land(context) { context.state.nextFrame = context.game.body(context.entity).ground !== null || monsterJumpFinished(context) ? context.entity.frame + 1 : context.entity.frame; return undefined; },
       GunnerCmdrCounter(context) {
-        const { game, entity } = context, body = game.body(entity), direction = anglesVectors(body.angles).forward;
+        const { game, entity } = context, body = game.body(entity), direction = angleVectorsRule(body.angles, "native").forward;
         const trace = game.host.trace({ start: body.origin, end: projectFlash(context, { x: 20, y: 0, z: 14 }), bounds: null, ignore: entity.actor.id, mask: 3 });
         game.host.emit({ kind: "effect", effect: "q2:berserk-slam", origin: trace.end, direction, count: 1, color: 0 });
         return slamRadiusDamage(context, trace.end, 15, 250, 200);

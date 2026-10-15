@@ -31,11 +31,11 @@ export class PacketScheduler<T> {
     this.pending.splice(index, 1); return true;
   }
   drain(nowMilliseconds: number, deliver: (value: T) => void): void {
-    while (true) {
-      const first = this.pending[0];
-      if (first === undefined || first.due > nowMilliseconds) return;
-      this.pending.shift(); deliver(first.value);
-    }
+    let count = 0;
+    while (count < this.pending.length && (this.pending[count]?.due ?? Infinity) <= nowMilliseconds) count++;
+    if (count === 0) return;
+    const ready = this.pending.splice(0, count);
+    for (const packet of ready) deliver(packet.value);
   }
   clear(): void { this.pending.length = 0; }
 }

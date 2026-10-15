@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
 import { basename } from "node:path";
 import type { ActorId } from '../../../contracts/identity.ts';
 import type { Vec3 } from '../../../contracts/math.ts';
@@ -79,7 +80,8 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
     }
     const signon = encode([...baselines.map(value => ({ kind: 'baseline', state: value } satisfies QwServerMessage)), ...persistent]);
     let routed: { readonly message: QwServerMessage; readonly destination: QcMessageDestination }[] = [];
-    const queued: { readonly message: QwServerMessage; readonly destination: QcMessageDestination }[] = [];
+    const queued = new EventRing<{ readonly message: QwServerMessage; readonly destination: QcMessageDestination }>(8192);
+    const queuedCursor: EventCursor = queued.openCursor();
     const styles = Array.from({ length: 64 }, (_, index) => simulation.events.lightStyle(index));
     const infoText = (info: ReadonlyMap<string, string>): string => [...info].map(([key, value]) => `\\${key}\\${value}`).join('');
     const requireClient = (player: QwApplicationPlayer): ClientState => { const client = clients.get(player.slot); if (client === undefined || !client.player.client.equals(player.client)) throw new Error('Stale QW client'); return client; };
@@ -130,11 +132,11 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
             if (!clients.get(player.slot)?.player.actor.equals(player.actor)) return;
             const flush = (): void => {
                 game.messages.flush();
-                const pending = queued.splice(0);
+                const pending = queued.take(queuedCursor); queued.retire();
                 for (const batch of game.drainMessages()) for (const entry of batch.entries)
                     if (entry.message.kind !== 'packet-entities' && entry.message.kind !== 'invalid-delta') pending.push({ message: entry.message, destination: batch.destination });
                 for (const entry of pending) {
-                    if (entry.destination.kind === 'signon' || !entry.destination.reliable) { queued.push(entry); continue; }
+                    if (entry.destination.kind === 'signon' || !entry.destination.reliable) { queued.admit(entry); continue; }
                     for (const client of clients.values()) if ((client.begun || entry.destination.kind === 'client') && receives(client.player, entry.destination)) emit(client.player, entry.message);
                 }
             };
@@ -154,7 +156,7 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
                 game.setClientRole(client.id, role); game.setClientInfo(client.id, info);
                 const actor = game.reservedClient(client.id), player = { client: client.id, actor: actor.id, slot: index };
                 clients.set(index, { player, role, info, begun: false, command: idle, commandTime: game.timeSeconds, stats: new Map<number, number>(), frags: 0 });
-                queued.push({ message: { kind: 'userinfo', slot: index, userId: client.id.generation * 32 + index + 1, value: infoText(info) }, destination: { kind: 'broadcast', reliable: true } });
+                queued.admit({ message: { kind: 'userinfo', slot: index, userId: client.id.generation * 32 + index + 1, value: infoText(info) }, destination: { kind: 'broadcast', reliable: true } });
                 return { kind: 'accepted', player };
             } catch (error) { options.session.closeClient(client.id); throw error; }
         },
@@ -182,7 +184,7 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
             const actor = simulation.actors.resolveOwned(player.actor);
             if (actor !== null && !game.isActiveClient(actor.id)) game.disconnectClient(actor); else simulation.disconnectPlayer(player.actor);
             options.session.closeClient(player.client); clients.delete(player.slot);
-            queued.push({ message: { kind: 'userinfo', slot: player.slot, userId: 0, value: '' }, destination: { kind: 'broadcast', reliable: true } }); options.print(reason); },
+            queued.admit({ message: { kind: 'userinfo', slot: player.slot, userId: 0, value: '' }, destination: { kind: 'broadcast', reliable: true } }); options.print(reason); },
         baselines: () => baselines,
         prepareDownload: async (_player, requestedPath) => {
             const path = requestedPath.toLowerCase();
@@ -216,19 +218,19 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
         command: (player, name, args) => {
             if (name === 'pause') {
                 const previous = simulation.q1Paused, text = simulation.toggleQ1Pause(player.actor);
-                queued.push({ message: { kind: 'print', level: 2, text }, destination: previous === simulation.q1Paused
+                queued.admit({ message: { kind: 'print', level: 2, text }, destination: previous === simulation.q1Paused
                     ? { kind: 'client', actor: player.actor, reliable: true } : { kind: 'broadcast', reliable: true } });
             } else if (name === 'kill') {
-                if (!game.clientKill(player.actor)) queued.push({ message: { kind: 'print', level: 2, text: "Can't suicide -- allready dead!\n" }, destination: { kind: 'client', actor: player.actor, reliable: true } });
+                if (!game.clientKill(player.actor)) queued.admit({ message: { kind: 'print', level: 2, text: "Can't suicide -- allready dead!\n" }, destination: { kind: 'client', actor: player.actor, reliable: true } });
             } else if (name === 'setinfo' && args.length === 2) {
                 const key = args[0], value = args[1]; if (key === undefined || value === undefined || key.startsWith('*') || /[\\"\n\r]/.test(key + value)) return;
                 const client = requireClient(player); if (value === '') client.info.delete(key); else client.info.set(key, value);
                 game.setClientInfo(player.client, client.info); simulation.notifyClientEvent("userinfo", player.actor);
-                queued.push({ message: { kind: 'set-info', slot: player.slot, key, value }, destination: { kind: 'broadcast', reliable: true } });
+                queued.admit({ message: { kind: 'set-info', slot: player.slot, key, value }, destination: { kind: 'broadcast', reliable: true } });
             } else options.print(`Unhandled QW client command: ${name}`);
         },
         observe: (_output, events) => {
-            routed = queued.splice(0);
+            routed = queued.take(queuedCursor); queued.retire();
             if (previousPause !== simulation.q1Paused) { previousPause = simulation.q1Paused; routed.push({ message: { kind: "pause", paused: previousPause }, destination: { kind: "broadcast", reliable: true } }); }
             for (const batch of game.drainMessages()) for (const entry of batch.entries) {
                 if (entry.message.kind !== 'packet-entities' && entry.message.kind !== 'invalid-delta') routed.push({ message: entry.message, destination: batch.destination });

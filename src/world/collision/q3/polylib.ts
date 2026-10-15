@@ -1,7 +1,7 @@
 // Translated from id Software's code/qcommon/cm_polylib.c and cm_polylib.h.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { CommonError } from "../../../core/common-error.ts";
-import { add3, sub3, scale3, vec3 } from "../../../core/math.ts";
+import { add3, sub3, scale3, vec3, dot3Double, cross3Stored, normalize3StoredOrZero } from "../../../core/math.ts";
 import type { Bounds, Plane, Vec3 } from "../../../core/math.ts";
 import type { ZoneAllocation } from "./allocation.ts";
 import { float32ToBits } from "../../../core/numeric.ts";
@@ -19,12 +19,9 @@ function at<T>(values: readonly T[], index: number): T {
   if (value === undefined) throw new RangeError(`Winding point ${index} outside allocation`);
   return value;
 }
-function dot(a: Vec3, b: Vec3): number { return a.x * b.x + a.y * b.y + a.z * b.z; }
-function cross(a: Vec3, b: Vec3): Vec3 { return vec3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x); }
-function normalize(value: Vec3): Vec3 {
-  const length = Math.sqrt(dot(value, value));
-  return length === 0 ? vec3(0, 0, 0) : scale3(value, 1 / length);
-}
+const dot = dot3Double;
+const cross = cross3Stored;
+const normalize = normalize3StoredOrZero;
 function fixed(value: number, digits: 1 | 6): string {
   const bits = float32ToBits(value), negative = (bits >>> 31) !== 0, exponent = (bits >>> 23) & 255;
   if (exponent === 255) return Number.isNaN(value) ? negative ? "-nan" : "nan" : negative ? "-inf" : "inf";

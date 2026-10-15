@@ -1,7 +1,8 @@
 /* Quake II Xatrix base monster variants. ZeniMax Media, GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import { add, length, normalize, scale, subtract, zero } from "../../foundation/fields.ts";
-import { anglesVectors, enemyBody, health, projectFlash, targetDistance, vectorAngles, visible } from "../../foundation/monsters/ai.ts";
+import { enemyBody, health, projectFlash, targetDistance, visible } from "../../foundation/monsters/ai.ts";
 import { infantryAttack, infantryCallbacks, infantryDie, infantryPain, infantryRun, infantrySight, infantryStand, infantryWalk } from "../../foundation/monsters/infantry.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
@@ -31,7 +32,7 @@ export const xatrixBrainLeftEye: readonly Vec3[] = [
 ];
 function tongueAllowed(start: Vec3, end: Vec3): boolean {
   const direction = subtract(start, end); if (length(direction) > 512) return false;
-  let pitch = vectorAngles(direction).x; if (pitch < -180) pitch += 360;
+  let pitch = vectorToAnglesRule(direction, "native-ai").x; if (pitch < -180) pitch += 360;
   return Math.abs(pitch) <= 30;
 }
 
@@ -65,14 +66,14 @@ export const xatrixBrainDefinition: Q2MonsterDefinition = {
       game.damage(entity.enemy, entity, entity.actor.id, 5, 0, subtract(start, enemy.origin), enemy.origin, zero, 36, 8);
       const body = game.body(entity); game.move(entity, { origin: { ...body.origin, z: body.origin.z + 1 } }, false);
       const target = game.host.actors.resolveOwned(entity.enemy);
-      if (target !== null) game.host.bodies.write(target, { ...enemy, velocity: scale(anglesVectors(body.angles).forward, -1200) });
+      if (target !== null) game.host.bodies.write(target, { ...enemy, velocity: scale(angleVectorsRule(body.angles, "native").forward, -1200) });
       return undefined;
     },
     brain_laserbeam(context) {
       const { game, entity } = context;
       if (game.host.random() > 0.8) game.sound(entity, "misc/lasfly.wav", 0, 1, 3);
       const enemy = enemyBody(context); if (enemy === null) return undefined;
-      const origin = game.body(entity).origin, angles = vectorAngles(subtract(enemy.origin, origin)), basis = anglesVectors(angles);
+      const origin = game.body(entity).origin, angles = vectorToAnglesRule(subtract(enemy.origin, origin), "native-ai"), basis = angleVectorsRule(angles, "native");
       for (const eye of [xatrixBrainRightEye, xatrixBrainLeftEye]) {
         const offset = recordAt(eye, entity.frame - brainFrame.walk101);
         const start = add(origin, add(scale(basis.right, offset.x), add(scale(basis.forward, offset.y), scale(basis.up, offset.z))));
@@ -90,7 +91,7 @@ export const xatrixBrainDefinition: Q2MonsterDefinition = {
 function xatrixInfantryFire(context: MonsterContext): undefined {
   if (context.entity.frame !== infantryFrame.attak103) return infantryCallbacks.InfantryMachineGun(context);
   const { entity, game } = context, enemy = enemyBody(context), start = projectFlash(context, muzzleOffset(game.options.edition, 26));
-  const direction = enemy === null ? anglesVectors(game.body(entity).angles).forward : normalize(subtract(add(add(enemy.origin, scale(enemy.velocity, -0.2)), { x: 0, y: 0, z: game.entity(entity.enemy)?.viewHeight ?? 22 }), start));
+  const direction = enemy === null ? angleVectorsRule(game.body(entity).angles, "native").forward : normalize(subtract(add(add(enemy.origin, scale(enemy.velocity, -0.2)), { x: 0, y: 0, z: game.entity(entity.enemy)?.viewHeight ?? 22 }), start));
   context.weapons.fireBullet(entity, game, start, direction, 3, 4, 300, 500, 0);
   return monsterFlash(context, 26, start, direction);
 }

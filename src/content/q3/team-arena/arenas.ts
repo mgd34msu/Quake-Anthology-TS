@@ -6,7 +6,7 @@ import { writeGround } from "../base/game/ground.ts";
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
 import { add3, scale3, sub3, vec3, vectorToAngles } from "../../../core/math.ts";
 import type { Vec3 } from "../../../core/math.ts";
-import { qvmAngleVectors } from "../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../core/math.ts";
 import type { ServerWorld } from "../base/world.ts";
 import { EntityEvent, EntityType, GameType, PersistentIndex, Team, Weapon } from "../base/shared/definitions.ts";
 import { ServerEntityFlags } from "../base/shared/entity-shared.ts";

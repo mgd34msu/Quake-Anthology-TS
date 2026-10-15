@@ -1,6 +1,7 @@
 /* Quake II xatrix/m_soldier.c heavy soldier variants. ZeniMax Media, GPL-2.0-or-later. */
 import { add, integerField, normalize, scale, subtract } from "../../foundation/fields.ts";
-import { anglesVectors, enemyBody, enemyEye, health, projectFlash, setDuck, targetDistance, vectorAngles } from "../../foundation/monsters/ai.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
+import { enemyBody, enemyEye, health, projectFlash, setDuck, targetDistance } from "../../foundation/monsters/ai.ts";
 import { throwGib, throwHead } from "../../foundation/monsters/gibs.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -27,11 +28,11 @@ function painSound(context: MonsterContext, death = false): undefined {
 export function createSoldierHeavyDefinitions(weapons: Q2MissionPackMonsterWeapons): readonly Q2MonsterDefinition[] {
   function fire(context: MonsterContext, index: number): undefined {
     const { entity, game, state } = context, flash = recordAt(entity.skin < 4 ? blasterFlashes : machinegunFlashes, index);
-    const start = projectFlash(context, muzzleOffset(game.options.edition, flash)), axes = anglesVectors(game.body(entity).angles);
+    const start = projectFlash(context, muzzleOffset(game.options.edition, flash)), axes = angleVectorsRule(game.body(entity).angles, "native");
     let direction = axes.forward;
     if (index !== 5 && index !== 6) {
       const eye = enemyEye(context); if (eye === null) return undefined;
-      const aim = anglesVectors(vectorAngles(subtract(eye, start)));
+      const aim = angleVectorsRule(vectorToAnglesRule(subtract(eye, start), "native-ai"), "native");
       direction = normalize(add(scale(aim.forward, 8192), add(scale(aim.right, (game.host.random() * 2 - 1) * 100), scale(aim.up, (game.host.random() * 2 - 1) * 50))));
     }
     if (entity.skin < 2) { weapons.fireIonRipper(entity, game, start, direction, 5, 600, 0x100000); return muzzle(context, flash, direction, start); }
@@ -39,7 +40,7 @@ export function createSoldierHeavyDefinitions(weapons: Q2MissionPackMonsterWeapo
     if (!state.holdFrame) state.pauseTime = game.host.now() + (3 + Math.floor(game.host.random() * 8)) * 0.1;
     if (game.host.random() > 0.8) game.sound(entity, "misc/lasfly.wav", 0, 1, 3);
     const enemy = enemyBody(context); if (enemy === null) return undefined;
-    const body = game.body(entity), aimAngles = vectorAngles(subtract(enemy.origin, body.origin)), aim = anglesVectors(aimAngles), offset = muzzleOffset(game.options.edition, flash);
+    const body = game.body(entity), aimAngles = vectorToAnglesRule(subtract(enemy.origin, body.origin), "native-ai"), aim = angleVectorsRule(aimAngles, "native"), offset = muzzleOffset(game.options.edition, flash);
     const origin = add(body.origin, add(scale(aim.right, offset.x + (flash === 85 ? -14 : 2)), add(scale(aim.up, offset.z + 8), scale(aim.forward, offset.y))));
     monsterDabeam(entity, game, entity.enemy, origin, aimAngles, 1, false);
     state.holdFrame = game.host.now() < state.pauseTime;

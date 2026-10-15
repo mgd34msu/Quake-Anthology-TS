@@ -1,3 +1,5 @@
+import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
+import { lerp3Double, lerpAnglesWrapped } from "../../../core/math.ts";
 import { updateQ1ClientMetadata, type Q1ClientRow } from "../q1-service-presentation.ts";
 import { asciiFold, commandSeparatorOffset, tokenizeCommand } from "../../../core/commands/text.ts";
 import { RemoteWorldContent } from './remote-world.ts';
@@ -48,11 +50,8 @@ function soundChannel(value: number): Q1SoundChannel {
     if (channel === undefined) throw new Error('Invalid NetQuake sound channel');
     return channel;
 }
-function lerp(a: Vec3, b: Vec3, f: number): Vec3 { return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, z: a.z + (b.z - a.z) * f }; }
-function angles(a: Vec3, b: Vec3, f: number): Vec3 {
-    const axis = (a: number, b: number): number => a + (((b - a + 540) % 360) - 180) * f;
-    return { x: axis(a.x, b.x), y: axis(a.y, b.y), z: axis(a.z, b.z) };
-}
+const lerp = lerp3Double;
+const angles = lerpAnglesWrapped;
 export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePresentationAccess {
     readonly client;
     private readonly world: RemoteWorldContent;
@@ -79,8 +78,10 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
     private sounds: readonly string[] = [];
     private readonly resources = new Map<string, ResolvedResourceReference>();
     private readonly styles = new Map<number, string>();
-    private readonly events: SimulationPresentationEvent[] = [];
-    private readonly soundsPending: SimulationEvent[] = [];
+    private readonly events = new EventRing<SimulationPresentationEvent>(8192);
+    private readonly eventCursor: EventCursor = this.events.openCursor();
+    private readonly soundsPending = new EventRing<SimulationEvent>(8192);
+    private readonly soundsCursor: EventCursor = this.soundsPending.openCursor();
     private published: SimulationOutput | null = null;
     readonly scoreboard = new Map<number, Q1ClientRow>();
     private records: readonly NetQuakeMessage[] = [];
@@ -111,7 +112,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
             return i - 1; return null; }
     isPlayer(actor: ActorId): boolean { return this.playerSlot(actor) !== null; }
     private emit(event: Q1Event, sourceEntity: number | null = null): void {
-        this.events.push({ kind: 'q1', event, content: this.world.content.recipe.map.entities.content, seconds: this.seconds, sequence: this.sequence++, sourceEntity });
+        this.events.admit({ kind: 'q1', event, content: this.world.content.recipe.map.entities.content, seconds: this.seconds, sequence: this.sequence++, sourceEntity });
     }
     async receive(messages: readonly NetQuakeMessage[], now: number, assertCurrent?: () => void): Promise<void> {
         assertCurrent?.();
@@ -132,8 +133,8 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                     this.statics.length = 0;
                     this.styles.clear();
                     this.scoreboard.clear();
-                    this.events.length = 0;
-                    this.soundsPending.length = 0;
+                    this.events.reset();
+                    this.soundsPending.reset();
                     this.models = message.models;
                     this.sounds = message.sounds;
                     this.maxClients = message.maxClients;
@@ -171,7 +172,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                 case 'set-angle':
                     this.viewAngles = message.angles;
                     if (this.player !== null)
-                        this.events.push({ kind: 'view-reset', reason: 'source', actor: this.player.actor, angles: message.angles, sequence: this.sequence++, seconds: this.seconds, content: this.world.content.recipe.map.entities.content });
+                        this.events.admit({ kind: 'view-reset', reason: 'source', actor: this.player.actor, angles: message.angles, sequence: this.sequence++, seconds: this.seconds, content: this.world.content.recipe.map.entities.content });
                     break;
                 case 'client-data':
                     this.data = message.data;
@@ -181,16 +182,16 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                     this.styles.set(message.index, message.value);
                     break;
                 case 'cd-track':
-                    this.events.push({ kind: 'music', event: { kind: 'cd-track', track: message.track },
+                    this.events.admit({ kind: 'music', event: { kind: 'cd-track', track: message.track },
                         content: this.world.content.recipe.map.entities.content, seconds: this.seconds, sequence: this.sequence++ });
                     break;
                 case 'name': case 'colors': case 'frags': case 'ping': case 'social': case 'player-info': {
                     updateQ1ClientMetadata(this.scoreboard,message);
-                    this.events.push({kind:'q1-client',event:message,content:this.sourceContent(),seconds:this.seconds,sequence:this.sequence++});
+                    this.events.admit({kind:'q1-client',event:message,content:this.sourceContent(),seconds:this.seconds,sequence:this.sequence++});
                     break;
                 }
                 case 'skybox':
-                    this.events.push({kind:'q1-sky',event:{kind:'skybox',name:message.text},content:this.sourceContent(),seconds:this.seconds,sequence:this.sequence++});
+                    this.events.admit({kind:'q1-sky',event:{kind:'skybox',name:message.text},content:this.sourceContent(),seconds:this.seconds,sequence:this.sequence++});
                     break;
                 case 'print':
                     this.options.print(message.text);
@@ -211,7 +212,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                         const resource = this.resources.get(`sound/${path}`);
                         if (resource === undefined)
                             throw new Error(`Unresolved NetQuake sound ${path}`);
-                        this.soundsPending.push({ sequence: this.sequence++, time: { kind: 'seconds', value: this.seconds }, audience: { kind: 'client', client: this.client.id }, payload: { kind: 'sound', resource: resource.id, actor: message.entity === 0 ? null : this.actor(message.entity), origin: message.origin, channel: message.channel, volume: message.volume / 255, attenuation: message.attenuation } });
+                        this.soundsPending.admit({ sequence: this.sequence++, time: { kind: 'seconds', value: this.seconds }, audience: { kind: 'client', client: this.client.id }, payload: { kind: 'sound', resource: resource.id, actor: message.entity === 0 ? null : this.actor(message.entity), origin: message.origin, channel: message.channel, volume: message.volume / 255, attenuation: message.attenuation } });
                     }
                     break;
                 }
@@ -354,7 +355,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
             return;
         const recipe = this.world.content.recipe, time = this.previousSeconds + (this.seconds - this.previousSeconds) * this.fraction;
         const bodies = [...this.current.values()].map(state => ({ actor: this.actor(state.number), body: { origin: this.sampled(state).origin, angles: this.sampled(state).angles, velocity: state.number === this.viewEntity ? data.velocity : zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null } }));
-        this.published = { snapshot: { session: this.options.session.session, frame: { frame: this.frameNumber, time: { kind: 'seconds', value: time }, elapsed: { kind: 'seconds', value: Math.max(0, this.seconds - this.previousSeconds) }, phase: 'frame-exit' }, actors: bodies.map(body => ({ id: body.actor, owner: recipe.map.entities.provider, definition: 'q1:remote-entity' })), bodies, inventories: [{ actor: player.actor, entries: this.playerUi(player.actor).inventory }], configurations: [{ actor: player.actor, movement: recipe.movement, character: recipe.character, weapons: recipe.weapons, inventory: recipe.inventory }], scene: { session: this.options.session.session, time: { kind: 'seconds', value: time }, world: { resource: recipe.map.geometry, geometry: this.world.content.world }, entities: [], lights: [], particles: [], lightStyles: [...this.styles].map(([style, pattern]) => ({ kind: 'q1', style, value: pattern.length === 0 ? 256 : (pattern.charCodeAt(Math.floor(time * 10) % pattern.length) - 97) * 22 })), areaBits: null } }, events: [...this.soundsPending] };
+        this.published = { snapshot: { session: this.options.session.session, frame: { frame: this.frameNumber, time: { kind: 'seconds', value: time }, elapsed: { kind: 'seconds', value: Math.max(0, this.seconds - this.previousSeconds) }, phase: 'frame-exit' }, actors: bodies.map(body => ({ id: body.actor, owner: recipe.map.entities.provider, definition: 'q1:remote-entity' })), bodies, inventories: [{ actor: player.actor, entries: this.playerUi(player.actor).inventory }], configurations: [{ actor: player.actor, movement: recipe.movement, character: recipe.character, weapons: recipe.weapons, inventory: recipe.inventory }], scene: { session: this.options.session.session, time: { kind: 'seconds', value: time }, world: { resource: recipe.map.geometry, geometry: this.world.content.world }, entities: [], lights: [], particles: [], lightStyles: [...this.styles].map(([style, pattern]) => ({ kind: 'q1', style, value: pattern.length === 0 ? 256 : (pattern.charCodeAt(Math.floor(time * 10) % pattern.length) - 97) * 22 })), areaBits: null } }, events: this.soundsPending.snapshot() };
         this.options.publish({ ...this.published, events: [] });
     }
     samplePresentation(now: number): SimulationOutput | null {
@@ -381,9 +382,9 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
     }
     drainPresentationEvents(): readonly SimulationPresentationEvent[] {
         if (this.published === null) return [];
-        this.options.publish({ ...this.published, events: [...this.soundsPending] });
-        this.soundsPending.length = 0;
-        return this.events.splice(0);
+        const sounds = this.soundsPending.take(this.soundsCursor); this.soundsPending.retire();
+        this.options.publish({ ...this.published, events: sounds });
+        const taken = this.events.take(this.eventCursor); this.events.retire(); return taken;
     }
     disconnected(reason: string): void { this.options.disconnected(reason); }
 }

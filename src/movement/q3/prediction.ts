@@ -5,7 +5,7 @@ import type { ActorAnimationState, ArsenalState, MovementProvider, MovementServi
   OrderedMovementEffect, Q3MovementInput, Q3MovementState } from "../../contracts/movement.ts";
 import type { Q3UserCommand } from "../../contracts/protocol.ts";
 import type { TraceHit } from "../../contracts/scene.ts";
-import { add3, length3, scale3, sub3, vec3 } from "../../core/math.ts";
+import { add3, length3, scale3, sub3, vec3, lerpAngleRule } from "../../core/math.ts";
 import { qvmFloatToInt } from "../../core/numeric.ts";
 import { MoveFlags, MoveType } from "./constants.ts";
 
@@ -99,11 +99,6 @@ function interpolateVector(a: Vec3, b: Vec3, fraction: number): Vec3 {
   return vec3(f32(a.x + f32(fraction * f32(b.x - a.x))), f32(a.y + f32(fraction * f32(b.y - a.y))),
     f32(a.z + f32(fraction * f32(b.z - a.z))));
 }
-function lerpAngle(from: number, to: number, fraction: number): number {
-  if (f32(to - from) > 180) to = f32(to - 360);
-  if (f32(to - from) < -180) to = f32(to + 360);
-  return f32(from + f32(fraction * f32(to - from)));
-}
 
 export function updateQ3PredictionView(state: Q3MovementState, health: number, command: Q3UserCommand): Q3MovementState {
   if (state.movementType === MoveType.PM_INTERMISSION || state.movementType === MoveType.PM_SPINTERMISSION ||
@@ -150,8 +145,8 @@ export class Q3PredictionRuntime {
     return { ...previous.actor, movement: { ...movement,
       bobCycle: qvmFloatToInt(f32(f32(a.bobCycle) + f32(fraction * f32((cycle - a.bobCycle) | 0)))),
       origin: interpolateVector(a.origin, b.origin, fraction), velocity: interpolateVector(a.velocity, b.velocity, fraction),
-      viewAngles: grabAngles ? movement.viewAngles : vec3(lerpAngle(a.viewAngles.x, b.viewAngles.x, fraction),
-        lerpAngle(a.viewAngles.y, b.viewAngles.y, fraction), lerpAngle(a.viewAngles.z, b.viewAngles.z, fraction)) } };
+      viewAngles: grabAngles ? movement.viewAngles : vec3(lerpAngleRule(a.viewAngles.x, b.viewAngles.x, fraction, "float"),
+        lerpAngleRule(a.viewAngles.y, b.viewAngles.y, fraction, "float"), lerpAngleRule(a.viewAngles.z, b.viewAngles.z, fraction, "float")) } };
   }
 
   async predict(frame: Q3PredictionFrame): Promise<Q3PredictionOutput> {

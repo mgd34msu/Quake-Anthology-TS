@@ -11,7 +11,7 @@ import { BotMoveResult, BotMoveResultFlag, BotMoveType } from "./movement-state.
 import { TravelFlags } from "./navigation-types.ts";
 import { dot3, length3, normalize3, sub3, vec3 } from "../../../core/math.ts";
 import type { Vec3 } from "../../../core/math.ts";
-import { qvmAngleVectors } from "../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../core/math.ts";
 import { GameType, PersistentIndex, Team, Weapon } from "../../../content/q3/base/shared/definitions.ts";
 import { EntityState } from "../../../content/q3/base/shared/entity-state.ts";
 import { BotCharacteristic, BotFlag, BotInventory, BotLongTermGoal, BotPatrolFlag, MAX_NODESWITCHES } from "./ai-definitions.ts";

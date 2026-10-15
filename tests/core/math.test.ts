@@ -8,7 +8,7 @@ import {
   Q3Random, Q3_BINARY32_PROFILE, checkedFloatToInt, createNumericOperations,
   float32ToBits, nativeAtof, nativeAtoi, qCrandom, qRandom, qvmFloatToInt,
 } from "../../src/core/numeric.ts";
-import { qvmAngleMod, qvmAngleVectors } from "../../src/core/qvm-math.ts";
+import { qvmAngleMod, qvmAngleVectors } from "../../src/core/math.ts";
 import { inverseSqrt32, rendererSine } from "../../src/core/renderer-math.ts";
 
 describe("source math", () => {

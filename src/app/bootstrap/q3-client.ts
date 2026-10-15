@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import type { ComponentBody, PreparedPrimaryBody } from "./component-bodies.ts";
 import type { QvmBodyPart } from "../../contracts/qvm-mod-presentation.ts";
 import { copyRefEntity, type RefModelEntity } from "../../content/q3/presentation/ref-entity.ts";
@@ -84,6 +85,8 @@ export interface ApplicationQ3ClientSource extends SnapshotSource {
   systemInfo?(): string;
   getServerCommand(sequence: number): readonly string[] | null | Promise<readonly string[] | null>;
   actorAt(number: number): ActorId;
+  /** Nullable audio lookup; stale sound entities are skipped instead of throwing. */
+  soundActor?(number: number): ActorId | null;
   snapshotPing?(number: number): number | null;
 }
 interface ApplicationQ3ClientCommonOptions {
@@ -159,7 +162,9 @@ export class ApplicationQ3Client {
   readonly commandNames = new Set<string>();
   private backend: { readonly kind: "typescript"; readonly game: Q3ClientPresentation } | { readonly kind: "qvm"; readonly game: ApplicationQvmClient } | null = null;
   private readonly submissions: Submission[] = [];
-  private readonly audioOperations: Q3SeatAudioOperation[] = [];
+  private readonly audioOperations = new EventRing<Q3SeatAudioOperation>(4096);
+  private readonly audioCursor: EventCursor = this.audioOperations.openCursor();
+  private takeAudio(): Q3SeatAudioOperation[] { const taken = this.audioOperations.take(this.audioCursor); this.audioOperations.retire(); return taken; }
   private readonly sceneRenderer: ApplicationQ3SceneRenderer;
   private readonly frames: SceneFrameBuilder;
   private readonly viewportValue: { x: number; y: number; width: number; height: number };
@@ -237,7 +242,7 @@ export class ApplicationQ3Client {
     this.assertCanRestartRound();
     if (this.localSource === null) throw new Error("Missing native local source");
     this.localSource.beginRoundRestart(bit, source);
-    this.submissions.length = 0; this.audioOperations.length = 0;
+    this.submissions.length = 0; this.audioOperations.reset();
   }
   rebindRound(binding: ApplicationQ3LocalRound): void {
     this.options.assertCurrent?.();
@@ -321,10 +326,10 @@ export class ApplicationQ3Client {
         o.assertCurrent?.();
       } }),
       ...(o.systemCinematics === undefined ? {} : { systemCinematics: o.systemCinematics }),
-      actorAt: number => source.actorAt(number), clock: { now: o.now, frameNumber: () => this.frameNumber }, output: {
+      actorAt: number => source.soundActor === undefined ? source.actorAt(number) : source.soundActor(number), clock: { now: o.now, frameNumber: () => this.frameNumber }, output: {
         scene: scene => { this.submissions.push({ kind: "scene", scene }); if ((scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) this.latestCamera = scene.camera; },
         command: command => { this.submissions.push({ kind: "command", command }); }, text: draw => { this.submissions.push({ kind: "text", draw }); },
-        audio: operation => { this.audioOperations.push(operation); }, listener: (origin, axis) => { this.latestCamera = { ...this.latestCamera, origin, axis }; },
+        audio: operation => { this.audioOperations.admit(operation); }, listener: (origin, axis) => { this.latestCamera = { ...this.latestCamera, origin, axis }; },
       } });
     this.services = services;
     const { scene: recorder, resources, sound, draw, cinematics } = services;
@@ -488,7 +493,7 @@ export class ApplicationQ3Client {
       catch (error) { if (failure !== null) throw new AggregateError([failure.error, error], "Cgame frame and status restoration failed"); throw error; }
     }
     await this.sceneRenderer.preload(this.submissions.flatMap(submission => submission.kind === "scene" ? [submission.scene] : []));
-    this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
+    this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.takeAudio() });
   }
   command(argv: readonly string[]): Promise<boolean> { const backend = this.requireBackend(); return backend.kind === "typescript" ? backend.game.console.execute(argv) : backend.game.command(argv); }
   handlesCommand(name: string): boolean { const backend = this.requireBackend(); return backend.kind === "typescript" ? backend.game.console.handles(name) : this.commandNames.has(name); }
@@ -576,8 +581,8 @@ export class ApplicationQ3Client {
     if (this.closed) return;
     this.options.commandRegistration.close();
     this.timeMirror?.close(); this.timeMirror = null;
-    this.backend?.game.close(); this.audioOperations.push({ kind: "clear-loops", killAll: true });
-    this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
+    this.backend?.game.close(); this.audioOperations.admit({ kind: "clear-loops", killAll: true });
+    this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.takeAudio() });
     this.closed = true; this.cinematics?.close(); this.media.close(); this.bodyPoses.clear(); this.poseActors.clear(); this.selectedBodies.clear(); this.primaryBodies.length = 0; this.sceneRenderer.close(); this.submissions.length = 0;
   }
 }

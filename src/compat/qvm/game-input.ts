@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { ModClientMovementOutputs } from "../../contracts/mod-client-outputs.ts";
 import { clientStanceCommand } from "../../movement/client-outputs.ts";
 import type { ActorId } from "../../contracts/identity.ts";
@@ -49,7 +50,7 @@ function completed(result: QvmSystemCallResult, finish: () => void): QvmSystemCa
 
 /** Exact authored wrappers own cancellation; Pmove owns application, including retained bot input. */
 export class QvmInputBinding {
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly clients: ClientScope[] = [];
   private readonly spawning: number[] = [];
   private readonly commandFrames: { readonly scope: ClientScope; readonly address: number }[] = [];
@@ -209,5 +210,5 @@ export class QvmInputBinding {
       finish(); return result;
     } catch (error) { finish(); throw error; }
   }
-  close(): void { for (const remove of this.removals.splice(0).reverse()) remove(); }
+  close(): void { this.removals.runReverse(); }
 }

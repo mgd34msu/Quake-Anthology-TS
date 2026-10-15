@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import { ApplicationLocalLobby } from "./local-lobby.ts";
 import { LocalLobbyService } from "../../network/services/online.ts";
 import type { Lobby } from "../../network/services/online.ts";
@@ -171,7 +172,7 @@ export class StartupApplication {
   private recordingPreparation: { readonly source: ClientSourceLifetime; readonly feed: ClientRecordingFeed } | null = null;
   private pendingRecording: DemoRecordingIntent | null = null;
 
-  private readonly releaseSourceCommands: (() => void)[] = [];
+  private readonly releaseSourceCommands = new CleanupStack();
   private frontendRouting: ApplicationConsoleRouting | null = null;
 
   private constructor(readonly model: StartupSelectionModel, private readonly host: ApplicationHost & { readonly localLobbies?: LocalLobbyService }, saveDirectory: string, private readonly entry: "menu" | "run") {
@@ -1437,7 +1438,7 @@ export class StartupApplication {
     this.imageSettings = null;
     this.releaseMenuInput?.(); this.releaseMenuInput = null;
     this.releaseDemos?.(); this.releaseDemos = null;
-    for (const release of this.releaseSourceCommands.splice(0)) release();
+    this.releaseSourceCommands.runAll();
     this.frontendRouting?.close(); this.frontendRouting = null;
     try { this.graphics?.close(); } catch (error) { errors.push(error); }
     this.graphics = null; this.client = null; this.game = null; this.remote = null;

@@ -1,10 +1,10 @@
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { SavedActorId } from "../../../../contracts/session.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think, Q2Use } from "../../foundation/host.ts";
 import { add, dot, length, normalize, numberField, scale, subtract, vectorField, zero } from "../../foundation/fields.ts";
-import { angleVectors, vectorAngles } from "../../foundation/weapons/vectors.ts";
 import { restoreQ2Actor } from "../../foundation/checkpoint.ts";
 import type { Q2RereleasePlayers } from "../players.ts";
 import type { Q2RereleaseHooks } from "../types.ts";
@@ -68,7 +68,7 @@ export class Q2RereleaseQ64 implements Q2SpawnModule {
       this.eyes.set(entity.actor.id, state);
       if ((entity.spawn.values.get("pathtarget") ?? "") !== "") game.schedule(entity, 0.1, this.eyeSetup);
       else {
-        const vectors = angleVectors(state.neutralAngles), point = state.eyePosition;
+        const vectors = angleVectorsRule(state.neutralAngles, "native"), point = state.eyePosition;
         entity.movedir = vectors.forward;
         state.eyePosition = add(add(scale(vectors.forward, point.x), scale(vectors.right, point.y)), scale(vectors.up, point.z));
         game.schedule(entity, 0.1, this.eyeThink);
@@ -116,9 +116,9 @@ export class Q2RereleaseQ64 implements Q2SpawnModule {
     if (closest !== null && target !== null) {
       if ((entity.spawnflags & 0x20000) === 0) { game.useTargets(entity, closest); entity.spawnflags |= 0x20000; }
       if (!game.host.actors.isLive(entity.actor.id)) return undefined;
-      const vectors = angleVectors(body.angles), offset = state.eyePosition;
+      const vectors = angleVectorsRule(body.angles, "native"), offset = state.eyePosition;
       const eye = add(body.origin, add(add(scale(vectors.forward, offset.x), scale(vectors.right, offset.y)), scale(vectors.up, offset.z)));
-      wanted = vectorAngles(normalize(subtract(target.origin, eye)));
+      wanted = vectorToAnglesRule(normalize(subtract(target.origin, eye)), "native");
       entity.frame = 2; entity.timestamp = game.host.now() + entity.wait;
     } else if (entity.timestamp <= game.host.now()) { wanted = state.neutralAngles; entity.frame = 0; }
     game.move(entity, { angles: { x: turn(body.angles.x, wanted.x, entity.speed), y: turn(body.angles.y, wanted.y, entity.speed), z: body.angles.z } });

@@ -1,8 +1,9 @@
 /* Quake II xatrix/m_boss5.c. ZeniMax Media, GPL-2.0-or-later. */
 import { bossExplode } from "../../base/monsters/boss-common.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import { damagedSkin, finishCorpse, move, muzzle, shot, sound } from "../../base/monsters/common.ts";
 import { normalize, subtract } from "../../foundation/fields.ts";
-import { anglesVectors, enemyEye, projectFlash, targetDistance, visible } from "../../foundation/monsters/ai.ts";
+import { enemyEye, projectFlash, targetDistance, visible } from "../../foundation/monsters/ai.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
 import { monsterPowerArmor, restoreMonsterPowerArmor } from "./power-armor.ts";
@@ -43,7 +44,7 @@ export const boss5Definition: Q2MonsterDefinition = {
     boss5MachineGun(context) {
       const flash = 64 + context.entity.frame - boss5Frame.attak1_1, body = context.game.body(context.entity);
       const start = projectFlash(context, muzzleOffset(context.game.options.edition, flash), { x: 0, y: body.angles.y, z: 0 });
-      const eye = enemyEye(context), direction = eye === null ? anglesVectors({ x: 0, y: body.angles.y, z: 0 }).forward : normalize(subtract(eye, start));
+      const eye = enemyEye(context), direction = eye === null ? angleVectorsRule({ x: 0, y: body.angles.y, z: 0 }, "native").forward : normalize(subtract(eye, start));
       context.weapons.fireBullet(context.entity, context.game, start, direction, 6, 4, 300, 500, 0);
       return muzzle(context, flash, direction, start);
     },

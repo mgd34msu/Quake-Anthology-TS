@@ -1,7 +1,7 @@
 // CG_Draw3DModel/DrawHead/DrawFlagModel/DrawTeamBackground from code/cgame/cg_draw.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { add3, vec3 } from "../../../core/math.ts";
-import { qvmAnglesToAxis } from "../../../core/qvm-math.ts";
+import { qvmAnglesToAxis } from "../../../core/math.ts";
 import type { Bounds, Vec3 } from "../../../core/math.ts";
 import type { Rect as Rect2D } from "../../../contracts/render.ts";
 import type { TextDrawSink as RenderCommandBuffer } from "../../../text/draw2d.ts";

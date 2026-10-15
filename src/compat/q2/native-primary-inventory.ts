@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import { sourceItemNamed } from "../../contracts/source-items.ts";
 import type { WeaponHudIcon } from "../../contracts/ui.ts";
 import { readClassicString } from "./classic/records.ts";
@@ -48,7 +49,7 @@ const integer: GuestValueLayout = { kind: "scalar", storage: "int32" };
 
 /** Original scanners own usability, category filters and accepted cursor side effects. */
 export class NativePrimaryInventory {
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly selected = new Map<ActorId, { readonly item: ItemId; readonly index: number }>();
   private readonly frames: Frame[] = [];
   private evaluating = 0;
@@ -205,5 +206,5 @@ export class NativePrimaryInventory {
     this.selected.set(actor, { item, index: row.sourceIndex });
   }
   release(actor: ActorId): void { this.selected.delete(actor); }
-  close(): void { if (this.closed) return; this.closed = true; for (const remove of this.removals.splice(0).reverse()) remove(); this.selected.clear(); }
+  close(): void { if (this.closed) return; this.closed = true; this.removals.runReverse(); this.selected.clear(); }
 }

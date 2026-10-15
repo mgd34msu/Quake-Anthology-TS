@@ -12,6 +12,10 @@ import { readContentId } from "../../persistence/recipe.ts";
 import { readVector } from "../../persistence/shared.ts";
 import type { SavedActorId } from "../../contracts/session.ts";
 import { normalizeShaderName, stripShaderExtension } from "../../materials/material.ts";
+import { EventRing, IdIndex, STRING_NONE, StringTable, type EventCursor } from "../../foundation/index.ts";
+
+/** Undrained presentation events retained between publications; sized at load like the C output ring. */
+const PRESENTATION_EVENT_CAPACITY = 32768;
 
 export interface LocalPresentationMedia {
   readonly kind: "local-media";
@@ -23,8 +27,9 @@ export interface LocalPresentationMedia {
 }
 type RetainedPresentation = SimulationPresentationEvent | LocalPresentationMedia;
 function q2LoopKey(event: Extract<Q2PresentationEvent, { readonly kind: "sound" }>, recipient?: ActorId): string {
-  return JSON.stringify(["sound", event.loopOwner ?? null, event.actor?.slot ?? -1, event.actor?.generation ?? -1, event.channel, event.path,
-    recipient === undefined ? null : [recipient.slot, recipient.generation]]);
+  const owner = event.loopOwner === undefined ? "-" : `${event.loopOwner.length}:${event.loopOwner}`;
+  const recipientKey = recipient === undefined ? "-" : `${recipient.slot}:${recipient.generation}`;
+  return `sound|${owner}|${event.actor?.slot ?? -1}:${event.actor?.generation ?? -1}|${event.channel}|${event.path.length}:${event.path}|${recipientKey}`;
 }
 
 /** Retains source events until the application resolves their content-owned media. */
@@ -33,8 +38,11 @@ export class PresentationState {
   private nextOwnerGeneration = 1;
   private legacyPersistence = false;
   private readonly owners = new Map<ProviderId, { readonly token: PresentationOwner; readonly content: ContentId; readonly fog: SimulationQ1Fog | null; status: "restored" | "active" }>();
-  private readonly source: SimulationPresentationEvent[] = [];
-  protected readonly resources = new Map<string, ResolvedResourceReference>();
+  private readonly source = new EventRing<SimulationPresentationEvent>(PRESENTATION_EVENT_CAPACITY);
+  private readonly sourceCursor: EventCursor = this.source.openCursor();
+  private readonly resourceNames = new StringTable(() => 0);
+  private readonly resourceIndex = new IdIndex();
+  private readonly resourceRows: ResolvedResourceReference[] = [];
   private readonly resourcesById = new Map<ResourceId, ResolvedResourceReference>();
   private readonly styles = new Map<number, { readonly family: "q1" | "q2"; readonly pattern: string }>();
   private readonly legacyStyles = new Map<number, { readonly family: "q1" | "q2"; readonly pattern: string }>();
@@ -118,7 +126,7 @@ export class PresentationState {
       if (slot !== null && affected.has(persistentDomain(event) ?? "") && (replacements.get(slot)?.sequence ?? -1) < event.sequence) replacements.set(slot, event);
     }
     for (const event of [...replacements.values()].sort((a, b) => a.sequence - b.sequence))
-      this.source.push({ ...event, sequence: this.presentationSequence++ });
+      this.admitSource({ ...event, sequence: this.presentationSequence++ });
     if (this.localMediaEnabled && (localMusic || affected.has("music:track") && [...this.persistent.values()].some(event => event.kind === "local-media" && event.event.kind !== "shader-remap"))) {
       const replacement = [...this.persistent.values()].filter(event => persistentDomain(event) === "music:track").sort((a, b) => b.sequence - a.sequence)[0];
       if (replacement !== undefined) {
@@ -139,7 +147,7 @@ export class PresentationState {
     }
     const fog = [...(this.fog?.presentation() ?? []), ...[...this.owners.values()].flatMap(entry =>
       entry.fog?.presentation().map(event => ({ ...event, owner: entry.token })) ?? [])];
-    for (const event of fog.sort((a, b) => a.sequence - b.sequence)) this.source.push({ ...event, sequence: this.presentationSequence++ });
+    for (const event of fog.sort((a, b) => a.sequence - b.sequence)) this.admitSource({ ...event, sequence: this.presentationSequence++ });
     this.rebuildStyles();
   }
 
@@ -221,9 +229,26 @@ export class PresentationState {
 
   registerResource(content: ContentId, path: string, resource: ResolvedResourceReference): undefined {
     if (resource.requestedPath !== path) throw new Error("Registered resource path does not match its source request");
-    this.resources.set(`${content}/${path}`, resource);
+    this.resourceIndex.reserve(1);
+    this.resourceIndex.insert(this.resourceNames.intern(path), this.resourceNames.intern(content), this.resourceRows.length);
+    this.resourceRows.push(resource);
     this.resourcesById.set(resource.id, resource);
     return undefined;
+  }
+
+  /** Interned (content, path) lookup; the most recent registration wins, as the former keyed map did. */
+  protected resourceFor(content: ContentId, path: string): ResolvedResourceReference | undefined {
+    const contentId = this.resourceNames.find(content);
+    const pathId = this.resourceNames.find(path);
+    if (contentId === STRING_NONE || pathId === STRING_NONE) return undefined;
+    const row = this.resourceIndex.find(pathId, contentId);
+    return row < 0 ? undefined : this.resourceRows[row];
+  }
+
+  private admitSource(event: SimulationPresentationEvent): void {
+    if (this.source.append(event) === 0) {
+      throw new Error(`Presentation event capacity exhausted (${PRESENTATION_EVENT_CAPACITY} undrained events); drain presentation output before admitting more`);
+    }
   }
 
   emit(content: ContentId, source: SourcePresentationEvent, time: SourceTime = this.now(), recipient?: ActorId): undefined {
@@ -279,10 +304,10 @@ export class PresentationState {
 
   private record(presentation: SimulationPresentationEvent): void {
     const { owner, recipient } = presentation;
-    this.source.push(presentation);
+    this.admitSource(presentation);
     if (presentation.kind === "q1-composition" && presentation.event.kind === "addon" && presentation.event.event.kind === "fog")
-      this.source.push(...((owner === undefined ? this.fog : this.owners.get(owner.provider)?.fog)?.update(presentation, presentation.event.event)
-        .map(event => ({ ...event, ...(owner === undefined ? {} : { owner }) })) ?? []));
+      for (const derived of (owner === undefined ? this.fog : this.owners.get(owner.provider)?.fog)?.update(presentation, presentation.event.event)
+        .map(event => ({ ...event, ...(owner === undefined ? {} : { owner }) })) ?? []) this.admitSource(derived);
     const slot = persistentSlot(presentation), prefix = presentationOwnerKey(owner);
     if (slot !== null) this.persistent.set(`${prefix}:${slot}`, presentation);
     if (presentation.kind === "q1" && (presentation.event.kind === "ambient" || presentation.event.kind === "static-model"))
@@ -295,11 +320,22 @@ export class PresentationState {
       this.styles.set(presentation.event.style, { family: presentation.kind, pattern: presentation.event.pattern });
   }
 
-  takePresentation(): readonly SimulationPresentationEvent[] { return this.source.splice(0); }
+  takePresentation(): readonly SimulationPresentationEvent[] {
+    const taken = this.source.take(this.sourceCursor);
+    this.source.retire();
+    return taken;
+  }
+
+  /** Zero-allocation drain for consumers that can visit events in place. */
+  drainPresentation(visit: (event: SimulationPresentationEvent) => void): number {
+    const count = this.source.drain(this.sourceCursor, (event) => { visit(event); });
+    this.source.retire();
+    return count;
+  }
 
   assertOutputConsumed(): undefined {
     this.assertLocalMediaConsumed();
-    if (this.source.length !== 0) throw new Error("Save requires consumed source output");
+    if (this.source.pending(this.sourceCursor) !== 0) throw new Error("Save requires consumed source output");
     return undefined;
   }
 
@@ -316,7 +352,7 @@ export class PresentationState {
   restore(reader: SaveReader, reference: (actor: SavedActorId) => ActorId): undefined {
     this.presentationSequence = reader.field("presentationSequence").integer(0);
     this.restoredThrough = this.presentationSequence; this.localMediaOutput.clear(); this.localMediaEnabled = false; this.mediaSequence = -1; this.shaderSequences.clear();
-    this.source.length = 0; this.styles.clear(); this.legacyStyles.clear(); this.persistent.clear();
+    this.source.reset(); const restoredSource: SimulationPresentationEvent[] = []; this.styles.clear(); this.legacyStyles.clear(); this.persistent.clear();
     this.owners.clear();
     const ownership = reader.field("ownership"); this.legacyPersistence = ownership.value === undefined;
     this.nextOwnerGeneration = ownership.value === undefined ? 1 : ownership.field("nextGeneration").integer(1);
@@ -328,14 +364,14 @@ export class PresentationState {
       const fog = this.ownerFog(content);
       if (value.field("fog").value !== null) {
         if (fog === null) return value.fail("Owned fog requires a Q1 map");
-        this.source.push(...fog.restore(value.field("fog"), reference).map(event => ({ ...event, owner: token })));
+        restoredSource.push(...fog.restore(value.field("fog"), reference).map(event => ({ ...event, owner: token })));
       }
       this.owners.set(token.provider, { token, content, fog, status: "restored" });
     });
     const fog = reader.field("q1Fog");
     if (fog.value !== undefined && fog.value !== null) {
       if (this.fog === null) return fog.fail("Q1 fog state requires a Q1 map");
-      this.source.push(...this.fog.restore(fog, reference));
+      restoredSource.push(...this.fog.restore(fog, reference));
     } else this.fog?.reset();
     reader.field("styles").list(value => this.styles.set(value.field("style").integer(0), { family: value.field("family").choice("q1", "q2"), pattern: value.field("pattern").string() }));
     if (reader.field("baseStyles").value !== undefined) reader.field("baseStyles").list(value =>
@@ -376,9 +412,12 @@ export class PresentationState {
       const slot = persistentSlot(restored);
       const key = `${presentationOwnerKey(owner)}:${slot ?? (restored.kind === "q2" && restored.event.kind === "sound"
         ? q2LoopKey(restored.event, restored.recipient) : `${kind}:${restored.sequence}`)}`;
-      this.persistent.set(key, restored); this.source.push(restored);
+      this.persistent.set(key, restored); restoredSource.push(restored);
     });
-    this.source.sort((a, b) => a.sequence - b.sequence);
+    restoredSource.sort((a, b) => a.sequence - b.sequence);
+    if (restoredSource.length !== 0 && this.source.appendAll(restoredSource) === 0) {
+      throw new Error(`Restored presentation output exceeds event capacity (${PRESENTATION_EVENT_CAPACITY})`);
+    }
     return undefined;
   }
 

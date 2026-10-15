@@ -1,6 +1,6 @@
 /* Independent patch collision translated from id Software's cm_patch.c and cm_polylib.c.
  * Copyright (C) 1999-2005 Id Software, Inc. SPDX-License-Identifier: GPL-2.0-or-later */
-import { vec3, add3, sub3, scale3, dot3, length3, lerp3 } from "../../../core/math.ts";
+import { vec3, add3, sub3, scale3, dot3, length3, lerp3, dot3Double, cross3Stored, normalize3Stored } from "../../../core/math.ts";
 import { CommonError } from "../../../core/common-error.ts";
 import type { Vec3, Plane, Bounds } from "../../../core/math.ts";
 import type { CvarRegistry, CvarSnapshot } from "../../../core/cvars/index.ts";
@@ -118,12 +118,9 @@ function at<T>(values: readonly T[], index: number): T {
 function negate(plane: Plane): Plane { return { normal: scale3(plane.normal, -1), distance: -plane.distance }; }
 // Engine-side generation follows the native i386 gcc -O2 reference, not game QVM
 // vector arithmetic: x87 keeps expression intermediates until float-array stores.
-function patchDot(a: Vec3, b: Vec3): number { return a.x * b.x + a.y * b.y + a.z * b.z; }
-function patchCross(a: Vec3, b: Vec3): Vec3 { return vec3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x); }
-function normalizePatchVector(value: Vec3): Vec3 {
-  const length = Math.sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
-  return length === 0 ? value : scale3(value, 1 / length);
-}
+const patchDot = dot3Double;
+const patchCross = cross3Stored;
+const normalizePatchVector = normalize3Stored;
 function curveMidpoint(a: Vec3, b: Vec3, c: Vec3): Vec3 {
   return vec3(0.5 * (0.5 * (a.x + b.x) + 0.5 * (b.x + c.x)),
     0.5 * (0.5 * (a.y + b.y) + 0.5 * (b.y + c.y)), 0.5 * (0.5 * (a.z + b.z) + 0.5 * (b.z + c.z)));

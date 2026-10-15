@@ -1,6 +1,7 @@
 /* Original Rogue Tank and Iron Maiden weapon and dodge behavior. GPL-2.0-or-later. */
 import { add, length, normalize, scale, subtract } from "../../foundation/fields.ts";
-import { anglesVectors, enemyBody, finishDodge, health, projectFlash, targetDistance, visible } from "../../foundation/monsters/ai.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
+import { enemyBody, finishDodge, health, projectFlash, targetDistance, visible } from "../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -17,7 +18,7 @@ import { chickFrame, chickMoves } from "./tables/rogue-chick.ts";
 function rocket(context: MonsterContext, flash: number, headChance: number, blindOffset: number): undefined {
   const { entity, game, state } = context, enemy = enemyBody(context);
   if (enemy === null || entity.enemy === null) return undefined;
-  const start = projectFlash(context, muzzleOffset(game.options.edition, flash)), right = anglesVectors(game.body(entity).angles).right;
+  const start = projectFlash(context, muzzleOffset(game.options.edition, flash)), right = angleVectorsRule(game.body(entity).angles, "native").right;
   const speed = 500 + 100 * game.options.skill, blind = state.manualSteering, target = blind ? state.blindFireTarget : enemy.origin;
   let point = blind ? target : { ...target, z: game.host.random() < headChance || start.z < enemy.origin.z + enemy.bounds.min.z ? target.z + (game.entity(entity.enemy)?.viewHeight ?? 22) : enemy.origin.z + enemy.bounds.min.z };
   if (!blind && game.host.random() < 0.2 + (3 - game.options.skill) * 0.15) point = add(point, scale(enemy.velocity, length(subtract(point, start)) / speed));

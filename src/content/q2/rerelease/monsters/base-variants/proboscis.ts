@@ -1,9 +1,10 @@
 // Rerelease m_parasite.cpp. ZeniMax Media, GPL-2.0.
 import type { ActorId } from "../../../../../contracts/identity.ts";
+import { vectorToAnglesRule } from "../../../../../core/math.ts";
 import type { Vec3 } from "../../../../../contracts/math.ts";
 import { add, dot, length, normalize, scale, subtract, zero } from "../../../foundation/fields.ts";
 import type { Q2Die, Q2Entity, Q2GameServices, Q2Think, Q2Touch } from "../../../foundation/host.ts";
-import { health, projectFlash, vectorAngles } from "../../../foundation/monsters/ai.ts";
+import { health, projectFlash } from "../../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../../foundation/monsters/index.ts";
 import type { MonsterContext } from "../../../foundation/monsters/types.ts";
 import { predictedDirection, rereleaseRandom } from "../common.ts";
@@ -79,7 +80,7 @@ export function createProboscis(monsters: Q2Monsters) {
       const target = game.host.bodies.read(tip.enemy), combat = game.host.combat.read(tip.enemy);
       if (target === null || combat === null || combat.health <= 0 || !combat.canTakeDamage) return retract(tip, game);
       const origin = add(target.origin, tip.pos1), from = start(owner), trace = game.host.trace({ start: from, end: origin, bounds: null, ignore: null, mask: 3 });
-      game.move(tip, { origin, angles: vectorAngles(normalize(subtract(origin, from))) });
+      game.move(tip, { origin, angles: vectorToAnglesRule(normalize(subtract(origin, from)), "native-ai") });
       if (trace.fraction !== 1) { retract(tip, game); return game.move(tip, { origin: body.origin }); }
       if (tip.timestamp <= game.host.now()) {
         const normal = trace.contact.kind === "plane" ? trace.contact.plane.normal : zero;
@@ -113,7 +114,7 @@ export function createProboscis(monsters: Q2Monsters) {
     tip.model = "models/monsters/parasite/tip/tris.md2"; tip.owner = entity.actor.id; entity.proboscus = tip.actor.id;
     tip.clipMask = 3 | 0x2000000 | 0x40000000; tip.speed = 1250; tip.projectile = true; tip.die = die; tip.touch = touch;
     tip.flags |= 8; game.host.combat.create(tip.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
-    game.move(tip, { origin: from, angles: vectorAngles(direction), velocity: scale(direction, tip.speed) });
+    game.move(tip, { origin: from, angles: vectorToAnglesRule(direction, "native-ai"), velocity: scale(direction, tip.speed) });
     game.motion(tip, "fly-missile"); game.solid(tip, "box"); game.schedule(tip, game.host.frameSeconds(), think);
     segment.model = "models/monsters/parasite/segment/tris.md2"; segment.renderFlags = 128; segment.postthink = draw;
     tip.proboscus = segment.actor.id; segment.owner = tip.actor.id;

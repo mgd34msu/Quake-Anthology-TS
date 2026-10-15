@@ -1,5 +1,6 @@
 /* Permanent Q2 monster provider: shared actor authority with source animation/AI callbacks. GPL-2.0-or-later. */
 import type { SavedActorId } from "../../../../contracts/session.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { Q2CallbackDefinitions } from "../callbacks.ts";
 import { restoreQ2Actor, saveQ2Actor, saveQ2Attack, restoreQ2Attack } from "../checkpoint.ts";
 import type { Q2MonstersCheckpoint } from "./checkpoint.ts";
@@ -13,7 +14,7 @@ import type { DeathReaction, PainReaction } from "../../../../contracts/world.ts
 import { add, dot, length, normalize, numberField, scale, subtract, zero } from "../fields.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think, Q2Use, Q2Pain, Q2Die } from "../host.ts";
 import type { MonsterCallback } from "./actions.ts";
-import { anglesVectors, enemyBody, finishDodge, fliesOn, fliesOff, monsterDeadThink, health, monsterSolidMask, MASK_WATER, runAi, setDuck, traceGroundActor, vectorAngles } from "./ai.ts";
+import { enemyBody, finishDodge, fliesOn, fliesOff, monsterDeadThink, health, monsterSolidMask, MASK_WATER, runAi, setDuck, traceGroundActor } from "./ai.ts";
 import { infantryAttack, infantryCallbacks, infantryDie, infantryDuck, infantryPain, infantryRun, infantrySidestep, infantrySight, infantryStand, infantryWalk } from "./infantry.ts";
 import { classic_infantryMoves, classic_soldierMoves, rerelease_infantryMoves, rerelease_soldierMoves } from "./moves.ts";
 import { defaultCheckAttack, MonsterPerception } from "./perception.ts";
@@ -138,7 +139,7 @@ export class Q2Monsters implements Q2SpawnModule {
     context.state.pauseTime = pauseUntil;
     if (goal === null || pauseUntil > context.game.host.now()) context.stand(); else context.walk();
     const target = goal === null ? null : context.game.host.bodies.read(goal);
-    if (target !== null) context.state.idealYaw = vectorAngles(subtract(target.origin, context.game.body(context.entity).origin)).y;
+    if (target !== null) context.state.idealYaw = vectorToAnglesRule(subtract(target.origin, context.game.body(context.entity).origin), "native-ai").y;
     return undefined;
   }
 
@@ -470,7 +471,7 @@ export class Q2Monsters implements Q2SpawnModule {
       const target = state.moveTarget === null ? null : game.host.bodies.read(state.moveTarget);
       if (target === null) { state.pauseTime = game.host.now() + 100000000; if (!spawnDead) context.stand(); }
       else {
-        state.idealYaw = vectorAngles(subtract(target.origin, game.body(entity).origin)).y;
+        state.idealYaw = vectorToAnglesRule(subtract(target.origin, game.body(entity).origin), "native-ai").y;
         game.move(entity, { angles: { ...game.body(entity).angles, y: state.idealYaw } }, false);
         if (!spawnDead) context.walk();
       }
@@ -484,7 +485,7 @@ export class Q2Monsters implements Q2SpawnModule {
       entity.goal = state.moveTarget = target?.actor.id ?? null;
       if (target === null) { game.host.diagnostic(`${entity.classname}: target ${entity.target} not found`); entity.target = ""; state.pauseTime = game.host.now() + 100000000; if (!spawnDead) context.stand(); }
       else if (target.classname === "path_corner") {
-        state.idealYaw = vectorAngles(subtract(game.body(target).origin, game.body(entity).origin)).y;
+        state.idealYaw = vectorToAnglesRule(subtract(game.body(target).origin, game.body(entity).origin), "native-ai").y;
         game.move(entity, { angles: { ...game.body(entity).angles, y: state.idealYaw } }, false);
         if (!spawnDead) context.walk(); entity.target = "";
       } else { entity.goal = state.moveTarget = null; state.pauseTime = game.host.now() + 100000000; if (!spawnDead) context.stand(); }
@@ -694,7 +695,7 @@ export class Q2Monsters implements Q2SpawnModule {
       if (state.dodging) return undefined;
       if (!ducker || trace === null || trace.end.z <= height || state.ducked) {
         if (game.options.skill < 2 && game.host.random() >= (game.options.skill === 0 ? 0.25 : 0.5)) { state.dodgeTime = game.host.now() + 0.8 + game.host.random() * 0.6; return undefined; }
-        state.lefty = trace === null ? game.host.random() < 0.5 : dot(anglesVectors(body.angles).right, subtract(trace.end, body.origin)) >= 0;
+        state.lefty = trace === null ? game.host.random() < 0.5 : dot(angleVectorsRule(body.angles, "native").right, subtract(trace.end, body.origin)) >= 0;
         if (definition.sidestep?.(context) === true) {
           if (ducker && state.ducked) sharedCallbacks.monster_duck_up(context);
           state.dodging = true; state.attackState = "sliding"; state.dodgeTime = game.host.now() + 0.4 + game.host.random() * 1.6;
@@ -720,7 +721,7 @@ export class Q2Monsters implements Q2SpawnModule {
     const { entity, game, state } = context;
     const definition = this.actors.get(entity.actor.id);
     if (state.dead || state.dodgeTime > game.host.now() || definition === undefined || definition.dodge === undefined && definition.duck === undefined && definition.sidestep === undefined) return undefined;
-    const body = game.body(entity), forward = anglesVectors(body.angles).forward;
+    const body = game.body(entity), forward = angleVectorsRule(body.angles, "native").forward;
     const min = add(add(body.origin, body.bounds.min), { x: -512, y: -512, z: -512 });
     const max = add(add(body.origin, body.bounds.max), { x: 512, y: 512, z: 512 });
     for (const projectile of game.entities.values()) {
@@ -738,7 +739,7 @@ export class Q2Monsters implements Q2SpawnModule {
   private blocked(context: MonsterContext, distance: number): boolean {
     const { game, entity, state } = context, enemy = enemyBody(context), body = game.body(entity);
     if (enemy === null || state.kind === "soldier" && (state.dodging || state.ducked)) return false;
-    const forward = anglesVectors(body.angles).forward;
+    const forward = angleVectorsRule(body.angles, "native").forward;
     if (state.kind === "infantry" && (entity.spawnflags & 8) === 0 && state.jumpTime <= game.host.now()) {
       const selfMin = body.origin.z + body.bounds.min.z, enemyMin = enemy.origin.z + enemy.bounds.min.z;
       const ahead = add(body.origin, scale(forward, 48));
@@ -783,7 +784,7 @@ export class Q2Monsters implements Q2SpawnModule {
             if (pauseUntil !== 0) { context.state.pauseTime = pauseUntil; context.stand(); }
             else {
               const target = goal === null ? null : game.host.bodies.read(goal);
-              if (target !== null) context.state.idealYaw = vectorAngles(subtract(target.origin, game.body(context.entity).origin)).y;
+              if (target !== null) context.state.idealYaw = vectorToAnglesRule(subtract(target.origin, game.body(context.entity).origin), "native-ai").y;
             }
             return undefined;
           } };

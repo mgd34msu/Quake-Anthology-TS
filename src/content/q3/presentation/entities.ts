@@ -3,10 +3,10 @@
 import { lerpModelTag } from "./model-access.ts";
 import type { PcmSound } from "../../../audio/wav.ts";
 import { CommonError } from "../../../core/common-error.ts";
-import { add3, cross3, dot3, length3, normalize3OrZero, perpendicularVector, scale3, sub3, vec3, vec4 } from "../../../core/math.ts";
+import { add3, cross3, dot3, length3, normalize3OrZero, perpendicularVector, scale3, sub3, vec3, vec4, lerpAngleRule } from "../../../core/math.ts";
 import type { Axis, Vec3 } from "../../../core/math.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
-import { qvmAnglesToAxis, qvmRotatePointAroundVector } from "../../../core/qvm-math.ts";
+import { qvmAnglesToAxis, qvmRotatePointAroundVector } from "../../../core/math.ts";
 import type { DynamicLight } from "./scene-host.ts";
 import { createBeamEntity, createModelEntity, createPortalEntity, createSpriteEntity, RF_MINLIGHT, RF_THIRD_PERSON, RF_NOSHADOW } from "./ref-entity.ts";
 import type { RefEntity, RefModelEntity, SceneModel, SceneShader, SceneSkin } from "./ref-entity.ts";
@@ -148,11 +148,6 @@ export function adjustPositionForMover(state: ClientGameState, input: Vec3, move
   return add3(input, sub3(origin, oldOrigin));
 }
 
-function lerpAngle(from: number, to: number, fraction: number): number {
-  if (f(to - from) > 180) to = f(to - 360);
-  if (f(to - from) < -180) to = f(to + 360);
-  return f(from + f(fraction * f(to - from)));
-}
 
 function interpolate(from: Vec3, to: Vec3, fraction: number): Vec3 {
   return add3(from, scale3(sub3(to, from), fraction));
@@ -199,7 +194,7 @@ export class PacketEntityPresenter {
       if (next === null) throw new CommonError("drop", "CG_InterpoateEntityPosition: cg.nextSnap == NULL");
       entity.lerpOrigin = interpolate(evaluateTrajectory(current.pos, snap.serverTime), evaluateTrajectory(entity.nextState.pos, next.serverTime), state.frameInterpolation);
       const a = evaluateTrajectory(current.apos, snap.serverTime), b = evaluateTrajectory(entity.nextState.apos, next.serverTime);
-      entity.lerpAngles = vec3(lerpAngle(a.x, b.x, state.frameInterpolation), lerpAngle(a.y, b.y, state.frameInterpolation), lerpAngle(a.z, b.z, state.frameInterpolation));
+      entity.lerpAngles = vec3(lerpAngleRule(a.x, b.x, state.frameInterpolation, "float"), lerpAngleRule(a.y, b.y, state.frameInterpolation, "float"), lerpAngleRule(a.z, b.z, state.frameInterpolation, "float"));
       return;
     }
     entity.lerpOrigin = evaluateTrajectory(current.pos, state.time);

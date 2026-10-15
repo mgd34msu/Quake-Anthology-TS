@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { QvmInventoryWord } from "./game-inventory.ts";
 import { sourceScore, type SourcePrimaryMatch } from "../../contracts/source-match.ts";
 import { QvmEquipmentMovement, type QvmEquipmentMotion, type QvmEquipmentMovementProfile } from "./game-equipment-movement.ts";
@@ -57,7 +58,7 @@ export class QvmPrimaryWeapons {
   private equipment: QvmEquipmentMovement | null = null;
   private closed = false;
   private readonly scratch: number;
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly evaluations: { readonly actor: ActorId; readonly kind: "damage-factor" | "teleport" | "objectives"; entered: boolean; result: number | null }[] = [];
   constructor(private readonly game: Pick<QvmGame, "module" | "data">, artifact: QvmModuleOptions["artifact"],
     private readonly profile: QvmPrimaryWeaponProfile, private readonly services: Services) {
@@ -313,5 +314,5 @@ export class QvmPrimaryWeapons {
     return this.game.module.memory.dataView(this.pointer(actor) + this.profile.powerups[powerup], 4).getInt32(0, true);
   }
   teleport(actor: ActorId): void { this.effect(actor, "teleport"); }
-  close(): void { this.closed = true; for (const remove of this.removals.splice(0).reverse()) remove(); this.dispatcher.close(); }
+  close(): void { this.closed = true; this.removals.runReverse(); this.dispatcher.close(); }
 }

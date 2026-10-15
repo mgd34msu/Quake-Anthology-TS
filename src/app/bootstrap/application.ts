@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import { componentEngineCommands } from "./component-commands.ts";
 import { readComponentClients, saveComponentClients, requireComponentClientPresentation } from "./component-client-save.ts";
 import { SaveReader } from "../../persistence/value.ts";
@@ -252,7 +253,7 @@ export interface ApplicationHost {
 type LocalQ3GuestSeat = { readonly state: LocalQ3ClientState; readonly cvars: CvarRegistry; userinfo: string; client: ApplicationQ3Client | null };
 type LocalQ3GuestBrowser = { readonly host: StartupServerBrowser; readonly view: Q3BrowserView };
 type LocalQ3GuestWorld = { readonly worldSound: ActorId; readonly authority: ReturnType<typeof createQ3ApplicationServerHost>;
-  readonly seats: Map<SeatId, LocalQ3GuestSeat>; readonly pendingCommands: ApplicationCommandRequest[] };
+  readonly seats: Map<SeatId, LocalQ3GuestSeat>; readonly pendingCommands: EventRing<ApplicationCommandRequest> };
 
 export class Application {
   private releaseViewCvars: (() => void) | null = null;
@@ -390,7 +391,8 @@ export class Application {
   private archivePersistence = false;
   private dedicatedConsole: DedicatedConsole | null = null;
   private dedicatedCommands: CommandBuffer | null = null;
-  private requestedCommands: ApplicationCommandRequest[] = [];
+  private readonly requestedCommands = new EventRing<ApplicationCommandRequest>(16384);
+  private readonly requestedCursor: EventCursor = this.requestedCommands.openCursor();
   private preparedStartup: PreparedStartup | null = null;
   private readonly keys: ApplicationKeys;
   private readonly keyProfiles = new WeakMap<SharedSimulation, ApplicationKeyProfile>();
@@ -449,7 +451,8 @@ export class Application {
   private lastRestartFrame = -1;
   private localSnapshotServerBit: 0 | 4 = 0;
   private fatalWorldFailure = false;
-  private roundPresentationEvents: SimulationPresentationEvent[] = [];
+  private readonly roundPresentationEvents = new EventRing<SimulationPresentationEvent>(32768);
+  private readonly roundCursor: EventCursor = this.roundPresentationEvents.openCursor();
   private pendingSave: { readonly path: string; readonly sourceProduct?: string } | null = null;
   private savedGames: StartupSaves | null = null;
   private localGuest: LocalQ3GuestWorld | null = null;
@@ -869,11 +872,11 @@ export class Application {
         const startupApplication = application;
         startup?.prepared.forwardCommands((name, args, source) => {
           let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
-          startupApplication.requestedCommands.push({ target: "application", name, arguments_: args, seat: origin.kind === "local-seat" ? origin.seat : null, source });
+          startupApplication.requestedCommands.admit({ target: "application", name, arguments_: args, seat: origin.kind === "local-seat" ? origin.seat : null, source });
           return undefined;
         });
-        if (startup !== null) application.requestedCommands.push(...startup.requests);
-        if (profileConfiguration !== null) application.requestedCommands.push(...profileConfiguration.requests);
+        if (startup !== null) if (startup.requests.length !== 0) application.requestedCommands.admitAll(startup.requests);
+        if (profileConfiguration !== null) if (profileConfiguration.requests.length !== 0) application.requestedCommands.admitAll(profileConfiguration.requests);
         application.frontendOverrides = preferences ?? {};
         application.elapsed = savedSettings?.hostMilliseconds ?? 0;
         if (initialSave !== undefined && simulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
@@ -883,7 +886,7 @@ export class Application {
         await application.prepareGuestBots(content, simulation);
         if (!options.dedicated && simulation.q3Guest() !== null) {
           const authority = createQ3ApplicationServerHost({ session, simulation, content, print: text => host.print(text), ...(initialSave === undefined ? {} : { mode: "restore" }) });
-          application.localGuest = { worldSound: createIdentityOwner("local-qvm-world-audio").actor(1022, 0), authority, seats: new Map<SeatId, LocalQ3GuestSeat>(), pendingCommands: [] };
+          application.localGuest = { worldSound: createIdentityOwner("local-qvm-world-audio").actor(1022, 0), authority, seats: new Map<SeatId, LocalQ3GuestSeat>(), pendingCommands: new EventRing<ApplicationCommandRequest>(16384) };
           await authority.prepare(0, initialSave === undefined ? 1 : simulation.q3Guest()?.state.cvars.variableValue("sv_serverid") ?? 0);
           if (initialSave === undefined) {
             await simulation.q3Guest()?.initialize(application.guestOutput());
@@ -1191,7 +1194,7 @@ export class Application {
   }
 
   private async bindSourceCommands(restoring = false): Promise<void> {
-    const prepared = await this.prepareSourceCommands(this.simulation, this.content, restoring, request => { this.requestedCommands.push(request); return undefined; });
+    const prepared = await this.prepareSourceCommands(this.simulation, this.content, restoring, request => { this.requestedCommands.admit(request); return undefined; });
     this.publishSourceCommands(prepared);
   }
 
@@ -1504,7 +1507,7 @@ export class Application {
       else await this.returnToLobby();
     }
     else for (const seat of leaving) {
-      if (!this.requestedCommands.some(command => command.name === "local_drop" && command.seat?.equals(seat)))
+      if (!this.requestedCommands.someLive(command => command.name === "local_drop" && command.seat?.equals(seat) === true))
         this.queueCommand("local_drop", [], seat);
     }
     const droppingSimulation = this.simulation;
@@ -1727,7 +1730,7 @@ export class Application {
     const commands = this.sourceCommands;
     if (commands === null) throw new Error("Server administration has no source command owner");
     if (this.operatorOutput.write !== null) throw new Error("Nested server administration is not supported");
-    const pending = this.requestedCommands; this.requestedCommands = [];
+    const pending = this.requestedCommands.take(this.requestedCursor); this.requestedCommands.retire();
     const restoreOutput = commands.bindOutput(output); this.operatorOutput.write = output;
     try {
       await commands.executeCommandAsync(text, { session: this.session.session, origin: { kind: "server-console" } }, () => this.commands(undefined, undefined, false), limited ? "none" : "source");
@@ -1736,7 +1739,7 @@ export class Application {
       output(`${error instanceof Error ? error.message : String(error)}\n`);
     } finally {
       this.operatorOutput.write = null; restoreOutput();
-      this.requestedCommands.unshift(...pending);
+      this.requestedCommands.prepend(pending);
     }
   }
 
@@ -1980,7 +1983,7 @@ export class Application {
         selectedQ3Presentations: new ApplicationSelectedQ3Presentations({ assets, audio, queries: this.simulation.scene,
           print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
           clock: { now: () => this.presentationMilliseconds ?? this.elapsed, frameNumber: () => this.presentationFrames }, hardware: () => q3Hardware(native.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
-        modPresentations: new ApplicationModPresentations({ assets, audio, input, queueCommand: request => { this.requestedCommands.push(request); }, renderer: native, queries: this.simulation.scene,
+        modPresentations: new ApplicationModPresentations({ assets, audio, input, queueCommand: request => { this.requestedCommands.admit(request); }, renderer: native, queries: this.simulation.scene,
           presentationMedia: componentMediaControl(this.simulation.events, audio, assets),
           systemCinematics: (_source, presentation, scope) => this.systemCinematics(this.simulation, this.content, assets, audioOwner, native, presentation.local.player.seat.id, inputOwner, scope),
           print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
@@ -2149,8 +2152,8 @@ export class Application {
   }
 
   private queueLocalGuestCommand(world: LocalQ3GuestWorld, command: ApplicationCommandRequest): undefined {
-    if (world === this.localGuest) this.requestedCommands.push(command);
-    else world.pendingCommands.push(command);
+    if (world === this.localGuest) this.requestedCommands.admit(command);
+    else world.pendingCommands.admit(command);
     return undefined;
   }
 
@@ -2162,6 +2165,8 @@ export class Application {
       actorAt: number => { if (number === 1022) return world.worldSound;
         const actor = simulation.actors.atSource(simulation.recipe.map.entities.provider, number);
         if (actor === null) throw new Error(`Guest entity ${number} is not published`); return actor.id; },
+      soundActor: number => number === 1022 ? world.worldSound
+        : simulation.actors.atSource(simulation.recipe.map.entities.provider, number)?.id ?? null,
       systemInfo: () => { world.seats.get(seat.id)?.client?.refreshSystemInfo(); },
       mapRestart: () => { throw new Error("Local guest map restart is unsupported"); },
       levelShot: () => this.queueLocalGuestCommand(world, { target: "application", name: "clientLevelShot", arguments_: [], seat: seat.id }),
@@ -2369,7 +2374,7 @@ export class Application {
         if (next !== undefined) this.queueCommand("spmap", [next.map], seat);
       },
       quit: () => { this.requestQuit(); },
-      reset: () => { this.requestedCommands.push({ target: "source", name: "arena-reset", arguments_: [], seat }); },
+      reset: () => { this.requestedCommands.admit({ target: "source", name: "arena-reset", arguments_: [], seat }); },
     };
   }
 
@@ -2526,7 +2531,7 @@ export class Application {
       now: () => performance.now(), commands: {
         reliable: text => input.enqueueClientReliable(text, { session: this.session.session, origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } }, (text, source) => {
           const [name, ...args] = tokenizeCommand(text, "q3").argv;
-          if (name !== undefined) this.requestedCommands.push({ target: "client", name, arguments_: args, seat: local.player.seat.id, source });
+          if (name !== undefined) this.requestedCommands.admit({ target: "client", name, arguments_: args, seat: local.player.seat.id, source });
         }),
         console: text => input.enqueueClientCommand(text, { session: this.session.session, origin: { kind: "script", name: "q3-cgame", caller: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } } }),
         print: text => { this.host.print(text); local.console.print(text); },
@@ -2541,7 +2546,7 @@ export class Application {
   requestQuit(): undefined { this.stopping = true; return undefined; }
 
   queueCommand(name: string, arguments_: readonly string[], seat: SeatId | null, source?: CommandContext): undefined {
-    this.requestedCommands.push({ target: "application", name, arguments_: [...arguments_], seat, ...(source === undefined ? {} : { source }) });
+    this.requestedCommands.admit({ target: "application", name, arguments_: [...arguments_], seat, ...(source === undefined ? {} : { source }) });
     return undefined;
   }
 
@@ -2668,15 +2673,15 @@ export class Application {
     let guestTransition: Q3GuestMapTransition | null = null;
     let guestNetworkPublished = false;
     const guestRejectedClients = new Map<ClientId, string>();
-    const guestNetworkCommands: { readonly slot: number; readonly text: string }[] = [];
+    const guestNetworkCommands = new EventRing<{ readonly slot: number; readonly text: string }>(1024);
     let guestNetworkCommandBytes = 0;
     const guestCandidateOutput: Q3GuestOutput = {
       configstring: (index, value) => { if (guestNetworkPublished) return this.guestOutput().configstring(index, value); },
       sendServerCommand: (slot, text) => {
         if (guestNetworkPublished) return this.guestOutput().sendServerCommand(slot, text);
         guestNetworkCommandBytes += text.length;
-        if (guestNetworkCommands.length >= 1024 || guestNetworkCommandBytes > 1024 * 1024) throw new Error("Q3 map initialization overflowed pending reliable commands");
-        guestNetworkCommands.push({ slot, text });
+        if (guestNetworkCommands.live >= 1024 || guestNetworkCommandBytes > 1024 * 1024) throw new Error("Q3 map initialization overflowed pending reliable commands");
+        guestNetworkCommands.admit({ slot, text });
       },
       dropClient: async (slot, reason) => {
         if (!guestNetworkPublished) {
@@ -2713,7 +2718,7 @@ export class Application {
         commands: () => candidatePublished ? this.sourceCommands : candidateCommands });
       const candidateActions: ApplicationCommandRequest[] = [];
       const candidateAction = (request: ApplicationCommandRequest): undefined => {
-        if (candidatePublished) this.requestedCommands.push(request); else candidateActions.push(request);
+        if (candidatePublished) this.requestedCommands.admit(request); else candidateActions.push(request);
         return undefined;
       };
       const nativeContext = Application.nativeCommandContext.bind(null, content, this.session.session);
@@ -2851,7 +2856,7 @@ export class Application {
         const serverId = (restoredGuest.state.cvars.variableValue("sv_serverid") + 1) | 0;
         if (this.network === null) {
           nextLocalGuest = { worldSound: createIdentityOwner("local-qvm-world-audio").actor(1022, 0), authority,
-            seats: new Map<SeatId, LocalQ3GuestSeat>(), pendingCommands: [] };
+            seats: new Map<SeatId, LocalQ3GuestSeat>(), pendingCommands: new EventRing<ApplicationCommandRequest>(16384) };
           await authority.prepare(0, serverId);
         }
         await restoredGuest.initialize(this.network === null ? this.guestOutput(nextLocalGuest) : guestCandidateOutput,
@@ -2883,7 +2888,7 @@ export class Application {
           const authority = createQ3ApplicationServerHost({ session: this.session, simulation: nextSimulation, content,
             print: text => this.host.print(text), mode: "restore" });
           nextLocalGuest = { worldSound: createIdentityOwner("local-qvm-world-audio").actor(1022, 0), authority,
-            seats: new Map<SeatId, LocalQ3GuestSeat>(), pendingCommands: [] };
+            seats: new Map<SeatId, LocalQ3GuestSeat>(), pendingCommands: new EventRing<ApplicationCommandRequest>(16384) };
           const serverId = restoredGuest.state.cvars.variableValue("sv_serverid");
           await authority.prepare(0, serverId);
           for (const local of previous.input.locals) {
@@ -2976,7 +2981,7 @@ export class Application {
           selectedQ3Presentations: new ApplicationSelectedQ3Presentations({ assets, audio, queries: current.scene,
             print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
             clock: { now: () => this.presentationMilliseconds ?? this.elapsed, frameNumber: () => this.presentationFrames }, hardware: () => q3Hardware(previous.renderer.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
-          modPresentations: new ApplicationModPresentations({ assets, audio, input, queueCommand: request => { this.requestedCommands.push(request); }, renderer: previous.renderer, queries: current.scene,
+          modPresentations: new ApplicationModPresentations({ assets, audio, input, queueCommand: request => { this.requestedCommands.admit(request); }, renderer: previous.renderer, queries: current.scene,
             presentationMedia: componentMediaControl(current.events, audio, assets),
             systemCinematics: (_source, presentation, scope) => this.systemCinematics(current, content, worldAssets, audio, previous.renderer, presentation.local.player.seat.id, input, scope),
             print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
@@ -3087,7 +3092,7 @@ export class Application {
       this.capture = nextCapture;
       this.tools?.beforeWorldChange();
       this.elapsed = destinationSourceMilliseconds;
-      this.sourceEvents = []; this.roundPresentationEvents = []; this.localSnapshotServerBit = 0;
+      this.sourceEvents = []; this.roundPresentationEvents.reset(); this.localSnapshotServerBit = 0;
       this.clientInputs = [];
       this.unhandledEffects = [];
       this.reportedEffectGaps.clear();
@@ -3096,7 +3101,7 @@ export class Application {
         preparedCommands.program?.publish();
         candidatePublished = true;
         candidateCommands = null;
-        this.requestedCommands.push(...candidateActions.splice(0));
+        if (candidateActions.length !== 0) this.requestedCommands.admitAll(candidateActions.splice(0));
         nextGraphical?.input.publishCandidateCommands();
         this.refreshApplicationTools();
         if (candidateImages !== null && this.imageSettings !== null) {
@@ -3135,7 +3140,7 @@ export class Application {
         adoptHeadless();
         this.ownedDemos?.service.refresh();
         this.enableStartupPersistence();
-        if (nextLocalGuest !== null) this.requestedCommands.push(...nextLocalGuest.pendingCommands.splice(0));
+        if (nextLocalGuest !== null) { const guestCommands = nextLocalGuest.pendingCommands.drainAll(); if (guestCommands.length !== 0) this.requestedCommands.admitAll(guestCommands); }
         if (options.dedicated) this.dedicatedCommands = this.sourceCommands;
         if (save !== undefined) this.requestRestoredScores();
       } finally {
@@ -3156,7 +3161,7 @@ export class Application {
           this.recordingHost = nextNetworkHost;
           await this.network.server.changeWorld(nextNetworkHost.host, [...guestRejectedClients].map(([client, reason]) => ({ client, reason })));
           guestNetworkPublished = true;
-          for (const command of guestNetworkCommands.splice(0)) await this.guestOutput().sendServerCommand(command.slot, command.text);
+          for (const command of guestNetworkCommands.drainAll()) await this.guestOutput().sendServerCommand(command.slot, command.text);
         }
       }
       if (nextUnifiedHost !== null) {
@@ -3231,7 +3236,7 @@ export class Application {
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
     if ((this.campaignMovie !== null && this.campaignMovie.componentOwned !== true) || this.pendingTeamArena !== null || (this.pendingMap !== null || this.pendingNativeTravel !== null) || this.pendingRestart !== null || this.pendingTransition !== null || this.pendingSave !== null)
       throw new Error("Saving requires pending world travel or restoration to finish");
-    if (this.requestedCommands.some(command => command.target === "component-client") || this.graphical?.modPresentations.pendingCommands)
+    if (this.requestedCommands.someLive(command => command.target === "component-client") || this.graphical?.modPresentations.pendingCommands)
       throw new Error("Saving requires pending component commands to finish");
     this.worldOperation = "saving";
     const completion = Promise.withResolvers<void>(); this.worldOperationCompletion = completion.promise;
@@ -3246,7 +3251,7 @@ export class Application {
       const captured = await serviceLoading(nextFrame => this.simulation.checkpointLoading(nextFrame), () => {
         if (!this.closed) this.graphical?.input.pollLoadingEvents();
       });
-      if (this.requestedCommands.some(command => command.target === "component-client")) throw new Error("Component commands changed during checkpoint capture");
+      if (this.requestedCommands.someLive(command => command.target === "component-client")) throw new Error("Component commands changed during checkpoint capture");
       const sources = this.simulation.modPresentationSources();
       if (this.campaignMovie?.componentOwned === true && (this.graphical === null || sources.length === 0)) throw new Error("Active component cinematic has no saved client owner");
       const clients = this.graphical === null || sources.length === 0 ? captured : saveComponentClients(captured,
@@ -3354,7 +3359,7 @@ export class Application {
             this.bots?.receive(events);
             await round?.receiveEvents(events);
             await this.sourceActions(events);
-            this.roundPresentationEvents.push(...events);
+            if (events.length !== 0) this.roundPresentationEvents.admitAll(events);
           }
           if (this.closed) throw new Error("Application closed during round restart");
         };
@@ -3721,7 +3726,7 @@ export class Application {
       try { await this.disconnectRankings(this.simulation, client.id); } catch (error) { failures.push(error); }
       dispose(() => this.session.closeClient(client.id));
     }
-    this.requestedCommands = this.requestedCommands.filter(command => !seats.some(seat => command.seat?.equals(seat.id) === true));
+    this.requestedCommands.filterLive(command => !seats.some(seat => command.seat?.equals(seat.id) === true));
     this.clientInputs = this.clientInputs.filter(event => !seats.some(seat => seat.id.equals(event.seat)));
     this.deferredInput = this.deferredInput.filter(event => !seats.some(seat => seat.id.equals(event.seat)));
     dispose(() => graphical.rerelease.publishSeats(graphical.input.locals.map(local => ({ seat: local.player.seat.id, actor: local.player.actor }))));
@@ -3790,7 +3795,7 @@ export class Application {
         this.localGuest?.seats.delete(change.removed.seat.id);graphical.q3.delete(change.removed.seat.id);
         this.sourceConnections.delete(change.removed.client);
         const removedSeat = change.removed.seat.id;
-        this.requestedCommands = this.requestedCommands.filter(command => command.seat === null || !command.seat.equals(removedSeat));
+        this.requestedCommands.filterLive(command => command.seat === null || !command.seat.equals(removedSeat));
         this.clientInputs = this.clientInputs.filter(event => !event.seat.equals(removedSeat));
       }
       players.sort((a,b)=>a.seat.id.index-b.seat.id.index);
@@ -3862,25 +3867,25 @@ export class Application {
       await this.commands(async () => {
         if (this.closed) return;
         await this.applyTransition();
-        if (this.requestedCommands.length !== 0) await this.afterCommandDispatch();
+        if (this.requestedCommands.pending(this.requestedCursor) !== 0) await this.afterCommandDispatch();
       });
       if (this.closed || this.pendingShellPublication || this.videoRestart?.pending) return;
       await this.applyTransition();
-    } while (this.requestedCommands.length !== 0 && !this.clientCommandsBlocked);
+    } while (this.requestedCommands.pending(this.requestedCursor) !== 0 && !this.clientCommandsBlocked);
   }
 
   async executeApplicationRequest(request: ConfigurationCommandRequest): Promise<void> {
     await this.commands(async () => {
       if (this.closed) return;
       await this.applyTransition();
-      if (this.requestedCommands.length !== 0) await this.afterCommandDispatch();
+      if (this.requestedCommands.pending(this.requestedCursor) !== 0) await this.afterCommandDispatch();
     }, [request]);
   }
 
   private get pendingShellPublication(): boolean { return this.ownership.kind === "borrowed" && this.ownership.client.hasPendingSource; }
 
   takePendingClientCommands(): () => Promise<void> {
-    const pending = this.requestedCommands; this.requestedCommands = [];
+    const pending = this.requestedCommands.take(this.requestedCursor); this.requestedCommands.retire();
     return () => this.commands(undefined, pending, true);
   }
 
@@ -3910,17 +3915,17 @@ export class Application {
   }
 
   private async commands(afterRequest?: () => Promise<void>, direct?: readonly ApplicationCommandRequest[], routeApplications = direct === undefined): Promise<void> {
-    const pending = direct ?? this.requestedCommands;
-    if (direct === undefined) this.requestedCommands = [];
+    const pending = direct ?? this.requestedCommands.take(this.requestedCursor);
+    if (direct === undefined) this.requestedCommands.retire();
     for (const [index, request] of pending.entries()) {
       await this.retireRemovedLocalPlayers();
       let origin = request.source?.origin; while (origin?.kind === "script") origin = origin.caller;
       if ((origin?.kind === "local-seat" || origin?.kind === "remote-client") && this.session.clientAt(origin.client.slot)?.id.equals(origin.client) !== true) continue;
       if (this.graphical !== null && request.seat !== null && !this.localPlayers.some(player => request.seat?.equals(player.seat.id) === true)) continue;
       if (request.source?.producer?.kind === "game-module" && request.source.producer.instance !== undefined && this.simulation.options.modCommands?.active(request.source) !== true) continue;
-      if (this.stepping && (this.pendingShellPublication || this.videoRestart?.pending)) { this.requestedCommands.unshift(...pending.slice(index)); return; }
+      if (this.stepping && (this.pendingShellPublication || this.videoRestart?.pending)) { this.requestedCommands.prepend(pending.slice(index)); return; }
       if (request.source?.producer?.kind === "game-module" && (request.name === "map" || request.name === "gamemap")) {
-        if (this.captureBlocksTransition()) { this.requestedCommands.unshift(...pending.slice(index)); return; }
+        if (this.captureBlocksTransition()) { this.requestedCommands.prepend(pending.slice(index)); return; }
         if (await this.nativeMatchTransition(request)) continue;
       }
       if (request.target === "component-client") {
@@ -3930,7 +3935,7 @@ export class Application {
         const source = request.source ?? this.ownership.client.prepared.commands.context;
         if (this.stepping) {
           if (this.ownership.client.routeCommand(request.name, request.arguments_, source)) {
-            this.requestedCommands.unshift(...pending.slice(index + 1));
+            this.requestedCommands.prepend(pending.slice(index + 1));
             return;
           }
         } else {
@@ -3939,7 +3944,7 @@ export class Application {
         }
       }
       if (this.closed) continue;
-      if (this.captureBlocksTransition()) { this.requestedCommands.unshift(...pending.slice(index)); return; }
+      if (this.captureBlocksTransition()) { this.requestedCommands.prepend(pending.slice(index)); return; }
       let command = request;
       const local = this.graphical?.input.locals.find(local => command.seat !== null && local.player.seat.id.equals(command.seat));
       const source: CommandContext | undefined = command.source ?? (local === undefined ? undefined : { session: this.session.session,
@@ -4551,7 +4556,7 @@ export class Application {
         host.host.observeProgress();
         const events = this.simulation.drainPresentationEvents();
         progressedEvents.push(...events);
-        const rounds = this.roundPresentationEvents.splice(0); progressedRoundEvents.push(...rounds);
+        const rounds = this.roundPresentationEvents.take(this.roundCursor); this.roundPresentationEvents.retire(); progressedRoundEvents.push(...rounds);
         const incoming = [...pendingBeforeFrameEvents, ...events]; pendingBeforeFrameEvents = [];
         const timeMilliseconds = this.elapsed - frame.pendingMilliseconds;
         await this.presentOutput(frame.output, { sourceEvents: incoming, roundEvents: rounds, localCommands: [],
@@ -4587,20 +4592,21 @@ export class Application {
           : { kind: "competitive", match: this.content.recipe.match.provider } satisfies Parameters<SharedTransitionCoordinator["resolve"]>[0];
         this.transitions.commit(this.transitions.resolve(mode, intents));
       }
-      const finalRoundEvents = this.roundPresentationEvents.splice(0), roundEvents = [...progressedRoundEvents, ...finalRoundEvents];
+      const finalRoundEvents = this.roundPresentationEvents.take(this.roundCursor), roundEvents = [...progressedRoundEvents, ...finalRoundEvents];
+      this.roundPresentationEvents.retire();
       const finalPresentation = progressedEventCount === 0 ? output : { snapshot: output.snapshot, events: output.events.slice(progressedEventCount) };
       await this.presentOutput(finalPresentation, { sourceEvents: [...pendingBeforeFrameEvents, ...frameEvents], roundEvents: finalRoundEvents,
         localCommands, frameMilliseconds: Math.max(0, this.elapsed - displayedMilliseconds), frameStartedAt, timeMilliseconds: this.elapsed });
       await this.capture?.drain();
       this.tools?.timer.stamp("frame end");
       if (captureTransitionPending) {
-        const heldRequests = this.requestedCommands;
-        this.requestedCommands = [];
+        const heldRequests = this.requestedCommands.take(this.requestedCursor);
+        this.requestedCommands.retire();
         try {
           await this.sourceActions();
           await this.commands();
           await this.applyTransition();
-        } finally { this.requestedCommands.push(...heldRequests); }
+        } finally { if (heldRequests.length !== 0) this.requestedCommands.admitAll(heldRequests); }
         await this.afterCommandDispatch();
       } else {
         await this.commands();

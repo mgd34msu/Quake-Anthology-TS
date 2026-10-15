@@ -122,7 +122,7 @@ test("source presentation advances original frame calls once with current camera
 });
 
 test("source weapon presentation checks current ownership per call and preserves the final camera basis", async () => {
-  const { qvmAnglesToAxis } = await import("../../../src/core/qvm-math.ts");
+  const { qvmAnglesToAxis } = await import("../../../src/core/math.ts");
   const f = fixture(), axis = qvmAnglesToAxis({ x: 15, y: 73, z: 12 }); let selected = false;
   const owner = new QvmModPresentation({ ...f.options,
     context: () => ({ ...f.options.context(), viewAxis: axis, weaponPresented: selected }),

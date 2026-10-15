@@ -1,5 +1,6 @@
 /* Rogue g_sphere.c. Sphere reactions share the owner's combat and movement authority. */
 import type { AttackProvenance } from "../../../contracts/gameplay.ts";
+import { vectorToAnglesRule } from "../../../core/math.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { TouchContact } from "../../../contracts/world.ts";
@@ -7,7 +8,6 @@ import type { Q2CallbackDefinitions } from "../foundation/callbacks.ts";
 import type { Q2Die, Q2Entity, Q2GameServices, Q2Pain, Q2Think, Q2Touch } from "../foundation/host.ts";
 import { add, length, normalize, scale, subtract, zero } from "../foundation/fields.ts";
 import { throwGib } from "../foundation/monsters/gibs.ts";
-import { vectorAngles } from "../foundation/weapons/vectors.ts";
 import { explode, projectileMask, publishProjectile, sight } from "./projectiles/common.ts";
 import type { Q2MissionPackProjectiles } from "./projectiles/index.ts";
 import { q2MissionPackDamage as mod } from "./types.ts";
@@ -91,7 +91,7 @@ export class Q2MissionPackSpheres {
       if (distance > 1) { speed = distance > 500 ? 500 : distance < 20 ? distance / game.host.frameSeconds() : distance; if (!direct) this.loop(entity, game, "spheres/h_active.wav"); }
       else { direction = normalize(subtract(body.origin, game.body(entity).origin)); speed = 0; if (!direct) this.loop(entity, game, "spheres/h_lurk.wav"); }
     }
-    game.move(entity, { angles: vectorAngles(direction), velocity: scale(direction, speed) }); return game.motion(entity, entity.motion);
+    game.move(entity, { angles: vectorToAnglesRule(direction, "native"), velocity: scale(direction, speed) }); return game.motion(entity, entity.motion);
   }
 
   private touch(entity: Q2Entity, game: Q2GameServices, contact: TouchContact, means: number): undefined {
@@ -166,14 +166,14 @@ export class Q2MissionPackSpheres {
     if (this.hooks.intermission()) return this.expire(entity, game);
     const owner = game.entity(entity.owner), enemy = entity.enemy === null ? null : game.host.bodies.read(entity.enemy);
     if (owner === null && (entity.spawnflags & doppleFlag(game)) === 0) return game.remove(entity);
-    const body = game.body(entity), ideal = owner !== null ? game.body(owner).angles.y : enemy !== null ? vectorAngles(subtract(enemy.origin, body.origin)).y : body.angles.y;
+    const body = game.body(entity), ideal = owner !== null ? game.body(owner).angles.y : enemy !== null ? vectorToAnglesRule(subtract(enemy.origin, body.origin), "native").y : body.angles.y;
     let delta = ideal - ((body.angles.y % 360 + 360) % 360); if (delta > 180) delta -= 360; if (delta < -180) delta += 360;
     game.move(entity, { angles: { ...body.angles, y: (body.angles.y + Math.max(-40, Math.min(40, delta)) + 360) % 360 } });
     if (entity.enemy === null) this.fly(entity, game); else this.chase(entity, game, false);
     if (owner !== null && (owner.flags & 0x4000) !== 0 && game.host.actors.isLive(entity.actor.id)) {
       const current = game.body(entity), currentOwner = game.body(owner);
       owner.viewHeight = current.origin.z - currentOwner.origin.z;
-      const angles = enemy === null ? current.angles : { x: 0, y: vectorAngles(subtract(enemy.origin, current.origin)).y, z: 0 };
+      const angles = enemy === null ? current.angles : { x: 0, y: vectorToAnglesRule(subtract(enemy.origin, current.origin), "native").y, z: 0 };
       game.move(owner, { origin: current.origin, velocity: current.velocity, bounds: { min: zero, max: zero } }); game.motion(owner, "fly-missile");
       this.hooks.playerEffect({ kind: "sphere-camera", actor: owner.actor.id, sphere: entity.actor.id, origin: current.origin, angles });
     }

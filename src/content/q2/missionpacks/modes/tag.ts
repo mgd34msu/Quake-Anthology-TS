@@ -1,12 +1,12 @@
 /* Original Rogue dm_tag.c. Shared inventory and scoring remain authoritative. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { SavedActorId } from "../../../../contracts/session.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think, Q2Touch } from "../../foundation/host.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import type { Q2ItemModule } from "../../foundation/items.ts";
 import { add, scale, zero } from "../../foundation/fields.ts";
-import { angleVectors } from "../../foundation/weapons/vectors.ts";
 
 export interface Q2TagHooks {
   readonly items: Q2ItemModule;
@@ -93,7 +93,7 @@ export class Q2Tag implements Q2SpawnModule {
     this.hooks.items.spawn(token, game);
     token.effects = 1 | 0x20000000; token.renderFlags = 512; token.owner = entity.actor.id; token.touch = null;
     const bounds = { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 15 } }, body = game.body(entity);
-    const forward = angleVectors(game.host.playerViewState(entity.actor.id)?.viewAngles ?? body.angles).forward;
+    const forward = angleVectorsRule(game.host.playerViewState(entity.actor.id)?.viewAngles ?? body.angles, "native").forward;
     const origin = game.host.trace({ start: body.origin, end: add(add(body.origin, scale(forward, 24)), { x: 0, y: 0, z: -16 }), bounds, ignore: entity.actor.id, mask: 1 }).end;
     game.move(token, { origin, bounds, velocity: { ...scale(forward, 100), z: 300 } });
     game.solid(token, "trigger"); game.motion(token, "toss"); game.show(token); game.schedule(token, 1, this.makeTouchable);

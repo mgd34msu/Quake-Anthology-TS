@@ -2,7 +2,7 @@ import type { UseParticipant } from "./state.ts";
 // Source game/g_utils.c configstring indices, target dispatch, team commands
 // and editor direction conversion. GPL-2.0-or-later, id Software 1999-2005.
 import { add3, cross3, dot3, normalize3, scale3, sub3, vec3 } from "../../../../core/math.ts";
-import { qvmAngleVectors } from "../../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../../core/math.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import type { BotDebugPolygons } from "../bot-debug.ts";

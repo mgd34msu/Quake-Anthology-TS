@@ -1,3 +1,5 @@
+import { BoundedQueue } from "../foundation/bounded-queue.ts";
+import { StringTable } from "../foundation/strings.ts";
 import { audioOutputFormat, defaultAudioOutputFormat, encodeOutputPcm, resampleQueuedPcm, type AudioOutputFormat } from "./output.ts";
 import { sourceSoundChannel } from "./types.ts";
 import type { SharedSoundChannel } from "./types.ts";
@@ -12,14 +14,14 @@ import { MusicPlayer } from "./music.ts";
 import { EnvironmentReverb } from "./environments.ts";
 import type { AudioTraceQuery, ReverbEnvironment } from "./environments.ts";
 import { StereoReverb, UnderwaterFilter } from "./reverb.ts";
-import type { AudioVoiceEvent, AudioVoiceClock, AudioListener, PlaySound, LoopSound, AudioAudience, AudioStreamTarget, StreamPcm, SoundAsset } from "./types.ts";
+import type { AudioVoiceEvent, AudioVoiceClock, AudioListener, PlaySound, LoopSound, AudioAudience, AudioStreamTarget, StreamPcm, SoundAsset, SoundFamily } from "./types.ts";
 interface SeatAudio {
     listener: AudioListener;
     readonly mixer: AudioMixer;
     readonly reverb: StereoReverb;
     readonly underwater: UnderwaterFilter;
     environment: EnvironmentReverb | null;
-    readonly loops: Map<string, LoopSound>;
+    readonly loops: Map<number, LoopSound>;
 }
 interface StreamBus {
     target: AudioStreamTarget;
@@ -91,7 +93,10 @@ export class UnifiedAudio {
     private outputStarted = false;
     private outputHandoffPending = false;
     private previousPumpFrame: number | null = null;
-    private readonly pumpIntervals: number[] = [];
+    private readonly pumpIntervals = new BoundedQueue<number>(8);
+    private readonly loopOwners = new StringTable(() => 0);
+    private readonly loopKeys = new Map<number, Map<number, number>>();
+    private nextLoopKey = 1;
     constructor(private readonly options: UnifiedAudioOptions) {
         this.sampleRate = options.sampleRate ?? 44100;
         this.format = audioOutputFormat(options.outputFormat ?? { ...defaultAudioOutputFormat, sampleRate: this.sampleRate });
@@ -117,6 +122,21 @@ export class UnifiedAudio {
     }
     private check(): void { if (this.closed)
         throw new Error("Audio engine closed"); }
+    private loopKey(family: SoundFamily, entity: number, owner: ProviderId | undefined): number {
+        const ownerId = owner === undefined ? 0 : this.loopOwners.intern(owner);
+        let byEntity = this.loopKeys.get(ownerId);
+        if (byEntity === undefined) {
+            byEntity = new Map<number, number>();
+            this.loopKeys.set(ownerId, byEntity);
+        }
+        const packed = entity * 4 + (family === "q1" ? 0 : family === "q2" ? 1 : 2);
+        let key = byEntity.get(packed);
+        if (key === undefined) {
+            key = this.nextLoopKey++;
+            byEntity.set(packed, key);
+        }
+        return key;
+    }
     private entity(actor: ActorId, owner?: ProviderId): number {
         const index = this.actors.findIndex(candidate => candidate.actor.equals(actor) && candidate.owner === owner);
         if (index >= 0)
@@ -168,7 +188,7 @@ export class UnifiedAudio {
                 const mixer = retained < 0 ? undefined : this.roundMixers.splice(retained, 1)[0]?.mixer;
                 state = { listener,
                     mixer: mixer ?? new AudioMixer(this.sampleRate, this.options.milliseconds, 96, 2, this.options.maxActors ?? 65536),
-                    reverb: new StereoReverb(this.sampleRate), underwater: new UnderwaterFilter(this.sampleRate), environment: null, loops: new Map<string, LoopSound>() };
+                    reverb: new StereoReverb(this.sampleRate), underwater: new UnderwaterFilter(this.sampleRate), environment: null, loops: new Map<number, LoopSound>() };
                 state.mixer.setEffectsVolume(this.effectsGain);
                 state.mixer.setDopplerEnabled(this.dopplerEnabled);
                 // A new seat starts at the host paint epoch; it has no prior source channels.
@@ -263,11 +283,12 @@ export class UnifiedAudio {
     loop(request: LoopSound): void {
         this.check();
         const entity = this.entity(request.actor);
+        const key = this.loopKey(request.family, entity, request.owner);
         for (const state of this.seats) {
             if (!selected(request.audience, state.listener.seat))
                 continue;
             const origin = this.loopPosition(request, state.listener);
-            state.loops.set(`${request.family}:${entity}${request.owner === undefined ? "" : `:${request.owner}`}`, request);
+            state.loops.set(key, request);
             if (request.family === "q3") this.q3Loop(state, request, origin);
         }
     }
@@ -314,7 +335,7 @@ export class UnifiedAudio {
             }
     }
     stopQ3SeatLoop(seat: SeatId, actor: ActorId, owner?: ProviderId): void {
-        const state = this.seat(seat), entity = this.entity(actor, owner), key = `q3:${this.entity(actor)}${owner === undefined ? "" : `:${owner}`}`, loop = state.loops.get(key);
+        const state = this.seat(seat), entity = this.entity(actor, owner), key = this.loopKey("q3", this.entity(actor), owner), loop = state.loops.get(key);
         if (loop?.audience.kind === "world") return;
         if (loop !== undefined && loop.audience.kind === "seat" && loop.audience.seat.equals(seat)) state.loops.delete(key);
         state.mixer.stopLoopingSound(entity);
@@ -424,13 +445,13 @@ export class UnifiedAudio {
             next.paused = this.paused;
             next.outputStarted = this.outputStarted;
             next.previousPumpFrame = null;
-            next.pumpIntervals.length = 0;
+            next.pumpIntervals.clear();
             next.outputHandoffPending = true;
             this.device = null;
             this.detachedOutput = null;
             this.queuedPcm = new Int16Array(0);
             this.previousPumpFrame = null;
-            this.pumpIntervals.length = 0;
+            this.pumpIntervals.clear();
         };
     }
     detachOutput(): void {
@@ -440,7 +461,7 @@ export class UnifiedAudio {
         this.detachedOutput = { playing: device.state === "playing", bufferFrames: device.bufferFrames, deviceName: device.deviceName };
         device.pause(); this.queuedPcm = this.pendingOutput;
         device.close(); this.device = null;
-        this.previousPumpFrame = null; this.pumpIntervals.length = 0;
+        this.previousPumpFrame = null; this.pumpIntervals.clear();
     }
     selectOutput(deviceName: string | null, requested: AudioOutputFormat = this.format, restart = false): void {
         this.check();
@@ -474,7 +495,7 @@ export class UnifiedAudio {
                     this.device?.close(); this.device = null;
                     this.detachedOutput = { playing, bufferFrames: previous.bufferFrames, deviceName: previous.deviceName };
                     throw new AggregateError([selectionError, restoreError], "Audio output selection and recovery failed");
-                } finally { this.previousPumpFrame = null; this.pumpIntervals.length = 0; }
+                } finally { this.previousPumpFrame = null; this.pumpIntervals.clear(); }
                 throw selectionError;
             }
         }
@@ -482,7 +503,7 @@ export class UnifiedAudio {
         this.device = replacement; this.detachedOutput = null;
         this.format = format; this.queuedPcm = converted;
         if (format.sampleRate !== oldFormat.sampleRate) this.outputStream = this.outputStream.withOutputRate(format.sampleRate);
-        this.previousPumpFrame = null; this.pumpIntervals.length = 0;
+        this.previousPumpFrame = null; this.pumpIntervals.clear();
         if (playing && !this.paused) replacement.resume();
     }
     private mixOutput(frames: number): Int16Array {
@@ -512,13 +533,13 @@ export class UnifiedAudio {
         const interval = this.previousPumpFrame === null ? 0 : playbackFrame - this.previousPumpFrame;
         if (!initialFill) {
             this.pumpIntervals.push(Math.max(interval, workFrames));
-            if (this.pumpIntervals.length > 8)
-                this.pumpIntervals.shift();
         }
+        let longestInterval = -Infinity;
+        this.pumpIntervals.forEach(value => { if (value > longestInterval) longestInterval = value; });
         // Q3's s_mixahead default supplies the initial horizon; paused loading is not a refill interval.
         const target = aheadFrames ?? Math.min(device.maxQueuedFrames,
             initialFill ? Math.max(Math.ceil(device.sampleRate * 0.2), device.bufferFrames * 2)
-                : Math.max(Math.ceil(device.sampleRate * 0.08), Math.max(...this.pumpIntervals) + device.bufferFrames * 2));
+                : Math.max(Math.ceil(device.sampleRate * 0.08), longestInterval + device.bufferFrames * 2));
         if (!Number.isSafeInteger(target) || target < 0 || target > device.maxQueuedFrames)
             throw new RangeError("Invalid audio lookahead");
         this.previousPumpFrame = playbackFrame;
@@ -535,7 +556,7 @@ export class UnifiedAudio {
         this.outputHandoffPending = false;
         return frames;
     }
-    pause(paused: boolean): void { this.check(); this.paused = paused; this.previousPumpFrame = null; this.pumpIntervals.length = 0; if (paused)
+    pause(paused: boolean): void { this.check(); this.paused = paused; this.previousPumpFrame = null; this.pumpIntervals.clear(); if (paused)
         this.device?.pause();
     else if (this.device !== null) {
         this.device.resume(); this.outputStarted = true;
@@ -569,7 +590,7 @@ export class UnifiedAudio {
         this.actorAliases.clear();
         this.positions.clear();
         this.previousPumpFrame = null;
-        this.pumpIntervals.length = 0;
+        this.pumpIntervals.clear();
     }
     close(): void { if (this.closed)
         return; try {

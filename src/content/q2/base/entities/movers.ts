@@ -1,5 +1,6 @@
 /* Quake II g_func.c platforms, secret doors and supporting brush entities. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import { add, dot, integerField, numberField, scale, subtract, zero } from "../../foundation/fields.ts";
 import type { Q2Entity, Q2GameServices, Q2Think, Q2Use, Q2Touch, Q2Die } from "../../foundation/host.ts";
@@ -9,7 +10,6 @@ import type { Q2LinearMotionCheckpoint } from "../../foundation/motion.ts";
 import { restoreQ2Actor } from "../../foundation/checkpoint.ts";
 import { Q2LinearMotion } from "../../foundation/motion.ts";
 import { killQ2Box } from "../../foundation/scenery.ts";
-import { angleVectors } from "../../foundation/weapons/vectors.ts";
 import type { Q2BaseEntityHooks } from "./types.ts";
 
 export interface Q2PlatformState {
@@ -199,7 +199,7 @@ export class Q2BaseMoverEntities {
   }
 
   private spawnSecret(entity: Q2Entity, game: Q2GameServices): undefined {
-    const axes = angleVectors(game.body(entity).angles);
+    const axes = angleVectorsRule(game.body(entity).angles, "native");
     game.move(entity, { angles: zero }, false); game.solid(entity, "brush"); game.motion(entity, "push");
     const body = game.body(entity), size = subtract(body.bounds.max, body.bounds.min);
     const width = Math.abs(dot((entity.spawnflags & 4) !== 0 ? axes.up : axes.right, size));

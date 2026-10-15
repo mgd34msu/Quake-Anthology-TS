@@ -1,7 +1,8 @@
 /* Quake II m_boss32.c. id Software, GPL-2.0-or-later. */
 import { normalize, scale, subtract, zero } from "../../foundation/fields.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { Q2Think } from "../../foundation/host.ts";
-import { anglesVectors, enemyEye, health, projectFlash, vectorAngles } from "../../foundation/monsters/ai.ts";
+import { enemyEye, health, projectFlash } from "../../foundation/monsters/ai.ts";
 import { throwGib } from "../../foundation/monsters/gibs.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
@@ -21,7 +22,7 @@ function makronSpawnCallback(monsters: Q2Monsters): Q2Think {
     const target = player === null ? null : services.host.bodies.read(player);
     if (target === null) return undefined;
     const body = services.body(self), direction = subtract(target.origin, body.origin);
-    return services.move(self, { angles: { ...body.angles, y: vectorAngles(direction).y }, velocity: { ...scale(normalize(direction), 400), z: 200 }, ground: null });
+    return services.move(self, { angles: { ...body.angles, y: vectorToAnglesRule(direction, "native-ai").y }, velocity: { ...scale(normalize(direction), 400), z: 200 }, ground: null });
   };
   spawnCallbacks.set(monsters, spawn);
   return spawn;
@@ -108,7 +109,7 @@ export const makronDefinition: Q2MonsterDefinition = {
       const frame = context.entity.frame, flash = 102 + frame - boss32Frame.attak405;
       const start = projectFlash(context, muzzleOffset(context.game.options.edition, flash));
       const eye = enemyEye(context), yaw = context.game.body(context.entity).angles.y;
-      const direction = anglesVectors({ x: eye === null ? 0 : vectorAngles(subtract(eye, start)).x, y: frame <= boss32Frame.attak413 ? yaw - 10 * (frame - boss32Frame.attak413) : yaw + 10 * (frame - boss32Frame.attak421), z: 0 }).forward;
+      const direction = angleVectorsRule({ x: eye === null ? 0 : vectorToAnglesRule(subtract(eye, start), "native-ai").x, y: frame <= boss32Frame.attak413 ? yaw - 10 * (frame - boss32Frame.attak413) : yaw + 10 * (frame - boss32Frame.attak421), z: 0 }, "native").forward;
       context.weapons.fireBlaster(context.entity, context.game, start, direction, 15, 1000, 8);
       return muzzle(context, 102, direction, start);
     },

@@ -2,7 +2,7 @@
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../contracts/math.ts";
 import { add3, vec3 } from "../../../core/math.ts";
-import { qvmAngleMod } from "../../../core/qvm-math.ts";
+import { qvmAngleMod } from "../../../core/math.ts";
 import { PlayerAnimation } from "../../../movement/q3/constants.ts";
 import type { PlayerAnimationConfig } from "./animation-config.ts";
 

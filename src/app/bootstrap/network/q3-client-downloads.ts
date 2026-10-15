@@ -1,3 +1,4 @@
+import { EventRing } from "../../../foundation/event-ring.ts";
 import type { ClientDownloadPermission, ClientDownloadProgress } from './client-download-policy.ts';
 // CL_InitDownloads/CL_DownloadsComplete over the shared staged filesystem. GPL-2.0-or-later.
 import { openArchive } from '../../../content/archive/index.ts';
@@ -40,7 +41,7 @@ interface PackageRequest { readonly remote: string; readonly local: string; read
 
 export class Q3ApplicationClientDownloads {
   private readonly source: Q3ClientDownload;
-  private queue: PackageRequest[] = [];
+  private queue = new EventRing<PackageRequest>(4096);
   private current: PackageRequest | null = null;
   private sink: DownloadSink | null = null;
   private size = 0;
@@ -50,19 +51,19 @@ export class Q3ApplicationClientDownloads {
   get progress(): readonly ClientDownloadProgress[] {
     const current = this.current;
     return [...(current === null ? [] : [{ path: current.local, transport: 'native', received: this.sink?.byteLength ?? 0, total: this.size, percent: this.size > 0 ? (this.sink?.byteLength ?? 0) * 100 / this.size : null, phase: 'running' } satisfies ClientDownloadProgress]),
-      ...(this.paused ?? this.queue).map(request => ({ path: request.local, transport: 'native', received: 0, total: null, percent: null, phase: 'pending' } satisfies ClientDownloadProgress))];
+      ...(this.paused ?? this.queue.snapshot()).map(request => ({ path: request.local, transport: 'native', received: 0, total: null, percent: null, phase: 'pending' } satisfies ClientDownloadProgress))];
   }
   cancel(): void {
     if (this.paused !== null) return;
     this.bindings.assertCurrent();
-    const remaining = this.current === null ? [...this.queue] : [this.current, ...this.queue];
+    const remaining = this.current === null ? this.queue.snapshot() : [this.current, ...this.queue.snapshot()];
     this.close(); this.paused = remaining;
     this.bindings.reliable('stopdl'); this.bindings.sendPacket();
   }
   retry(): boolean {
     this.bindings.assertCurrent();
     if (this.paused === null || this.bindings.permission?.({ transport: 'native', category: 'package' }) === false) return false;
-    this.queue = this.paused; this.paused = null; return this.startNext();
+    const resumed = this.paused; this.paused = null; this.queue.reset(); if (resumed.length !== 0) this.queue.admitAll(resumed); return this.startNext();
   }
   constructor(private readonly root: string, private readonly bindings: Q3ApplicationDownloadBindings, private readonly owner?: DownloadMounts) {
     if (owner !== undefined && resolve(root) !== dirname(resolve(owner.writeRoot)))
@@ -127,7 +128,7 @@ export class Q3ApplicationClientDownloads {
       if (pack === undefined) throw new Error('Q3 download pair has no server reference');
       if (matching.some(value => (value.checksum >>> 0) !== (pack.checksum >>> 0)))
         throw new Error('Q3 server references conflicting checksums for one download name');
-      this.queue.push({ remote, local, checksum: pack.checksum });
+      this.queue.admit({ remote, local, checksum: pack.checksum });
     }
     return this.startNext();
   }
@@ -135,8 +136,8 @@ export class Q3ApplicationClientDownloads {
     return this.owner === undefined ? path : q3DownloadPath(path, this.owner);
   }
   private startNext(): boolean {
-    const request = this.queue.shift(); this.current = request ?? null; this.size = 0;
-    if (request === undefined) return false;
+    const request = this.queue.shift(); this.current = request; this.size = 0;
+    if (request === null) return false;
     this.source.begin(request.remote, request.local); return true;
   }
   publishSize(size: number): number {
@@ -155,6 +156,6 @@ export class Q3ApplicationClientDownloads {
     finally { this.receiving = false; }
   }
   close(): void {
-    this.paused = null; this.generation++; this.source.close(); this.sink?.close(); this.sink = null; this.current = null; this.queue = []; this.size = 0;
+    this.paused = null; this.generation++; this.source.close(); this.sink?.close(); this.sink = null; this.current = null; this.queue.reset(); this.size = 0;
   }
 }

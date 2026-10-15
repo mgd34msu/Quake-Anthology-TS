@@ -1,6 +1,7 @@
 /* Rogue g_newai.c and rerelease rogue/g_rogue_newai.cpp hint paths, plus g_ai pursuit.
  * Copyright (C) 1998-2023 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { vectorToAnglesRule } from "../../../../core/math.ts";
 import type { SavedActorId } from "../../../../contracts/session.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import { saveQ2Actor } from "../../foundation/checkpoint.ts";
@@ -8,7 +9,7 @@ import { length, subtract } from "../../foundation/fields.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Touch } from "../../foundation/host.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import type { MonsterContext } from "../../foundation/monsters/types.ts";
-import { health, MASK_OPAQUE, vectorAngles, visible } from "../../foundation/monsters/ai.ts";
+import { health, MASK_OPAQUE, visible } from "../../foundation/monsters/ai.ts";
 import type { SaveReader } from "../../../../persistence/value.ts";
 import { readSavedActor } from "../../../../persistence/save-image.ts";
 
@@ -190,7 +191,7 @@ export class Q2RogueHints implements Q2SpawnModule {
 
   go(context: MonsterContext, point: Q2Entity): undefined {
     const { game, entity, state } = context;
-    state.idealYaw = vectorAngles(subtract(game.body(point).origin, game.body(entity).origin)).y;
+    state.idealYaw = vectorToAnglesRule(subtract(game.body(point).origin, game.body(entity).origin), "native-ai").y;
     entity.goal = state.moveTarget = point.actor.id; state.pauseTime = 0; state.hintPath = true;
     state.soundTarget = null; state.pursuitLastSeen = false; state.pursueNext = false; state.pursueTemporary = false;
     state.searchTime = game.host.now(); return context.run();

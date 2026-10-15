@@ -2,7 +2,7 @@
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 import { length3, sub3, vec2, vec3, vec4, vectorToAngles } from "../../../core/math.ts";
 import type { Axis, Vec3 } from "../../../contracts/math.ts";
-import { qvmAngleVectors } from "../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../core/math.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
 import { CommonError } from "../../../core/common-error.ts";
 import { Tokenizer } from "../../../core/common-parse.ts";

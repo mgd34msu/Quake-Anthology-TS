@@ -2,7 +2,7 @@
 // death, gibbing, almost-score rewards and kamikaze death timers.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { length3, scale3, sub3, vec3, vectorToAngles } from "../../../../core/math.ts";
-import { qvmAngleVectors } from "../../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import type { ServerWorld } from "../world.ts";
 import { EntityEvent, EntityType, GameType, GIB_HEALTH, MissionpackStatIndex, MoveType, PersistentIndex, Powerup, Team, Weapon, WeaponState, statSchema } from "../shared/definitions.ts";

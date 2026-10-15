@@ -1,6 +1,7 @@
 /* Quake II m_mutant.c. id Software, GPL-2.0-or-later. */
 import { add, length, normalize, scale, subtract } from "../../foundation/fields.ts";
-import { anglesVectors, checkBottom, enemyBody, flyCheck, health, targetDistance } from "../../foundation/monsters/ai.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
+import { checkBottom, enemyBody, flyCheck, health, targetDistance } from "../../foundation/monsters/ai.ts";
 import type { Q2Touch } from "../../foundation/host.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -69,7 +70,7 @@ export function createMutantDefinition(monsters: Q2Monsters, source: "classic" |
       mutant_hit_left(context) { return hit(context, false); }, mutant_hit_right(context) { return hit(context, true); },
       mutant_check_refire(context) { if (aliveEnemy(context) && (context.game.options.skill === 3 && context.game.host.random() < 0.5 || targetDistance(context) < 80)) context.state.nextFrame = mutantFrame.attack09; return undefined; },
       mutant_jump_takeoff(context) {
-        const { entity, game, state } = context, body = game.body(entity), forward = anglesVectors(body.angles).forward;
+        const { entity, game, state } = context, body = game.body(entity), forward = angleVectorsRule(body.angles, "native").forward;
         game.sound(entity, "mutant/mutsght1.wav", 2);
         game.move(entity, { origin: { ...body.origin, z: body.origin.z + 1 }, velocity: { ...scale(forward, 600), z: 250 }, ground: null });
         state.ducked = true; state.attackFinished = game.host.now() + 3;

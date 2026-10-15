@@ -1,7 +1,7 @@
 // Ported from id Software's game/g_weapon.c and g_combat.c ray/invulnerability helpers.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { add3, dot3, length3, normalize3, scale3, sub3, vec3, vectorToAngles } from "../../../../core/math.ts";
-import { qvmAngleVectors } from "../../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../../core/math.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
 import { q3AccuracyHit, q3BulletFire, q3GauntletAttack, q3LightningFire, q3ShotgunFire, q3RailFire, q3RailStatistics } from "./hitscan.ts";
 import type { Q3AccuracySubject, Q3BulletAttack, Q3BulletHost, Q3ContactHost } from "./hitscan.ts";

@@ -1,3 +1,5 @@
+import { BoundedQueue } from "../../foundation/bounded-queue.ts";
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import type { ContentId, ResourceId } from "../../contracts/content.ts";
 import type { Vec3, Vec4 } from "../../contracts/math.ts";
 import type { ApplicationWeaponHudAssets } from "./weapon-hud.ts";
@@ -9,9 +11,11 @@ type HudAssets = Pick<ApplicationWeaponHudAssets, "load" | "picture"> & { readon
 
 /** State addressed to one local actor; source events remain authoritative. */
 export class SeatSourceHud {
-  private readonly pending: SimulationPresentationEvent[] = [];
-  private readonly objectivePrints: { readonly text: string; readonly seconds: number }[] = [];
-  drainObjectivePrints(): readonly { readonly text: string; readonly seconds: number }[] { return this.objectivePrints.splice(0); }
+  private readonly pending = new EventRing<SimulationPresentationEvent>(8192);
+  private readonly pendingCursor: EventCursor = this.pending.openCursor();
+  private readonly objectivePrints = new EventRing<{ readonly text: string; readonly seconds: number }>(1024);
+  private readonly objectiveCursor: EventCursor = this.objectivePrints.openCursor();
+  drainObjectivePrints(): readonly { readonly text: string; readonly seconds: number }[] { const taken = this.objectivePrints.take(this.objectiveCursor); this.objectivePrints.retire(); return taken; }
   private objective = "";
   private missionVisible = false;
   private readonly bars = new Map<number, HudHealthBar>();
@@ -34,14 +38,15 @@ export class SeatSourceHud {
   private blue = 0;
   private ctf = false;
   private pickup: { readonly name: string; readonly path: string; readonly content: ContentId; icon: ResourceId | null; readonly expiresMilliseconds: number } | null = null;
-  private readonly damage: HudDamageIndicator[] = [];
+  private readonly damage = new BoundedQueue<HudDamageIndicator>(32);
   private damagePicture: { readonly content: ContentId; image: ResourceId | null; width: number; height: number } | null = null;
   private capture = "";
   private captureUntil = 0;
   constructor(private readonly actor: ActorId, private readonly localize?: (content: ContentId, text: string, args?: readonly string[]) => Promise<string>) {}
 
   async prepare(icons: HudAssets): Promise<void> {
-    for (const source of this.pending.splice(0)) {
+    const pending = this.pending.take(this.pendingCursor); this.pending.retire();
+    for (const source of pending) {
       if (source.kind !== "q2-rerelease" || this.localize === undefined) { this.apply(source); continue; }
       const event = source.event;
       if (event.kind === "healthbar") this.apply({ ...source, event: { ...event, name: await this.localize(source.content, event.name) } });
@@ -70,15 +75,16 @@ export class SeatSourceHud {
       color: poi.tint, hideOnAim: (poi.flags & 1) !== 0, expiresMilliseconds: poi.expiresMilliseconds }]);
   }
   receive(source: SimulationPresentationEvent): void {
-    if (this.localize !== undefined && source.kind === "q2-rerelease" && (source.event.kind === "healthbar" || source.event.kind === "help-computer" || source.event.kind === "mission-objective")) this.pending.push(source);
+    if (this.localize !== undefined && source.kind === "q2-rerelease" && (source.event.kind === "healthbar" || source.event.kind === "help-computer" || source.event.kind === "mission-objective")) this.pending.admit(source);
     else this.apply(source);
   }
   private apply(source: SimulationPresentationEvent): void {
     if (source.kind === "q2" && source.event.kind === "pickup" && source.event.player.equals(this.actor))
       this.pickup = { name: source.event.name, content: source.content, path: source.event.icon, icon: null, expiresMilliseconds: source.seconds * 1000 + 3000 };
     if (source.kind === "q2" && source.event.kind === "damage-indicator" && source.event.actor.equals(this.actor)) {
+      const wasFull = this.damage.length >= 32;
       this.damage.push({ origin: source.event.origin, amount: source.event.amount, expiresMilliseconds: source.seconds * 1000 + 800 });
-      if (this.damage.length > 8) this.damage.shift();
+      if (!wasFull && this.damage.length > 8) this.damage.shift();
     }
     if (source.kind === "q2" && source.event.kind === "help") this.helpText.set(source.event.slot, source.event.text);
     if (source.kind === "q2-player" && source.event.kind === "inventory" && source.event.actor.equals(this.actor)) {
@@ -99,7 +105,7 @@ export class SeatSourceHud {
     }
     if (source.kind === "q2-rerelease") {
       const event = source.event;
-      if (event.kind === "mission-objective" && event.actor.equals(this.actor)) { this.objective = event.text; this.objectivePrints.push({ text: event.text, seconds: source.seconds }); }
+      if (event.kind === "mission-objective" && event.actor.equals(this.actor)) { this.objective = event.text; this.objectivePrints.admit({ text: event.text, seconds: source.seconds }); }
       if (event.kind === "mission-status" && event.actor.equals(this.actor)) this.missionVisible = event.iconVisible;
       if ((event.kind === "poi" || event.kind === "keyed-poi") && event.actor.equals(this.actor)) {
         const key = event.kind === "poi" ? 1 : event.key, now = source.seconds * 1000;
@@ -120,11 +126,11 @@ export class SeatSourceHud {
         const now = source.seconds * 1000, direction = event.direction;
         let index = this.damage.findIndex(value => value.expiresMilliseconds <= now || "direction" in value && value.direction.x * direction.x + value.direction.y * direction.y + value.direction.z * direction.z >= 0.95);
         if (index < 0) index = this.damage.length < 32 ? this.damage.length : 0;
-        const previous = this.damage[index];
+        const previous = this.damage.at(index);
         const retain = previous !== undefined && previous.expiresMilliseconds > now && "direction" in previous && previous.direction.x * direction.x + previous.direction.y * direction.y + previous.direction.z * direction.z >= 0.95 ? previous : null;
         const normalize = (value: Vec3): Vec3 => { const length = Math.hypot(value.x, value.y, value.z) || 1; return { x: value.x / length, y: value.y / length, z: value.z / length }; };
         const color = normalize({ x: Number(event.health) + Number(event.armor), y: Number(event.shield) + Number(event.armor), z: Number(event.armor) });
-        this.damage[index] = { direction, amount: event.damage + (retain?.amount ?? 0), color: normalize({ x: color.x + (retain?.color.x ?? 0), y: color.y + (retain?.color.y ?? 0), z: color.z + (retain?.color.z ?? 0) }), health: event.health || (retain?.health ?? false), armor: event.armor || (retain?.armor ?? false), shield: event.shield || (retain?.shield ?? false), expiresMilliseconds: now + 1000 };
+        this.damage.setAt(index, { direction, amount: event.damage + (retain?.amount ?? 0), color: normalize({ x: color.x + (retain?.color.x ?? 0), y: color.y + (retain?.color.y ?? 0), z: color.z + (retain?.color.z ?? 0) }), health: event.health || (retain?.health ?? false), armor: event.armor || (retain?.armor ?? false), shield: event.shield || (retain?.shield ?? false), expiresMilliseconds: now + 1000 });
       }
       if (event.kind === "help-path" && event.actor.equals(this.actor)) this.path = { origin: event.position, direction: event.direction, expiresMilliseconds: source.seconds * 1000 + 10000 };
       if (event.kind === "end-of-unit") this.report = { ready: event.buttonTime * 1000, lines: [...event.levels].sort((a,b) => a.visitOrder - b.visitOrder).map(level => `${level.name || level.map}: ${level.killedMonsters}/${level.totalMonsters} kills  ${level.foundSecrets}/${level.totalSecrets} secrets  ${Math.floor(level.time / 60)}:${String(Math.floor(level.time % 60)).padStart(2, "0")}`) };
@@ -165,7 +171,12 @@ export class SeatSourceHud {
     }
     if (this.captureUntil > nowMilliseconds) prompts.push({ action: this.capture, binding: "", icon: null });
     const scores = this.scoreVisible ? this.scoreRows : this.scoresHeld && this.clients.size > 0 ? [...this.clients.values()].sort((a,b) => b.frags - a.frags).map(client => `${client.frags}  ${client.name}${client.team === 0 ? "" : `  Team ${client.team}`}${client.observer ? "  Spectator" : ""}`) : null;
-    return { helpPath: this.path !== null && this.path.expiresMilliseconds > nowMilliseconds ? this.path : null, pickup: this.pickup, damageIndicators: this.damage.filter(damage => damage.expiresMilliseconds > nowMilliseconds).map(damage => "direction" in damage && this.damagePicture !== null && this.damagePicture.image !== null && this.damagePicture.width > 0 ? { ...damage, picture: { image: this.damagePicture.image, width: this.damagePicture.width, height: this.damagePicture.height } } : damage), inventory: this.inventory, healthBars: [...this.bars.entries()].sort(([a], [b]) => a - b).map(([, bar]) => bar),
+    const damageIndicators: HudDamageIndicator[] = [];
+    this.damage.forEach(damage => {
+      if (damage.expiresMilliseconds <= nowMilliseconds) return;
+      damageIndicators.push("direction" in damage && this.damagePicture !== null && this.damagePicture.image !== null && this.damagePicture.width > 0 ? { ...damage, picture: { image: this.damagePicture.image, width: this.damagePicture.width, height: this.damagePicture.height } } : damage);
+    });
+    return { helpPath: this.path !== null && this.path.expiresMilliseconds > nowMilliseconds ? this.path : null, pickup: this.pickup, damageIndicators, inventory: this.inventory, healthBars: [...this.bars.entries()].sort(([a], [b]) => a - b).map(([, bar]) => bar),
       help: this.report !== null ? { title: "Unit complete", lines: this.report.lines, objectives: [{ text: nowMilliseconds >= this.report.ready ? "Press attack to continue" : "", complete: false }] } : scores !== null ? { title: "Scores", lines: scores, objectives: [] } : this.helpVisible ? this.helpComputer ?? { title: "Help computer", lines: [...this.helpText.entries()].sort(([a], [b]) => a - b).map(([, text]) => text), objectives: [] } : null,
       prompts };
   }

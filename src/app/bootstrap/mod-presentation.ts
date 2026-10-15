@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import { SaveReader, encodeCheckpointValue } from "../../persistence/value.ts";
 import type { SavedActorId } from "../../contracts/session.ts";
 import { captureSceneContext, readSceneContext } from "../../compat/qvm/mod-presentation-checkpoint.ts";
@@ -72,13 +73,15 @@ export class ApplicationModPresentation {
   readonly cvars: CvarRegistry;
   private readonly generation: number;
   private readonly globals = new ScriptGlobalDefines();
-  private readonly audioOperations: Q3SeatAudioOperation[] = [];
+  private readonly audioOperations = new EventRing<Q3SeatAudioOperation>(4096);
+  private readonly audioCursor: EventCursor = this.audioOperations.openCursor();
   private mediaValue: ApplicationQ3Assets | null = null;
   private servicesValue: ApplicationQ3Services | null = null;
   private core: QvmModPresentation | null = null;
   private rendererValue: ApplicationQ3SceneRenderer | null = null;
   private captured: Q3SceneContent | null = null;
-  private pendingHud: Q3OverlaySubmission[] = [];
+  private readonly pendingHud = new EventRing<Q3OverlaySubmission>(4096);
+  private readonly hudCursor: EventCursor = this.pendingHud.openCursor();
   private hudColor = { x: 1, y: 1, z: 1, w: 1 };
   private capturedHud: readonly Q3OverlaySubmission[] = [];
   private capturedBodies: readonly ComponentBody[] = [];
@@ -161,7 +164,7 @@ export class ApplicationModPresentation {
   captureCheckpoint() {
     this.assertCurrent();
     if (this.initializing || this.operations !== 0 || this.core === null || this.files === null || this.scripts === null || this.collision === null
-      || this.audioOperations.length !== 0 || this.pendingHud.length !== 0) throw new Error("Component checkpoint requires an idle completed frame");
+      || this.audioOperations.pending(this.audioCursor) !== 0 || this.pendingHud.pending(this.hudCursor) !== 0) throw new Error("Component checkpoint requires an idle completed frame");
     const profile = this.options.source.prepared.declaration.cgame.abiProfile;
     return { version: 1, declaration: this.options.source.prepared.declaration, core: this.core.captureCheckpoint(),
       cvars: this.cvars.captureSaveState(), files: this.files.captureCheckpoint(), scripts: this.scripts.captureCheckpoint(),
@@ -195,31 +198,30 @@ export class ApplicationModPresentation {
         owner: options.source.prepared.source.id, resourceHandles: "client",
         ...(options.systemCinematics === undefined ? {} : { systemCinematics: typeof options.systemCinematics === "function" ? options.systemCinematics(owner) : options.systemCinematics }), seat: options.seat, viewport: options.viewport, queries: options.queries,
         actorAt: slot => {
-          owner.assertCurrent(); const actor = options.source.source.actor(slot);
-          if (actor === null) throw new Error(`Component sound source slot ${slot} has no live actor`);
-          return actor;
+          owner.assertCurrent();
+          return options.source.source.actor(slot);
         }, clock: { now: () => options.clock.now() + owner.millisecondsOffset, frameNumber: options.clock.frameNumber }, output: {
           scene: scene => {
             owner.assertCurrent();
             if (options.source.prepared.declaration.hud === undefined) { options.output.scene(scene); return; }
             if ((scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) throw new Error("Component HUD cannot replace the world view");
-            owner.pendingHud.push({ kind: "scene", scene });
+            owner.pendingHud.admit({ kind: "scene", scene });
           },
           command: command => {
             owner.assertCurrent();
             if (options.source.prepared.declaration.hud === undefined) { options.output.command(command); return; }
             if (command.kind !== "set-color" && command.kind !== "stretch-pic") throw new Error("Component HUD cannot control the framebuffer");
             if (command.kind === "set-color") owner.hudColor = command.color;
-            else owner.pendingHud.push({ kind: "command", command: { kind: "set-color", color: owner.hudColor } });
-            owner.pendingHud.push({ kind: "command", command });
+            else owner.pendingHud.admit({ kind: "command", command: { kind: "set-color", color: owner.hudColor } });
+            owner.pendingHud.admit({ kind: "command", command });
           },
           text: draw => {
             owner.assertCurrent();
             if (options.source.prepared.declaration.hud === undefined) { options.output.text(draw); return; }
-            owner.pendingHud.push({ kind: "text", draw });
+            owner.pendingHud.admit({ kind: "text", draw });
           },
           listener: (origin, axis) => { owner.assertCurrent(); options.output.listener(origin, axis); },
-          audio: operation => { owner.assertCurrent(); owner.audioOperations.push(operation); },
+          audio: operation => { owner.assertCurrent(); owner.audioOperations.admit(operation); },
         } });
       owner.assertCurrent();
       owner.rendererValue = new ApplicationQ3SceneRenderer(owner.media, owner.services.resources);
@@ -232,7 +234,7 @@ export class ApplicationModPresentation {
         actor: slot => options.source.source.actor(slot), live: actor => options.source.source.live(actor), assertCurrent: () => owner.assertCurrent() });
       if (checkpoint === undefined) await owner.core.initialize(baselineSequence);
       else await owner.restoreOwned(checkpoint.value, checkpoint.resolveActor);
-      owner.assertCurrent(); owner.initializing = false; owner.services.scene.clearScene(); owner.pendingHud = []; owner.flushAudio(); return owner;
+      owner.assertCurrent(); owner.initializing = false; owner.services.scene.clearScene(); owner.pendingHud.reset(); owner.flushAudio(); return owner;
     } catch (error) {
       try { owner.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Component presentation initialization and cleanup failed"); }
       throw error;
@@ -329,11 +331,12 @@ export class ApplicationModPresentation {
       ?? options.scalar?.(call, this)
       ?? (call.kind === "engine" && call.code === QvmCgameImport.CG_MEMORY_REMAINING ? Math.min(0x7fffffff, freemem()) : rejectQvmSyscall(call));
   }
+  private takeAudio(): Q3SeatAudioOperation[] { const taken = this.audioOperations.take(this.audioCursor); this.audioOperations.retire(); return taken; }
   private flushAudio(): void {
-    if (this.audioOperations.length === 0) return;
+    if (this.audioOperations.pending(this.audioCursor) === 0) return;
     this.assertCurrent();
     this.options.audio.receiveCgameFrame({ content: this.options.source.identity.source.content, seat: this.options.seat,
-      owner: this.options.source.prepared.source.id, operations: this.audioOperations.splice(0) });
+      owner: this.options.source.prepared.source.id, operations: this.takeAudio() });
   }
   async command(arguments_: readonly string[]): Promise<boolean> {
     if (!this.published) throw new Error("Component presentation has not been published");
@@ -355,9 +358,9 @@ export class ApplicationModPresentation {
     try {
       await this.core.consume(event, sequence);
       this.assertCurrent();
-      if (this.options.source.source.live(event.actor)) this.flushAudio(); else this.audioOperations.length = 0;
+      if (this.options.source.source.live(event.actor)) this.flushAudio(); else this.audioOperations.reset();
     } catch (error) {
-      this.audioOperations.length = 0;
+      this.audioOperations.reset();
       try { this.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Component presentation execution and cleanup failed"); }
       throw error;
     } finally { this.operations--; }
@@ -386,7 +389,7 @@ export class ApplicationModPresentation {
       this.services.scene.clearScene();
       if (this.options.source.prepared.declaration.hud !== undefined) await this.core.drawHud(sequence);
       this.assertCurrent();
-      const hud = this.pendingHud.splice(0);
+      const hud = this.pendingHud.take(this.hudCursor); this.pendingHud.retire();
       this.services.scene.clearScene();
       await this.renderer.preload([scene, ...hud.flatMap(submission => submission.kind === "scene" ? [submission.scene] : [])]);
       this.assertCurrent(); this.flushAudio();
@@ -399,7 +402,7 @@ export class ApplicationModPresentation {
   }
   close(): void {
     if (this.closed) return;
-    this.closed = true; this.audioOperations.length = 0; this.pendingHud = []; this.capturedHud = []; this.capturedBodies = [];
+    this.closed = true; this.audioOperations.reset(); this.pendingHud.reset(); this.capturedHud = []; this.capturedBodies = [];
     const failures: unknown[] = [];
     for (const cleanup of [() => this.core?.close(), () => this.files?.closeAll(), () => this.scripts?.closeAll(), () => this.globals.clear(),
       () => this.servicesValue?.cinematics.close(), () => this.rendererValue?.close(), () => this.mediaValue?.bank.bank.clear(), () => this.mediaValue?.close(),

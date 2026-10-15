@@ -18,7 +18,7 @@ import { encodeCheckpointValue } from "../../../../../src/persistence/value.ts";
 import { PlayerState } from "../../../../../src/content/q3/base/shared/player-state.ts";
 import { Weapon } from "../../../../../src/content/q3/base/shared/definitions.ts";
 import { add, scale, subtract, normalize } from "../../../../../src/content/q2/foundation/fields.ts";
-import { angleVectors } from "../../../../../src/content/q2/foundation/weapons/vectors.ts";
+import { angleVectorsRule } from "../../../../../src/core/math.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const plane = { normal: { x: -1, y: 0, z: 0 }, distance: 0, type: 0, signbits: 1 };
@@ -83,7 +83,7 @@ function fixture(edition: Q2Edition, frameSeconds = 0.1, modifiers: Pick<Q2Weapo
   const project: HandGrenadeEquipmentInput["project"] = (angles, offset) => {
     const body = bodies.read(player.id);
     if (body === null) throw new Error("Missing test actor body");
-    const axes = angleVectors(angles), eye = add(body.origin, { x: 0, y: 0, z: 22 });
+    const axes = angleVectorsRule(angles, "native"), eye = add(body.origin, { x: 0, y: 0, z: 22 });
     const start = add(add(eye, scale(axes.forward, offset.x)), scale(axes.right, offset.y));
     if (edition === "classic") return { start: add(start, { x: 0, y: 0, z: offset.z }), direction: axes.forward };
     const muzzle = add(start, scale(axes.up, offset.z));

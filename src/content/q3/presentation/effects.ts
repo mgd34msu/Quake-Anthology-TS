@@ -4,7 +4,7 @@ import type { PcmSound } from "../../../audio/wav.ts";
 import { add3, cross3, length3, normalize3, perpendicularVector, scale3, sub3, vec3, vec4 } from "../../../core/math.ts";
 import type { Axis, Vec3, Vec4 } from "../../../core/math.ts";
 import { qRandom, qvmFloatToInt } from "../../../core/numeric.ts";
-import { qvmAnglesToAxis as anglesToAxis, qvmRotatePointAroundVector as rotatePointAroundVector } from "../../../core/qvm-math.ts";
+import { qvmAnglesToAxis as anglesToAxis, qvmRotatePointAroundVector as rotatePointAroundVector } from "../../../core/math.ts";
 import { createModelEntity, createSpriteEntity, createLightningEntity, RF_THIRD_PERSON } from "./ref-entity.ts";
 import type { RefSpriteEntity, SceneModel, SceneShader } from "./ref-entity.ts";
 import { TrajectoryType } from "../base/shared/trajectory.ts";

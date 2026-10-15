@@ -1,7 +1,8 @@
 /* Original Rogue m_widow2.c. ZeniMax Media, GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import { add, length, normalize, scale, subtract, zero } from "../../foundation/fields.ts";
-import { anglesVectors, changeYaw, enemyBody, enemyEye, health, inFront, projectFlash, targetDistance, vectorAngles } from "../../foundation/monsters/ai.ts";
+import { changeYaw, enemyBody, enemyEye, health, inFront, projectFlash, targetDistance } from "../../foundation/monsters/ai.ts";
 import { throwGib, throwHead } from "../../foundation/monsters/gibs.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
@@ -22,7 +23,7 @@ const tongueOffsets: readonly Vec3[] = [
   { x: 17.39, y: 1.02, z: 68.75 }, { x: 17.37, y: 1.20, z: 68.70 }, { x: 17.36, y: 1.24, z: 68.71 }, { x: 17.37, y: 1.21, z: 68.72 },
 ];
 function tongueOkay(start: Vec3, end: Vec3): boolean {
-  const delta = subtract(start, end); let pitch = vectorAngles(delta).x; if (pitch < -180) pitch += 360;
+  const delta = subtract(start, end); let pitch = vectorToAnglesRule(delta, "native-ai").x; if (pitch < -180) pitch += 360;
   return length(delta) <= 256 && Math.abs(pitch) <= 30;
 }
 function saveBeam(context: MonsterContext): undefined {
@@ -37,7 +38,7 @@ export function createWidow2Definition(monsters: Q2Monsters, weapons: Q2MissionP
     if (entity.frame >= frame.spawn04 && entity.frame <= frame.spawn14) {
       const index = entity.frame - frame.spawn04; flash = 200 + index;
       const start = projectFlash(context, muzzleOffset(game.options.edition, flash)), angles = game.body(entity).angles;
-      direction = anglesVectors({ ...angles, x: angles.x + vectorAngles(subtract(enemy.origin, start)).x, y: angles.y - (-40 + index * 8) }).forward;
+      direction = angleVectorsRule({ ...angles, x: angles.x + vectorToAnglesRule(subtract(enemy.origin, start), "native-ai").x, y: angles.y - (-40 + index * 8) }, "native").forward;
       weapons.fireHeatBeam(entity, game, start, direction, zero, 10, 50); return monsterFlash(context, flash, start, direction);
     }
     saveBeam(context);
@@ -60,8 +61,8 @@ export function createWidow2Definition(monsters: Q2Monsters, weapons: Q2MissionP
     let velocity: Vec3;
     if (game.host.isPlayer(entity.enemy)) velocity = add(enemy.velocity, scale(normalize(delta), 1000));
     else {
-      const target = monsters.context(entity.enemy); if (target !== null) { target.state.idealYaw = vectorAngles(delta).y; changeYaw(target); }
-      velocity = scale(anglesVectors(game.body(entity).angles).forward, 1000);
+      const target = monsters.context(entity.enemy); if (target !== null) { target.state.idealYaw = vectorToAnglesRule(delta, "native-ai").y; changeYaw(target); }
+      velocity = scale(angleVectorsRule(game.body(entity).angles, "native").forward, 1000);
     }
     game.host.bodies.write(actor, { ...enemy, angles: game.host.bodies.read(actor.id)?.angles ?? enemy.angles, origin, ground: null, velocity });
     const target = game.entity(entity.enemy); if (target !== null) game.motion(target, target.motion);
@@ -80,7 +81,7 @@ export function createWidow2Definition(monsters: Q2Monsters, weapons: Q2MissionP
         if (game.entity(entity.enemy)?.solid !== "none" || trace.fraction < 1) return false;
       }
     }
-    state.idealYaw = vectorAngles(subtract(enemy.origin, game.body(entity).origin)).y;
+    state.idealYaw = vectorToAnglesRule(subtract(enemy.origin, game.body(entity).origin), "native-ai").y;
     if (entity.timestamp < game.host.now() && distance < 300 && tongueOkay(widowProject(entity, game, recordAt(tongueOffsets, 0)), enemy.origin)) {
       if (game.options.skill === 0 && Math.floor(game.host.random() * 4) !== 0) return false; state.attackState = "melee"; return true;
     }

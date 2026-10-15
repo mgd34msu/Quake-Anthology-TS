@@ -6,6 +6,7 @@
  */
 
 import type { NumericOperations, NumericProfile, RandomSource, RandomState, RandomStep } from "../contracts/numeric.ts";
+import { float32Bits, float32FromBits, float64FromBits } from "../foundation/binary.ts";
 export type { ArithmeticProfile, FloatingRounding, FloatToIntProfile, NumericOperations, NumericProfile, NumericProfileId, RandomSource, RandomState, RandomStep } from "../contracts/numeric.ts";
 
 /** Converts a JavaScript number with C-style signed 32-bit wraparound. */
@@ -30,17 +31,11 @@ export function qvmFloatToInt(value: number): number {
 }
 
 export function float32ToBits(value: number): number {
-  const bytes = new ArrayBuffer(4);
-  const view = new DataView(bytes);
-  view.setFloat32(0, value, true);
-  return view.getUint32(0, true);
+  return float32Bits(value);
 }
 
 export function bitsToFloat32(bits: number): number {
-  const bytes = new ArrayBuffer(4);
-  const view = new DataView(bytes);
-  view.setUint32(0, uint32(bits), true);
-  return view.getFloat32(0, true);
+  return float32FromBits(bits);
 }
 
 /** Returns the updated seed produced by Quake's Q_rand. */
@@ -240,10 +235,7 @@ function matchesAsciiWord(text: string, offset: number, word: string): boolean {
 }
 
 function doubleFromBits(bits: bigint): number {
-  const bytes = new ArrayBuffer(8);
-  const view = new DataView(bytes);
-  view.setBigUint64(0, bits, false);
-  return view.getFloat64(0, false);
+  return float64FromBits(bits);
 }
 
 function signedZero(negative: boolean): number {

@@ -1,10 +1,10 @@
 /* Rogue g_newdm.c/g_items.c decoy creation, animation, and sphere retaliation. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../core/math.ts";
 import type { Q2CallbackDefinitions } from "../foundation/callbacks.ts";
 import type { Q2Die, Q2Entity, Q2GameServices, Q2Pain, Q2Think } from "../foundation/host.ts";
 import type { Q2Weapons } from "../foundation/weapons/index.ts";
 import { add, length, scale, subtract, zero } from "../foundation/fields.ts";
-import { angleVectors, vectorAngles } from "../foundation/weapons/vectors.ts";
 import { findRogueSpawnPoint, checkRogueGroundSpawnPoint, rogueSpawnGrow, rogueSpawnCallbacks } from "./monsters/spawn.ts";
 import type { Q2MissionPackSpheres } from "./spheres.ts";
 import { explode } from "./projectiles/common.ts";
@@ -19,7 +19,7 @@ export class Q2MissionPackDoppleganger {
 
   use(owner: Q2Entity, game: Q2GameServices): boolean {
     const body = game.body(owner), angles = this.weapons.inputs.get(owner.actor.id)?.angles ?? body.angles;
-    const forward = angleVectors({ x: 0, y: angles.y, z: 0 }).forward;
+    const forward = angleVectorsRule({ x: 0, y: angles.y, z: 0 }, "native").forward;
     const point = findRogueSpawnPoint(game, add(body.origin, scale(forward, 48)), body.bounds, 32);
     if (point === null || !checkRogueGroundSpawnPoint(game, point, body.bounds, 64, -1)) return false;
     if (!game.host.inventory.consume(owner.actor, "q2:item_doppleganger", 1)) return false;
@@ -61,7 +61,7 @@ export class Q2MissionPackDoppleganger {
 
   fire(owner: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3): Q2Entity {
     game.sourceCallbacks.register(this.callbacks);
-    const base = game.create("doppleganger"), angles = vectorAngles(direction);
+    const base = game.create("doppleganger"), angles = vectorToAnglesRule(direction, "native");
     base.teamMaster = owner.actor.id; base.renderFlags = 0x8000; base.damageableTarget = true; base.pain = this.pain; base.die = this.die;
     game.move(base, { origin: start, angles: { ...angles, x: 0 }, velocity: zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } } });
     game.motion(base, "toss"); game.solid(base, "box");

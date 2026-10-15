@@ -1,5 +1,6 @@
 import type { MonsterContext } from "../../foundation/monsters/types.ts";
-import { anglesVectors, enemyBody, finishDodge, health, projectFlash, visible } from "../../foundation/monsters/ai.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
+import { enemyBody, finishDodge, health, projectFlash, visible } from "../../foundation/monsters/ai.ts";
 import { parasiteDrainReachable } from "../../base/monsters/parasite.ts";
 import type { Q2MissionPackMonsterState } from "./state.ts";
 import type { Q2GameServices } from "../../foundation/host.ts";
@@ -66,7 +67,7 @@ export function rogueMonsterDodge(context: MonsterContext, monsters: Q2Monsters,
   if (dodger) {
     if (state.dodging) return undefined;
     if (trace.end.z <= height || state.ducked) {
-      state.lefty = dot(anglesVectors(body.angles).right, subtract(trace.end, body.origin)) >= 0;
+      state.lefty = dot(angleVectorsRule(body.angles, "native").right, subtract(trace.end, body.origin)) >= 0;
       if (duck !== null && state.ducked) rogueDuckUp(context);
       state.dodging = true; state.attackState = "sliding";
       return sidestep(context);

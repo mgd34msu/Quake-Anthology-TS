@@ -1,8 +1,9 @@
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
 import type { Q2Touch } from "../../foundation/host.ts";
 import { add, length, normalize, numberField, scale, subtract, zero } from "../../foundation/fields.ts";
-import { anglesVectors, corpse, enemyBody, finishDodge, health, projectFlash, setDuck, targetDistance, vectorAngles } from "../../foundation/monsters/ai.ts";
+import { corpse, enemyBody, finishDodge, health, projectFlash, setDuck, targetDistance } from "../../foundation/monsters/ai.ts";
 import { throwGib } from "../../foundation/monsters/gibs.ts";
 import { humanoidBounds, move, sound } from "../../base/monsters/common.ts";
 import { blockedCheckJump, blockedCheckPlatform, checkGib, monsterJumpFinished, predictedDirection, reactsToPain } from "./common.ts";
@@ -138,7 +139,7 @@ export function createRereleaseBerserkDefinition(monsters: Q2Monsters): Q2Monste
         const enemy = enemyBody(context); if (enemy === null) return undefined;
         const body = context.game.body(context.entity), speed = length(subtract(body.origin, enemy.origin)) * 1.95;
         const direction = predictedDirection(context, body.origin, speed, false); if (direction === null) return undefined;
-        const angles = { ...body.angles, y: vectorAngles(direction).y }, forward = anglesVectors(angles).forward;
+        const angles = { ...body.angles, y: vectorToAnglesRule(direction, "native-ai").y }, forward = angleVectorsRule(angles, "native").forward;
         context.game.move(context.entity, { origin: { ...body.origin, z: body.origin.z + 1 }, velocity: { ...scale(forward, speed), z: 450 }, angles, ground: null });
         context.state.ducked = true; context.state.attackFinished = context.game.host.now() + 3; context.entity.touch = touch;
         return highGravity(context);
@@ -154,8 +155,8 @@ export function createRereleaseBerserkDefinition(monsters: Q2Monsters): Q2Monste
         return undefined;
       },
       berserk_shrink(context) { context.entity.serverFlags |= 2; const body = context.game.body(context.entity); return context.game.move(context.entity, { bounds: { ...body.bounds, max: { ...body.bounds.max, z: 0 } } }); },
-      berserk_jump_now(context) { const body = context.game.body(context.entity), axis = anglesVectors(body.angles); return context.game.move(context.entity, { velocity: add(body.velocity, add(scale(axis.forward, 100), scale(axis.up, 300))) }); },
-      berserk_jump2_now(context) { const body = context.game.body(context.entity), axis = anglesVectors(body.angles); return context.game.move(context.entity, { velocity: add(body.velocity, add(scale(axis.forward, 150), scale(axis.up, 400))) }); },
+      berserk_jump_now(context) { const body = context.game.body(context.entity), axis = angleVectorsRule(body.angles, "native"); return context.game.move(context.entity, { velocity: add(body.velocity, add(scale(axis.forward, 100), scale(axis.up, 300))) }); },
+      berserk_jump2_now(context) { const body = context.game.body(context.entity), axis = angleVectorsRule(body.angles, "native"); return context.game.move(context.entity, { velocity: add(body.velocity, add(scale(axis.forward, 150), scale(axis.up, 400))) }); },
       berserk_jump_wait_land(context) { context.state.nextFrame = context.entity.frame + (context.game.body(context.entity).ground !== null || monsterJumpFinished(context) ? 1 : 0); return undefined; },
     },
   };

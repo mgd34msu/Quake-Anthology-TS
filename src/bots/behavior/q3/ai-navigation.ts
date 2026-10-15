@@ -11,7 +11,7 @@ import { CvarFlag } from "../../../core/cvars/index.ts";
 import { infoValueForKey } from "../../../core/info-string.ts";
 import { add3, cross3, dot3, length3, normalize3, scale3, sub3, vec3 } from "../../../core/math.ts";
 import type { Vec3 } from "../../../core/math.ts";
-import { qvmAngleMod, qvmAngleVectors } from "../../../core/qvm-math.ts";
+import { qvmAngleMod, qvmAngleVectors } from "../../../core/math.ts";
 import { EntityType, GameType, Team } from "../../../content/q3/base/shared/definitions.ts";
 import { ENTITYNUM_NONE, MoveFlags } from "../../../content/q3/base/shared/player-state.ts";
 import type { GameAiContext } from "./ai-context.ts";

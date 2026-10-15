@@ -3,7 +3,7 @@ import type { ContentDigest } from "../../contracts/content.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { GuestAddress, GuestCallValue } from "../../contracts/execution.ts";
 import type { Vec3 } from "../../contracts/math.ts";
-import { qvmAngleVectors } from "../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../core/math.ts";
 import type { NativePrimaryWeaponHost, NativePrimaryWeaponProfile } from "./native-primary-weapons.ts";
 import { classicSignature, q2Pointer } from "./classic/layout.ts";
 import { signature } from "./rerelease/api.ts";

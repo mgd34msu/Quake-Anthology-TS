@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
 import { RereleaseNavigationImports } from "../../../compat/q2/rerelease/navigation.ts";
 import type { NativeInputMotion } from "../../../compat/q2/native-input.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
@@ -48,7 +49,8 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   readonly #resourceNames = { model: new ResourceNameIndex(8192, [255]), sound: new ResourceNameIndex(2048), image: new ResourceNameIndex(512) };
   readonly #weaponModels = new Map<number, string>();
   private weaponModels: readonly string[] = ["weapon.md2"];
-  readonly #messages: RereleaseGuestMessage[] = [];
+  readonly #messages = new EventRing<RereleaseGuestMessage>(8192);
+  readonly #messageCursor: EventCursor = this.#messages.openCursor();
   readonly #links = new Map<ActorId, LinkMetadata>();
   readonly #buffer = messageBuffer();
   #options: RereleaseGuestServicesOptions;
@@ -159,7 +161,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   }
   validateMap(binding: RereleaseGuestMapServices): void { if (binding.scene.geometry.models.length >= 8191) throw new RangeError("API2023 map exceeds model capacity"); }
   private seedMap(): void { for (const kind of resourceKinds) this.#resourceNames[kind].clear(); this.#weaponModels.clear(); this.weaponModels = ["weapon.md2"]; this.storeConfigstring(63, this.options.mapPath); for (let i = 1; i < this.options.scene.geometry.models.length; i++) this.storeConfigstring(63 + i + (i >= 254 ? 1 : 0), `*${i}`); }
-  rebindWorld(binding: RereleaseGuestMapServices): void { this.validateMap(binding); this.#options = { ...this.#options, ...binding }; this.#loading = true; this.#frame = 0; this.#strings.clear(); this.#messages.length = 0; this.#links.clear(); SZ_Clear(this.#buffer); this.seedMap(); }
+  rebindWorld(binding: RereleaseGuestMapServices): void { this.validateMap(binding); this.#options = { ...this.#options, ...binding }; this.#loading = true; this.#frame = 0; this.#strings.clear(); this.#messages.reset(); this.#links.clear(); SZ_Clear(this.#buffer); this.seedMap(); }
   completeSpawn(): void { this.#loading = false; }
   beginFrame(frame: number): void { if (!Number.isInteger(frame) || frame < 0 || frame > 0xffffffff) throw new RangeError("Invalid API2023 frame"); this.#frame = frame; for (const actor of this.#links.keys()) if (!this.options.engine.actors.isLive(actor)) this.#links.delete(actor); }
   configstrings(): ReadonlyMap<number, string> { return new Map(this.#strings); }
@@ -266,8 +268,8 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     }
   }
   private acceptsClient(slot: number): boolean { if (this.options.acceptsClient !== undefined) return this.options.acceptsClient(slot); return slot >= 1 && slot <= this.options.maxClients && slot < this.host.module.entities().count && this.host.isClientReserved(slot); }
-  private enqueue(audience: ClassicGuestAudience, reliable: boolean, bytes: Uint8Array, dupeKey = 0): void { this.#messages.push({ sourceDialect: "q2-multicast-float", audience, reliable, bytes, dupeKey }); }
-  drainMessages(): readonly RereleaseGuestMessage[] { return this.#messages.splice(0); }
+  private enqueue(audience: ClassicGuestAudience, reliable: boolean, bytes: Uint8Array, dupeKey = 0): void { this.#messages.admit({ sourceDialect: "q2-multicast-float", audience, reliable, bytes, dupeKey }); }
+  drainMessages(): readonly RereleaseGuestMessage[] { const taken = this.#messages.take(this.#messageCursor); this.#messages.retire(); return taken; }
   private print(slot: number | null, level: number, text: string, broadcast: boolean, center = false): void {
     if (!broadcast && slot === null) { this.options.print(text); return; }
     if (slot !== null && !this.acceptsClient(slot)) return;

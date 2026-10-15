@@ -1,12 +1,12 @@
 /* LMCTF plasma.c / p_weapon.c. Copyright Team HOSTILE and LMCTF. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import type { Q2Entity, Q2GameServices, Q2Think, Q2Touch } from "../../foundation/host.ts";
 import type { Q2WeaponContext, Q2Weapons } from "../../foundation/weapons/player.ts";
 import type { Q2WeaponDefinition } from "../../foundation/weapons/types.ts";
 import { q2WeaponRecoil } from "../../foundation/weapons/presentation.ts";
 import { add, scale, zero } from "../../foundation/fields.ts";
-import { angleVectors, vectorAngles } from "../../foundation/weapons/vectors.ts";
 import { lmctfPlayer, lmctfPrint } from "./types.ts";
 import type { LmctfContext } from "./types.ts";
 
@@ -41,7 +41,7 @@ export class LmctfWeapons {
     }
     if (state.frame === 4) {
       const projection = weapons.project(current, { x: 8, y: 8, z: -8 }), reflect = lmctfPlayer(this.context, self.actor.id).plasmaMode;
-      weapons.kick(current, scale(angleVectors(input.angles).forward, -2), q2WeaponRecoil(state, game.options.edition, now).kickAngles);
+      weapons.kick(current, scale(angleVectorsRule(input.angles, "native").forward, -2), q2WeaponRecoil(state, game.options.edition, now).kickAngles);
       game.sound(self, reflect ? "weapons/plasma/fire1.wav" : "weapons/plasma/fire2.wav", 1);
       this.launch(self, game, projection.start, projection.direction, reflect);
       const cells = game.host.inventory.entries(self.actor.id).find(entry => entry.item === "q2:ammo_cells");
@@ -57,9 +57,9 @@ export class LmctfWeapons {
     state.frame++; return undefined;
   };
   launch(owner: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, reflect: boolean): undefined {
-    const angles = vectorAngles(direction);
+    const angles = vectorToAnglesRule(direction, "native");
     for (const yaw of reflect ? [0] : [0, 10, -10]) {
-      const goop = game.create("goop"), velocity = scale(yaw === 0 ? direction : angleVectors({ ...angles, y: angles.y + yaw }).forward, 1200);
+      const goop = game.create("goop"), velocity = scale(yaw === 0 ? direction : angleVectorsRule({ ...angles, y: angles.y + yaw }, "native").forward, 1200);
       goop.owner = owner.actor.id; goop.clipMask = 0x6000003; goop.serverFlags = 2; goop.damage = reflect ? 39 : 1;
       goop.effects = 0x100000 | 0x2000; goop.renderFlags = 32; goop.model = "sprites/s_plasma1.sp2"; goop.sound = "weapons/plasma/flyby.wav";
       goop.touch = reflect ? this.reflect : this.spread;

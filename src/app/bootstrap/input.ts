@@ -1,3 +1,5 @@
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import { InputDevices, inputDeviceStore } from "./input-devices.ts";
 import type { StartupConfigOptions } from "./startup-config.ts";
 import type { ClientBootstrap } from "./client-bootstrap.ts";
@@ -223,21 +225,24 @@ export class ApplicationInput {
   private ownsInputDevices = false;
   private sequence = 0;
   private ownsControllers = true;
-  private pendingWindowEvents: SdlEvent[] = [];
-  private pendingControllerEvents: ControllerEvent[] = [];
+  private pendingWindowEvents = new EventRing<SdlEvent>(32768);
+  private pendingWindowCursor: EventCursor = this.pendingWindowEvents.openCursor();
+  private pendingControllerEvents = new EventRing<ControllerEvent>(8192);
+  private pendingControllerCursor: EventCursor = this.pendingControllerEvents.openCursor();
   private hapticLoad: (request: ResourceRequest) => Promise<Uint8Array | null> = async () => null;
   private readonly seatUi = new Map<SeatId, ApplicationInputUi>();
   private readonly mouseSettings = new Map<SeatId, MouseSettings>();
   private readonly q3Selections = new Map<SeatId, Q3CommandSelection>();
   private readonly arsenalSelections = new Map<SeatId, Pick<ArsenalIntent, "provider" | "weapon">>();
   private readonly offhandButtons = new Map<SeatId, { readonly grapple: InputButton; readonly grenade: InputButton }>();
-  private readonly unregister: (() => void)[] = [];
+  private readonly unregister = new CleanupStack();
   private readonly uiCallbacks = new Map<SeatInput, (event: SeatInputEvent, focus: SeatInputFocus) => boolean>();
-  private readonly releaseUi: (() => void)[] = [];
+  private readonly releaseUi = new CleanupStack();
   private readonly clientCommands: ClientCommandBindings;
   private commandsActive = false;
-  private readonly stagedCommands: ({ readonly kind: "console"; readonly text: string; readonly source: CommandContext }
-    | { readonly kind: "reliable"; readonly text: string; readonly source: CommandContext; readonly dispatch: (text: string, source: CommandContext) => void })[] = [];
+  private readonly stagedCommands = new EventRing<{ readonly kind: "console"; readonly text: string; readonly source: CommandContext }
+    | { readonly kind: "reliable"; readonly text: string; readonly source: CommandContext; readonly dispatch: (text: string, source: CommandContext) => void }>(16384);
+  private readonly stagedCursor: EventCursor = this.stagedCommands.openCursor();
   private readonly consoleRouting: ApplicationConsoleRouting | null;
   private externalRouting: CommandCvarRouting | undefined;
   private consoleCvars: CvarRegistry;
@@ -335,7 +340,7 @@ export class ApplicationInput {
       dispose(() => this.commands.discardClient(id));
       const retired = (source: CommandContext): boolean => { let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
         return (origin.kind === "local-seat" || origin.kind === "remote-client") && origin.client.equals(id); };
-      for (let index = this.stagedCommands.length - 1; index >= 0; index--) { const command = this.stagedCommands[index]; if (command !== undefined && retired(command.source)) this.stagedCommands.splice(index, 1); }
+      this.stagedCommands.filterLive(command => !retired(command.source));
     }
     const active = next.map(local => local.player.seat.id);
     if (client !== undefined) {
@@ -684,7 +689,8 @@ export class ApplicationInput {
     }
     for (const local of locals) local.console.publish(local.input.focus);
     this.clientCommands.activate();
-    for (const command of this.stagedCommands.splice(0)) {
+    const staged = this.stagedCommands.take(this.stagedCursor); this.stagedCommands.retire();
+    for (const command of staged) {
       if (command.kind === "console") this.commands.append(command.text, command.source);
       else command.dispatch(command.text, command.source);
     }
@@ -692,15 +698,16 @@ export class ApplicationInput {
 
   private retireCommands(): void {
     this.clientCommands.deactivate();
-    for (const release of this.releaseUi.splice(0)) release();
-    for (const unregister of this.unregister.splice(0)) unregister();
+    this.releaseUi.runAll();
+    this.unregister.runAll();
     this.commandsActive = false;
   }
 
   pollLoadingEvents(): void {
     const events = this.window.pollEvents();
-    this.pendingWindowEvents.push(...events);
-    this.pendingControllerEvents.push(...this.controllers.pollEvents());
+    if (events.length !== 0) this.pendingWindowEvents.admitAll(events);
+    const controllerEvents = this.controllers.pollEvents();
+    if (controllerEvents.length !== 0) this.pendingControllerEvents.admitAll(controllerEvents);
     if (events.some(event => event.kind === "quit" || event.kind === "window" && event.event === 14)) this.actions.quit();
   }
 
@@ -744,12 +751,15 @@ export class ApplicationInput {
   pump(executeCommands = true): void {
     this.releaseOffhand(false);
     this.synchronizeClientFocus();
-    for (const event of [...this.pendingWindowEvents.splice(0), ...this.window.pollEvents()]) {
+    const handleWindow = (event: SdlEvent): void => {
       if (event.kind === "window" && event.event === 13) this.stopHaptics();
       this.router.handlePlatform(event);
-    }
+    };
+    this.pendingWindowEvents.drain(this.pendingWindowCursor, handleWindow); this.pendingWindowEvents.retire();
+    for (const event of this.window.pollEvents()) handleWindow(event);
     this.inputDevices.frame(this.now());
-    for (const event of [...this.pendingControllerEvents.splice(0), ...this.controllers.pollEvents()]) this.router.handleController(event);
+    this.pendingControllerEvents.drain(this.pendingControllerCursor, event => { this.router.handleController(event); }); this.pendingControllerEvents.retire();
+    for (const event of this.controllers.pollEvents()) this.router.handleController(event);
     this.controllerSettings.update();
     if (executeCommands) this.commands.execute();
     this.router.updateCapture();
@@ -862,11 +872,11 @@ export class ApplicationInput {
   enqueueClientCommand(text: string, source: CommandContext): void {
     if (this.candidateProgram !== null) this.candidateProgram.commands.append(text, source);
     else if (this.commandsActive) this.commands.append(text, source);
-    else this.stagedCommands.push({ kind: "console", text, source });
+    else this.stagedCommands.admit({ kind: "console", text, source });
   }
   enqueueClientReliable(text: string, source: CommandContext, dispatch: (text: string, source: CommandContext) => void): void {
     if (this.commandsActive) dispatch(text, source);
-    else this.stagedCommands.push({ kind: "reliable", text, source, dispatch });
+    else this.stagedCommands.admit({ kind: "reliable", text, source, dispatch });
   }
   get profileChanged(): boolean {
     return this.commands.dialect !== (this.actions.console?.dialect() ?? this.dialect) || this.locals.some(local => local.input.dialect !== this.dialect);
@@ -882,7 +892,7 @@ export class ApplicationInput {
     const previous = this.currentWindow;
     this.releaseForProfileChange();
     this.stopHaptics();
-    this.pendingWindowEvents = [];
+    this.pendingWindowEvents.reset();
     this.currentWindow = next;
     try { this.router.attachWindow(next); }
     catch (error) {
@@ -892,8 +902,10 @@ export class ApplicationInput {
     }
   }
   transferPlatformTo(next: ApplicationInput): void {
-    next.pendingWindowEvents = this.pendingWindowEvents; this.pendingWindowEvents = [];
-    next.pendingControllerEvents = this.pendingControllerEvents; this.pendingControllerEvents = [];
+    next.pendingWindowEvents = this.pendingWindowEvents; next.pendingWindowCursor = this.pendingWindowCursor;
+    this.pendingWindowEvents = new EventRing<SdlEvent>(32768); this.pendingWindowCursor = this.pendingWindowEvents.openCursor();
+    next.pendingControllerEvents = this.pendingControllerEvents; next.pendingControllerCursor = this.pendingControllerCursor;
+    this.pendingControllerEvents = new EventRing<ControllerEvent>(8192); this.pendingControllerCursor = this.pendingControllerEvents.openCursor();
     this.retireCommands();
     next.adoptStartup();
     this.router.transferWindowTo(next.router);
@@ -908,8 +920,8 @@ export class ApplicationInput {
     this.releaseForProfileChange(commands);
     this.retireCommands();
     this.router.transferWindowTo(next);
-    for (const event of this.pendingWindowEvents.splice(0)) next.handlePlatform(event);
-    for (const event of this.pendingControllerEvents.splice(0)) next.handleController(event);
+    this.pendingWindowEvents.drain(this.pendingWindowCursor, event => { next.handlePlatform(event); }); this.pendingWindowEvents.retire();
+    this.pendingControllerEvents.drain(this.pendingControllerCursor, event => { next.handleController(event); }); this.pendingControllerEvents.retire();
     this.ownsControllers = false;
   }
   activatePreparedPlatform(): void {
@@ -1029,7 +1041,7 @@ export class ApplicationInput {
     for (const local of this.locals) local.haptics.close();
     this.router.close();
     if (this.ownsControllers) this.controllers.close();
-    this.stagedCommands.length = 0;
+    this.stagedCommands.reset();
     this.seatUi.clear();
     this.q3Selections.clear();
     this.arsenalSelections.clear();

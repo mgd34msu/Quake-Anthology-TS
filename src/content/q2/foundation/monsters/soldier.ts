@@ -1,7 +1,8 @@
 /* Soldier callbacks from id Software game/m_soldier.c and rerelease/m_soldier.cpp. GPL-2.0-or-later. */
 import type { DeathReaction, PainReaction } from "../../../../contracts/world.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import { add, dot, length, normalize, scale, subtract } from "../fields.ts";
-import { anglesVectors, clearShot, corpse, enemyBody, enemyEye, finishDodge, health, proneShot, projectFlash, setDuck, targetDistance, vectorAngles, visible } from "./ai.ts";
+import { clearShot, corpse, enemyBody, enemyEye, finishDodge, health, proneShot, projectFlash, setDuck, targetDistance, visible } from "./ai.ts";
 import { classic_soldierFrames, rerelease_soldierFrames } from "./frames.ts";
 import { throwGib, throwHead } from "./gibs.ts";
 import { muzzleIds, muzzleOffset } from "./muzzle.ts";
@@ -106,7 +107,7 @@ function fire(context: MonsterContext, flashNumber: number, angleLimited = false
   const rerelease = game.options.edition === "rerelease";
   const flash = recordAt(state.weapon === "blaster" ? blasterFlash : state.weapon === "shotgun" ? shotgunFlash : machinegunFlash, flashNumber);
   const start = projectFlash(context, muzzleOffset(game.options.edition, flash));
-  let aim = anglesVectors(game.body(entity).angles).forward;
+  let aim = angleVectorsRule(game.body(entity).angles, "native").forward;
   if (flashNumber === 5 || flashNumber === 6) {
     if (rerelease && (entity.spawnflags & 65536) !== 0) return undefined;
   } else {
@@ -115,7 +116,7 @@ function fire(context: MonsterContext, flashNumber: number, angleLimited = false
     const end = state.attackState === "blind" ? { ...state.blindFireTarget, z: state.blindFireTarget.z + (game.entity(entity.enemy)?.viewHeight ?? 22) } : enemy;
     const direction = subtract(end, start);
     if (rerelease && angleLimited && dot(normalize(direction), aim) < 0.5) { state.holdFrame = game.host.now() < state.fireWait; return undefined; }
-    const basis = anglesVectors(vectorAngles(direction));
+    const basis = angleVectorsRule(vectorToAnglesRule(direction, "native-ai"), "native");
     const r = (game.host.random() * 2 - 1) * 1000, u = (game.host.random() * 2 - 1) * 500;
     aim = normalize(add(scale(basis.forward, 8192), add(scale(basis.right, r), scale(basis.up, u))));
   }
@@ -255,7 +256,7 @@ export const soldierCallbacks = {
   soldier_duck_up(context: MonsterContext): undefined { return setDuck(context, false); },
   soldier_start_charge(context: MonsterContext): undefined { context.state.charging = true; return undefined; },
   soldier_blind(context: MonsterContext): undefined { return context.setMove("soldier_move_blind"); },
-  soldier_blind_check(context: MonsterContext): undefined { if (context.state.manualSteering) context.state.idealYaw = vectorAngles(subtract(context.state.blindFireTarget, context.game.body(context.entity).origin)).y; return undefined; },
+  soldier_blind_check(context: MonsterContext): undefined { if (context.state.manualSteering) context.state.idealYaw = vectorToAnglesRule(subtract(context.state.blindFireTarget, context.game.body(context.entity).origin), "native-ai").y; return undefined; },
   soldier_stand_up(context: MonsterContext): undefined { context.setMove("soldier_move_trip", false); context.state.nextFrame = rerelease_soldierFrames.runt08; return undefined; },
   monster_check_prone(context: MonsterContext): undefined { if (!needsCock(context) && proneShot(context)) context.setMove("soldier_move_attack5", false); return undefined; },
   soldier_dead: corpse,

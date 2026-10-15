@@ -25,6 +25,7 @@ sequence. These guides contain the detailed instructions.
 - [Installed executable, source changes, and runtime evidence](execution-status.md#installed-executable-and-recent-fixes)
 - [Performance and fidelity acceptance](functional-targets/performance.md)
 - [Architecture contracts](contracts.md)
+- [Shared foundation: primitives and the event system](foundation.md)
 - [Source comparison for console commands and settings](console-source-parity.md)
 - [Development checks](getting-started.md#check-a-change)
 

@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { CvarRegistry } from "./index.ts";
 
 interface CvarMirrorSubscription { readonly clients: Set<SharedCvarMirror>; readonly release: () => void; }
@@ -5,7 +6,7 @@ const subscriptions = new WeakMap<CvarRegistry, Map<string, CvarMirrorSubscripti
 
 /** Selected engine controls share values while each client retains its own unrelated settings. */
 export class SharedCvarMirror {
-  private readonly releases: (() => void)[] = [];
+  private readonly releases = new CleanupStack();
   private refreshing = false;
   constructor(private readonly owner: CvarRegistry, private readonly mirror: CvarRegistry,
     private readonly names: readonly string[], assertCurrent: () => void) {
@@ -43,7 +44,7 @@ export class SharedCvarMirror {
     } finally { this.refreshing = false; }
   }
   close(): void {
-    for (const release of this.releases.splice(0)) release();
+    this.releases.runAll();
     const shared = subscriptions.get(this.owner);
     if (shared === undefined) return;
     for (const name of this.names) {

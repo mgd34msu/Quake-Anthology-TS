@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../../foundation/cleanup.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, GuestCallValue, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
@@ -29,7 +30,7 @@ export interface RereleaseDeferredDamageSave {
 }
 interface Tracked {
   readonly actor: OwnedActor; readonly view: RawEntityView; readonly generation: number;
-  readonly remove: (() => void)[]; pending: DamageRequest | null;
+  readonly remove: CleanupStack; pending: DamageRequest | null;
 }
 
 /** Observes the DLL's accumulator and callback boundary; the DLL retains all monster logic and stores. */
@@ -81,7 +82,7 @@ export class RereleaseDeferredDamage {
     const source = new RereleaseSourceEdict(view, this.host.module);
     if ((this.host.module.memory.readUint32(source.at("shared.svflags")) & 4) === 0) return;
     const actor = this.host.actor(view); if (actor === null || this.#tracked.has(actor.id)) return;
-    const entry: Tracked = { actor, view, generation: source.generation(), remove: [], pending: null };
+    const entry: Tracked = { actor, view, generation: source.generation(), remove: new CleanupStack(), pending: null };
     this.#tracked.set(actor.id, entry);
     const { memory } = this.host.module;
     entry.remove.push(memory.observeWrites(this.#at(view, this.host.module.requireWorldProfile().monster.mod + 2), 1, () => {
@@ -126,7 +127,7 @@ export class RereleaseDeferredDamage {
   }
   release(actor: OwnedActor): void {
     const entry = this.#tracked.get(actor.id); if (entry === undefined) return;
-    this.#tracked.delete(actor.id); for (const remove of entry.remove) remove();
+    this.#tracked.delete(actor.id); entry.remove.runAll();
   }
   clear(): void { for (const entry of [...this.#tracked.values()]) this.release(entry.actor); this.#calls.length = 0; }
   close(): void { this.#removePain(); this.#removeEntry(); this.clear(); this.#calls.length = 0; }

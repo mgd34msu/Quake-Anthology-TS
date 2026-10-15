@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { ContentDigest } from "../../contracts/content.ts";
 import type { GuestAddress, GuestCallResult, GuestCallValue, NativeAbi, GuestValueLayout } from "../../contracts/execution.ts";
 import type { GuestRegister } from "../../guest/core/contracts.ts";
@@ -30,7 +31,7 @@ const integer: GuestValueLayout = { kind: "scalar", storage: "int32" };
 
 /** Original commands retain cheat checks, grants and map-owned drop decisions. */
 export class NativePrimaryCommands {
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly giving: (ActorId | null)[] = [];
   private readonly dropping: (ActorId | null)[] = [];
   private readonly items: readonly Item[];
@@ -152,5 +153,5 @@ export class NativePrimaryCommands {
       return readClassicString(this.host.memory, value.value);
     });
   }
-  close(): void { if (this.closed) return; this.closed = true; for (const remove of this.removals.splice(0).reverse()) remove(); }
+  close(): void { if (this.closed) return; this.closed = true; this.removals.runReverse(); }
 }

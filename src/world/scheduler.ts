@@ -20,7 +20,12 @@ export type ThinkResult =
   | { readonly kind: "not-run"; readonly reason: "unscheduled" | "boundary" | "not-due" | "stale" }
   | { readonly kind: "ran"; readonly invocations: number; readonly alive: boolean };
 
-interface PendingThink extends ScheduledThink { readonly owned: OwnedActor; readonly sourceSlot: number; }
+interface PendingThink extends ScheduledThink {
+  readonly owned: OwnedActor;
+  readonly sourceSlot: number;
+  /** Provider registration order as an integer, bound once at schedule time. */
+  readonly providerRank: number;
+}
 
 /** Deadlines select eligibility; source traversal, rather than deadline sorting, selects execution order. */
 export function compareInvocationOrder(ordering: FrameOrdering, left: InvocationOrder, right: InvocationOrder,
@@ -59,6 +64,7 @@ export function thinkCallbackTime(profile: ClockProfile, due: SourceTime, frame:
 export class FrameScheduler implements ActorSchedule {
   private readonly scheduled = new Map<number, PendingThink>();
   private readonly profiles = new Map<ProviderId, ClockProfile>();
+  private readonly providerRanks = new Map<ProviderId, number>();
   private readonly ordering: FrameOrdering;
   private advancing = false;
   private closed = false;
@@ -72,10 +78,9 @@ export class FrameScheduler implements ActorSchedule {
       this.profiles.set(provider, Object.freeze({ ...profile }));
     }
     if (this.ordering.kind === "mixed") {
-      const seen = new Set<ProviderId>();
-      for (const provider of this.ordering.providers) {
-        if (seen.has(provider)) throw new Error(`Duplicate provider in frame order: ${provider}`);
-        seen.add(provider);
+      for (const [rank, provider] of this.ordering.providers.entries()) {
+        if (this.providerRanks.has(provider)) throw new Error(`Duplicate provider in frame order: ${provider}`);
+        this.providerRanks.set(provider, rank);
         this.profile(provider);
       }
     }
@@ -92,10 +97,11 @@ export class FrameScheduler implements ActorSchedule {
     validateTime(timing.due);
     if (!sameActor(actor.id, timing.order.actor) || actor.owner !== timing.order.provider) throw new RangeError("Think order must name its owning actor and provider");
     if (!Number.isSafeInteger(timing.order.sequence) || timing.order.sequence < 0) throw new RangeError("Think invocation sequence must be a nonnegative safe integer");
-    if (this.ordering.kind === "mixed" && !this.ordering.providers.includes(actor.owner)) throw new RangeError("Provider is absent from mixed frame ordering");
+    const providerRank = this.ordering.kind === "mixed" ? this.providerRanks.get(actor.owner) : 0;
+    if (providerRank === undefined) throw new RangeError("Provider is absent from mixed frame ordering");
     const sourceSlot = this.options.sourceSlot?.(actor.id) ?? actor.id.slot;
     if (!Number.isSafeInteger(sourceSlot) || sourceSlot < 0) throw new RangeError("Source slot must be a nonnegative safe integer");
-    this.scheduled.set(actor.id.slot, Object.freeze({ actor: actor.id, owned: actor, callback, sourceSlot,
+    this.scheduled.set(actor.id.slot, Object.freeze({ actor: actor.id, owned: actor, callback, sourceSlot, providerRank,
       timing: Object.freeze({ ...timing, due: copyTime(timing.due), order: Object.freeze({ ...timing.order }) }) }));
     return undefined;
   }
@@ -180,9 +186,9 @@ export class FrameScheduler implements ActorSchedule {
   close(): undefined { this.closed = true; this.scheduled.clear(); return undefined; }
 
   private comparePending(left: PendingThink, right: PendingThink, invocations: boolean): number {
-    const provider = this.ordering.kind === "native" ? 0
-      : this.ordering.providers.indexOf(left.owned.owner) - this.ordering.providers.indexOf(right.owned.owner);
-    return provider || left.sourceSlot - right.sourceSlot || (invocations ? left.timing.order.sequence - right.timing.order.sequence : 0);
+    return left.providerRank - right.providerRank
+      || left.sourceSlot - right.sourceSlot
+      || (invocations ? left.timing.order.sequence - right.timing.order.sequence : 0);
   }
 
   private result(invocations: number, actor: ActorId, reason: Extract<ThinkResult, { readonly kind: "not-run" }>["reason"]): ThinkResult {

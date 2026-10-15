@@ -1,11 +1,11 @@
 import type { WeaponTrajectoryUpdate } from "../../../../contracts/weapon-behavior.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 /* Xatrix g_weapon.c and Rogue g_newweap.c projectile callbacks. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import type { Q2Entity, Q2GameServices, Q2Think, Q2Touch } from "../../foundation/host.ts";
 import { add, dot, length, normalize, scale, subtract, zero } from "../../foundation/fields.ts";
-import { angleVectors, vectorAngles } from "../../foundation/weapons/vectors.ts";
 import { q2MissionPackDamage as mod } from "../types.ts";
 import type { Q2MissionPackProjectileHooks } from "../types.ts";
 import { effect, explode, freeProjectile, projectile, projectileMask, publishProjectile, sight, velocity } from "./common.ts";
@@ -83,7 +83,7 @@ export class Q2MissionPackBolts {
 
   private readonly heatThink: Q2Think = (entity, game) => {
     let nearest: ActorId | null = null, nearestDistance = 0;
-    const origin = game.body(entity).origin, forward = angleVectors(game.body(entity).angles).forward;
+    const origin = game.body(entity).origin, forward = angleVectorsRule(game.body(entity).angles, "native").forward;
     for (const actor of game.host.nearby(origin, 1024)) {
       if (actor === entity.owner || !game.host.isPlayer(actor) || (game.host.combat.read(actor)?.health ?? 0) <= 0 || !sight(game, entity, actor)) continue;
       const body = game.host.bodies.read(actor);
@@ -97,7 +97,7 @@ export class Q2MissionPackBolts {
       entity.enemy = nearest;
       if (game.host.weaponBehavior?.controlsTrajectory(entity.actor.id) !== true) {
         entity.movedir = normalize(subtract(target.origin, origin));
-        game.move(entity, { angles: vectorAngles(entity.movedir), velocity: scale(entity.movedir, 500) });
+        game.move(entity, { angles: vectorToAnglesRule(entity.movedir, "native"), velocity: scale(entity.movedir, 500) });
         game.motion(entity, entity.motion);
       }
     }
@@ -106,7 +106,7 @@ export class Q2MissionPackBolts {
 
   private readonly heatThinkRerelease: Q2Think = (entity, game) => {
     let acquire: ActorId | null = null, oldDot = 1, oldDistance = 0;
-    const origin = game.body(entity).origin, forward = angleVectors(game.body(entity).angles).forward;
+    const origin = game.body(entity).origin, forward = angleVectorsRule(game.body(entity).angles, "native").forward;
     for (const actor of game.host.nearby(origin, 1024)) {
       if (actor === entity.owner || !game.host.isPlayer(actor) || (game.host.combat.read(actor)?.health ?? 0) <= 0 || !sight(game, entity, actor)) continue;
       const body = game.host.bodies.read(actor);
@@ -126,7 +126,7 @@ export class Q2MissionPackBolts {
       const from = Math.abs(cosine) > 0.9995 ? 1 - entity.accel : Math.sin((1 - entity.accel) * angle) / sine;
       const to = Math.abs(cosine) > 0.9995 ? entity.accel : Math.sin(entity.accel * angle) / sine;
       entity.movedir = normalize(add(scale(entity.movedir, from), scale(desired, to)));
-      game.move(entity, { angles: vectorAngles(entity.movedir) });
+      game.move(entity, { angles: vectorToAnglesRule(entity.movedir, "native") });
       }
       if (entity.enemy === null) { game.sound(entity, "weapons/railgr1a.wav", 1, 1, 0.25); entity.enemy = acquire; }
     }
@@ -227,7 +227,7 @@ export class Q2MissionPackBolts {
       : length(min) === 0 || length(max) === 0 ? target.origin : scale(add(min, max), 0.5);
     if (game.host.weaponBehavior?.controlsTrajectory(entity.actor.id) !== true) {
       entity.movedir = normalize(subtract(destination, game.body(entity).origin));
-      game.move(entity, { velocity: scale(entity.movedir, entity.speed), angles: vectorAngles(entity.movedir) });
+      game.move(entity, { velocity: scale(entity.movedir, entity.speed), angles: vectorToAnglesRule(entity.movedir, "native") });
       game.motion(entity, entity.motion);
     }
     return game.schedule(entity, 0.1, this.trackerFly);

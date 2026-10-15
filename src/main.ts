@@ -1,9 +1,28 @@
-import { dirname } from "node:path";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { version } from "../package.json";
 import { LlmSettingsService } from "./llm/settings.ts";
 import { applicationHelp, parseApplicationCommand } from "./app/bootstrap/options.ts";
+import { defaultUserContentRoot } from "./content/user-data.ts";
+import { BoundedQueue } from "./foundation/bounded-queue.ts";
+
+/** Recent console output retained so a fatal error leaves a diagnosable log on disk. */
+const recentOutput = new BoundedQueue<string>(256);
+export function writeCrashLog(error: unknown, argv: readonly string[], directory: string = dirname(defaultUserContentRoot())): void {
+  try {
+    mkdirSync(directory, { recursive: true });
+    let tail = "";
+    recentOutput.forEach(chunk => { tail += chunk; });
+    if (tail.length > 32768) tail = tail.slice(-32768);
+    appendFileSync(resolve(directory, "crash.log"),
+      `\n=== Quake Anthology ${version} crash ${new Date().toISOString()} argv=${JSON.stringify(argv)}\n`
+      + `${error instanceof Error ? error.stack ?? error.message : String(error)}\n--- recent output ---\n${tail}\n`);
+  } catch { /* The stderr report below is the fallback. */ }
+}
 
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<number> {
+  process.on("unhandledRejection", error => { writeCrashLog(error, argv); process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`); process.exit(1); });
+  process.on("uncaughtException", error => { writeCrashLog(error, argv); process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`); process.exit(1); });
   try {
     const command = parseApplicationCommand(argv);
     if (command.kind === "version") { process.stdout.write(`Quake Anthology ${version}\n`); return 0; }
@@ -27,7 +46,7 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
       baseDirectory: Bun.main.startsWith("/$bunfs/") || Bun.main.startsWith("B:/~BUN/") ? dirname(process.execPath) : process.cwd(),
     });
     try {
-      const host = { ...(llm === undefined ? {} : { llm }), print: (text: string): undefined => { process.stdout.write(text); return undefined; } };
+      const host = { ...(llm === undefined ? {} : { llm }), print: (text: string): undefined => { recentOutput.push(text); process.stdout.write(text); return undefined; } };
       const application = command.options.dedicated
         ? await (await import("./app/bootstrap/application.ts")).openApplication(command.options, host)
         : await (await import("./app/bootstrap/startup.ts")).StartupApplication.open(command.options, host, undefined, command.kind);
@@ -42,6 +61,7 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
       return 0;
     } finally { await llm?.close(); }
   } catch (error) {
+    writeCrashLog(error, argv);
     process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
     return 1;
   }

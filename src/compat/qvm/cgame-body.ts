@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { QvmModule, QvmModuleOptions } from "./module.ts";
 import { QvmOpcode, QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import { QvmMemory } from "./memory.ts";
@@ -30,7 +31,7 @@ interface BodyRange {
 export class QvmBodySubmissions {
   private readonly ranges: BodyRange[] = [];
   private readonly meshes: { readonly range: BodyRange; readonly pointer: number; readonly part: QvmBodyPart; readonly shader: number }[] = [];
-  private removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly calls = new Map<number, ReadonlyMap<number, QvmBodyPart>>();
   constructor(private readonly module: QvmModule, private readonly artifact: QvmModuleOptions["artifact"], private readonly declarations: readonly QvmBodySubmission[],
     private readonly hidden: (entity: number) => boolean, private readonly capture?: QvmBodyCapture) {
@@ -52,7 +53,7 @@ export class QvmBodySubmissions {
   get capturesPlayerMeshes(): boolean { return this.declarations.some(declaration => declaration.mesh !== undefined); }
   enable(active: boolean): void {
     if (this.ranges.length !== 0) throw new Error("Cannot change body submissions during source rendering");
-    if (!active) { for (const remove of this.removals.splice(0)) remove(); return; }
+    if (!active) { this.removals.runAll(); return; }
     if (this.removals.length !== 0) return;
     const artifact = this.artifact;
     if (artifact.kind !== "bytecode") throw new Error("Cgame source artifact changed");
@@ -95,7 +96,7 @@ export class QvmBodySubmissions {
           }));
         }
       }
-    } catch (error) { for (const remove of this.removals.splice(0)) remove(); throw error; }
+    } catch (error) { this.removals.runAll(); throw error; }
   }
   suppress(call: QvmHostCall): boolean {
     if (this.ranges.length === 0 || call.kind !== "engine" || call.role !== "cgame" || call.code !== QvmCgameImport.CG_R_ADDREFENTITYTOSCENE) return false;

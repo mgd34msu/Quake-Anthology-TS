@@ -1,9 +1,10 @@
 // Rerelease m_brain.cpp. ZeniMax Media, GPL-2.0.
 import type { Vec3 } from "../../../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../../core/math.ts";
 import { brainDefinition } from "../../../base/monsters/brain.ts";
 import { add, length, numberField, scale, subtract, zero } from "../../../foundation/fields.ts";
 import type { Q2Think } from "../../../foundation/host.ts";
-import { anglesVectors, corpse, enemyBody, health, projectFlash, setDuck, targetDistance, vectorAngles, visible } from "../../../foundation/monsters/ai.ts";
+import { corpse, enemyBody, health, projectFlash, setDuck, targetDistance, visible } from "../../../foundation/monsters/ai.ts";
 import { throwGib } from "../../../foundation/monsters/gibs.ts";
 import type { Q2Monsters } from "../../../foundation/monsters/index.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../../foundation/monsters/types.ts";
@@ -20,7 +21,7 @@ function screen(context: MonsterContext, active: boolean): undefined {
 function run(context: MonsterContext): undefined { screen(context, true); return context.setMove(context.state.standGround ? "brain_move_stand" : "brain_move_run"); }
 function tongueAllowed(start: Vec3, end: Vec3): boolean {
   const direction = subtract(start, end); if (length(direction) > 512) return false;
-  let pitch = vectorAngles(direction).x; if (pitch < -180) pitch += 360;
+  let pitch = vectorToAnglesRule(direction, "native-ai").x; if (pitch < -180) pitch += 360;
   return Math.abs(pitch) <= 30;
 }
 function hit(context: MonsterContext, right: boolean): undefined {
@@ -36,7 +37,7 @@ export function createRereleaseBrainDefinition(monsters: Q2Monsters): Q2MonsterD
       if (context === null) return freeMonsterBeam(beam, game);
       const position = positions[context.entity.frame - brainFrame.walk101];
       if (position === undefined) return freeMonsterBeam(beam, game);
-      const body = game.body(context.entity), axes = anglesVectors(body.angles), start = add(add(add(body.origin, scale(axes.right, position.x)), scale(axes.forward, position.y)), scale(axes.up, position.z));
+      const body = game.body(context.entity), axes = angleVectorsRule(body.angles, "native"), start = add(add(add(body.origin, scale(axes.right, position.x)), scale(axes.forward, position.y)), scale(axes.up, position.z));
       const direction = predictedDirection(context, start, 0, false, 0.1 + game.host.random() * 0.1);
       if (direction === null) return undefined;
       game.move(beam, { origin: start }); beam.movedir = direction;
@@ -108,7 +109,7 @@ export function createRereleaseBrainDefinition(monsters: Q2Monsters): Q2MonsterD
         game.sound(entity, "brain/brnatck3.wav", 1); game.host.emit({ kind: "monster-beam", effect: "parasite", actor: entity.actor.id, start, end });
         game.damage(entity.enemy, entity, entity.actor.id, 5, 0, subtract(start, end), end, zero, 36, 8);
         const body = game.body(entity), target = game.host.actors.resolveOwned(entity.enemy); game.move(entity, { origin: { ...body.origin, z: body.origin.z + 1 } });
-        if (target !== null) game.host.bodies.write(target, { ...enemy, velocity: scale(anglesVectors(body.angles).forward, -1200) });
+        if (target !== null) game.host.bodies.write(target, { ...enemy, velocity: scale(angleVectorsRule(body.angles, "native").forward, -1200) });
         return undefined;
       },
       brain_laserbeam(context) { fireMonsterBeam(context, 1, false, rightEye); return fireMonsterBeam(context, 1, true, leftEye); },

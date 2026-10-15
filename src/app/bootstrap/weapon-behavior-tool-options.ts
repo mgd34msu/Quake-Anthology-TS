@@ -1,5 +1,5 @@
-import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { resolveDefaultContentRoot } from "../../content/roots.ts";
 import type { ProjectileRole } from "../../contracts/weapon-behavior.ts";
 import { defaultUserContentRoot } from "../../content/user-data.ts";
 import { normalizeResourcePath } from "../../content/mounts/paths.ts";
@@ -53,7 +53,7 @@ export function parseWeaponBehaviorTool(argv: readonly string[]): WeaponBehavior
     flags.set(key, value);
   }
   const artifact = flags.get("--artifact"), content: ToolContent = { product,
-    corpusRoot: resolve(flags.get("--content") ?? resolve(homedir(), "Projects/qfiles")),
+    corpusRoot: flags.get("--content") === undefined ? resolveDefaultContentRoot() : resolve(flags.get("--content") ?? ""),
     userContentRoot: resolve(flags.get("--user-content") ?? defaultUserContentRoot()),
     ...(artifact === undefined ? {} : { artifact: normalizeResourcePath(artifact) }) };
   if (action === "declare-qvm" || action === "declare-native") {

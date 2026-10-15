@@ -1,4 +1,5 @@
 import { latchQ2WeaponButtons, earlyQ2WeaponTurn, beginQ2WeaponTurn } from "../../foundation/weapons/turn.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import { q2WeaponRecoil } from "../../foundation/weapons/presentation.ts";
 /* Source player phases are invoked by the common simulation. This is not a second G_RunFrame. */
 import type { DamageDecision, InventoryEntry } from "../../../../contracts/gameplay.ts";
@@ -14,7 +15,6 @@ import type { Q2ItemModule } from "../../foundation/items.ts";
 import { throwGib } from "../../foundation/monsters/gibs.ts";
 import { Q2WeaponState } from "../../foundation/weapons/index.ts";
 import type { Q2WeaponEvent, Q2Weapons } from "../../foundation/weapons/index.ts";
-import { angleVectors } from "../../foundation/weapons/vectors.ts";
 import { q2FallingDamage, q2WorldEffects } from "./environment.ts";
 import { q2Obituary } from "./obituary.ts";
 import { q2ClientAnimation, q2ClientEffects, q2BuildView, q2DamageFeedback } from "./view.ts";
@@ -456,7 +456,7 @@ export class Q2Players implements Q2SpawnModule {
     const powers = this.items.playerPowerups(entity.actor.id);
     game.host.combat.setTraits(entity.actor, { invulnerable: state.god || powers.invulnerabilityUntil > now });
     this.worldEffects(context);
-    const body = game.body(entity), vectors = angleVectors(context.movement.viewAngles);
+    const body = game.body(entity), vectors = angleVectorsRule(context.movement.viewAngles, "native");
     const side = dot(body.velocity, vectors.right), roll = (side < 0 ? -1 : 1) * Math.min(Math.abs(side) * this.rules.rollAngle / this.rules.rollSpeed, this.rules.rollAngle);
     if (context.movement.animateQ2) game.move(entity, { angles: { x: (context.movement.viewAngles.x > 180 ? context.movement.viewAngles.x - 360 : context.movement.viewAngles.x) / 3, y: context.movement.viewAngles.y, z: roll * 4 } }, false);
     const speed = Math.hypot(body.velocity.x, body.velocity.y);
@@ -567,7 +567,7 @@ export class Q2Players implements Q2SpawnModule {
     }
     const targetBody = game.body(target), movement = this.hooks.movement(target.actor.id);
     const eye = add(targetBody.origin, { x: 0, y: 0, z: target.viewHeight });
-    const forward = angleVectors({ ...movement.viewAngles, x: Math.min(movement.viewAngles.x, 56) }).forward;
+    const forward = angleVectorsRule({ ...movement.viewAngles, x: Math.min(movement.viewAngles.x, 56) }, "native").forward;
     const behind = add(eye, scale(forward, -30));
     const desired = { ...behind, z: Math.max(behind.z, targetBody.origin.z + 20) + (movement.grounded ? 0 : 16) };
     const trace = (start: Vec3, end: Vec3) => game.host.trace({ start, end, bounds: null, ignore: target.actor.id, mask: 3 });

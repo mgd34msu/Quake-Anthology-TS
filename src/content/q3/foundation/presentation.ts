@@ -6,7 +6,7 @@ import type { Axis, Vec3, Vec4 } from "../../../contracts/math.ts";
 import type { AnimationState } from "../../../contracts/movement.ts";
 import type { SceneEntity } from "../../../contracts/scene.ts";
 import type { SourceTime } from "../../../contracts/time.ts";
-import { qvmAnglesToAxis } from "../../../core/qvm-math.ts";
+import { qvmAnglesToAxis } from "../../../core/math.ts";
 import { PlayerAnimation, Powerup } from "../../../movement/q3/constants.ts";
 import type { ModelSourceOptions } from "../../../render/scene/models/types.ts";
 import { attachSceneEntity, modelAttachmentTag } from "../../../render/scene/models/transform.ts";

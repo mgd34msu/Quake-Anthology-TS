@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { QvmCombatMass, QvmCombatTeam, QvmDamageFlags } from "../../contracts/qvm-combat.ts";
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { ArmorState, AttackProvenance, DamageRequest, ProtectionChannel } from "../../contracts/gameplay.ts";
@@ -51,7 +52,7 @@ export class QvmCombatBindings {
   private readonly scopes: QvmDamageScopes;
   private readonly admitted = new Map<number, OwnedActor>();
   private readonly protection = { powered: new Map<OwnedActor, ArmorIntercept>(), regular: new Map<OwnedActor, ArmorIntercept>() };
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private removeArmor: (() => void) | null = null;
   private incoming: IncomingDamage | null = null;
   private closed = false;
@@ -131,7 +132,7 @@ export class QvmCombatBindings {
   close(): undefined {
     if (this.closed) return undefined;
     this.closed = true; this.protection.powered.clear(); this.protection.regular.clear(); this.admitted.clear(); this.removeUnusedArmorHook();
-    for (const remove of this.removals.splice(0)) remove();
+    this.removals.runAll();
     return undefined;
   }
   private live(actor: OwnedActor): boolean {

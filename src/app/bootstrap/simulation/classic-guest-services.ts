@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
 import type { ClassicPrimaryWorldProfile } from "../../../compat/q2/classic/world-profile.ts";
 import type { NativePickupProfile } from "../../../compat/q2/native-pickups.ts";
 import type { EquipmentMovement } from "../../../contracts/movement.ts";
@@ -57,7 +58,8 @@ export class ClassicGuestServices {
   readonly services: ClassicQ2EngineServices;
   readonly #configstrings = new Map<number, string>();
   readonly #resourceNames = { model: new ResourceNameIndex(256), sound: new ResourceNameIndex(256), image: new ResourceNameIndex(256) };
-  readonly #messages: ClassicGuestMessage[] = [];
+  readonly #messages = new EventRing<ClassicGuestMessage>(8192);
+  readonly #messageCursor: EventCursor = this.#messages.openCursor();
   readonly #buffer = new SizeBuf();
   #host: ClassicQ2GuestHost | null = null;
   #combat: ClassicCombatBindings | null = null;
@@ -116,7 +118,7 @@ export class ClassicGuestServices {
     this.validateMap(binding);
     const { engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance, pickups } = binding;
     this.#options = { ...this.#options, engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance, pickups };
-    this.#loading = true; this.#configstrings.clear(); this.#messages.length = 0; SZ_Clear(this.#buffer);
+    this.#loading = true; this.#configstrings.clear(); this.#messages.reset(); SZ_Clear(this.#buffer);
     for (const kind of resourceKinds) this.#resourceNames[kind].clear();
     this.storeConfigstring(33, binding.mapPath);
     for (let model = 1; model < binding.scene.geometry.models.length; model++) this.storeConfigstring(33 + model, `*${model}`);
@@ -170,7 +172,7 @@ export class ClassicGuestServices {
     try { return run(); } finally { this.#playerMovement = previous; }
   }
   configstrings(): ReadonlyMap<number, string> { return new Map(this.#configstrings); }
-  drainMessages(): readonly ClassicGuestMessage[] { return this.#messages.splice(0); }
+  drainMessages(): readonly ClassicGuestMessage[] { const taken = this.#messages.take(this.#messageCursor); this.#messages.retire(); return taken; }
   resource(kind: "model" | "sound" | "image", index: number): string { return this.#configstrings.get(resourceBases[kind] + index) ?? ""; }
   resourceIndex(kind: "model" | "sound" | "image", name: string): number {
     const index = this.#resourceNames[kind].find(name);
@@ -240,7 +242,7 @@ export class ClassicGuestServices {
     return { clusters: query.overflow || query.leaves.length >= 128 || clusters.length > 16 ? null : clusters, headnode: query.topnode ?? 0, areas: [first, second] };
   }
   private enqueue(audience: ClassicGuestAudience, reliable: boolean): void {
-    this.#messages.push({ audience, reliable, bytes: this.#buffer.data.slice(0, this.#buffer.cursize) }); SZ_Clear(this.#buffer);
+    this.#messages.admit({ audience, reliable, bytes: this.#buffer.data.slice(0, this.#buffer.cursize) }); SZ_Clear(this.#buffer);
   }
   private multicast(origin: Vec3, destination: number): void {
     if (!Number.isInteger(destination) || destination < 0 || destination > 5) throw new RangeError("API 3 invalid multicast destination");
@@ -282,7 +284,7 @@ export class ClassicGuestServices {
     if (destination !== "center") MSG_WriteByte(packet, level);
     MSG_WriteString(packet, text);
     const audience: ClassicGuestAudience = destination === "broadcast" ? { kind: "multicast", origin: zero, scope: "all" } : { kind: "unicast", slot: this.host.edicts.fromPointer(entity ?? this.host.edicts.at(0).address).slot };
-    this.#messages.push({ audience, reliable: true, bytes: packet.data.slice(0, packet.cursize) });
+    this.#messages.admit({ audience, reliable: true, bytes: packet.data.slice(0, packet.cursize) });
     if (destination === "broadcast") this.options.print(text);
     return undefined;
   }

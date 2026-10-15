@@ -1,3 +1,5 @@
+import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
+import { angleVectorsRule } from "../../../core/math.ts";
 import { q2RereleaseViewContinuous, Q2RereleaseViewHeight, q2RemoteViewHeight, q2RemoteViewPosition, q2RemoteBodyBounds, q2RemoteCommand } from "./q2-remote-view.ts";
 import { interpolateQ2DamageBlend } from "../q2-damage-blend.ts";
 import type { MvdProfile } from '../../../network/q2/mvd-profile.ts';
@@ -20,7 +22,6 @@ import type { SceneLightStyle, SceneQueries } from '../../../contracts/scene.ts'
 import { blockChecksum } from '../../../core/md4.ts';
 import { Q2_BASE_WEAPONS } from '../../../content/q2/foundation/weapons/index.ts';
 import { muzzleOffset } from '../../../content/q2/foundation/monsters/muzzle.ts';
-import { anglesVectors } from '../../../content/q2/foundation/monsters/ai.ts';
 import { readElement, toQ2Command, toQ2RereleaseCommand, toQ2Player, toQ2RereleasePlayer } from '../../../network/q2/index.ts';
 import type { Q2ServerRecord, Q2WireFrame, UsercmdT } from '../../../network/q2/index.ts';
 import type { EngineSession, SessionClient } from '../../../world/session/session.ts';
@@ -84,7 +85,8 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
     private readonly actors = new Map<number, ActorId>();
     private readonly configs = new Map<number, string>();
     private readonly resources = new Map<string, ResolvedResourceReference>();
-    private readonly events: SimulationPresentationEvent[] = [];
+    private readonly events = new EventRing<SimulationPresentationEvent>(8192);
+    private readonly eventCursor: EventCursor = this.events.openCursor();
     private current: Q2WireFrame | null = null;
     private previousFrame: Q2WireFrame | null = null;
     private receivedAt = 0;
@@ -217,7 +219,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
 
         this.inventory = [];
         this.layoutText = '';
-        this.events.length = 0;
+        this.events.reset();
         for (const [index, value] of state.configStrings)
             this.configs.set(index, value);
         this.currentPlayer = { client: this.client.id, actor: this.actor(state.data.clientnum + 1), sourceEntity: state.data.clientnum + 1 };
@@ -227,7 +229,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
     private playerInfo(index: number, value: string, seconds: number): void {
         if (index < this.layout.playerSkins || index >= this.layout.playerSkins + 256) return;
         const slot = index - this.layout.playerSkins, split = value.indexOf('\\');
-        this.events.push({ kind: 'q2-player', sequence: this.eventSequence++, content: this.world.content.recipe.map.entities.content, seconds, sourceEntity: slot + 1,
+        this.events.admit({ kind: 'q2-player', sequence: this.eventSequence++, content: this.world.content.recipe.map.entities.content, seconds, sourceEntity: slot + 1,
             event: { kind: 'userinfo', actor: this.actor(slot + 1), slot, name: split < 0 ? value : value.slice(0, split), skin: split < 0 ? '' : value.slice(split + 1) } });
     }
     private requirePlayer(actor: ActorId): {
@@ -354,16 +356,16 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         if (this.options.recordedProfile === undefined) this.receivePrediction(frame);
         for (const entity of frame.entities)
             if (entity.event !== 0)
-                this.events.push({ kind: 'q2', sequence: this.eventSequence++, content: this.world.content.recipe.map.entities.content, seconds: time / 1000, sourceEntity: entity.number, event: { kind: 'entity-event', actor: this.actor(entity.number), event: entity.event } });
+                this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: this.world.content.recipe.map.entities.content, seconds: time / 1000, sourceEntity: entity.number, event: { kind: 'entity-event', actor: this.actor(entity.number), event: entity.event } });
         for (const entity of previous?.entities ?? []) {
             if (entity.sound === 0 || frame.entities.some(current => current.number === entity.number && current.sound === entity.sound)) continue;
-            this.events.push({ kind: 'q2', sequence: this.eventSequence++, content: this.world.content.recipe.map.entities.content, seconds: time / 1000, sourceEntity: entity.number, event: { kind: 'sound', actor: this.actor(entity.number), origin: vector(entity.origin), path: this.configs.get(this.layout.sounds + entity.sound) ?? '', channel: 0, volume: 0, attenuation: 0, reliable: false, loop: 'stop' } });
+            this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: this.world.content.recipe.map.entities.content, seconds: time / 1000, sourceEntity: entity.number, event: { kind: 'sound', actor: this.actor(entity.number), origin: vector(entity.origin), path: this.configs.get(this.layout.sounds + entity.sound) ?? '', channel: 0, volume: 0, attenuation: 0, reliable: false, loop: 'stop' } });
         }
         for (const entity of frame.entities) {
             if (entity.sound === 0 || previous?.entities.some(old => old.number === entity.number && old.sound === entity.sound)) continue;
             const path = this.configs.get(this.layout.sounds + entity.sound);
             if (path === undefined) throw new Error(`Q2 loop sound ${entity.sound} has no configstring`);
-            this.events.push({ kind: 'q2', sequence: this.eventSequence++, content: this.world.content.recipe.map.entities.content, seconds: time / 1000, sourceEntity: entity.number, event: { kind: 'sound', actor: this.actor(entity.number), origin: vector(entity.origin), path, channel: 0, volume: 1, attenuation: 1, reliable: false, loop: 'start' } });
+            this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: this.world.content.recipe.map.entities.content, seconds: time / 1000, sourceEntity: entity.number, event: { kind: 'sound', actor: this.actor(entity.number), origin: vector(entity.origin), path, channel: 0, volume: 1, attenuation: 1, reliable: false, loop: 'start' } });
         }
     }
     private receivePrediction(frame: Q2WireFrame): void {
@@ -451,7 +453,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
                 this.configs.set(event.index, event.value);
                 if (this.currentPlayer !== null) this.playerInfo(event.index, event.value, seconds);
             }
-            else if (event.kind === 'print' && event.level === 3 && this.currentPlayer !== null) this.events.push({ kind: 'q2-player', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: this.currentPlayer?.sourceEntity ?? null, event: { kind: 'print', target: this.currentPlayer?.actor ?? null, level: 'chat', text: event.text } });
+            else if (event.kind === 'print' && event.level === 3 && this.currentPlayer !== null) this.events.admit({ kind: 'q2-player', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: this.currentPlayer?.sourceEntity ?? null, event: { kind: 'print', target: this.currentPlayer?.actor ?? null, level: 'chat', text: event.text } });
             else if (event.kind === 'inventory')
                 this.inventory = event.counts;
             else if (event.kind === 'layout')
@@ -459,10 +461,10 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
             else if (event.kind === 'temporary-entity') {
                 const decoded = q2EffectFromWire(event.value);
                 if (decoded !== null)
-                    this.events.push({ kind: 'q2', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: null, event: decoded });
+                    this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: null, event: decoded });
                 else {
                     const beam = q2BeamFromWire(event.value);
-                    if (beam !== null) this.events.push({ kind: 'q2-weapon', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: null, event: beam });
+                    if (beam !== null) this.events.admit({ kind: 'q2-weapon', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: null, event: beam });
                 }
             }
             else if (event.kind === 'sound') {
@@ -470,25 +472,25 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
                 if (path === undefined)
                     throw new Error(`Q2 sound ${event.sound.index} has no configstring`);
                 const entity = this.current?.entities.find(entity => entity.number === event.sound.entity);
-                this.events.push({ kind: 'q2', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: event.sound.entity, event: { kind: 'sound', actor: event.sound.entity === 0 ? null : this.actor(event.sound.entity), origin: event.sound.position ?? (entity === undefined ? zero : vector(entity.origin)), path, volume: event.sound.volume, attenuation: event.sound.attenuation, channel: event.sound.channel, reliable: false, loop: 'once' } });
+                this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: event.sound.entity, event: { kind: 'sound', actor: event.sound.entity === 0 ? null : this.actor(event.sound.entity), origin: event.sound.position ?? (entity === undefined ? zero : vector(entity.origin)), path, volume: event.sound.volume, attenuation: event.sound.attenuation, channel: event.sound.channel, reliable: false, loop: 'once' } });
             }
             else if (event.kind === 'muzzle-flash') {
                 if (event.monster) {
                     const entity = this.current?.entities.find(entity => entity.number === event.entity);
                     if (entity === undefined)
                         continue;
-                    const axes = anglesVectors(vector(entity.angles)), offset = muzzleOffset('classic', event.flash), origin = vector(entity.origin);
-                    this.events.push({ kind: 'q2', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: event.entity, event: { kind: 'monster-muzzleflash', actor: this.actor(event.entity), flash: event.flash,
+                    const axes = angleVectorsRule(vector(entity.angles), "native"), offset = muzzleOffset('classic', event.flash), origin = vector(entity.origin);
+                    this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: event.entity, event: { kind: 'monster-muzzleflash', actor: this.actor(event.entity), flash: event.flash,
                             origin: { x: origin.x + axes.forward.x * offset.x + axes.right.x * offset.y, y: origin.y + axes.forward.y * offset.x + axes.right.y * offset.y, z: origin.z + axes.forward.z * offset.x + axes.right.z * offset.y + offset.z }, direction: axes.forward } });
                 }
                 else
-                    this.events.push({ kind: 'q2-weapon', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: event.entity, event: { kind: 'muzzleflash', actor: this.actor(event.entity), flash: event.flash, silenced: event.silenced } });
+                    this.events.admit({ kind: 'q2-weapon', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: event.entity, event: { kind: 'muzzleflash', actor: this.actor(event.entity), flash: event.flash, silenced: event.silenced } });
             }
             else if (event.kind === 'center-print' && this.currentPlayer !== null)
-                this.events.push({ kind: 'q2', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: this.currentPlayer.sourceEntity, event: { kind: 'centerprint', actor: this.currentPlayer.actor, text: event.text } });
+                this.events.admit({ kind: 'q2', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: this.currentPlayer.sourceEntity, event: { kind: 'centerprint', actor: this.currentPlayer.actor, text: event.text } });
         }
     }
-    drainPresentationEvents(): readonly SimulationPresentationEvent[] { return this.events.splice(0); }
+    drainPresentationEvents(): readonly SimulationPresentationEvent[] { const taken = this.events.take(this.eventCursor); this.events.retire(); return taken; }
     disconnected(reason: string): void { this.options.cinematic?.stop(); this.options.print(`${reason}\n`); this.options.disconnected(reason); }
     print(text: string): void { this.options.print(text); }
 }

@@ -1,9 +1,10 @@
 // Rerelease m_mutant.cpp. ZeniMax Media, GPL-2.0.
 import { createMutantDefinition } from "../../../base/monsters/mutant.ts";
+import { angleVectorsRule } from "../../../../../core/math.ts";
 import { aliveEnemy } from "../../../base/monsters/common.ts";
 import { add, length, normalize, scale, subtract } from "../../../foundation/fields.ts";
 import type { Q2Touch } from "../../../foundation/host.ts";
-import { anglesVectors, checkBottom, corpse, enemyBody, health, targetDistance, walkMove } from "../../../foundation/monsters/ai.ts";
+import { checkBottom, corpse, enemyBody, health, targetDistance, walkMove } from "../../../foundation/monsters/ai.ts";
 import { throwGib } from "../../../foundation/monsters/gibs.ts";
 import type { Q2Monsters } from "../../../foundation/monsters/index.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../../foundation/monsters/types.ts";
@@ -17,7 +18,7 @@ function hit(context: MonsterContext, right: boolean): undefined {
   return game.sound(entity, connected ? right ? "mutant/mutatck3.wav" : "mutant/mutatck2.wav" : "mutant/mutatck1.wav", 1);
 }
 function jump(context: MonsterContext, up: boolean): undefined {
-  const body = context.game.body(context.entity), axes = anglesVectors(body.angles);
+  const body = context.game.body(context.entity), axes = angleVectorsRule(body.angles, "native");
   return context.game.move(context.entity, { velocity: add(body.velocity, add(scale(axes.forward, up ? 200 : 100), scale(axes.up, up ? 450 : 300))) });
 }
 export function createRereleaseMutantDefinition(monsters: Q2Monsters): Q2MonsterDefinition {
@@ -93,7 +94,7 @@ export function createRereleaseMutantDefinition(monsters: Q2Monsters): Q2Monster
         return undefined;
       },
       mutant_jump_takeoff(context) {
-        const { entity, game, state } = context, body = game.body(entity), forward = anglesVectors(body.angles).forward;
+        const { entity, game, state } = context, body = game.body(entity), forward = angleVectorsRule(body.angles, "native").forward;
         game.sound(entity, "mutant/mutsght1.wav", 2);
         game.move(entity, { origin: { ...body.origin, z: body.origin.z + 1 }, velocity: { ...scale(forward, 425), z: 160 }, ground: null });
         state.ducked = true; state.attackFinished = game.host.now() + 3; entity.style = 1; entity.touch = touch; return undefined;

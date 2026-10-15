@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import { createQ2Fog } from "../../content/q2/rerelease/types.ts";
 import { q2FogFromWire } from "./rerelease-presentation/fog.ts";
 import type { ContentId } from "../../contracts/content.ts";
@@ -15,7 +16,8 @@ export class NativeQ2ClientPresentation {
   private readonly reader: Q2ServerMessageReader;
   private readonly sourceLayout;
   private readonly configs: Map<number, string>;
-  private readonly pending: SimulationPresentationEvent[] = [];
+  private readonly pending = new EventRing<SimulationPresentationEvent>(8192);
+  private readonly pendingCursor: EventCursor = this.pending.openCursor();
   private sequence = 1;
   private counts: readonly number[] = [];
   private layoutText = "";
@@ -51,8 +53,8 @@ export class NativeQ2ClientPresentation {
       imageConfigOffset: layout.images, soundConfigOffset: layout.sounds, playerSkinConfigOffset: layout.playerSkins,
       configString: index => this.configs.get(index), setConfigString: (index, value) => { this.configs.set(index, value); },
       setInventory: counts => { this.counts = [...counts]; }, setLayout: value => { this.layoutText = value; },
-      emit: event => { this.pending.push(event); },
+      emit: event => { this.pending.admit(event); },
     };
   }
-  takeEvents(): readonly SimulationPresentationEvent[] { return this.pending.splice(0); }
+  takeEvents(): readonly SimulationPresentationEvent[] { const taken = this.pending.take(this.pendingCursor); this.pending.retire(); return taken; }
 }

@@ -1,5 +1,6 @@
 // Rerelease m_medic.cpp. ZeniMax Media, GPL-2.0.
 import { throwGib } from "../../../foundation/monsters/gibs.ts";
+import { angleVectorsRule, angleModScaled } from "../../../../../core/math.ts";
 import { numberField } from "../../../foundation/fields.ts";
 import { findRereleaseSpawnPoint, checkRereleaseGroundSpawnPoint } from "../spawn-placement.ts";
 import { monsterPowerArmor } from "../../../missionpacks/monsters/power-armor.ts";
@@ -7,7 +8,7 @@ import { pickRogueCoopTarget } from "../../../missionpacks/monsters/medic.ts";
 import type { Bounds, Vec3 } from "../../../../../contracts/math.ts";
 import type { Q2Entity, Q2Think } from "../../../foundation/host.ts";
 import { add, length, scale, subtract, zero } from "../../../foundation/fields.ts";
-import { anglesVectors, corpse, finishDodge, health, setDuck, monsterSolidMask, projectFlash, targetDistance, visible } from "../../../foundation/monsters/ai.ts";
+import { corpse, finishDodge, health, setDuck, monsterSolidMask, projectFlash, targetDistance, visible } from "../../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../../foundation/monsters/index.ts";
 import { defaultCheckAttack } from "../../../foundation/monsters/perception.ts";
 import { recordAt } from "../../../foundation/monsters/types.ts";
@@ -37,7 +38,6 @@ export function rereleaseMedicReinforcements(fields: Q2Entity["spawn"]["values"]
     return { classname, strength: Number.parseInt(strength, 10) };
   });
 }
-function anglemod(angle: number): number { return (Math.trunc(angle * 65536 / 360) & 65535) * 360 / 65536; }
 const spawnGrowLaserThink: Q2Think = (beam, game) => {
   const owner = game.entity(beam.owner);
   if (owner === null) return game.remove(beam);
@@ -214,7 +214,7 @@ export function createRereleaseMedicDefinitions(monsters: Q2Monsters, weapons: Q
     const currentTarget = game.entity(entity.enemy);
     if (currentTarget === null) return undefined;
     const body = game.body(currentTarget);
-    return game.host.emit({ kind: "monster-beam", effect: "medic", actor: entity.actor.id, start: add(start, scale(anglesVectors(game.body(entity).angles).forward, 8)), end: { ...body.origin, z: body.origin.z + (body.bounds.min.z + body.bounds.max.z) / 2 } });
+    return game.host.emit({ kind: "monster-beam", effect: "medic", actor: entity.actor.id, start: add(start, scale(angleVectorsRule(game.body(entity).angles, "native").forward, 8)), end: { ...body.origin, z: body.origin.z + (body.bounds.min.z + body.bounds.max.z) / 2 } });
   }
   function reinforcementList(context: MonsterContext): readonly Reinforcement[] {
     return rereleaseMedicReinforcements(context.entity.spawn.values).map(({ classname, strength }) => {
@@ -273,13 +273,13 @@ export function createRereleaseMedicDefinitions(monsters: Q2Monsters, weapons: Q
       let success = false;
       const check = (point: Vec3, reinforcement: Reinforcement): boolean => { success = checkRereleaseGroundSpawnPoint(context.game, point, reinforcement.bounds, 256, -1); return success; };
       eachSpawn(context, false, check, true);
-      if (!success) { eachSpawn(context, true, check, true); if (success) { context.state.manualSteering = true; context.state.idealYaw = anglemod(context.game.body(context.entity).angles.y) + 180; if (context.state.idealYaw > 360) context.state.idealYaw -= 360; } }
+      if (!success) { eachSpawn(context, true, check, true); if (success) { context.state.manualSteering = true; context.state.idealYaw = angleModScaled(context.game.body(context.entity).angles.y) + 180; if (context.state.idealYaw > 360) context.state.idealYaw -= 360; } }
       if (!success) context.state.nextFrame = medicFrame.attack53;
       return undefined;
     },
     medic_spawngrows(context) {
       if (context.state.manualSteering) {
-        if (Math.abs(anglemod(context.game.body(context.entity).angles.y) - context.state.idealYaw) > 0.1) { context.state.holdFrame = true; return undefined; }
+        if (Math.abs(angleModScaled(context.game.body(context.entity).angles.y) - context.state.idealYaw) > 0.1) { context.state.holdFrame = true; return undefined; }
         context.state.holdFrame = false; context.state.manualSteering = false;
       }
       let success = false;

@@ -1,8 +1,9 @@
 /* Shared original boss routines. id Software Quake II, GPL-2.0-or-later. */
 import { add, subtract, zero } from "../../foundation/fields.ts";
+import { vectorToAnglesRule } from "../../../../core/math.ts";
 import type { Q2Think } from "../../foundation/host.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
-import { enemyBody, enemyEye, health, targetDistance, vectorAngles } from "../../foundation/monsters/ai.ts";
+import { enemyBody, enemyEye, health, targetDistance } from "../../foundation/monsters/ai.ts";
 import { throwGib } from "../../foundation/monsters/gibs.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
 
@@ -17,7 +18,7 @@ export function bossCheckAttack(context: MonsterContext, hover = false, allowNon
     if ((trace.hit.kind !== "actor" || trace.hit.actor !== entity.enemy) && (!allowNonSolid || game.entity(entity.enemy)?.solid !== "none" || trace.fraction < 1)) return false;
   }
   const distance = targetDistance(context);
-  state.idealYaw = vectorAngles(subtract(enemy.origin, body.origin)).y;
+  state.idealYaw = vectorToAnglesRule(subtract(enemy.origin, body.origin), "native-ai").y;
   if (distance < 80) { state.attackState = state.hasMelee ? "melee" : "missile"; return true; }
   if (!state.hasRangedAttack || game.host.now() < state.attackFinished || distance >= 1000) return false;
   const chance = state.standGround ? 0.4 : hover ? 0.8 : distance < 500 ? 0.4 : 0.2;

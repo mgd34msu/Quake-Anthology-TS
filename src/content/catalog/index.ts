@@ -2,10 +2,11 @@ import { managedAddonHidden, managedAddonTitle } from "./addons.ts";
 import { open, readdir, stat } from "node:fs/promises";
 import { basename, dirname, extname, relative, resolve } from "node:path";
 import { createContentId, createMountId, createMountIdentity } from "../../contracts/content.ts";
-import type { ArchiveFormat, ContentDigest, ContentId, ContentMount, MountPlanId, ResolvedMountPlan } from "../../contracts/content.ts";
+import type { ArchiveFormat, ContentDigest, ContentId, ContentMount, GameFamily, MountPlanId, ResolvedMountPlan } from "../../contracts/content.ts";
 import { openArchive } from "../archive/index.ts";
 import { type MountPlanOpener, digestFile, openMountPlan } from "../mounts/index.ts";
 import { findContentPath, normalizeResourcePath } from "../mounts/paths.ts";
+import { gameFamilyForDirectory, gameRelativePath, resolveGameRoots, type GameRoots } from "../roots.ts";
 import { userProductDirectory } from "../user-data.ts";
 import { expectedProducts } from "./products.ts";
 import type { ProductExpectation } from "./products.ts";
@@ -160,11 +161,23 @@ function productDirectories(product: CatalogProduct): readonly { readonly root: 
   return [user, { root: product.looseRoot, archives: product.archives.filter(archive => !userArchives.has(archive)) }];
 }
 
+/** Resolve a canonical content path against its family's anchored game root, falling back to the canonical corpus path. */
+async function anchoredPath(gameRoots: GameRoots, corpusRoot: string, family: GameFamily, canonicalPath: string): Promise<string | null> {
+  const gameRoot = gameRoots.get(family) ?? null;
+  if (gameRoot !== null) {
+    const relative = gameRelativePath(canonicalPath, family);
+    if (relative === "") return gameRoot;
+    const found = await findContentPath(gameRoot, relative);
+    if (found !== null) return found;
+  }
+  return findContentPath(corpusRoot, canonicalPath);
+}
+
 /** Q3 FS_GetModList reads loose description bytes, home before base, bounded to 48. */
-async function modDescription(product: ProductExpectation, roots: readonly string[]): Promise<ProductExpectation> {
+async function modDescription(product: ProductExpectation, roots: readonly { readonly root: string; readonly gameRoots: GameRoots }[]): Promise<ProductExpectation> {
   if (product.family !== "q3") return product;
-  for (const root of roots) {
-    const path = await findContentPath(root, `${product.contentDirectory}/description.txt`);
+  for (const { root, gameRoots } of roots) {
+    const path = await anchoredPath(gameRoots, root, product.family, `${product.contentDirectory}/description.txt`);
     if (path === null) continue;
     const file = await open(path, "r");
     try {
@@ -178,12 +191,12 @@ async function modDescription(product: ProductExpectation, roots: readonly strin
   return product;
 }
 
-async function discoverMods(root: string, products: readonly ProductExpectation[], inspect: (path: string, format: ArchiveFormat) => Promise<CatalogArchive>): Promise<readonly ProductExpectation[]> {
+async function discoverMods(root: string, products: readonly ProductExpectation[], inspect: (path: string, format: ArchiveFormat) => Promise<CatalogArchive>, gameRoots: GameRoots): Promise<readonly ProductExpectation[]> {
   const roots = new Map<string, ProductExpectation>();
   for (const product of products) if (product.baseProduct === null && !roots.has(dirname(product.contentDirectory))) roots.set(dirname(product.contentDirectory), product);
   const found: ProductExpectation[] = [];
   for (const [directory, base] of roots) {
-    const installed = await findContentPath(root, directory);
+    const installed = await anchoredPath(gameRoots, root, base.family, directory);
     if (installed === null) continue;
     for (const entry of await readdir(installed, { withFileTypes: true })) {
       const contentDirectory = `${directory}/${entry.name}`;
@@ -400,10 +413,13 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
     archives.set(path, pending);
     return pending;
   };
-  const corpusMods = options.discoverMods === false ? [] : await discoverMods(corpusRoot, expected, inspect);
-  const userMods = options.discoverMods === false || userContentRoot === null ? [] : await discoverMods(userContentRoot, [...expected, ...corpusMods], inspect);
+  const corpusGameRoots = resolveGameRoots(corpusRoot);
+  const userGameRoots = userContentRoot === null ? corpusGameRoots : resolveGameRoots(userContentRoot);
+  const corpusMods = options.discoverMods === false ? [] : await discoverMods(corpusRoot, expected, inspect, corpusGameRoots);
+  const userMods = options.discoverMods === false || userContentRoot === null ? [] : await discoverMods(userContentRoot, [...expected, ...corpusMods], inspect, userGameRoots);
   const userModIds = new Set([...userMods.map(product => product.id), ...remoteOverlays]);
-  const descriptionRoots = userContentRoot === null ? [corpusRoot] : [userContentRoot, corpusRoot];
+  const descriptionRoots = userContentRoot === null ? [{ root: corpusRoot, gameRoots: corpusGameRoots }]
+    : [{ root: userContentRoot, gameRoots: userGameRoots }, { root: corpusRoot, gameRoots: corpusGameRoots }];
   const expectations = await Promise.all([...expected, ...corpusMods, ...userMods].map(product =>
     stock.some(known => known.id === product.id) ? product : modDescription(product, descriptionRoots)));
   const products: CatalogProduct[] = [];
@@ -411,7 +427,7 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
   for (const expectation of expectations) {
     normalizeResourcePath(expectation.contentDirectory);
     const id = createContentId({ family: expectation.family, edition: expectation.edition, package: expectation.campaign, revision: "installed" });
-    const rootPath = await findContentPath(corpusRoot, expectation.contentDirectory);
+    const rootPath = await anchoredPath(corpusGameRoots, corpusRoot, expectation.family, expectation.contentDirectory);
     const looseRoot = rootPath !== null && (await stat(rootPath)).isDirectory() ? rootPath : null;
     const found: CatalogArchive[] = [];
     const diagnostics: string[] = [];
@@ -432,7 +448,7 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
       }
     }
     const userRoot = userContentRoot === null || userContentRoot === corpusRoot ? null
-      : await findContentPath(userContentRoot, expectation.contentDirectory) ?? userProductDirectory(userContentRoot, expectation.contentDirectory);
+      : await anchoredPath(userGameRoots, userContentRoot, expectation.family, expectation.contentDirectory) ?? userProductDirectory(userContentRoot, expectation.contentDirectory);
     const userArchives: CatalogArchive[] = [];
     const userDiagnostics: string[] = [];
     if (userRoot !== null) {
@@ -453,7 +469,8 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
     const allMaps: ContentMap[] = [...userMaps, ...userRoot === null ? [] : await looseMaps(userRoot), ...corpusMaps];
     const requirements: string[] = [...diagnostics, ...userModIds.has(expectation.id) ? userDiagnostics : []];
     for (const archive of remoteOverlays.has(expectation.id) ? [] : expectation.requiredContentArchives) {
-      const path = await findContentPath(corpusRoot, archive) ?? (userModIds.has(expectation.id) && userContentRoot !== null ? await findContentPath(userContentRoot, archive) : null);
+      const archiveFamily = gameFamilyForDirectory(archive.split("/")[0] ?? "") ?? expectation.family;
+      const path = await anchoredPath(corpusGameRoots, corpusRoot, archiveFamily, archive) ?? (userModIds.has(expectation.id) && userContentRoot !== null ? await anchoredPath(userGameRoots, userContentRoot, archiveFamily, archive) : null);
       if (path === null || !(await stat(path)).isFile()) requirements.push(archive);
     }
     if (looseRoot === null && !userModIds.has(expectation.id)) requirements.push(expectation.contentDirectory);

@@ -1,9 +1,9 @@
 /* LM_CTF g_runes.c and Vampire g_combat.c additions. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import type { Q2Entity, Q2GameServices, Q2Think, Q2Touch } from "../../foundation/host.ts";
 import { add, length, subtract, zero } from "../../foundation/fields.ts";
-import { angleVectors } from "../../foundation/weapons/vectors.ts";
 import { LMCTF_RUNES, lmctfPlayer, lmctfToss } from "./types.ts";
 import type { LmctfContext, LmctfRune, LmctfRuneDefinition } from "./types.ts";
 
@@ -105,7 +105,7 @@ export class LmctfRunes {
     this.visible(rune, game); rune.owner = actor; rune.touch = this.dropTouch;
     // The source computes random velocity before ctf_TossEnt overwrites it.
     game.host.random(); game.host.random(); game.host.random();
-    lmctfToss(rune, player, game, angleVectors(game.host.playerViewState(actor)?.viewAngles ?? game.body(player).angles).forward);
+    lmctfToss(rune, player, game, angleVectorsRule(game.host.playerViewState(actor)?.viewAngles ?? game.body(player).angles, "native").forward);
     rune.timestamp = game.host.now(); game.schedule(rune, 1, this.droppedThink); game.sound(player, "misc/power2.wav", 3); return true;
   }
   damage(actor: ActorId | null, amount: number, game: Q2GameServices): number {

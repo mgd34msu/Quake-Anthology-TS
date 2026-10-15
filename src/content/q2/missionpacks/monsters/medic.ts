@@ -1,9 +1,10 @@
 /* Quake II rogue/m_medic.c. ZeniMax Media, GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule, angleModScaled } from "../../../../core/math.ts";
 import type { Bounds, Vec3 } from "../../../../contracts/math.ts";
 import type { Q2Entity } from "../../foundation/host.ts";
 import { add, length, scale, subtract, zero } from "../../foundation/fields.ts";
-import { anglesVectors, finishDodge, health, monsterSolidMask, projectFlash, targetDistance, visible } from "../../foundation/monsters/ai.ts";
+import { finishDodge, health, monsterSolidMask, projectFlash, targetDistance, visible } from "../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import { defaultCheckAttack } from "../../foundation/monsters/perception.ts";
 import { recordAt } from "../../foundation/monsters/types.ts";
@@ -25,7 +26,6 @@ const cableOffsets: readonly Vec3[] = [
 const reinforcementPositions: readonly Vec3[] = [{ x: 80, y: 0, z: 0 }, { x: 40, y: 60, z: 0 }, { x: 40, y: -60, z: 0 }, { x: 0, y: 80, z: 0 }, { x: 0, y: -80, z: 0 }];
 const reinforcements = ["monster_soldier_light", "monster_soldier", "monster_soldier_ss", "monster_infantry", "monster_gunner", "monster_medic", "monster_gladiator"];
 function reinforcementBounds(index: number): Bounds { return index === 6 ? { min: { x: -32, y: -32, z: -24 }, max: { x: 32, y: 32, z: 64 } } : humanoidBounds; }
-function anglemod(angle: number): number { return (Math.trunc(angle * 65536 / 360) & 65535) * 360 / 65536; }
 export function pickRogueCoopTarget(context: MonsterContext): ActorId | null {
   const { game } = context;
   if (game.options.mode !== "coop") return null;
@@ -156,7 +156,7 @@ export function createRogueMedicDefinitions(monsters: Q2Monsters, weapons: Q2Mis
     const currentTarget = game.entity(entity.enemy);
     if (currentTarget === null) return undefined;
     const body = game.body(currentTarget);
-    return game.host.emit({ kind: "monster-beam", effect: "medic", actor: entity.actor.id, start: add(start, scale(anglesVectors(game.body(entity).angles).forward, 8)), end: { ...body.origin, z: body.origin.z + (body.bounds.min.z + body.bounds.max.z) / 2 } });
+    return game.host.emit({ kind: "monster-beam", effect: "medic", actor: entity.actor.id, start: add(start, scale(angleVectorsRule(game.body(entity).angles, "native").forward, 8)), end: { ...body.origin, z: body.origin.z + (body.bounds.min.z + body.bounds.max.z) / 2 } });
   }
   function eachSpawn(context: MonsterContext, behind: boolean, visit: (point: Vec3, bounds: Bounds, index: number) => boolean): undefined {
     const strength = source.get(context.entity).summonStrength, count = strength === 0 ? 1 : strength - 1 + strength % 2;
@@ -195,13 +195,13 @@ export function createRogueMedicDefinitions(monsters: Q2Monsters, weapons: Q2Mis
       let success = false;
       const check = (point: Vec3, bounds: Bounds): boolean => { success = checkRogueGroundSpawnPoint(context.game, point, bounds, 256, -1); return success; };
       eachSpawn(context, false, check);
-      if (!success) { eachSpawn(context, true, check); if (success) { context.state.manualSteering = true; context.state.idealYaw = anglemod(context.game.body(context.entity).angles.y) + 180; if (context.state.idealYaw > 360) context.state.idealYaw -= 360; } }
+      if (!success) { eachSpawn(context, true, check); if (success) { context.state.manualSteering = true; context.state.idealYaw = angleModScaled(context.game.body(context.entity).angles.y) + 180; if (context.state.idealYaw > 360) context.state.idealYaw -= 360; } }
       if (!success) context.state.nextFrame = medicFrame.attack53;
       return undefined;
     },
     medic_spawngrows(context) {
       if (context.state.manualSteering) {
-        if (Math.abs(anglemod(context.game.body(context.entity).angles.y) - context.state.idealYaw) > 0.1) { context.state.holdFrame = true; return undefined; }
+        if (Math.abs(angleModScaled(context.game.body(context.entity).angles.y) - context.state.idealYaw) > 0.1) { context.state.holdFrame = true; return undefined; }
         context.state.holdFrame = false; context.state.manualSteering = false;
       }
       let success = false;

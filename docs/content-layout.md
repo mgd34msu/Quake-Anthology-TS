@@ -1,7 +1,13 @@
 # Organize game data, mods, maps, and music
 
-Point `--content-root` at one directory containing your game installations.
-The default is `~/Projects/qfiles`. Install only products you own; missing products
+Point `--content-root` at one directory containing your game installations, or
+omit it: the executable searches its own folder, then the folder above it, then
+the default Steam library locations (`--steam` searches only Steam), stopping at
+the first folder holding a game. Each game is located by its base directory —
+`id1`, `baseq2`, or `baseq3` — so an unmodified Steam layout (`Quake/Id1`,
+`Quake 2/baseq2`, `Quake 3 Arena/baseq3`) works, and expansions, rerelease
+trees, and mods resolve as siblings of the base directory. The curated layout
+below also works. Install only products you own; missing products
 remain unavailable. Preserve the original archive names and loose companion files.
 
 ## Installed content

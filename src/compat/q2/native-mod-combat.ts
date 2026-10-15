@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { NativeModInvocationResult } from "./native-mod-invocations.ts";
 import type { GuestAddress, GuestCallResult, GuestCallValue, GuestValueLayout } from "../../contracts/execution.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
@@ -227,7 +228,7 @@ export class NativeModCombat {
       const target = this.calls.address(request.target), inflictor = this.pointer(request.attack.inflictor ?? world), attacker = this.pointer(request.attack.attacker ?? world);
       return this.calls.transfer(() => {
         const slot = this.slot(target), memory = this.host.memory;
-        const frame: DamageFrame = { request, observer, result: null, applied: 0 }, removals: (() => void)[] = [];
+        const frame: DamageFrame = { request, observer, result: null, applied: 0 }, removals = new CleanupStack();
         let health = this.calls.scalar(target, definition.health), velocity = readClassicVector(memory, this.at(slot, this.definition.fields.velocity));
         const current = () => this.frames.at(-1) === frame && frame.result === null && this.host.active(slot) && this.services.actors.isLive(request.target);
         const vectors = memory.allocate({ byteLength: 36, alignment: 4n, label: "Native mod damage vectors" }); this.frames.push(frame);
@@ -248,7 +249,7 @@ export class NativeModCombat {
             pointer(vectors), pointer(memory.offset(vectors, 12n)), pointer(memory.offset(vectors, 24n)), int(request.amount), int(request.knockback), int(cause.damageFlags),
             native.edition === "classic" ? int(native.value) : { kind: "aggregate", layout: rereleaseModLayout, bytes: new Uint8Array([native.id, Number(native.friendlyFire), Number(native.noPointLoss)]) }]));
           return frame.result ?? { reaction: "none", appliedDamage: frame.applied };
-        } finally { this.frames.pop(); for (const remove of removals) remove(); memory.unmap(vectors, 36); }
+        } finally { this.frames.pop(); removals.runAll(); memory.unmap(vectors, 36); }
       });
     });
   }

@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from '../../foundation/event-ring.ts';
 import type { RemoteSeatSource } from './remote-seat-source.ts';
 
 interface Publication {
@@ -11,7 +12,8 @@ export class RemoteSeatPump {
   private pendingPoll: Promise<void> | null = null;
   private pendingDrain: Promise<void> | null = null;
   private failure: { readonly error: unknown } | null = null;
-  private readonly publications: Publication[] = [];
+  private readonly publications = new EventRing<Publication>(4096);
+  private readonly publicationCursor: EventCursor = this.publications.openCursor();
   readonly retirementError = new Error('Remote seat publication was retired');
   private closing: Promise<void> | null = null;
   private closed = false;
@@ -32,7 +34,7 @@ export class RemoteSeatPump {
   enqueue<T>(operation: () => T | Promise<T>, ready: () => boolean = () => true): Promise<T> {
     if (this.closed) return Promise.reject(this.retirementError);
     return new Promise<T>((resolve, reject) => {
-      this.publications.push({ ready, reject, execute: async () => {
+      this.publications.admit({ ready, reject, execute: async () => {
         try { resolve(await operation()); }
         catch (error) { reject(error); throw error; }
       } });
@@ -45,9 +47,10 @@ export class RemoteSeatPump {
     this.pendingDrain = Promise.resolve().then(async () => {
       try {
         while (!this.closed) {
-          const next = this.publications[0];
-          if (next === undefined || !next.ready()) return;
-          this.publications.shift();
+          const next = this.publications.peek(this.publicationCursor);
+          if (next === null || !next.ready()) return;
+          this.publications.read(this.publicationCursor);
+          this.publications.retire();
           await next.execute();
         }
       } finally { this.pendingDrain = null; }
@@ -58,7 +61,7 @@ export class RemoteSeatPump {
   close(): Promise<void> {
     if (this.closing !== null) return this.closing;
     this.closed = true;
-    for (const publication of this.publications.splice(0)) publication.reject(this.retirementError);
+    for (const publication of this.publications.drainAll()) publication.reject(this.retirementError);
     this.closing = (async () => {
       try {
         try { await this.pendingDrain; } catch (error) { if (error !== this.retirementError) this.failure ??= { error }; }

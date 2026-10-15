@@ -1,12 +1,13 @@
 /* Q2 g_ai target selection, attacks and player-trail pursuit. GPL-2.0-or-later. */
 import type { SavedActorId } from "../../../../contracts/session.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import { saveQ2Actor } from "../checkpoint.ts";
 import type { Q2MonsterPerceptionCheckpoint } from "./checkpoint.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q2GameServices } from "../host.ts";
 import { add, length, scale, subtract, zero } from "../fields.ts";
-import { anglesVectors, changeYaw, chaseDirection, enemyBody, enemyEye, FL_NOTARGET, health, inFront, monsterSolidMask, MASK_OPAQUE, attackTraceMask, stepDirection, targetDistance, vectorAngles, visible } from "./ai.ts";
+import { changeYaw, chaseDirection, enemyBody, enemyEye, FL_NOTARGET, health, inFront, monsterSolidMask, MASK_OPAQUE, attackTraceMask, stepDirection, targetDistance, visible } from "./ai.ts";
 import type { MonsterContext, Q2MonsterSourceCombatHooks, Q2MonsterHintHooks } from "./types.ts";
 
 interface Sighting { readonly actor: ActorId; readonly time: number; }
@@ -156,7 +157,7 @@ export class MonsterPerception {
       const playerEye = { ...body.origin, z: body.origin.z + observed.viewHeight };
       if (previous === undefined || game.host.trace({ start: playerEye, end: previous.origin, bounds: null, ignore: player, mask: MASK_OPAQUE }).fraction !== 1) {
         const oldOrigin = this.playerOrigins.get(player) ?? body.origin;
-        trail.push({ origin: oldOrigin, time: game.host.now(), yaw: previous === undefined ? body.angles.y : vectorAngles(subtract(oldOrigin, previous.origin)).y });
+        trail.push({ origin: oldOrigin, time: game.host.now(), yaw: previous === undefined ? body.angles.y : vectorToAnglesRule(subtract(oldOrigin, previous.origin), "native-ai").y });
         if (trail.length > 8) trail.shift();
         this.trails.set(player, trail);
       }
@@ -243,7 +244,7 @@ export class MonsterPerception {
       const origin = game.body(entity).origin;
       if ((entity.spawnflags & 1) !== 0 ? !visible(context, candidate) : !game.host.inPhs(origin, noise.origin)) return false;
       if (length(subtract(noise.origin, origin)) > 1000 || !game.host.areasConnected(origin, noise.origin)) return false;
-      state.idealYaw = vectorAngles(subtract(noise.origin, origin)).y;
+      state.idealYaw = vectorToAnglesRule(subtract(noise.origin, origin), "native-ai").y;
       if (!state.manualSteering) changeYaw(context);
       if (state.temporaryStandGround) { state.standGround = false; state.temporaryStandGround = false; }
       state.soundTarget = noise;
@@ -272,7 +273,7 @@ export class MonsterPerception {
     if (enemy === null) return undefined;
     entity.goal = entity.enemy;
     if (state.standGround) context.stand(); else context.run();
-    state.idealYaw = vectorAngles(subtract(enemy.origin, game.body(entity).origin)).y;
+    state.idealYaw = vectorToAnglesRule(subtract(enemy.origin, game.body(entity).origin), "native-ai").y;
     if (game.options.edition === "classic" && !state.standGround) state.attackFinished = game.host.now() + 1;
     return undefined;
   }
@@ -386,7 +387,7 @@ export class MonsterPerception {
       const selected = check(context);
       if (!selected) return false;
       if (state.attackState === "missile" || state.attackState === "melee" || state.attackState === "blind") {
-        state.idealYaw = vectorAngles(subtract(enemy.origin, game.body(entity).origin)).y;
+        state.idealYaw = vectorToAnglesRule(subtract(enemy.origin, game.body(entity).origin), "native-ai").y;
         if (!state.manualSteering) changeYaw(context);
         if (facingIdeal(context)) {
           if (state.attackState === "melee") { context.melee(); state.attackState = "straight"; }
@@ -399,7 +400,7 @@ export class MonsterPerception {
     let selected = false;
     if (rerelease && state.checkAttackTime <= game.host.now()) { state.checkAttackTime = game.host.now() + 0.1; selected = check(context); }
     if (state.attackState === "missile" || state.attackState === "melee" || rerelease && state.attackState === "blind") {
-      state.idealYaw = vectorAngles(subtract(enemy.origin, game.body(entity).origin)).y;
+      state.idealYaw = vectorToAnglesRule(subtract(enemy.origin, game.body(entity).origin), "native-ai").y;
       if (!state.manualSteering) changeYaw(context);
       if (facingIdeal(context)) {
         if (state.attackState === "melee") context.melee();
@@ -461,8 +462,8 @@ export class MonsterPerception {
       const center = game.host.trace({ start: body.origin, end: state.lastSighting, bounds: body.bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) });
       if (center.fraction < 1) {
         const d2 = d1 * (center.fraction + 1) * 0.5;
-        state.idealYaw = vectorAngles(subtract(state.lastSighting, body.origin)).y;
-        const basis = anglesVectors({ ...body.angles, y: state.idealYaw });
+        state.idealYaw = vectorToAnglesRule(subtract(state.lastSighting, body.origin), "native-ai").y;
+        const basis = angleVectorsRule({ ...body.angles, y: state.idealYaw }, "native");
         const make = (forward: number, right: number): Vec3 => add(body.origin, add(scale(basis.forward, forward), scale(basis.right, right)));
         const left = game.host.trace({ start: body.origin, end: make(d2, -16), bounds: body.bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) });
         const right = game.host.trace({ start: body.origin, end: make(d2, 16), bounds: body.bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) });
@@ -471,7 +472,7 @@ export class MonsterPerception {
         if (side !== 0) {
           const fraction = side < 0 ? left.fraction : right.fraction;
           state.savedGoal = state.lastSighting; state.pursueTemporary = true; state.lastSighting = make(fraction < 1 ? d2 * fraction * 0.5 : d2, side);
-          state.idealYaw = vectorAngles(subtract(state.lastSighting, body.origin)).y;
+          state.idealYaw = vectorToAnglesRule(subtract(state.lastSighting, body.origin), "native-ai").y;
         }
         game.move(entity, { angles: { ...body.angles, y: state.idealYaw } }, false);
       }

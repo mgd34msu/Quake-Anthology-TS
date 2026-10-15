@@ -43,7 +43,7 @@ import { useQ3Holdable } from "../../../../content/q3/team-arena/client-events.t
 import { captureQ3Graph, prepareQ3Graph, restoreQ3Graph } from "../../../../content/q3/base/game/save-state.ts";
 import { readQ3Graph } from "../../../../content/q3/base/game/save-reader.ts";
 import { q3GrappleVelocity } from "../../../../content/q3/base/game/grapple.ts";
-import { qvmAngleVectors } from "../../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../../core/math.ts";
 import { MoveFlags } from "../../../../movement/q3/constants.ts";
 import { savedActorId, readSavedActor } from "../../../../persistence/save-image.ts";
 import { SaveReader } from "../../../../persistence/value.ts";

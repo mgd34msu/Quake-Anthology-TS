@@ -1,9 +1,10 @@
 /* Q2 g_misc.c / rerelease g_misc.cpp organic and metallic gibs. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { Q2Entity, Q2GameServices, Q2Think, Q2Touch, Q2Die } from "../host.ts";
 import type { Q2CallbackDefinitions } from "../callbacks.ts";
 import { add, scale, zero } from "../fields.ts";
-import { anglesVectors, vectorAngles } from "./ai.ts";
+
 
 export interface Q2GibOptions {
   readonly head?: boolean;
@@ -36,7 +37,7 @@ const organicTouch: Q2Touch = (entity, game, contact) => {
   entity.touch = null;
   if (contact.plane !== null) {
     game.sound(entity, "misc/fhit3.wav", 2);
-    game.move(entity, { angles: vectorAngles(anglesVectors(vectorAngles(contact.plane.normal)).right) });
+    game.move(entity, { angles: vectorToAnglesRule(angleVectorsRule(vectorToAnglesRule(contact.plane.normal, "native-ai"), "native").right, "native-ai") });
     if (entity.model === "models/objects/gibs/sm_meat/tris.md2") { entity.frame++; game.show(entity); game.schedule(entity, 0.1, animateMeat); }
   }
   return undefined;

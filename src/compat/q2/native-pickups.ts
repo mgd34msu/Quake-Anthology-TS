@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { SourcePickupQuantity } from "../../contracts/pickups.ts";
 import type { ContentDigest } from "../../contracts/content.ts";
 import type { GuestAddress, GuestCallResult, GuestCallValue, RawEntityView } from "../../contracts/execution.ts";
@@ -74,7 +75,7 @@ function argument(values: readonly GuestCallValue[], index: number): GuestAddres
 
 /** The complete original caller owns eligibility, feedback, targets and item lifetime. */
 export class NativePrimaryPickups {
-  private readonly remove: (() => void)[] = [];
+  private readonly remove = new CleanupStack();
   private readonly frames: (PickupFrame | null)[] = [];
   private closed = false;
   private supplyOwner: NativePickupSupply | null = null;
@@ -90,7 +91,7 @@ export class NativePrimaryPickups {
       this.remove.push(host.runner.options.callbacks.observeEntry(this.at(profile.targetsReturn), () => {
         const frame = this.frames.at(-1); if (frame !== undefined && frame !== null && frame.selection.kind !== "original") this.requireCurrent(frame);
       }));
-    } catch (error) { for (const remove of this.remove.splice(0).reverse()) remove(); throw error; }
+    } catch (error) { this.remove.runReverse(); throw error; }
   }
   assertIdle(): void { if (this.frames.length !== 0) throw new Error("Native pickup caller is still active"); }
   bindSupply(owner: NativePickupSupply): () => undefined {
@@ -109,7 +110,7 @@ export class NativePrimaryPickups {
   close(): undefined {
     this.closed = true;
     for (const frame of this.frames) if (frame !== null) frame.invalid = true;
-    for (const remove of this.remove.splice(0).reverse()) remove();
+    this.remove.runReverse();
     return undefined;
   }
   private at(offset: number): GuestAddress { return this.host.memory.offset(this.image, BigInt(offset)); }
@@ -197,7 +198,7 @@ export class NativePrimaryPickups {
     if (description === null) { this.frames.push(null); try { return original(values); } finally { this.frames.pop(); } }
     const result = this.host.admission().runSource(description.offer, selection => {
       if (selection.kind === "stale") return voidResult;
-      const frame: PickupFrame = { ...description, selection }, remove: (() => void)[] = [];
+      const frame: PickupFrame = { ...description, selection }, remove = new CleanupStack();
       const { memory, runner } = this.host, processor = captureAbiProcessorState(runner.options.cpu.state);
       this.frames.push(frame);
       try {
@@ -214,7 +215,7 @@ export class NativePrimaryPickups {
         if (error !== frame.cancelled) throw error;
         restoreAbiProcessorState(runner.options.cpu.state, processor);
         return voidResult;
-      } finally { for (const close of remove.reverse()) close(); this.frames.pop(); }
+      } finally { remove.runReverse(); this.frames.pop(); }
     });
     if (result instanceof Promise) throw new Error("Native synchronous pickup caller yielded during admission");
     return result;
@@ -303,7 +304,7 @@ export class NativePrimaryPickups {
     const operation = frame.grant.supply;
     if (operation === undefined || frame.selection.kind !== "replacement") throw new Error("Native supply has no selected grant");
     const { memory, runner } = this.host, processor = captureAbiProcessorState(runner.options.cpu.state), declined = {};
-    const remove: (() => void)[] = [];
+    const remove = new CleanupStack();
     let settled = false, ammo: { descriptor: GuestAddress; amount: number } | null = null;
     let projected: { address: GuestAddress; previous: number } | null = null;
     const restore = (): void => { if (projected !== null) { const saved = projected; projected = null; memory.writeInt32(saved.address, saved.previous); } };
@@ -367,6 +368,6 @@ export class NativePrimaryPickups {
       if (error !== declined) throw error;
       restoreAbiProcessorState(runner.options.cpu.state, processor);
       return { kind: "int32", value: 0 };
-    } finally { restore(); frame.supply = null; for (const close of remove.reverse()) close(); }
+    } finally { restore(); frame.supply = null; remove.runReverse(); }
   }
 }

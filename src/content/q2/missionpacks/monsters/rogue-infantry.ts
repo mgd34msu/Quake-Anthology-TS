@@ -1,6 +1,7 @@
 /* Original Rogue m_infantry.c behavior. ZeniMax Media, GPL-2.0-or-later. */
 import { add, scale } from "../../foundation/fields.ts";
-import { anglesVectors, enemyBody, finishDodge } from "../../foundation/monsters/ai.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
+import { enemyBody, finishDodge } from "../../foundation/monsters/ai.ts";
 import { infantryAttack, infantryCallbacks, infantryDie, infantryRun, infantrySight, infantryStand, infantryWalk } from "../../foundation/monsters/infantry.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -35,7 +36,7 @@ function machineGun(context: MonsterContext): undefined {
   return monsterFlash(context, 26, aim.start, aim.direction);
 }
 function jumpNow(context: MonsterContext, high: boolean): undefined {
-  const { entity, game } = context, body = game.body(entity), axes = anglesVectors(body.angles);
+  const { entity, game } = context, body = game.body(entity), axes = angleVectorsRule(body.angles, "native");
   entity.timestamp = game.host.now();
   return game.move(entity, { velocity: add(body.velocity, add(scale(axes.forward, high ? 150 : 100), scale(axes.up, high ? 400 : 300))) });
 }

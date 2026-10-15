@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
 import { createViewProjector } from "../../../render/scene/view.ts";
 import { admitQ3Poly, q3ProceduralFog, snapshotQ3SceneAdmission, type Q3SceneAdmission } from "../../../content/q3/presentation/scene.ts";
 import { reserveSourceEntityRange, sourceDrawGroup, type SourceSceneOrder, type SceneOperation } from "../../../render/scene/submissions.ts";
@@ -37,7 +38,7 @@ import { SceneModelRenderer } from "../../../render/scene/models/renderer.ts";
 import type { ModelSourceOptions } from "../../../render/scene/models/types.ts";
 import { beamBatch, defaultModelBatch, polyGeometry, spriteGeometry, railGeometry } from "../../../render/scene/particles/primitives.ts";
 import { ParticleSystem, loadParticleAnimations } from "../../../render/scene/particles/q3-system.ts";
-import { qvmRotatePointAroundVector } from "../../../core/qvm-math.ts";
+import { qvmRotatePointAroundVector } from "../../../core/math.ts";
 import type { Q3SharedBallisticEvent } from "../simulation/q3-ballistics.ts";
 import type { ApplicationAssets } from "../assets.ts";
 
@@ -82,14 +83,16 @@ export class Q3ApplicationEffects {
   private constructor(readonly content: ContentId, readonly assets: ApplicationAssets,
     readonly state: { time: number; readonly product: Product }, readonly effects: ClientEffects,
     readonly system: LocalEntitySystem, readonly marks: ImpactMarkSystem, readonly shaders: ReadonlyMap<string, RegisteredSceneMaterial>,
-    readonly renderer: SceneModelRenderer, readonly sounds: SourceEffectSound[], readonly loadWeapons: () => Promise<WeaponEffects>, bloodOwners: WeakMap<RefEntity, ActorId>) { this.bloodOwners = bloodOwners; }
+    readonly renderer: SceneModelRenderer, readonly sounds: EventRing<SourceEffectSound>, readonly loadWeapons: () => Promise<WeaponEffects>, bloodOwners: WeakMap<RefEntity, ActorId>) { this.bloodOwners = bloodOwners; }
+  private soundCursor: EventCursor | null = null;
+  private takeSounds(): SourceEffectSound[] { this.soundCursor ??= this.sounds.openCursor(); const taken = this.sounds.take(this.soundCursor); this.sounds.retire(); return taken; }
 
   static async create(assets: ApplicationAssets, queries: SceneQueries, content: ContentId, isPlayer: (actor: ActorId) => boolean,
     preload?: "character" | "weapons", readHardware: () => Q3Hardware = () => "generic"): Promise<Q3ApplicationEffects> {
     const hardware = q3EffectHardware(readHardware);
     const provider = await assets.provider(content), product: Product = assets.content.catalog.product(content).expectation.campaign === "missionpack" ? "missionpack" : "baseq3";
     const renderer = new SceneModelRenderer(provider, assets.world);
-    const bank = new SoundBank(provider.mounts), sounds: SourceEffectSound[] = [], names = new Map<PcmSound, string>(), shaders = new Map<string, RegisteredSceneMaterial>();
+    const bank = new SoundBank(provider.mounts), sounds = new EventRing<SourceEffectSound>(8192), names = new Map<PcmSound, string>(), shaders = new Map<string, RegisteredSceneMaterial>();
     const sound = async (path: string): Promise<PcmSound | null> => { const loaded = await bank.register(path, "q3"); if (loaded === null) return null; names.set(loaded.pcm, path); return loaded.pcm; };
     let preloading = preload !== undefined;
     const shader = async (name: string): Promise<SceneShader> => {
@@ -105,7 +108,7 @@ export class Q3ApplicationEffects {
     const sourceSound = (pcm: PcmSound | null, origin: Vec3, channel: number, volume: number, actor?: ActorId): void => {
       if (pcm === null) return;
       const path = names.get(pcm); if (path === undefined) throw new Error("Q3 local sound lacks source registration");
-      sounds.push({ content, path, origin, channel, volume, seconds: state.time / 1000,
+      sounds.admit({ content, path, origin, channel, volume, seconds: state.time / 1000,
         playback: actor === undefined ? { kind: "once" } : { kind: "actor", actor } });
     };
     const common = {
@@ -201,7 +204,7 @@ export class Q3ApplicationEffects {
         loop: (pcm, actor, origin, velocity) => {
           if (pcm === null) return;
           const path = names.get(pcm); if (path === undefined) throw new Error("Q3 loop sound lacks source registration");
-          sounds.push({ content, path, origin, channel: 0, volume: 1, seconds: state.time / 1000, playback: { kind: "loop", actor, velocity } });
+          sounds.admit({ content, path, origin, channel: 0, volume: 1, seconds: state.time / 1000, playback: { kind: "loop", actor, velocity } });
         } };
     };
     const result = new Q3ApplicationEffects(content, assets, state, effects, system, marks, shaders, renderer, sounds, loadWeapons, bloodOwners);
@@ -430,12 +433,12 @@ export class Q3ApplicationEffects {
     }
     return { admission, operations, q3Lights: this.lights };
   }
-  drainSounds(): readonly SourceEffectSound[] { return this.sounds.splice(0); }
+  drainSounds(): readonly SourceEffectSound[] { return this.takeSounds(); }
   resetRound(): void {
     for (const entity of this.effects.pool.activeEntities()) this.bloodOwners.delete(entity.refEntity);
     this.effects.pool.initialize(); this.marks.reset(); this.readyWeapons?.particles.resetRound();
     this.refs = []; this.admission = snapshotQ3SceneAdmission("mixed", [], []); this.lights = [];
-    this.models.length = 0; this.options.clear(); this.sounds.length = 0;
+    this.models.length = 0; this.options.clear(); this.sounds.reset();
     this.projectiles.clear(); this.flashes.clear(); this.lastFires.clear(); this.bolts.clear();
   }
   close(): void { this.resetRound(); }

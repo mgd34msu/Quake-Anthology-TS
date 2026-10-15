@@ -1,7 +1,8 @@
 /* Quake II rogue/g_combat.c and g_newai.c. ZeniMax Media, GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { Q2Entity, Q2GameServices } from "../../foundation/host.ts";
-import { anglesVectors, health, visible } from "../../foundation/monsters/ai.ts";
+import { health, visible } from "../../foundation/monsters/ai.ts";
 import { dot, normalize, scale, subtract } from "../../foundation/fields.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import type { MonsterContext, Q2MonsterSourceCombatHooks } from "../../foundation/monsters/types.ts";
@@ -56,7 +57,7 @@ export function createRogueCombatHooks(monsters: Q2Monsters, source: Q2MissionPa
       if (current !== null) {
         metadata.badArea = current.actor.id;
         if (game.entity(entity.enemy)?.classname === teslaClass(game)) {
-          const body = game.body(entity), forward = anglesVectors(body.angles).forward;
+          const body = game.body(entity), forward = angleVectorsRule(body.angles, "native").forward;
           const badDot = dot(forward, normalize(subtract(game.body(current).origin, body.origin))), moveDot = dot(forward, normalize(displacement));
           if (badDot < 0 && moveDot < 0 || badDot > 0 && moveDot > 0) return { kind: "move", displacement: scale(displacement, -1) };
         }

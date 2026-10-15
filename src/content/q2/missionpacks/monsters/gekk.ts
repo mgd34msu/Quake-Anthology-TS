@@ -1,9 +1,10 @@
 /* Quake II xatrix/m_gekk.c and acid gibs from g_misc.c. ZeniMax Media, GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import { add, length, normalize, scale, subtract, zero } from "../../foundation/fields.ts";
 import { freeQ2Entity } from "../../foundation/callbacks.ts";
 import type { Q2Die, Q2Entity, Q2GameServices, Q2Touch } from "../../foundation/host.ts";
-import { anglesVectors, checkBottom, enemyBody, enemyEye, health, MASK_SHOT, projectFlash, runAi, setDuck, targetDistance, traceGroundActor, vectorAngles } from "../../foundation/monsters/ai.ts";
+import { checkBottom, enemyBody, enemyEye, health, MASK_SHOT, projectFlash, runAi, setDuck, targetDistance, traceGroundActor } from "../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
 import { aliveEnemy, finishCorpse, move, sound } from "../../base/monsters/common.ts";
@@ -21,7 +22,7 @@ export function fireGekkLoogie(self: Q2Entity, game: Q2GameServices, start: Vec3
   game.sourceCallbacks.register({ think: { G_FreeEdict: freeQ2Entity }, touch: { loogie_touch: loogieTouch } });
   const projectile = game.create("loogie"), aim = normalize(direction);
   projectile.owner = self.actor.id; projectile.model = "models/objects/loogy/tris.md2"; projectile.effects |= 8; projectile.damage = damage; projectile.clipMask = MASK_SHOT; projectile.projectile = true;
-  game.move(projectile, { origin: start, angles: vectorAngles(aim), velocity: scale(aim, speed), bounds: { min: zero, max: zero } }, false);
+  game.move(projectile, { origin: start, angles: vectorToAnglesRule(aim, "native-ai"), velocity: scale(aim, speed), bounds: { min: zero, max: zero } }, false);
   projectile.touch = loogieTouch; game.solid(projectile, "box"); game.motion(projectile, "fly-missile"); game.schedule(projectile, 2, freeQ2Entity); game.show(projectile);
   const trace = game.host.trace({ start: game.body(self).origin, end: start, bounds: null, ignore: projectile.actor.id, mask: MASK_SHOT });
   if (trace.fraction < 1) {
@@ -113,7 +114,7 @@ export function createGekkDefinition(monsters: Q2Monsters): Q2MonsterDefinition 
     game.sound(entity, "gek/gk_sght1.wav", 2);
     game.move(entity, { origin: { ...body.origin, z: fromWater ? enemy?.origin.z ?? body.origin.z : body.origin.z + 1 } }, false);
     const long = checkJump(context);
-    game.move(entity, { velocity: { ...scale(anglesVectors(body.angles).forward, fromWater ? long ? 300 : 150 : long ? 700 : 250), z: fromWater ? long ? 250 : 300 : long ? 250 : 400 }, ground: null }, false);
+    game.move(entity, { velocity: { ...scale(angleVectorsRule(body.angles, "native").forward, fromWater ? long ? 300 : 150 : long ? 700 : 250), z: fromWater ? long ? 250 : 300 : long ? 250 : 400 }, ground: null }, false);
     context.state.ducked = true; context.state.attackFinished = game.host.now() + 3; entity.touch = jumpTouch;
     return undefined;
   }
@@ -186,7 +187,7 @@ export function createGekkDefinition(monsters: Q2Monsters): Q2MonsterDefinition 
       },
       loogie(context) {
         const eye = enemyEye(context); if (eye === null || !aliveEnemy(context)) return undefined;
-        const start = add(projectFlash(context, { x: -18, y: -0.8, z: 24 }), scale(anglesVectors(context.game.body(context.entity).angles).up, 2));
+        const start = add(projectFlash(context, { x: -18, y: -0.8, z: 24 }), scale(angleVectorsRule(context.game.body(context.entity).angles, "native").up, 2));
         fireGekkLoogie(context.entity, context.game, start, subtract(eye, start), 5, 550); return undefined;
       },
       reloogie(context) {

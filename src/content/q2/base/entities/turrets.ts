@@ -1,5 +1,6 @@
 /* Quake II g_turret.c. Turret drivers reuse the permanent infantry AI/death runner. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
 import { add, length, numberField, scale, subtract, zero } from "../../foundation/fields.ts";
 import type { Q2Entity, Q2GameServices, Q2Think, Q2Die } from "../../foundation/host.ts";
@@ -9,7 +10,6 @@ import { restoreQ2Actor, saveQ2Actor } from "../../foundation/checkpoint.ts";
 import { visible } from "../../foundation/monsters/ai.ts";
 import { infantryStand } from "../../foundation/monsters/infantry.ts";
 import type { MonsterContext } from "../../foundation/monsters/types.ts";
-import { angleVectors, vectorAngles } from "../../foundation/weapons/vectors.ts";
 import type { Q2BaseEntityHooks } from "./types.ts";
 
 interface Breach {
@@ -100,7 +100,7 @@ export class Q2TurretEntities {
   }
 
   private fire(entity: Q2Entity, game: Q2GameServices, state: Breach, driver: Q2Entity): undefined {
-    const body = game.body(entity), axes = angleVectors(body.angles);
+    const body = game.body(entity), axes = angleVectorsRule(body.angles, "native");
     const start = add(add(add(body.origin, scale(axes.forward, state.muzzle.x)), scale(axes.right, state.muzzle.y)), scale(axes.up, state.muzzle.z));
     const damage = Math.trunc(100 + game.host.random() * 50), speed = 550 + 50 * game.options.skill;
     this.hooks.weapons.fireRocket(driver, game, start, axes.forward, damage, speed, 150, damage);
@@ -155,7 +155,7 @@ export class Q2TurretEntities {
     const enemy = entity.enemy === null ? null : game.host.bodies.read(entity.enemy), breach = this.breaches.get(turret);
     if (enemy === null || breach === undefined) return undefined;
     const target = add(enemy.origin, { x: 0, y: 0, z: game.entity(entity.enemy)?.viewHeight ?? 22 });
-    breach.goal = vectorAngles(subtract(target, game.body(turret).origin));
+    breach.goal = vectorToAnglesRule(subtract(target, game.body(turret).origin), "native");
     if (game.host.now() < state.attackFinished) return undefined;
     const reactionTime = 3 - game.options.skill;
     if (game.host.now() - state.trailTime < reactionTime) return undefined;
@@ -201,7 +201,7 @@ export class Q2TurretEntities {
     master.owner = self.actor.id; master.teamMaster = master.actor.id;
     last.teamChain = self.actor.id; self.teamMaster = master.actor.id; self.teamChain = null;
     const body = services.body(self), target = services.body(breach), delta = subtract(body.origin, target.origin);
-    state.radius = length({ x: delta.x, y: delta.y, z: 0 }); state.yawOffset = normalizeAngle(vectorAngles(delta).y); state.height = delta.z;
+    state.radius = length({ x: delta.x, y: delta.y, z: 0 }); state.yawOffset = normalizeAngle(vectorToAnglesRule(delta, "native").y); state.height = delta.z;
     services.move(self, { angles: target.angles }, false); self.flags |= 1024;
     return services.schedule(self, services.host.frameSeconds(), this.driverThink);
   };

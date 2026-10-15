@@ -101,6 +101,11 @@ export class ApplicationQ3Source implements SnapshotSource {
     if (actor === null) throw new Error(`Q3 sound entity ${number} has no source actor`);
     return actor;
   }
+  /** Sound updates for entities retired since snapshot capture are dropped, not fatal. */
+  soundActor(number: number): ActorId | null {
+    if (this.pendingRoundTime !== null) return null;
+    return this.actors.get(number) ?? this.sourceActor(number);
+  }
   private command(argv: readonly string[]): void {
     this.serverCommands.set(++this.reliable, argv);
     this.serverCommands.delete(this.reliable - 64);

@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
 import { sweepBody } from "../../../movement/swept-body.ts";
 import { pushQ1Pusher } from "../../../movement/q1/pusher.ts";
 import type { Q1PhysicsEntity, Q1PusherServices } from "../../../movement/q1/types.ts";
@@ -91,7 +92,8 @@ export class SharedPhysics {
   private readonly collisions = new Map<OwnedActor, ActorCollision>();
   private readonly motions = new Map<OwnedActor, Q2Motion>();
   private readonly flags = new Map<OwnedActor, SharedPhysicsFlags>();
-  private readonly events: PhysicsEvent[] = [];
+  private readonly events = new EventRing<PhysicsEvent>(8192);
+  private readonly eventCursor: EventCursor = this.events.openCursor();
   private readonly sources = new Map<OwnedActor, SourceBodyPhysics>();
   private pushTransaction: Pushed[] | null = null;
   private worldGravity: number;
@@ -130,7 +132,7 @@ export class SharedPhysics {
     this.worldGravity = value; return undefined;
   }
   capture() {
-    if (this.pushTransaction !== null || this.events.length !== 0) throw new Error("Physics save requires a completed event boundary");
+    if (this.pushTransaction !== null || this.events.pending(this.eventCursor) !== 0) throw new Error("Physics save requires a completed event boundary");
     return { gravity: this.worldGravity, rereleaseMovement: this.rereleaseMovement.capture(),
       collisions: [...this.collisions].map(([actor, collision]) => ({ actor: savedActorId(actor.id), collision: { ...collision, owner: collision.owner === null ? null : savedActorId(collision.owner) } })),
       spatial: this.options.scene.spatial.query({ min: { x: -Infinity, y: -Infinity, z: -Infinity }, max: { x: Infinity, y: Infinity, z: Infinity } }).map(value => ({
@@ -223,8 +225,8 @@ export class SharedPhysics {
   solidOf(actor: ActorId): SharedSolid | null { const owned = this.options.actors.resolveOwned(actor); return owned === null ? null : this.solid(owned); }
   motionOf(actor: ActorId): Q2Motion | null { const owned = this.options.actors.resolveOwned(actor); return owned === null ? null : this.motion(owned); }
   isBrush(actor: ActorId): boolean { const owned = this.options.actors.resolveOwned(actor); return owned !== null && this.solid(owned)?.solid === "brush"; }
-  drainEvents(): readonly PhysicsEvent[] { return this.events.splice(0); }
-  private emit(event: PhysicsEvent): undefined { if (this.options.event !== undefined) return this.options.event(event); this.events.push(event); return undefined; }
+  drainEvents(): readonly PhysicsEvent[] { const taken = this.events.take(this.eventCursor); this.events.retire(); return taken; }
+  private emit(event: PhysicsEvent): undefined { if (this.options.event !== undefined) return this.options.event(event); this.events.admit(event); return undefined; }
   private actorFlags(actor: OwnedActor): SharedPhysicsFlags { return { ...this.flags.get(actor), ...(this.sources.get(actor)?.flags() ?? this.options.getFlags?.(actor)) }; }
   setFlags(actor: OwnedActor, changes: SharedPhysicsFlags): undefined {
     if (!this.live(actor)) return undefined;

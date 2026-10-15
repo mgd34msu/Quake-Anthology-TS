@@ -16,7 +16,7 @@ import { CvarRegistry } from "../../../core/cvars/index.ts";
 import { CommandBuffer } from "../../../core/commands/index.ts";
 import { CommonParseCursor, CommonParseState } from "../../../core/common-parse.ts";
 import { Q3_BINARY32_PROFILE } from "../../../core/numeric.ts";
-import { qvmAngleVectors } from "../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../core/math.ts";
 import type { MountedContent } from "../../../content/mounts/index.ts";
 import type { SharedSceneQueries } from "../../../world/collision/index.ts";
 import type { SessionActorRegistry, SharedBodyTable } from "../../../world/actors/index.ts";

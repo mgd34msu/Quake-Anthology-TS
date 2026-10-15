@@ -1,6 +1,7 @@
 /* Original Rogue Berserk, Mutant and Parasite movement callbacks. GPL-2.0-or-later. */
 import { add, scale } from "../../foundation/fields.ts";
-import { anglesVectors, enemyBody, finishDodge } from "../../foundation/monsters/ai.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
+import { enemyBody, finishDodge } from "../../foundation/monsters/ai.ts";
 import { defaultCheckAttack } from "../../foundation/monsters/perception.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -16,7 +17,7 @@ import { mutantMoves } from "./tables/rogue-mutant.ts";
 import { parasiteMoves } from "./tables/rogue-parasite.ts";
 
 function jumpImpulse(context: MonsterContext, forwardSpeed: number, upSpeed: number, timed: boolean): undefined {
-  const { game, entity } = context, body = game.body(entity), axes = anglesVectors(body.angles);
+  const { game, entity } = context, body = game.body(entity), axes = angleVectorsRule(body.angles, "native");
   if (timed) entity.timestamp = game.host.now();
   return game.move(entity, { velocity: add(body.velocity, add(scale(axes.forward, forwardSpeed), scale(axes.up, upSpeed))) });
 }

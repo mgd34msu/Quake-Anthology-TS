@@ -20,7 +20,7 @@ import type { WorldSnapshot } from "../../contracts/session.ts";
 import type { Q3CharacterAssets, Q3CharacterView } from "../../content/q3/foundation/index.ts";
 import { Q3CharacterPresenter } from "../../content/q3/foundation/index.ts";
 import { add3, sub3, scale3, length3, normalize3OrZero, vectorToAngles, anglesToAxis } from "../../core/math.ts";
-import { qvmAngleVectors } from "../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../core/math.ts";
 import type { WorldScene, WorldViewInput } from "../../render/scene/world.ts";
 import type { ModelTransform } from "../../render/scene/view.ts";
 import { SceneModelRenderer } from "../../render/scene/models/index.ts";

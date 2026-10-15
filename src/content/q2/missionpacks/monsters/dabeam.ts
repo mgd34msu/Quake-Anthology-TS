@@ -1,10 +1,11 @@
 /* Quake II xatrix/g_monster.c transient monster healing/laser beam. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import { add, normalize, scale, subtract, zero } from "../../foundation/fields.ts";
 import { freeQ2Entity } from "../../foundation/callbacks.ts";
 import type { Q2Entity, Q2GameServices, Q2Think } from "../../foundation/host.ts";
-import { anglesVectors, traceGroundActor } from "../../foundation/monsters/ai.ts";
+import { traceGroundActor } from "../../foundation/monsters/ai.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 
 const beamHit: Q2Think = (entity, game) => {
@@ -42,7 +43,7 @@ export function monsterDabeam(owner: Q2Entity, game: Q2GameServices, target: Act
   if (enemy !== null) {
     const point = add(enemy.origin, scale(add(enemy.bounds.min, enemy.bounds.max), 0.5));
     beam.movedir = normalize(subtract(medic ? { ...point, x: point.x + Math.sin(game.host.now()) * 8 } : point, origin));
-  } else beam.movedir = anglesVectors(angles).forward;
+  } else beam.movedir = angleVectorsRule(angles, "native").forward;
   beam.spawnflags |= 0x80000001;
   game.move(beam, { origin, angles, bounds: { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } } }, false);
   game.motion(beam, "stationary"); game.solid(beam, "none"); game.schedule(beam, 0.1, beamHit);

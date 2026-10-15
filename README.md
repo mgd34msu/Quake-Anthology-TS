@@ -4,10 +4,10 @@ Quake, Quake II, and Quake III gameplay in one engine and executable, written in
 strict TypeScript and run or compiled with Bun. Mix movement, characters, weapons,
 monsters, and equipment while retaining each selected source's behavior.
 
-**Version 1.0.0** is available from [GitHub Releases](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.0.0),
-with a Linux x64 executable and source. See the [release notes](docs/releases/1.0.0.md).
+**Version 1.1.0** is available from [GitHub Releases](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.1.0),
+with a Linux x64 executable and source. See the [release notes](docs/releases/1.1.0.md).
 Native DLL gameplay can still lag in demanding scenes. That remaining performance
-work is scheduled for a patch release; saving and loading are accepted for 1.0.0.
+work is scheduled for a patch release; saving and loading are accepted for 1.1.0.
 Supported mod interfaces and compatibility limits are documented below.
 
 Classic Quake and Quake II components must preserve their original gameplay,
@@ -25,8 +25,14 @@ bun install --frozen-lockfile
 bun run start --content-root /path/to/qfiles
 ```
 
-Starting without launch selections opens the menu. The default game-data root is
-`~/Projects/qfiles`. To compile a standalone executable:
+Starting without launch selections opens the menu. Without `--content-root`, the
+executable searches its own folder, then the folder above it, then the default
+Steam library locations, and stops at the first folder holding a game. Use
+`--steam` to search only the Steam locations. Games are recognized by their base
+directories — `id1` (Quake), `baseq2` (Quake II), `baseq3` (Quake III Arena) —
+under any parent folder names, including Steam's `Quake`, `Quake 2`, and
+`Quake 3 Arena`; expansions, rerelease trees, and mods resolve as siblings of
+those base directories. To compile a standalone executable:
 
 ```sh
 bun run build
@@ -44,7 +50,8 @@ video dependencies, content discovery, and build records.
 
 ## Recommended content layout
 
-Keep each game's original archives and companion files together. Keep classic
+An existing Steam installation works as-is. For a curated corpus, keep each
+game's original archives and companion files together. Keep classic
 and rerelease data separate, including files with identical names.
 
 ```text

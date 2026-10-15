@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { ActorId, ProviderId } from "../../contracts/identity.ts";
 import type { ModCallbackInput, ModRuntimeValue } from "../../contracts/mod-callbacks.ts";
 import type { SourceMatchServices, SourceObjectiveDeclaration, SourceObjectiveState } from "../../contracts/source-match.ts";
@@ -18,7 +19,7 @@ function equal(left: SourceObjectiveState, right: SourceObjectiveState): boolean
 
 /** Borrowed words project the original owner; only that owner's callback changes an objective. */
 export class ModSourceObjectives<Scalar, Reference, Call> {
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly projected = new Map<string, { readonly state: SourceObjectiveState; readonly location: string }>();
   private busy = false;
   private active = false;
@@ -69,7 +70,7 @@ export class ModSourceObjectives<Scalar, Reference, Call> {
           } }));
       }
       this.active = true; this.refresh();
-    } catch (error) { for (const remove of this.removals.splice(0).reverse()) remove(); this.active = false; throw error; }
+    } catch (error) { this.removals.runReverse(); this.active = false; throw error; }
   }
   refresh(): void {
     if (this.closed || this.busy || !this.storage.current()) return;
@@ -103,5 +104,5 @@ export class ModSourceObjectives<Scalar, Reference, Call> {
     } finally { this.busy = false; }
   }
   restored(): void { this.projected.clear(); if (this.active) this.refresh(); }
-  close(): void { if (this.closed) return; this.closed = true; for (const remove of this.removals.splice(0).reverse()) remove(); this.projected.clear(); }
+  close(): void { if (this.closed) return; this.closed = true; this.removals.runReverse(); this.projected.clear(); }
 }

@@ -1,7 +1,8 @@
 /* Original Rogue m_widow.c. ZeniMax Media, GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import { normalize, subtract } from "../../foundation/fields.ts";
-import { anglesVectors, enemyBody, enemyEye, health, projectFlash, targetDistance, vectorAngles } from "../../foundation/monsters/ai.ts";
+import { enemyBody, enemyEye, health, projectFlash, targetDistance } from "../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -21,7 +22,7 @@ const sweepAngles: readonly number[] = [32, 26, 20, 10, 0, -6.5, -13, -27, -41];
 function targetAngle(context: MonsterContext): number {
   const enemy = enemyBody(context); if (enemy === null) return 0;
   const body = context.game.body(context.entity);
-  let angle = body.angles.y - vectorAngles(subtract(body.origin, enemy.origin)).y;
+  let angle = body.angles.y - vectorToAnglesRule(subtract(body.origin, enemy.origin), "native-ai").y;
   if (angle < 0) angle += 360;
   return angle - 180;
 }
@@ -43,7 +44,7 @@ export function createWidowDefinition(monsters: Q2Monsters, weapons: Q2MissionPa
     if (entity.frame >= frame.spawn05 && entity.frame <= frame.spawn13) {
       const index = entity.frame - frame.spawn05; flash = 156 + index;
       const start = projectFlash(context, muzzleOffset(game.options.edition, flash)), body = game.body(entity);
-      direction = anglesVectors({ ...body.angles, x: body.angles.x + vectorAngles(subtract(enemy.origin, start)).x, y: body.angles.y - recordAt(sweepAngles, index) }).forward;
+      direction = angleVectorsRule({ ...body.angles, x: body.angles.x + vectorToAnglesRule(subtract(enemy.origin, start), "native-ai").x, y: body.angles.y - recordAt(sweepAngles, index) }, "native").forward;
       weapons.fireBlaster2(entity, game, start, direction, 10 * source.widowDamageMultiplier, 1000, effect); return monsterFlash(context, flash, start, direction);
     }
     if (entity.frame >= frame.fired02a && entity.frame <= frame.fired20) {
@@ -51,11 +52,11 @@ export function createWidowDefinition(monsters: Q2Monsters, weapons: Q2MissionPa
       flash = entity.frame === frame.fired02a ? 175 : 165 + entity.frame - frame.fired03;
       const start = projectFlash(context, muzzleOffset(game.options.edition, flash));
       const aim = predictedDirection(context, start, 1000, true, game.host.random() * 0.1 - 0.05); if (aim === null) return undefined;
-      const angles = vectorAngles(aim), yaw = game.body(entity).angles.y;
+      const angles = vectorToAnglesRule(aim, "native-ai"), yaw = game.body(entity).angles.y;
       let aimAngle = 100 - 10 * (flash - 165); if (aimAngle <= 0) aimAngle += 360;
       let enemyAngle = yaw - angles.y; if (enemyAngle <= 0) enemyAngle += 360;
       const error = aimAngle - enemyAngle;
-      direction = anglesVectors({ ...angles, y: error > 15 ? yaw - aimAngle + 15 : error < -15 ? yaw - aimAngle - 15 : angles.y }).forward;
+      direction = angleVectorsRule({ ...angles, y: error > 15 ? yaw - aimAngle + 15 : error < -15 ? yaw - aimAngle - 15 : angles.y }, "native").forward;
       weapons.fireBlaster2(entity, game, start, direction, 10 * source.widowDamageMultiplier, 1000, effect); return monsterFlash(context, flash, start, direction);
     }
     if (entity.frame >= frame.run01 && entity.frame <= frame.run08) {
@@ -78,7 +79,7 @@ export function createWidowDefinition(monsters: Q2Monsters, weapons: Q2MissionPa
         if (game.entity(entity.enemy)?.solid !== "none" || trace.fraction < 1) return false;
       }
     }
-    state.idealYaw = vectorAngles(subtract(enemy.origin, game.body(entity).origin)).y;
+    state.idealYaw = vectorToAnglesRule(subtract(enemy.origin, game.body(entity).origin), "native-ai").y;
     if (distance <= 100) { if (game.options.skill === 0 && Math.floor(game.host.random() * 4) !== 0) return false; state.attackState = "melee"; return true; }
     if (game.host.now() < state.attackFinished) return false;
     const chance = state.standGround ? 0.4 : distance < 80 ? 0.8 : distance < 500 ? 0.7 : distance < 1000 ? 0.6 : 0.5;

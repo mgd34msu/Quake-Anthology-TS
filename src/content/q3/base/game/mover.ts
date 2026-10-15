@@ -6,7 +6,7 @@ import type { DamageParticipant } from "./state.ts";
 /* Push transactions and binary movers translated from id Software's g_mover.c.
  * Copyright (C) 1999-2005 Id Software, Inc. SPDX-License-Identifier: GPL-2.0-or-later */
 import { add3, dot3, length3, radiusFromBounds, scale3, sub3, vec3 } from "../../../../core/math.ts";
-import { qvmAngleVectors } from "../../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../../core/math.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
 import type { Bounds, Vec3 } from "../../../../core/math.ts";
 import type { ServerWorld } from "../world.ts";

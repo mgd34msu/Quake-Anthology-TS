@@ -58,6 +58,8 @@ export interface ClientEventOptions {
 
 interface EventServices {
   presentEvent(entity: ClientEntity, position: Vec3, source: () => Promise<void>): Promise<void>;
+  /** Source registration is synchronous; await it before an event emits weapon media. */
+  prepareWeapon(weapon: number): Promise<void>;
   readonly media: ClientEventMedia;
   readonly options: ClientEventOptions;
   /** Independent cgame VM RNG, shared by this client's presentation subsystems only. */
@@ -277,6 +279,13 @@ export class ClientEventRuntime {
       debug("UNKNOWN"); throw new CommonError("drop", `Unknown event: ${event}`);
     }
     debug(event >= EntityEvent.EV_STEP_4 && event <= EntityEvent.EV_STEP_16 ? "EV_STEP" : event >= EntityEvent.EV_DEATH1 && event <= EntityEvent.EV_DEATH3 ? "EV_DEATHx" : known);
+    const eventWeapon = event === EntityEvent.EV_RAILTRAIL ? Weapon.WP_RAILGUN
+      : event === EntityEvent.EV_SHOTGUN ? Weapon.WP_SHOTGUN
+      : event === EntityEvent.EV_BULLET_HIT_WALL || event === EntityEvent.EV_BULLET_HIT_FLESH ? Weapon.WP_MACHINEGUN
+      : event === EntityEvent.EV_FIRE_WEAPON || event === EntityEvent.EV_MISSILE_HIT
+        || event === EntityEvent.EV_MISSILE_MISS || event === EntityEvent.EV_MISSILE_MISS_METAL ? es.weapon
+      : Weapon.WP_NONE;
+    if (eventWeapon !== Weapon.WP_NONE) await host.prepareWeapon(eventWeapon);
     if (event >= EntityEvent.EV_USE_ITEM0 && event <= EntityEvent.EV_USE_ITEM14) { this.useItem(entity); return; }
     switch (event) {
       case EntityEvent.EV_FOOTSTEP: case EntityEvent.EV_FOOTSTEP_METAL: case EntityEvent.EV_FOOTSPLASH: case EntityEvent.EV_FOOTWADE: case EntityEvent.EV_SWIM:

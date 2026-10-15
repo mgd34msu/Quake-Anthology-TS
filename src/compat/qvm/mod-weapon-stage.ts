@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import { QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import type { ItemId } from "../../contracts/gameplay.ts";
 import type { ActorId } from "../../contracts/identity.ts";
@@ -99,7 +100,7 @@ export interface QvmWeaponDispatcherOperations {
 
 /** Invocation-owned weapon decisions shared by original primary and component callers. */
 export class QvmWeaponDispatcher {
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly dispatchers: { readonly actor: ActorId; readonly call: QvmFunctionCall }[] = [];
   private readonly evaluations: { readonly actor: ActorId; readonly region: QvmRegionEvaluation; readonly inputs: readonly number[]; entered: boolean }[] = [];
   constructor(private readonly definition: QvmWeaponDispatcherDefinition, private readonly operations: QvmWeaponDispatcherOperations) {
@@ -171,14 +172,14 @@ export class QvmWeaponDispatcher {
     try { return this.operations.module.call([], this.definition.dispatcher.entry); }
     finally { this.evaluations.pop(); }
   }
-  close(): void { for (const remove of this.removals.splice(0).reverse()) remove(); this.dispatchers.length = 0; }
+  close(): void { this.removals.runReverse(); this.dispatchers.length = 0; }
 }
 
 /** Original source setup and weapon code share the live caller's pmove and exact applied input. */
 export class QvmModWeaponStage {
   private readonly applications: ModClientApplication[] = [];
   private readonly dispatcher: QvmWeaponDispatcher;
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly inputs: { readonly actor: ActorId; cancellation: QvmCancellationScope | null; entered: boolean }[] = [];
   constructor(private readonly definition: QvmWeaponStage, inputEntry: number, private readonly operations: Operations) {
     this.dispatcher = new QvmWeaponDispatcher(definition, { ...operations,
@@ -261,5 +262,5 @@ export class QvmModWeaponStage {
       return result;
     });
   }
-  close(): void { for (const remove of this.removals.splice(0).reverse()) remove(); this.applications.length = 0; this.dispatcher.close(); }
+  close(): void { this.removals.runReverse(); this.applications.length = 0; this.dispatcher.close(); }
 }

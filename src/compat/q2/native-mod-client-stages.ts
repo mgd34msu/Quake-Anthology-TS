@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { NativeModSourceCall } from "../../contracts/native-mod-callbacks.ts";
 import type { Q2UserCommand, Q2RereleaseUserCommand } from "../../contracts/protocol.ts";
 import type { ModClientApplication } from "../../world/session/mod-clients.ts";
@@ -7,7 +8,7 @@ import { writeRereleaseUserCommand } from "./rerelease/player-state.ts";
 
 /** Exclusions apply only while their declaring original call is active. */
 export class NativeModClientStages {
-  private active: { readonly call: NativeModSourceCall; readonly removals: (() => void)[]; readonly extra: (() => () => void) | undefined } | null = null;
+  private active: { readonly call: NativeModSourceCall; readonly removals: CleanupStack; readonly extra: (() => () => void) | undefined } | null = null;
   constructor(private readonly host: Pick<NativeModHost, "memory" | "imageBase" | "bindInlineRegion">) {}
   private bind(scope: NonNullable<NativeModClientStages["active"]>): void {
     const { memory, imageBase } = this.host;
@@ -16,10 +17,10 @@ export class NativeModClientStages {
     if (scope.extra !== undefined) scope.removals.push(scope.extra());
   }
   private unbind(scope: NativeModClientStages["active"]): void {
-    for (const remove of scope?.removals.splice(0).reverse() ?? []) remove();
+    scope?.removals.runReverse();
   }
   run<T>(call: NativeModSourceCall, invoke: () => T, extra?: () => () => void): T {
-    const previous = this.active, scope = { call, removals: [], extra } satisfies NonNullable<NativeModClientStages["active"]>;
+    const previous = this.active, scope = { call, removals: new CleanupStack(), extra } satisfies NonNullable<NativeModClientStages["active"]>;
     this.unbind(previous); this.active = scope;
     try {
       this.bind(scope);

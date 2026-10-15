@@ -7,6 +7,18 @@ import { q1LeafPvs } from "../../formats/q1-map/queries.ts";
 import { splitDlightMask } from "../../materials/dlight.ts";
 import type { DynamicLight } from "../../materials/q3-lighting.ts";
 import { dot3 } from "../../core/math.ts";
+import { StampSet } from "../../foundation/stamp.ts";
+
+/** World-owned surface visit marks, sized at first use per map (epoch per frame query). */
+const surfaceStamps = new WeakMap<DecodedWorld, StampSet>();
+function surfaceStamp(map: DecodedWorld): StampSet {
+  let stamps = surfaceStamps.get(map);
+  if (stamps === undefined) {
+    stamps = new StampSet(map.kind === "q3-bsp" ? map.surfaces.length : map.faces.length);
+    surfaceStamps.set(map, stamps);
+  }
+  return stamps;
+}
 import { boundsInFrustum, cameraFrustum } from "./view.ts";
 
 function at<T>(items: readonly T[], index: number): T {
@@ -109,7 +121,8 @@ export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: Wo
       break;
     }
   }
-  const planes = options.noCull === true ? [] : map.kind === "q3-bsp" ? cameraFrustum(camera).slice(0, 4) : cameraFrustum(camera), leaves: number[] = [], surfaces: number[] = [], seen = new Set<number>();
+  const planes = options.noCull === true ? [] : map.kind === "q3-bsp" ? cameraFrustum(camera).slice(0, 4) : cameraFrustum(camera), leaves: number[] = [], surfaces: number[] = [], seen = surfaceStamp(map);
+  seen.begin();
   const leafVisible = (index: number): boolean => {
     if (map.kind === "q1-bsp") return index !== 0 && (pvs === null || ((pvs[(index - 1) >> 3] ?? 0) & (1 << ((index - 1) & 7))) !== 0);
     const leaf = at<Exclude<DecodedWorld, { readonly kind: "q1-bsp" }>["leaves"][number]>(map.leaves, index);
@@ -150,7 +163,7 @@ export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: Wo
     const members = map.kind === "q3-bsp" ? map.leafSurfaces : map.leafFaces;
     for (let i = 0; i < range.count; i++) {
       const surface = at(members, range.first + i);
-      if (!seen.has(surface)) { seen.add(surface); surfaces.push(surface); surfaceDlightMasks.set(surface, mask); }
+      if (seen.mark(surface)) { surfaces.push(surface); surfaceDlightMasks.set(surface, mask); }
     }
   }
   return { leaf: eye, leaves, surfaces, surfaceDlightMasks };

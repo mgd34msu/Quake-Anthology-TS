@@ -31,7 +31,7 @@ import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../.
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
 import { canonicalWeaponSource, supportsSelectedWeaponProduct } from "../../content/catalog/weapons.ts";
 import { loadTeamArenaCampaign, planTeamArenaSkirmish, type TeamArenaCampaign, type TeamArenaTeams } from "./team-arena-skirmish.ts";
-import { applicationPlayerProducts, applicationPreset } from "./content.ts";
+import { applicationPlayerProducts, applicationPreset, movementContentProduct } from "./content.ts";
 import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
 import type { ApplicationOptions } from "./options.ts";
 import type { Q1ProtocolIdentity } from "../../contracts/protocol.ts";
@@ -561,7 +561,10 @@ export class StartupSelectionModel {
     const current = this.product("product"), currentLabel = productChoice(current).label;
     const defaultsPlayer = applicationPlayerProducts(this.catalog, { product: this.values.product,
       movement: current.expectation.family, character: current.expectation.family, network: this.initial.network });
-    const movementChoices = [...this.baseChoices(), productChoice(this.catalog.product("q1-quakeworld"))];
+    const quakeworld = this.catalog.product("q1-quakeworld");
+    const quakeworldChoice = { ...productChoice(quakeworld),
+      unavailable: unavailable(quakeworld) === null ? null : unavailable(this.catalog.product(quakeworld.expectation.baseProduct ?? "q1-classic-id1")) };
+    const movementChoices = [...this.baseChoices(), quakeworldChoice];
     const characterChoices = [...this.baseChoices()];
     for (const id of [defaultsPlayer.movement, this.values.movement])
       if (!movementChoices.some(choice => choice.id === id)) movementChoices.push(productChoice(this.catalog.product(id)));
@@ -702,7 +705,7 @@ export class StartupSelectionModel {
     }
     const options = this.options, base = applicationPreset(this.catalog, options), mapContent = this.geometry();
     const movementProduct = this.product("movement"), characterProduct = this.product("character");
-    const movement: ProviderReference = { provider: `${movementProduct.expectation.family}:movement`, content: movementProduct.id };
+    const movement: ProviderReference = { provider: `${movementProduct.expectation.family}:movement`, content: movementContentProduct(this.catalog, movementProduct.expectation.id).id };
     const character: ProviderReference = { provider: `${characterProduct.expectation.family}:character`, content: characterProduct.id };
     const movementTiming = nativeProviderTiming(movement, movementProduct.expectation.family, movementProduct.expectation.edition === "rerelease");
     const characterTiming = nativeProviderTiming(character, characterProduct.expectation.family, characterProduct.expectation.edition === "rerelease");

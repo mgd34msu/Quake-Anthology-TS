@@ -2,41 +2,79 @@ import type { ActorId } from '../../../contracts/identity.ts';
 import type { Q1CompositionEvent } from '../../../content/composition/q1/types.ts';
 import type { NetQuakeMessage } from '../../../network/q1/netquake.ts';
 
+const STATE_SERVER_VARS = 0;
+const STATE_SET_VIEWS = 1;
+const STATE_SEQUENCE = 2;
+const STATE_LEVEL_COMPLETED = 3;
+const STATE_BACK_TO_LOBBY = 4;
+const STATE_PROMPT_BEGIN = 5;
+const STATE_PROMPT_CHOICE = 6;
+const STATE_STAT = 7;
+const STATE_LIGHT_STYLE = 8;
+const STATE_NAME = 9;
+const STATE_COLORS = 10;
+const STATE_FRAGS = 11;
+const STATE_PING = 12;
+const STATE_SOCIAL = 13;
+const STATE_PLAYER_INFO = 14;
+const STATE_SET_VIEW = 15;
+const STATE_SET_ANGLE = 16;
+const STATE_PAUSE = 17;
+const STATE_CD_TRACK = 18;
+const STATE_FOG = 19;
+const STATE_SKYBOX = 20;
+const STATE_INTERMISSION = 21;
+function stateKey(category: number, discriminator = 0): number { return discriminator * 32 + category; }
+type LocalMessageState = Map<number, NetQuakeMessage>;
+
 /** Client-owned service state, separate from the module's authoritative edict fields. */
 export class QuakeCLocalMessages {
-  private readonly baseline = new Map<string, NetQuakeMessage>();
-  private readonly clients = new Map<ActorId, Map<string, NetQuakeMessage>>();
+  private readonly baseline: LocalMessageState = new Map<number, NetQuakeMessage>();
+  private readonly clients = new Map<ActorId, LocalMessageState>();
   private baselineView: ActorId | null = null;
   private readonly views = new Map<ActorId, ActorId>();
-  private retained(state: Map<string, NetQuakeMessage>, message: NetQuakeMessage): void {
+  private retained(state: LocalMessageState, message: NetQuakeMessage): void {
     switch (message.kind) {
-      case 'server-vars': case 'set-views': case 'sequence': case 'level-completed': case 'back-to-lobby':
-        state.set(message.kind, message); break;
+      case 'server-vars': state.set(stateKey(STATE_SERVER_VARS), message); break;
+      case 'set-views': state.set(stateKey(STATE_SET_VIEWS), message); break;
+      case 'sequence': state.set(stateKey(STATE_SEQUENCE), message); break;
+      case 'level-completed': state.set(stateKey(STATE_LEVEL_COMPLETED), message); break;
+      case 'back-to-lobby': state.set(stateKey(STATE_BACK_TO_LOBBY), message); break;
       case 'prompt-begin': case 'prompt-clear':
-        for (const key of state.keys()) if (key.startsWith('prompt:')) state.delete(key);
-        state.set('prompt:begin', message); break;
+        for (const key of state.keys()) if (key % 32 === STATE_PROMPT_BEGIN || key % 32 === STATE_PROMPT_CHOICE) state.delete(key);
+        state.set(stateKey(STATE_PROMPT_BEGIN), message); break;
       case 'prompt-choice': {
-        const begin = state.get('prompt:begin');
+        const begin = state.get(stateKey(STATE_PROMPT_BEGIN));
         if (begin?.kind === 'prompt-begin' && begin.text !== '') {
           const count = [...state.values()].filter(value => value.kind === 'prompt-choice').length;
-          state.set(`prompt:choice:${count}`, message);
+          state.set(stateKey(STATE_PROMPT_CHOICE, count), message);
         }
         break;
       }
       case 'stat':
         if (!Number.isInteger(message.index) || message.index < 0 || message.index >= 32) throw new Error('Invalid NetQuake client stat');
-        state.set(`stat:${message.index}`, message); break;
+        state.set(stateKey(STATE_STAT, message.index), message); break;
       case 'killed-monster': case 'found-secret': {
-        const index = message.kind === 'killed-monster' ? 14 : 13, old = state.get(`stat:${index}`);
-        state.set(`stat:${index}`, {kind:'stat',index,value:(old?.kind === 'stat' ? old.value : 0) + 1}); break;
+        const index = message.kind === 'killed-monster' ? 14 : 13, old = state.get(stateKey(STATE_STAT, index));
+        state.set(stateKey(STATE_STAT, index), {kind:'stat',index,value:(old?.kind === 'stat' ? old.value : 0) + 1}); break;
       }
       case 'spawned-monster': {
-        const old = state.get('stat:12'); state.set('stat:12', {kind:'stat',index:12,value:(old?.kind === 'stat' ? old.value : 0) + message.value}); break;
+        const old = state.get(stateKey(STATE_STAT, 12)); state.set(stateKey(STATE_STAT, 12), {kind:'stat',index:12,value:(old?.kind === 'stat' ? old.value : 0) + message.value}); break;
       }
-      case 'light-style': state.set(`light-style:${message.index}`, message); break;
-      case 'name': case 'colors': case 'frags': case 'ping': case 'social': case 'player-info': state.set(`${message.kind}:${message.slot}`, message); break;
-      case 'set-view': case 'set-angle': case 'pause': case 'cd-track': case 'fog': case 'skybox': state.set(message.kind, message); break;
-      case 'intermission': case 'finale': case 'cutscene': state.set('intermission', message); break;
+      case 'light-style': state.set(stateKey(STATE_LIGHT_STYLE, message.index), message); break;
+      case 'name': state.set(stateKey(STATE_NAME, message.slot), message); break;
+      case 'colors': state.set(stateKey(STATE_COLORS, message.slot), message); break;
+      case 'frags': state.set(stateKey(STATE_FRAGS, message.slot), message); break;
+      case 'ping': state.set(stateKey(STATE_PING, message.slot), message); break;
+      case 'social': state.set(stateKey(STATE_SOCIAL, message.slot), message); break;
+      case 'player-info': state.set(stateKey(STATE_PLAYER_INFO, message.slot), message); break;
+      case 'set-view': state.set(stateKey(STATE_SET_VIEW), message); break;
+      case 'set-angle': state.set(stateKey(STATE_SET_ANGLE), message); break;
+      case 'pause': state.set(stateKey(STATE_PAUSE), message); break;
+      case 'cd-track': state.set(stateKey(STATE_CD_TRACK), message); break;
+      case 'fog': state.set(stateKey(STATE_FOG), message); break;
+      case 'skybox': state.set(stateKey(STATE_SKYBOX), message); break;
+      case 'intermission': case 'finale': case 'cutscene': state.set(stateKey(STATE_INTERMISSION), message); break;
       default: break;
     }
   }
@@ -63,11 +101,11 @@ export class QuakeCLocalMessages {
     }
   }
   stat(actor: ActorId, index: number): number | null {
-    const message = this.clients.get(actor)?.get(`stat:${index}`);
+    const message = this.clients.get(actor)?.get(stateKey(STATE_STAT, index));
     return message?.kind === 'stat' ? message.value : null;
   }
-  angles(actor: ActorId) { const message = this.clients.get(actor)?.get('set-angle'); return message?.kind === 'set-angle' ? message.angles : null; }
-  view(actor: ActorId): number | null { const message = this.clients.get(actor)?.get('set-view'); return message?.kind === 'set-view' ? message.entity : null; }
+  angles(actor: ActorId) { const message = this.clients.get(actor)?.get(stateKey(STATE_SET_ANGLE)); return message?.kind === 'set-angle' ? message.angles : null; }
+  view(actor: ActorId): number | null { const message = this.clients.get(actor)?.get(stateKey(STATE_SET_VIEW)); return message?.kind === 'set-view' ? message.entity : null; }
   viewTarget(actor: ActorId): ActorId | null { return this.views.get(actor) ?? null; }
   captureViews() { return { baseline: this.baselineView, clients: [...this.views].map(([actor, target]) => ({ actor, target })) }; }
   restoreViews(baseline: ActorId | null, clients: readonly { readonly actor: ActorId; readonly target: ActorId }[]): void {
@@ -78,12 +116,12 @@ export class QuakeCLocalMessages {
     }
   }
   sessionState(actor: ActorId) {
-    const state = this.clients.get(actor), server = state?.get('server-vars'), views = state?.get('set-views'), sequence = state?.get('sequence');
+    const state = this.clients.get(actor), server = state?.get(stateKey(STATE_SERVER_VARS)), views = state?.get(stateKey(STATE_SET_VIEWS)), sequence = state?.get(stateKey(STATE_SEQUENCE));
     return {serverVars:server?.kind === 'server-vars' ? server.text : '',views:views?.kind === 'set-views' ? views.value : 1,
-      sequence:sequence?.kind === 'sequence' ? sequence.value : 0,levelCompleted:state?.has('level-completed') === true,backToLobby:state?.has('back-to-lobby') === true};
+      sequence:sequence?.kind === 'sequence' ? sequence.value : 0,levelCompleted:state?.has(stateKey(STATE_LEVEL_COMPLETED)) === true,backToLobby:state?.has(stateKey(STATE_BACK_TO_LOBBY)) === true};
   }
   prompt(actor: ActorId): Extract<Q1CompositionEvent, {readonly kind:'prompt' | 'clear-prompt'}> {
-    const messages = this.clients.get(actor), begin = messages?.get('prompt:begin');
+    const messages = this.clients.get(actor), begin = messages?.get(stateKey(STATE_PROMPT_BEGIN));
     if (begin?.kind !== 'prompt-begin' || begin.text === '') return {kind:'clear-prompt',actor};
     const choices: {label:string;impulse:number}[] = [];
     for (const message of messages?.values() ?? []) if (message.kind === 'prompt-choice') choices.push({label:message.text,impulse:message.impulse});
@@ -94,7 +132,7 @@ export class QuakeCLocalMessages {
     if (prompt.kind !== 'prompt' || !prompt.choices.some(choice => choice.impulse === impulse)) return false;
     this.receive([{kind:'prompt-clear'}], actor); return true;
   }
-  intermission(actor: ActorId): boolean { return this.clients.get(actor)?.has('intermission') === true; }
+  intermission(actor: ActorId): boolean { return this.clients.get(actor)?.has(stateKey(STATE_INTERMISSION)) === true; }
   presentation(actor: ActorId): readonly NetQuakeMessage[] {
     return [...(this.clients.get(actor)?.values() ?? [])].filter(message => message.kind === 'skybox' || message.kind === 'name' || message.kind === 'colors' || message.kind === 'frags' || message.kind === 'ping' || message.kind === 'social' || message.kind === 'player-info' || message.kind === 'prompt-begin' || message.kind === 'prompt-choice' || message.kind === 'prompt-clear' || message.kind === 'light-style' || message.kind === 'intermission' || message.kind === 'finale' || message.kind === 'cutscene' || message.kind === 'cd-track' || message.kind === 'pause');
   }
@@ -104,7 +142,7 @@ export class QuakeCLocalMessages {
     for (const message of baseline) this.retained(this.baseline, message);
     for (const entry of clients) {
       if (this.clients.has(entry.actor)) throw new Error('Duplicate restored local QC client');
-      const state = new Map<string, NetQuakeMessage>();
+      const state: LocalMessageState = new Map<number, NetQuakeMessage>();
       for (const message of entry.messages) this.retained(state, message);
       this.clients.set(entry.actor,state);
     }

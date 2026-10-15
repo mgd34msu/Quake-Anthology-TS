@@ -1,7 +1,8 @@
 /* Quake II m_actor.c. id Software, GPL-2.0-or-later. */
 import { add, integerField, movedir, normalize, numberField, scale, subtract, zero } from "../../foundation/fields.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Use, Q2Touch } from "../../foundation/host.ts";
-import { anglesVectors, enemyBody, health, projectFlash, vectorAngles } from "../../foundation/monsters/ai.ts";
+import { enemyBody, health, projectFlash } from "../../foundation/monsters/ai.ts";
 import { throwGib, throwHead } from "../../foundation/monsters/gibs.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
@@ -40,7 +41,7 @@ export const actorDefinition: Q2MonsterDefinition = {
     context.state.painTime = context.game.host.now() + 3;
     if (reaction.attacker !== null && context.game.host.isPlayer(reaction.attacker) && context.game.host.random() < 0.4) {
       const other = context.game.host.bodies.read(reaction.attacker);
-      if (other !== null) context.state.idealYaw = vectorAngles(subtract(other.origin, context.game.body(context.entity).origin)).y;
+      if (other !== null) context.state.idealYaw = vectorToAnglesRule(subtract(other.origin, context.game.body(context.entity).origin), "native-ai").y;
       context.setMove(context.game.host.random() < 0.5 ? "actor_move_flipoff" : "actor_move_taunt");
       const messages = ["Watch it", "#$@*&", "Idiot", "Check your targets"];
       return context.game.host.emit({ kind: "print", actor: reaction.attacker, level: "chat", text: `${actorName(context.entity, context.game)}: ${recordAt(messages, Math.floor(context.game.host.random() * 3))}!\n` });
@@ -65,7 +66,7 @@ export const actorDefinition: Q2MonsterDefinition = {
     actor_run: run, actor_dead: finishCorpse,
     actor_fire(context) {
       const { entity, game } = context, enemy = enemyBody(context), start = projectFlash(context, muzzleOffset(game.options.edition, 63));
-      let direction = anglesVectors(game.body(entity).angles).forward;
+      let direction = angleVectorsRule(game.body(entity).angles, "native").forward;
       if (enemy !== null) {
         const target = health(game, entity.enemy) > 0 ? add(add(enemy.origin, scale(enemy.velocity, -0.2)), { x: 0, y: 0, z: game.entity(entity.enemy)?.viewHeight ?? 22 }) : { x: enemy.origin.x + enemy.bounds.min.x, y: enemy.origin.y + enemy.bounds.min.y, z: enemy.origin.z + (enemy.bounds.min.z + enemy.bounds.max.z) / 2 };
         direction = normalize(subtract(target, start));
@@ -84,7 +85,7 @@ export function createActorTargetModule(monsters: Q2Monsters): Q2SpawnModule {
     const state = context.state, target = game.pickTarget(entity.target);
     entity.goal = state.moveTarget = target?.actor.id ?? null;
     if (target === null || target.classname !== "target_actor") { game.host.diagnostic(`misc_actor has bad target ${entity.target}`); entity.target = ""; state.pauseTime = 100000000; return stand(context); }
-    state.idealYaw = vectorAngles(subtract(game.body(target).origin, game.body(entity).origin)).y;
+    state.idealYaw = vectorToAnglesRule(subtract(game.body(target).origin, game.body(entity).origin), "native-ai").y;
     game.move(entity, { angles: { ...game.body(entity).angles, y: state.idealYaw } }); context.walk(); entity.target = ""; return undefined;
   };
   const touch: Q2Touch = (self, services, contact) => {
@@ -114,7 +115,7 @@ export function createActorTargetModule(monsters: Q2Monsters): Q2SpawnModule {
       actor.goal ??= context.state.moveTarget;
       if (context.state.moveTarget === null && actor.enemy === null) { context.state.pauseTime = services.host.now() + 100000000; return stand(context); }
       const goal = services.entity(context.state.moveTarget);
-      if (goal !== null && actor.goal === goal.actor.id) context.state.idealYaw = vectorAngles(subtract(services.body(goal).origin, services.body(actor).origin)).y;
+      if (goal !== null && actor.goal === goal.actor.id) context.state.idealYaw = vectorToAnglesRule(subtract(services.body(goal).origin, services.body(actor).origin), "native-ai").y;
       return undefined;
     };
   return { callbacks: { use: { actor_use: use }, touch: { target_actor_touch: touch } }, spawn(entity, game) {

@@ -1,3 +1,4 @@
+import { StampSet } from '../../foundation/stamp.ts';
 /* Quake II brush tracing and area connectivity from id Software cmodel.c and
  * q2repro cmodel.c. Copyright (C) 1997-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds, Vec3 } from '../../contracts/math.ts';
@@ -57,7 +58,13 @@ function expand(plane: BspPlane, shape: TraceShape, n: NumericOperations): numbe
 export class Q2Collision {
     readonly #openPortals = new Set<number>();
     readonly #flood: number[];
-    constructor(readonly geometry: Q2WorldGeometry) { this.#flood = geometry.areas.map(() => 0); this.#floodAreas(); }
+    readonly #mediaBrushStamps: StampSet;
+    readonly #traceBrushStamps: StampSet;
+    constructor(readonly geometry: Q2WorldGeometry) {
+        this.#mediaBrushStamps = new StampSet(geometry.brushes.length);
+        this.#traceBrushStamps = new StampSet(geometry.brushes.length);
+        this.#flood = geometry.areas.map(() => 0); this.#floodAreas();
+    }
     modelBounds(index: number): Bounds { return at(this.geometry.models, index).bounds; }
     pointLeaf(point: Vec3, model = 0): number { return this.#pointLeaf(point, at(this.geometry.models, model).headnode); }
     #pointLeaf(point: Vec3, headnode: number, numeric: NumericOperations | null = null): number {
@@ -96,14 +103,13 @@ export class Q2Collision {
                 y: Math.max(start.y, reached.y) + bounds.max.y + 1, z: Math.max(start.z, reached.z) + bounds.max.z + 1 } };
         const leaves = this.boxLeaves(envelope, this.geometry.leaves.length, at(this.geometry.models, model).headnode);
         const geometry = this.geometry;
+        const seen = this.#mediaBrushStamps; seen.begin();
         function* brushes(): Generator<MediumBrush, undefined, unknown> {
-            const seen = new Set<number>();
             for (const leafIndex of leaves.leaves) {
                 const leaf = at(geometry.leaves, leafIndex);
                 for (let index = 0; index < leaf.brushes.count; index++) {
                     const brushIndex = at(geometry.leafBrushes, leaf.brushes.first + index);
-                    if (seen.has(brushIndex)) continue;
-                    seen.add(brushIndex);
+                    if (!seen.mark(brushIndex)) continue;
                     const brush = at(geometry.brushes, brushIndex);
                     if (convertContents(brush.contents, 'q2', 'q1') === -1) continue;
                     yield { contents: brush.contents, planes: Array.from({ length: brush.sides.count }, (_, side) =>
@@ -155,11 +161,10 @@ export class Q2Collision {
         const mask = geometryMask(query.policy, 'q2'), bounds = shapeBounds(query.shape);
         const extents = { x: Math.max(-bounds.min.x, bounds.max.x), y: Math.max(-bounds.min.y, bounds.max.y), z: Math.max(-bounds.min.z, bounds.max.z) };
         const work: Work = { fraction: 1, startSolid: false, allSolid: false, contents: 0, plane: noPlane, surface: null, secondary: null };
-        const checked = new Set<number>();
+        const checked = this.#traceBrushStamps; checked.begin();
         const brushTrace = (index: number): void => {
-            if (checked.has(index))
+            if (!checked.mark(index))
                 return;
-            checked.add(index);
             const brush = at(this.geometry.brushes, index);
             if ((brush.contents & mask) === 0 || brush.sides.count === 0)
                 return;

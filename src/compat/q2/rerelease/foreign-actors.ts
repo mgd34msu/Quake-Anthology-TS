@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../../foundation/cleanup.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, GuestCallValue, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
@@ -41,7 +42,7 @@ export class RereleaseForeignActors {
   readonly #damageFrames: DamageFrame[] = [];
   readonly #inventoryPublications: { readonly frame: DamageFrame | undefined; readonly actor: ActorId; readonly committed: () => boolean }[] = [];
   readonly #armorBindings = new Map<OwnedActor, { readonly stages: Partial<Record<ProtectionChannel, Parameters<SourceArmorStage["bind"]>[0]>>; readonly armor: () => ArmorState }>();
-  readonly #armorHooks: (() => void)[] = [];
+  readonly #armorHooks = new CleanupStack();
   #powerBypass: bigint | "pending" | null = null;
   readonly deferred: RereleaseDeferredDamage;
   #restoring: { readonly actors: ReadonlyMap<number, SavedActorId>; readonly domain: "checkpoint" | "current" } | null = null;
@@ -107,11 +108,11 @@ export class RereleaseForeignActors {
       if (binding.stages[channel] !== undefined) throw new Error("Native armor stage already has an owner");
       binding.stages[channel] = intercept; this.#armorBindings.set(actor, binding);
       try { if (this.#armorHooks.length === 0) this.#installArmorHooks(); }
-      catch (error) { delete binding.stages[channel]; if (binding.stages.regular === undefined && binding.stages.powered === undefined) this.#armorBindings.delete(actor); for (const remove of this.#armorHooks.splice(0)) remove(); throw error; }
+      catch (error) { delete binding.stages[channel]; if (binding.stages.regular === undefined && binding.stages.powered === undefined) this.#armorBindings.delete(actor); this.#armorHooks.runAll(); throw error; }
       return () => {
         if (binding.stages[channel] === intercept) delete binding.stages[channel];
         if (binding.stages.regular === undefined && binding.stages.powered === undefined) this.#armorBindings.delete(actor);
-        if (this.#armorBindings.size === 0) for (const remove of this.#armorHooks.splice(0)) remove();
+        if (this.#armorBindings.size === 0) this.#armorHooks.runAll();
         return undefined;
       };
     } };
@@ -301,9 +302,9 @@ export class RereleaseForeignActors {
       let health = source.health, velocity = source.vector("velocity"), armor = readArmor(), appliedDamage = 0;
       if (armor === undefined) throw new Error("Native target lacks a combat binding");
       this.#damageFrames.push(frame);
-      const removeWrites: (() => void)[] = [], removeEntries: (() => void)[] = [];
+      const removeWrites = new CleanupStack(), removeEntries = new CleanupStack();
       let vectors: GuestAddress | null = null;
-      const stopWrites = (): void => { frame.observing = false; for (const remove of removeWrites.splice(0)) remove(); };
+      const stopWrites = (): void => { frame.observing = false; removeWrites.runAll(); };
       const current = (): boolean => this.#damageFrames.at(-1) === frame && state.result === null;
       try {
         frame.observing = true;
@@ -361,7 +362,7 @@ export class RereleaseForeignActors {
         }
         return state.result ?? { reaction: "none", appliedDamage };
       } finally {
-        stopWrites(); for (const remove of removeEntries) remove();
+        stopWrites(); removeEntries.runAll();
         if (vectors !== null) memory.unmap(vectors, 36); this.#damageFrames.pop(); this.host.reconcile();
       }
     });
@@ -392,7 +393,7 @@ export class RereleaseForeignActors {
   }
   endRestore(): void { this.#restoring = null; }
   close(): void {
-    for (const remove of this.#armorHooks.splice(0)) remove();
+    this.#armorHooks.runAll();
     this.#armorBindings.clear();
     if (this.#closed) return; this.#closed = true;
     this.#removeEntry(); this.#removeContinuation(); this.deferred.close(); this.clear();

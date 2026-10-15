@@ -1,9 +1,9 @@
 import { translateQ2RereleaseHudRecord } from './q2-rerelease-hud-events.ts';
+import { angleVectorsRule } from "../../../core/math.ts";
 import type { ContentId } from '../../../contracts/content.ts';
 import type { ActorId } from '../../../contracts/identity.ts';
 import type { Vec3 } from '../../../contracts/math.ts';
 import { muzzleOffset } from '../../../content/q2/foundation/monsters/muzzle.ts';
-import { anglesVectors } from '../../../content/q2/foundation/monsters/ai.ts';
 import type { Q2ServerRecord } from '../../../network/q2/index.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
 import { SvcFogDataBitsT, type SvcFogDataT } from '../../../network/q2/fog.ts';
@@ -73,7 +73,7 @@ export function translateQ2ServiceRecords(records: readonly Q2ServerRecord[], ho
         if (entity === null) { remaining.push(record); continue; }
         const actor = host.actor(event.entity);
         if (actor === null) { remaining.push(record); continue; }
-        const axes = anglesVectors(entity.angles), offset = muzzleOffset(host.edition ?? 'classic', event.flash), origin = entity.origin;
+        const axes = angleVectorsRule(entity.angles, "native"), offset = muzzleOffset(host.edition ?? 'classic', event.flash), origin = entity.origin;
         host.emit({ kind: 'q2', sequence: host.nextSequence(), content: host.content(), seconds: host.seconds, sourceEntity: event.entity,
           event: { kind: 'monster-muzzleflash', actor, flash: event.flash,
             origin: { x: origin.x + axes.forward.x * offset.x + axes.right.x * offset.y,

@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { GuestAddress, GuestCallResult, GuestCallValue } from "../../contracts/execution.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { NativeModAddress, NativeModDeclaration, NativeModEntry, NativeModScalar, NativeModSourceActors } from "../../contracts/native-mod-callbacks.ts";
@@ -34,7 +35,7 @@ interface SourceCalls {
 export class NativeModActors {
   private readonly slots = new Map<number, OwnedActor>();
   private readonly actorSlots = new Map<ActorId, number>();
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly pending = new Set<number>();
   private readonly unsubscribe: () => undefined;
   private suspended = false;
@@ -67,7 +68,7 @@ export class NativeModActors {
         if (!this.suspended && slot !== null && !host.active(slot)) this.retire(slot);
         return result;
       });
-    } catch (error) { behavior?.close(); this.unsubscribe(); for (const remove of this.removals.reverse()) remove(); throw error; }
+    } catch (error) { behavior?.close(); this.unsubscribe(); this.removals.invokeReverse(); throw error; }
   }
   get advancing(): boolean { return this.tickTime !== null; }
   get sourceFrame(): number { return this.frame; }
@@ -191,6 +192,6 @@ export class NativeModActors {
   close(): void {
     if (this.closing) return; this.closing = true;
     try { for (const slot of this.slots.keys()) this.pending.add(slot); this.drainReleases(); }
-    finally { this.unsubscribe(); for (const slot of [...this.slots.keys()]) this.retire(slot); this.behavior.close(); for (const remove of this.removals.reverse()) remove(); }
+    finally { this.unsubscribe(); for (const slot of [...this.slots.keys()]) this.retire(slot); this.behavior.close(); this.removals.invokeReverse(); }
   }
 }

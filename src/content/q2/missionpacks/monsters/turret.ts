@@ -1,10 +1,11 @@
 /* Quake II rogue/m_turret.c. ZeniMax Media, GPL-2.0-or-later. */
 import type { Bounds, Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule, angleModScaled } from "../../../../core/math.ts";
 import type { TraceResult } from "../../../../contracts/scene.ts";
 import { add, dot, length, normalize, scale, subtract, zero } from "../../foundation/fields.ts";
 import type { Q2Think, Q2Use } from "../../foundation/host.ts";
 import type { Q2MoverModule } from "../../foundation/movers.ts";
-import { anglesVectors, attackTraceMask, enemyBody, enemyEye, health, targetDistance, vectorAngles, visible } from "../../foundation/monsters/ai.ts";
+import { attackTraceMask, enemyBody, enemyEye, health, targetDistance, visible } from "../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
 import { throwQ2Debris } from "../../foundation/scenery.ts";
@@ -13,7 +14,6 @@ import { monsterFlash } from "../../rerelease/monsters/common.ts";
 import type { Q2MissionPackMonsterState } from "./state.ts";
 import { turretFrame, turretMoves } from "./tables/rogue-turret.ts";
 
-function anglemod(angle: number): number { return (Math.trunc(angle * 65536 / 360) & 65535) * 360 / 65536; }
 function clamp(value: number, low: number, high: number): number { return Math.max(low, Math.min(high, value)); }
 function targetOrWorld(context: MonsterContext, trace: TraceResult): boolean {
   return trace.hit.kind === "none" || trace.hit.kind === "world" || trace.hit.actor.equals(context.game.host.worldActor()) || context.entity.enemy !== null && trace.hit.actor.equals(context.entity.enemy);
@@ -32,7 +32,7 @@ export function createRogueTurretDefinition(monsters: Q2Monsters, movers: Q2Move
     const viewHeight = game.entity(entity.enemy)?.viewHeight ?? 22;
     if (state.move.name === "turret_move_fire_blind") end = { ...state.blindFireTarget, z: state.blindFireTarget.z + (enemy.origin.z < state.blindFireTarget.z ? viewHeight + 10 : enemy.bounds.min.z - 10) };
     else if (game.host.isPlayer(entity.enemy)) end = { ...end, z: end.z + viewHeight };
-    const body = game.body(entity), ideal = vectorAngles(subtract(end, body.origin));
+    const body = game.body(entity), ideal = vectorToAnglesRule(subtract(end, body.origin), "native-ai");
     let pitch = ideal.x, yaw = ideal.y;
     switch (source.get(entity).turretOrientation) {
       case -1: if (pitch < -90) pitch += 360; pitch = Math.min(pitch, -5); break;
@@ -50,8 +50,8 @@ export function createRogueTurretDefinition(monsters: Q2Monsters, movers: Q2Move
     let yawMove = yaw - body.angles.y;
     if (yawMove >= 180) yawMove -= 360;
     if (yawMove <= -180) yawMove += 360;
-    return game.move(entity, { angles: { x: pitch === body.angles.x ? body.angles.x : anglemod(body.angles.x + clamp(pitchMove, -state.yawSpeed, state.yawSpeed)),
-      y: yaw === body.angles.y ? body.angles.y : anglemod(body.angles.y + clamp(yawMove, -state.yawSpeed, state.yawSpeed)), z: body.angles.z } });
+    return game.move(entity, { angles: { x: pitch === body.angles.x ? body.angles.x : angleModScaled(body.angles.x + clamp(pitchMove, -state.yawSpeed, state.yawSpeed)),
+      y: yaw === body.angles.y ? body.angles.y : angleModScaled(body.angles.y + clamp(yawMove, -state.yawSpeed, state.yawSpeed)), z: body.angles.z } });
   }
   function rocketSpeed(context: MonsterContext): number {
     const { game } = context;
@@ -63,7 +63,7 @@ export function createRogueTurretDefinition(monsters: Q2Monsters, movers: Q2Move
     if (enemy === null || entity.enemy === null) return undefined;
     const start = game.body(entity).origin;
     const direct = normalize(subtract(blind ? state.blindFireTarget : enemy.origin, start));
-    if (dot(direct, anglesVectors(game.body(entity).angles).forward) < 0.98) return undefined;
+    if (dot(direct, angleVectorsRule(game.body(entity).angles, "native").forward) < 0.98) return undefined;
     if (!blind) game.host.random(); // The source retains this draw after its fire-chance condition was removed.
     const speed = (entity.spawnflags & 32) !== 0 ? rocketSpeed(context) : game.options.skill === 0 ? 600 : game.options.skill === 1 ? 800 : 1000;
     if (!blind && !visible(context)) return undefined;
@@ -207,7 +207,7 @@ export function createRogueTurretDefinition(monsters: Q2Monsters, movers: Q2Move
     die(context) {
       const { entity, game } = context, body = game.body(entity);
       game.host.emit({ kind: "effect", effect: "q2:plain-explosion", origin: body.origin, direction: zero, count: 1, color: 0 });
-      const start = add(body.origin, anglesVectors(body.angles).forward);
+      const start = add(body.origin, angleVectorsRule(body.angles, "native").forward);
       for (const speed of [1, 2, 1, 2]) throwQ2Debris(entity, game, "models/objects/debris1/tris.md2", speed, start);
       const base = game.entity(entity.teamChain);
       if (base !== null) { game.solid(base, "box"); if (game.host.combat.read(base.actor.id) !== null) game.host.combat.setTraits(base.actor, { canTakeDamage: false }); game.motion(base, "stationary"); game.link(base); }

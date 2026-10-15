@@ -1,9 +1,9 @@
 /* Original Xatrix/Rogue p_weapon.c source callbacks over the shared Weapon_Generic. */
 import { add, dot, length, normalize, scale, subtract, zero } from "../../foundation/fields.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q2Weapons, Q2WeaponContext, Q2WeaponExtension, Q2ThrowDefinition } from "../../foundation/weapons/player.ts";
 import type { Q2Edition } from "../../foundation/host.ts";
-import { angleVectors } from "../../foundation/weapons/vectors.ts";
 import type { Q2MissionPackProjectiles } from "../projectiles/index.ts";
 import { velocity } from "../projectiles/common.ts";
 import type { Q2MissionPack } from "../types.ts";
@@ -118,7 +118,7 @@ export class Q2MissionPackWeapons {
       return weapons.consume(context, 1, false);
     }
     const timer = state.grenadeTime - context.now, charged = 400 + (3 - timer) * 400 / 3;
-    const speed = Math.trunc(trap ? charged : Math.min(800, charged)), axes = angleVectors(input.angles);
+    const speed = Math.trunc(trap ? charged : Math.min(800, charged)), axes = angleVectorsRule(input.angles, "native");
     const projection = weapons.project(context, { x: 8, y: 8, z: -8 });
     if (trap) this.projectiles.fireTrap(self, game, projection.start, projection.direction, 125 * weapons.multiplier(context), speed, timer, 165, held);
     else {
@@ -134,7 +134,7 @@ export class Q2MissionPackWeapons {
 
   private prox(context: Q2WeaponContext, weapons: Q2Weapons): undefined {
     const { self, game, state, input } = context, projection = weapons.project(context, { x: 8, y: context.rerelease ? 0 : 8, z: -8 }, context.rerelease ? { ...input.angles, x: Math.max(-62.5, input.angles.x) } : input.angles);
-    weapons.kick(context, scale(angleVectors(input.angles).forward, -2), { x: -1, y: 0, z: 0 });
+    weapons.kick(context, scale(angleVectorsRule(input.angles, "native").forward, -2), { x: -1, y: 0, z: 0 });
     this.projectiles.fireProx(self, game, projection.start, projection.direction, weapons.multiplier(context), 600);
     weapons.flash(context, context.rerelease ? 31 : 6); if (!context.rerelease) state.frame++;
     weapons.playerNoise(self, game, projection.start, "weapon"); return weapons.consume(context);
@@ -144,7 +144,7 @@ export class Q2MissionPackWeapons {
     const { self, game, input, state } = context;
     const aim = { ...input.angles, y: input.angles.y + game.host.random() * 2 - 1 };
     const projection = weapons.project(context, { x: 16, y: 7, z: -8 }, aim);
-    weapons.kick(context, scale(angleVectors(context.rerelease ? input.angles : aim).forward, -3), { x: -3, y: 0, z: 0 });
+    weapons.kick(context, scale(angleVectorsRule(context.rerelease ? input.angles : aim, "native").forward, -3), { x: -3, y: 0, z: 0 });
     this.projectiles.fireIonRipper(self, game, projection.start, projection.direction, (game.options.mode === "deathmatch" ? 30 : 50) * weapons.multiplier(context), 500, 0x100000);
     weapons.flash(context, 16); if (!context.rerelease) state.frame++;
     weapons.playerNoise(self, game, projection.start, "weapon"); return weapons.consume(context);
@@ -155,8 +155,8 @@ export class Q2MissionPackWeapons {
     const damage = (70 + Math.floor(game.host.random() * 10)) * multiplier;
     const angles = { ...input.angles, y: input.angles.y + (second ? -1.5 : 1.5) };
     const projection = weapons.project(context, { x: 0, y: 8, z: -8 }, context.rerelease ? angles : input.angles);
-    const direction = context.rerelease ? projection.direction : angleVectors(angles).forward;
-    weapons.kick(context, scale(angleVectors(input.angles).forward, -2), { x: -2, y: 0, z: 0 });
+    const direction = context.rerelease ? projection.direction : angleVectorsRule(angles, "native").forward;
+    weapons.kick(context, scale(angleVectorsRule(input.angles, "native").forward, -2), { x: -2, y: 0, z: 0 });
     this.projectiles.firePlasma(self, game, projection.start, direction, damage, 725, 120, second ? 30 : 120 * multiplier);
     if (second) { weapons.consume(context); if (context.rerelease) weapons.flash(context, 20); }
     else { weapons.flash(context, 18); weapons.playerNoise(self, game, projection.start, "weapon"); }
@@ -174,7 +174,7 @@ export class Q2MissionPackWeapons {
     const kickOrigin = { x: random(), y: 0, z: 0 }, kickAngles = { x: random(), y: 0, z: 0 };
     kickOrigin.y = random(); kickAngles.y = random(); kickOrigin.z = random(); kickAngles.z = random();
     weapons.kick(context, kickOrigin, kickAngles);
-    const axes = angleVectors(input.angles), side = (state.frame === 6 ? 8 : 6) * (input.hand === "left" ? -1 : input.hand === "center" ? 0 : 1);
+    const axes = angleVectorsRule(input.angles, "native"), side = (state.frame === 6 ? 8 : 6) * (input.hand === "left" ? -1 : input.hand === "center" ? 0 : 1);
     const projection = context.rerelease ? weapons.project(context, { x: 15, y: state.frame === 6 ? 8 : 6, z: -8 }, add(input.angles, kickAngles)) : {
       start: add(add(add(add(game.body(self).origin, { x: 0, y: 0, z: self.viewHeight }), scale(axes.forward, 15)), scale(axes.right, side)), scale(axes.up, -8)), direction: axes.forward };
     this.projectiles.fireFlechette(self, game, projection.start, projection.direction, 10 * weapons.multiplier(context), context.rerelease ? 1150 : 750, 3 * weapons.multiplier(context));
@@ -196,7 +196,7 @@ export class Q2MissionPackWeapons {
       trace = game.host.trace({ start: projection.start, end, bounds: { min: { x: -16, y: -16, z: -16 }, max: { x: 16, y: 16, z: 16 } }, ignore: self.actor.id, mask });
     const actor = trace.hit.kind === "actor" ? trace.hit.actor : null;
     const enemy = actor !== null && (game.host.isMonster(actor) || game.host.isPlayer(actor) || game.entity(actor)?.damageableTarget === true) && (game.host.combat.read(actor)?.health ?? 0) > 0 ? actor : null;
-    weapons.kick(context, scale(angleVectors(input.angles).forward, -2), { x: -1, y: 0, z: 0 });
+    weapons.kick(context, scale(angleVectorsRule(input.angles, "native").forward, -2), { x: -1, y: 0, z: 0 });
     this.projectiles.fireTracker(self, game, projection.start, projection.direction, (context.rerelease ? game.options.mode === "deathmatch" ? 45 : 135 : game.options.mode === "deathmatch" ? 30 : 45) * weapons.multiplier(context), 1000, enemy);
     weapons.hooks.emit({ kind: "muzzleflash", actor: self.actor.id, flash: 35, silenced: context.rerelease && context.silenced });
     weapons.playerNoise(self, game, projection.start, "weapon"); if (!context.rerelease) state.frame++;
@@ -260,7 +260,7 @@ export class Q2MissionPackWeapons {
   private chainfist(context: Q2WeaponContext, weapons: Q2Weapons): undefined {
     if (context.rerelease) return this.chainfistRerelease(context, weapons);
     const { self, game, input, state } = context, projection = weapons.project(context, { x: 0, y: 8, z: -4 });
-    const axes = angleVectors(input.angles);
+    const axes = angleVectorsRule(input.angles, "native");
     weapons.kick(context, scale(axes.forward, -2), { x: -1, y: 0, z: 0 });
     const trace = game.host.trace({ start: projection.start, end: add(projection.start, scale(projection.direction, 64)), bounds: null, ignore: self.actor.id, mask: 0x6000003 });
     if (trace.fraction < 1) {

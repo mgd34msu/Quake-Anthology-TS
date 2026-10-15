@@ -72,8 +72,9 @@ export function rereleasePathToGoal(runtime: NavigationRuntime | null, request: 
   const costs = new Map<number, number>([[start.id, 0]]), previous = new Map<number, NavigationEdge>();
   const queue = [{ node: start.id, cost: 0 }];
   while (queue.length > 0) {
-    queue.sort((a, b) => a.cost - b.cost);
-    const current = queue.shift(); if (current === undefined) break;
+    let best = 0;
+    for (let index = 1; index < queue.length; index++) if ((queue[index]?.cost ?? Infinity) < (queue[best]?.cost ?? Infinity)) best = index;
+    const current = queue.splice(best, 1)[0]; if (current === undefined) break;
     if (current.cost !== costs.get(current.node)) continue;
     if (current.node === goal.id) break;
     for (const edge of runtime.outgoing(current.node)) {

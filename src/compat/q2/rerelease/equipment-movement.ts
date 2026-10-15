@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../../foundation/cleanup.ts";
 import type { GuestAddress } from "../../../contracts/execution.ts";
 import type { EquipmentMovement } from "../../../contracts/movement.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -24,7 +25,7 @@ export function withRereleaseEquipmentMovement(module: RereleaseGuestModule, add
   const memory = module.memory, state = memory.borrow(address, pmoveLayout.byteLength);
   const field = (name: string): number => fieldOffset(pmoveLayout, name);
   const flags = field("s.pm_flags"), type = field("s.pm_type"), originalType = state.getInt32(type, true), pose = equipment?.pose;
-  const multiplier = equipment?.speedMultiplier ?? 1, scope = {}, previous = active.get(module), removals: (() => void)[] = [];
+  const multiplier = equipment?.speedMultiplier ?? 1, scope = {}, previous = active.get(module), removals = new CleanupStack();
   active.set(module, scope);
   try {
     if (!Number.isFinite(multiplier) || multiplier <= 0) throw new RangeError("Equipment movement speed must be finite and positive");
@@ -52,7 +53,7 @@ export function withRereleaseEquipmentMovement(module: RereleaseGuestModule, add
     return undefined;
   } finally {
     if (pose !== undefined) state.setInt32(type, originalType, true);
-    for (const remove of removals.reverse()) remove();
+    removals.runReverse();
     if (previous === undefined) active.delete(module); else active.set(module, previous);
   }
 }

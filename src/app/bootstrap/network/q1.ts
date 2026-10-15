@@ -1,3 +1,5 @@
+import { BoundedQueue } from '../../../foundation/bounded-queue.ts';
+import { EventRing, type EventCursor } from '../../../foundation/event-ring.ts';
 import type { ClientId } from '../../../contracts/identity.ts';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import { addressKey } from '../../../network/common/endpoint.ts';
@@ -19,10 +21,10 @@ interface Peer<TAddress extends NetworkAddress> {
     readonly channel: NetQuakeChannel;
     stage: 1 | 2 | 3 | 4;
     state: Q1ApplicationGameState;
-    readonly reliable: Uint8Array[];
+    readonly reliable: EventRing<Uint8Array>;
     lastReceived: number;
     sequence: number;
-    readonly pings: number[];
+    readonly pings: BoundedQueue<number>;
 }
 export class Q1ServerNetwork<TAddress extends NetworkAddress> implements ApplicationNetwork {
     readonly role = 'server';
@@ -31,10 +33,11 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
     private host: Q1ApplicationServerHost;
     private codec: ReturnType<typeof createNetQuakeCodec>;
     private readonly peers = new Map<string, Peer<TAddress>>();
-    private pending: ActorCommand[] = [];
+    private readonly pending = new EventRing<ActorCommand>(8192);
+    private readonly pendingCursor: EventCursor = this.pending.openCursor();
     private sourceSeconds = 0;
     private readonly playerNames = new Map<number, string>();
-    clientPings(): ReadonlyMap<ClientId, number> { return new Map([...this.peers.values()].map(peer => [peer.player.client, peer.pings.length === 0 ? 0 : Math.trunc(peer.pings.reduce((sum, value) => sum + value, 0) / peer.pings.length)])); }
+    clientPings(): ReadonlyMap<ClientId, number> { return new Map([...this.peers.values()].map(peer => { let sum = 0; peer.pings.forEach(value => { sum += value; }); return [peer.player.client, peer.pings.length === 0 ? 0 : Math.trunc(sum / peer.pings.length)]; })); }
     constructor(readonly options: Q1ServerNetworkOptions<TAddress>) { this.validate(options.host); this.host = options.host; this.codec = createNetQuakeCodec(this.host.protocol, new MessageReader(new Uint8Array(0))); }
     private validate(host: Q1ApplicationServerHost): void { const support = host.supportsSourceWire(); if (support.kind === 'unsupported')
         throw new Error(support.reasons.join('; ')); }
@@ -43,18 +46,18 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
     get clients(): readonly Q1ApplicationPlayer[] { return [...this.peers.values()].map(peer => peer.player); }
     private bytes(messages: readonly Q1ApplicationMessage[]): Uint8Array { for (const message of messages) if (message.kind === "name") this.playerNames.set(message.slot, message.value); const buffer = new SizeBuf(this.codec.maxMsglen); for (const message of messages)
         writeNetQuakeMessage(buffer, this.host.protocol, message); return buffer.bytes(); }
-    private start(peer: Peer<TAddress>): void { peer.stage = 1; peer.reliable.push(this.bytes([peer.state.info, { kind: 'set-view', entity: peer.player.sourceEntity }, { kind: 'signon', stage: 1 }])); }
+    private start(peer: Peer<TAddress>): void { peer.stage = 1; peer.reliable.admit(this.bytes([peer.state.info, { kind: 'set-view', entity: peer.player.sourceEntity }, { kind: 'signon', stage: 1 }])); }
     changeWorld(host: Q1ApplicationServerHost): void { this.validate(host);
         if (this.peers.size !== 0 && (host.protocol.version !== this.host.protocol.version || protocolFlags(host.protocol) !== protocolFlags(this.host.protocol))) throw new Error('Connected NetQuake peers require the same protocol across travel');
         const carried = [...this.peers.values()].map(peer => ({ peer, player: host.carriedPlayer(peer.player.client) })); this.host = host;
-        this.codec = createNetQuakeCodec(host.protocol, new MessageReader(new Uint8Array(0))); this.pending = []; for (const { peer, player } of carried) {
+        this.codec = createNetQuakeCodec(host.protocol, new MessageReader(new Uint8Array(0))); this.pending.reset(); for (const { peer, player } of carried) {
         peer.player = player;
         peer.state = host.gameState(player);
-        peer.reliable.length = 0;
+        peer.reliable.reset();
         this.start(peer);
     } }
     disconnectClient(client: ClientId, reason: string): boolean { const peer = [...this.peers.values()].find(value => value.player.client.equals(client)); if (peer === undefined)
-        return false; this.options.transport.send(peer.remote, peer.channel.unreliable(this.bytes([{ kind: 'disconnect' }]))); this.peers.delete(addressKey(peer.remote)); this.pending = this.pending.filter(command => !command.actor.equals(peer.player.actor)); this.host.disconnect(peer.player, reason); return true; }
+        return false; this.options.transport.send(peer.remote, peer.channel.unreliable(this.bytes([{ kind: 'disconnect' }]))); this.peers.delete(addressKey(peer.remote)); this.pending.filterLive(command => !command.actor.equals(peer.player.actor)); this.host.disconnect(peer.player, reason); return true; }
     private command(peer: Peer<TAddress>, text: string): void {
         const [name, ...args] = quakeWorldCommandArguments(text);
         if (name === undefined)
@@ -67,18 +70,18 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
             });
             const text = name === 'ping' ? `Client ping times:\n${[...this.peers.values()].map((other, index) => `${pings.get(other.player.client) ?? 0} ${rows[index]}\n`).join('')}`
                 : `map: ${this.host.mapName}\nplayers: ${this.peers.size} active (${this.host.maxClients} max)\n${[...this.peers.values()].map((other, index) => `#${other.player.client.slot + 1} ${rows[index]} ${addressKey(other.remote)}\n`).join('')}`;
-            peer.reliable.push(this.bytes([{ kind: 'print', text }])); return;
+            peer.reliable.admit(this.bytes([{ kind: 'print', text }])); return;
         }
         if (name === 'disconnect') {
             this.disconnectClient(peer.player.client, 'Client disconnected');
             return;
         }
         if (name === 'prespawn' && peer.stage === 1) {
-            peer.reliable.push(this.bytes([...peer.state.signon, ...[...peer.state.baselines.values()].map(state => ({ kind: 'baseline', state } satisfies Q1ApplicationMessage)), { kind: 'signon', stage: 2 }]));
+            peer.reliable.admit(this.bytes([...peer.state.signon, ...[...peer.state.baselines.values()].map(state => ({ kind: 'baseline', state } satisfies Q1ApplicationMessage)), { kind: 'signon', stage: 2 }]));
             peer.stage = 2;
         }
         else if (name === 'spawn' && peer.stage === 2) {
-            peer.reliable.push(this.bytes([...this.host.spawn(peer.player), { kind: 'signon', stage: 3 }]));
+            peer.reliable.admit(this.bytes([...this.host.spawn(peer.player), { kind: 'signon', stage: 3 }]));
             peer.stage = 3;
         }
         else if (name === 'begin' && peer.stage === 3)
@@ -113,7 +116,7 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
                             if (admitted.kind === 'rejected')
                                 return admitted;
                             try {
-                                const peer: Peer<TAddress> = { remote: packet.from, player: admitted.player, channel: new NetQuakeChannel(this.codec.maxMsglen), stage: 1, state: this.host.gameState(admitted.player), reliable: [], lastReceived: now, sequence: 0, pings: [] };
+                                const peer: Peer<TAddress> = { remote: packet.from, player: admitted.player, channel: new NetQuakeChannel(this.codec.maxMsglen), stage: 1, state: this.host.gameState(admitted.player), reliable: new EventRing<Uint8Array>(4096), lastReceived: now, sequence: 0, pings: new BoundedQueue<number>(16) };
                                 this.start(peer);
                                 this.peers.set(addressKey(packet.from), peer);
                             }
@@ -145,8 +148,7 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
                             this.disconnectClient(peer.player.client, 'Client disconnected');
                         else if (message.kind === 'move' && peer.stage === 4) {
                             peer.pings.push(Math.max(0, this.sourceSeconds - message.command.acknowledgedServerTimeSeconds) * 1000);
-                            if (peer.pings.length > 16) peer.pings.shift();
-                            this.pending.push(this.host.input(peer.player, message.command, peer.sequence++));
+                            this.pending.admit(this.host.input(peer.player, message.command, peer.sequence++));
                         }
                     }
             }
@@ -165,15 +167,15 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
             }
             if (peer.channel.canSendReliable) {
                 const bytes = peer.reliable.shift();
-                if (bytes !== undefined)
+                if (bytes !== null)
                     peer.channel.queueReliable(bytes);
             }
             const bytes = peer.channel.next(now);
             if (bytes !== null)
                 this.options.transport.send(peer.remote, bytes);
         }
-        const commands = this.pending;
-        this.pending = [];
+        const commands = this.pending.take(this.pendingCursor);
+        this.pending.retire();
         return commands;
     }
     submit(_commands: readonly ActorCommand[], _now: number): void { throw new Error('Server input must enter the application input batch'); }
@@ -185,10 +187,10 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
         for (const peer of this.peers.values()) {
             const frame = this.host.frame(peer.player, output);
             if (frame.reliable.length !== 0)
-                peer.reliable.push(this.bytes(frame.reliable));
+                peer.reliable.admit(this.bytes(frame.reliable));
             if (peer.channel.canSendReliable) {
                 const reliable = peer.reliable.shift();
-                if (reliable !== undefined)
+                if (reliable !== null)
                     peer.channel.queueReliable(reliable);
             }
             const reliable = peer.channel.next(now);

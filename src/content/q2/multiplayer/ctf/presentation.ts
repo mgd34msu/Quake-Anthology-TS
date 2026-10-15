@@ -1,8 +1,8 @@
 /* Original CTF scoreboard, status, player ID and team communication. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { Q2Entity, Q2GameServices } from "../../foundation/host.ts";
 import { add, dot, length, normalize, scale, subtract } from "../../foundation/fields.ts";
-import { angleVectors } from "../../foundation/weapons/vectors.ts";
 import { ctfCarriedFlag, ctfName, ctfPlayer, ctfPrint } from "./types.ts";
 import type { Q2CtfContext, Q2CtfScoreRow, Q2CtfTech } from "./types.ts";
 import { ctfCanSee } from "./flags.ts";
@@ -39,7 +39,7 @@ export class Q2CtfPresentation {
     return this.context.hooks.emit({ kind: "scoreboard", actor: entity.actor.id, red, blue, spectators, totals, captures: [match.team1, match.team2], layout });
   }
   identify(entity: Q2Entity, game: Q2GameServices): ActorId | null {
-    const origin = game.body(entity).origin, forward = angleVectors(game.host.playerViewState(entity.actor.id)?.viewAngles ?? game.body(entity).angles).forward;
+    const origin = game.body(entity).origin, forward = angleVectorsRule(game.host.playerViewState(entity.actor.id)?.viewAngles ?? game.body(entity).angles, "native").forward;
     const trace = game.host.trace({ start: origin, end: add(origin, scale(forward, 1024)), bounds: null, ignore: entity.actor.id, mask: 3 });
     if (trace.hit.kind === "actor" && game.host.isPlayer(trace.hit.actor)) return trace.hit.actor;
     let best: ActorId | null = null, alignment = 0.9;

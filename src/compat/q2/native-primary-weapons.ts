@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { SourceEquipmentContext } from "../../contracts/source-items.ts";
 import type { ContentDigest } from "../../contracts/content.ts";
 import type { GuestAddress, GuestCallResult, GuestCallValue, NativeAbi, RawEntityView } from "../../contracts/execution.ts";
@@ -53,7 +54,7 @@ export interface NativePrimaryWeaponHooks {
 export class NativePrimaryWeapons {
   private closed = false;
   private readonly dispatcher: NativeWeaponDispatcher;
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly delayFlags = new Map<ActorId, number>();
   private readonly delayResult: GuestAddress | null;
   private readonly damageFactors = new Map<ActorId, number>();
@@ -222,6 +223,6 @@ export class NativePrimaryWeapons {
   continuing(actor: ActorId): boolean { return this.current(actor) && this.profile.continuations.some(group => group.every(test => this.matches(actor, test))); }
   timeMilliseconds(): number { return this.readAddress(this.at(this.profile.time.address), this.profile.time.encoding) * this.profile.time.milliseconds; }
   release(actor: ActorId): void { this.damageFactors.delete(actor); this.delayFlags.delete(actor); }
-  close(): void { if (this.closed) return; this.closed = true; for (const remove of this.removals.splice(0).reverse()) remove(); this.dispatcher.close(); this.damageFactors.clear(); this.delayFlags.clear();
+  close(): void { if (this.closed) return; this.closed = true; this.removals.runReverse(); this.dispatcher.close(); this.damageFactors.clear(); this.delayFlags.clear();
     if (this.delayResult !== null) this.host.memory.unmap(this.delayResult, 8); }
 }

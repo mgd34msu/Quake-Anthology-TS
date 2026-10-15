@@ -1,12 +1,12 @@
 /* CTF g_ctf.c/g_ctf.cpp and LMCTF p_weapon.c weapon-slot continuations. GPL-2.0-or-later. */
 import type { ActorId } from "../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../core/math.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q2GameServices } from "../foundation/host.ts";
 import type { Q2WeaponDefinition } from "../foundation/weapons/types.ts";
 import { stepQ2ClassicFrame, stepQ2RereleaseFrame } from "../foundation/weapons/generic-frame.ts";
 import type { Q2GenericFrameState, Q2RereleaseFrameInput, Q2RereleaseFrameHooks } from "../foundation/weapons/generic-frame.ts";
 import { scale } from "../foundation/fields.ts";
-import { angleVectors } from "../foundation/weapons/vectors.ts";
 import type { Q2CtfGrappleEquipment } from "./ctf-grapple.ts";
 import type { LmctfGrappleEquipment } from "./lmctf-grapple.ts";
 import type { CtfGrappleState, LmctfGrappleState } from "./grapple-services.ts";
@@ -73,7 +73,7 @@ export function fireCtfGrappleWeapon(
   edition: "classic" | "rerelease", presentation: Pick<GrappleWeaponPresentation, "kick">,
 ): undefined {
   if (core.state(actor).grappleState !== "fly") { if (edition === "classic") state.frame++; return undefined; }
-  if (edition === "classic") presentation.kick(scale(angleVectors(core.hooks.pose(actor, game).angles).forward, -2), -1);
+  if (edition === "classic") presentation.kick(scale(angleVectorsRule(core.hooks.pose(actor, game).angles, "native").forward, -2), -1);
   core.fireFromPose(actor, game);
   if (edition === "classic" && game.host.actors.isLive(actor)) state.frame++;
   return undefined;
@@ -84,7 +84,7 @@ export function fireLmctfGrappleWeapon(
   presentation: Pick<GrappleWeaponPresentation, "kick">,
 ): undefined {
   state.sourceFiring = core.state(actor).hookState === 0;
-  if (state.sourceFiring) presentation.kick(scale(angleVectors(core.hooks.pose(actor, game).angles).forward, -2), -1);
+  if (state.sourceFiring) presentation.kick(scale(angleVectorsRule(core.hooks.pose(actor, game).angles, "native").forward, -2), -1);
   return core.fire(actor, game);
 }
 

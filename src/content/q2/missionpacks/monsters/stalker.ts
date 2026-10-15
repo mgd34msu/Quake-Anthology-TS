@@ -1,8 +1,9 @@
 /* Quake II rogue/m_stalker.c. ZeniMax Media, GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { TraceResult } from "../../../../contracts/scene.ts";
 import { add, length, normalize, scale, subtract } from "../../foundation/fields.ts";
-import { anglesVectors, attackTraceMask, changeYaw, enemyBody, finishDodge, health, monsterSolidMask, projectFlash, vectorAngles, visible } from "../../foundation/monsters/ai.ts";
+import { attackTraceMask, changeYaw, enemyBody, finishDodge, health, monsterSolidMask, projectFlash, visible } from "../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
 import { aliveEnemy, beginDeath, damagedSkin, finishCorpse, move, sound } from "../../base/monsters/common.ts";
@@ -78,7 +79,7 @@ export function createStalkerDefinition(monsters: Q2Monsters, weapons: Q2Mission
     for (const corner of [{ x: enemy.bounds.min.x, y: enemy.bounds.min.y }, { x: enemy.bounds.max.x, y: enemy.bounds.min.y }, { x: enemy.bounds.max.x, y: enemy.bounds.max.y }, { x: enemy.bounds.min.x, y: enemy.bounds.max.y }]) {
       if ((game.host.pointContents({ ...corner, z: enemy.bounds.min.z - 0.25 }) & 3) === 0) return false;
     }
-    const delta = subtract(destination, body.origin), angles = vectorAngles(delta);
+    const delta = subtract(destination, body.origin), angles = vectorToAnglesRule(delta, "native-ai");
     if (Math.abs(Math.trunc(angles.y - body.angles.y)) > 45) return false;
     context.state.idealYaw = angles.y; changeYaw(context);
     if (length(delta) > 450) return false;
@@ -94,7 +95,7 @@ export function createStalkerDefinition(monsters: Q2Monsters, weapons: Q2Mission
     }
     const chosen = !high && !Number.isNaN(jump[0]) ? jump[0] : jump[1];
     if (Number.isNaN(chosen)) return false;
-    const forward = normalize(anglesVectors(game.body(entity).angles).forward);
+    const forward = normalize(angleVectorsRule(game.body(entity).angles, "native").forward);
     game.move(entity, { velocity: { ...scale(forward, velocity * Math.cos(chosen)), z: velocity * Math.sin(chosen) + 0.5 * gravity() * 0.1 } });
     return true;
   }
@@ -117,7 +118,7 @@ export function createStalkerDefinition(monsters: Q2Monsters, weapons: Q2Mission
   }
   function reactivate(context: MonsterContext): undefined { context.state.standGround = false; return context.setMove("stalker_move_false_death_end"); }
   function jumpImpulse(context: MonsterContext, forwardSpeed: number, upSpeed: number): undefined {
-    const { entity, game } = context, body = game.body(entity), axes = anglesVectors(body.angles);
+    const { entity, game } = context, body = game.body(entity), axes = angleVectorsRule(body.angles, "native");
     entity.timestamp = game.host.now();
     return game.move(entity, { velocity: add(add(body.velocity, scale(axes.forward, forwardSpeed)), scale(axes.up, upSpeed)) });
   }

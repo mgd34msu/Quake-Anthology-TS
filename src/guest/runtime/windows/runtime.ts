@@ -25,9 +25,10 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
   readonly teb: GuestAddress;
   readonly peb: GuestAddress;
   readonly staticTls: GuestAddress;
-  readonly #imports = new Map<string, ImportEntry>();
-  readonly #data = new Map<string, GuestAddress>();
-  readonly #requested = new Set<string>();
+  readonly #imports = new Map<string, Map<string, ImportEntry>>();
+  readonly #importOrder: ImportEntry[] = [];
+  readonly #data = new Map<string, Map<string, GuestAddress>>();
+  readonly #requested = new Map<string, Set<string>>();
   readonly #libraries = new Map<string, GuestAddress>();
   readonly #images: PeImage[] = [];
   readonly #libraryReferences = new Map<bigint, number>();
@@ -66,8 +67,10 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
   get images(): readonly PeImage[] { return this.#images; }
   get lastError(): number { return Number(readUnsigned(this.memory, this.memory.offset(this.teb, this.memory.pointerBytes === 4 ? 0x34n : 0x68n), 4)); }
   set lastError(value: number) { writeUnsigned(this.memory, this.memory.offset(this.teb, this.memory.pointerBytes === 4 ? 0x34n : 0x68n), 4, BigInt(value)); }
-  get coverage(): readonly WindowsImportCoverage[] { return [...this.#imports.values()].filter(entry => this.#requested.has(`${entry.library}!${entry.name}`) || entry.reached > 0)
+  get coverage(): readonly WindowsImportCoverage[] { return this.#importOrder.filter(entry => this.#requested.get(entry.library)?.has(entry.name) === true || entry.reached > 0)
     .map(({ library, name, supported, reached, failed, lastFailure }) => ({ library, name, supported, reached, failed, lastFailure })); }
+  #importEntry(library: string, name: string): ImportEntry | undefined { return this.#imports.get(library)?.get(name); }
+  #dataAddress(library: string, name: string): GuestAddress | undefined { return this.#data.get(library)?.get(name); }
   attachRunner(runner: GuestCallRunner): void {
     if (runner.options.cpu.memory !== this.memory || runner.options.callbacks !== this.options.callbacks) throw new TypeError("Windows runner belongs to different guest state");
     this.#runner = runner;
@@ -89,46 +92,53 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
   }
   register(library: string, name: string, signature: GuestCallSignature, invoke: WindowsImportImplementation): void { this.#register(library, name, signature, invoke, true); }
   registerData(library: string, name: string, bytes: Uint8Array): GuestAddress {
-    const key = `${canonical(library)}!${name}`; if (this.#data.has(key) || this.#imports.has(key)) throw new Error(`Duplicate Windows data export ${key}`);
-    const address = this.memory.allocate({ byteLength: bytes.length, alignment: 16n, label: key }); this.memory.write(address, bytes); this.#data.set(key, address);
-    const normalized = canonical(library); if (!this.#libraries.has(normalized)) this.#libraries.set(normalized, this.memory.allocate({ byteLength: 16, label: `Windows library handle ${normalized}` }));
+    const normalized = canonical(library), key = `${normalized}!${name}`;
+    if (this.#dataAddress(normalized, name) !== undefined || this.#importEntry(normalized, name) !== undefined) throw new Error(`Duplicate Windows data export ${key}`);
+    const address = this.memory.allocate({ byteLength: bytes.length, alignment: 16n, label: key }); this.memory.write(address, bytes);
+    let exports = this.#data.get(normalized); if (exports === undefined) { exports = new Map<string, GuestAddress>(); this.#data.set(normalized, exports); }
+    exports.set(name, address);
+    if (!this.#libraries.has(normalized)) this.#libraries.set(normalized, this.memory.allocate({ byteLength: 16, label: `Windows library handle ${normalized}` }));
     return address;
   }
   #register(library: string, name: string, signature: GuestCallSignature, invoke: WindowsImportImplementation, supported: boolean): ImportEntry {
     const normalized = canonical(library), key = `${normalized}!${name}`;
-    if (this.#imports.has(key)) throw new Error(`Windows import already registered: ${key}`);
+    if (this.#importEntry(normalized, name) !== undefined) throw new Error(`Windows import already registered: ${key}`);
     let reached = 0;
     const callback: GuestHostCallback = { id: `windows:${key}`, signature, invoke: (context, args) => {
-      reached++; const entry = this.#imports.get(key); if (entry !== undefined) entry.reached = reached;
+      reached++; const entry = this.#importEntry(normalized, name); if (entry !== undefined) entry.reached = reached;
       try { return invoke(context, args); } catch (error) { if (entry !== undefined) { entry.failed++; entry.lastFailure = error instanceof Error ? error.message : String(error); } throw error; }
     } };
     const address = this.options.callbacks.bind(callback);
     const entry: ImportEntry = { library: normalized, name, callback, address, supported, reached, failed: 0, lastFailure: null };
-    this.#imports.set(key, entry);
+    let imports = this.#imports.get(normalized); if (imports === undefined) { imports = new Map<string, ImportEntry>(); this.#imports.set(normalized, imports); }
+    imports.set(name, entry);
+    this.#importOrder.push(entry);
     if (!this.#libraries.has(normalized)) this.#libraries.set(normalized, this.memory.allocate({ byteLength: 16, label: `Windows library handle ${normalized}` }));
     return entry;
   }
   resolve(import_: GuestImport, requesting: GuestImage): GuestImportResolution {
     const name = import_.symbol.kind === "name" ? import_.symbol.name : `#${import_.symbol.ordinal}`;
     const library = canonical(import_.library);
-    this.#requested.add(`${library}!${name}`);
-    const data = this.#data.get(`${library}!${name}`); if (data !== undefined) return { kind: "guest", address: data, module: this.memory.module };
+    let requested = this.#requested.get(library); if (requested === undefined) { requested = new Set<string>(); this.#requested.set(library, requested); }
+    requested.add(name);
+    const data = this.#dataAddress(library, name); if (data !== undefined) return { kind: "guest", address: data, module: this.memory.module };
     const guest = this.#images.find(image => canonical(image.module.artifactPath) === library);
     if (guest !== undefined && guest !== requesting) {
       const target = resolvePeExport(guest, import_.symbol, forwarded => this.#images.find(image => canonical(image.module.artifactPath) === canonical(forwarded)) ?? null);
       return { kind: "guest", address: target.address, module: target.image.module };
     }
-    let entry = this.#imports.get(`${library}!${name}`);
+    let entry = this.#importEntry(library, name);
     if (entry === undefined) entry = this.#register(library, name, this.signature(library, [], "void"), context => { throw new UnsupportedWindowsImport(library, name, context); }, false);
     return { kind: "host", address: entry.address, callback: entry.callback };
   }
   resolveAddress(library: string, name: string): GuestAddress | null {
-    const seen = new Set<string>();
+    const seen = new Map<string, Set<string>>();
     for (let depth = 0; depth < 128; depth++) {
-      const normalized = canonical(library), key = `${normalized}!${name}`;
-      if (seen.has(key)) return null; seen.add(key);
+      const normalized = canonical(library);
+      let names = seen.get(normalized); if (names === undefined) { names = new Set<string>(); seen.set(normalized, names); }
+      if (names.has(name)) return null; names.add(name);
       const image = this.#images.find(value => canonical(value.module.artifactPath) === normalized);
-      if (image === undefined) { const entry = this.#imports.get(key); return entry?.supported === true ? entry.address : this.#data.get(key) ?? null; }
+      if (image === undefined) { const entry = this.#importEntry(normalized, name); return entry?.supported === true ? entry.address : this.#dataAddress(normalized, name) ?? null; }
       const exported = image.exports.find(value => value.symbol.kind === "name" ? value.symbol.name === name : `#${value.symbol.ordinal}` === name);
       if (exported === undefined) return null;
       if (exported.target.kind === "address") return exported.target.address;
@@ -139,7 +149,7 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
   libraryHandle(library: string): GuestAddress | null {
     const normalized = canonical(library), image = this.#images.find(value => canonical(value.module.artifactPath) === normalized);
     if (image !== undefined) return image.base;
-    return ([...this.#imports.values()].some(value => value.library === normalized && value.supported) || [...this.#data.keys()].some(key => key.startsWith(`${normalized}!`))) ? this.#libraries.get(normalized) ?? null : null;
+    return ([...this.#imports.get(normalized)?.values() ?? []].some(value => value.supported) || (this.#data.get(normalized)?.size ?? 0) > 0) ? this.#libraries.get(normalized) ?? null : null;
   }
   loadLibrary(library: string): GuestAddress | null {
     const handle = this.libraryHandle(library);

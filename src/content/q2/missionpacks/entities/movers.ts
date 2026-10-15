@@ -1,9 +1,9 @@
 /* Rogue g_func.c plat2 and g_newfnc.c secret doors/force walls. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import type { Q2Die, Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think, Q2Touch, Q2Use } from "../../foundation/host.ts";
 import { add, numberField, scale, subtract, zero } from "../../foundation/fields.ts";
-import { angleVectors } from "../../foundation/weapons/vectors.ts";
 import { killQ2Box } from "../../foundation/scenery.ts";
 import type { Q2MissionPackEntityHooks } from "./types.ts";
 import { explode } from "../projectiles/common.ts";
@@ -154,7 +154,7 @@ export class Q2RogueMovers implements Q2SpawnModule {
     return entity.message === "" ? undefined : game.host.emit({ kind: "centerprint", actor: contact.other, text: entity.message });
   };
   private spawnSecret(entity: Q2Entity, game: Q2GameServices): undefined {
-    const angles = game.body(entity).angles, axes = angleVectors(angles);
+    const angles = game.body(entity).angles, axes = angleVectorsRule(angles, "native");
     game.move(entity, { angles: zero }); game.solid(entity, "brush"); game.motion(entity, "push");
     const body = game.body(entity), size = subtract(body.bounds.max, body.bounds.min);
     if (![0, 90, 180, 270].includes(angles.y)) { game.host.diagnostic("Secret door not at 0,90,180,270!"); return game.remove(entity); }

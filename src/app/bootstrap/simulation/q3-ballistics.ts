@@ -17,7 +17,7 @@ import type { SessionActorRegistry, SharedBodyTable } from "../../../world/actor
 import type { SharedSceneQueries } from "../../../world/collision/index.ts";
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
 import { add3, normalize3, scale3, vec3 } from "../../../core/math.ts";
-import { qvmAngleVectors } from "../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../core/math.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
 import { q3MissileParameters, q3NailVelocity } from "../../../content/q3/base/game/ballistics-math.ts";
 import { q3AccuracyHit, q3BulletFire, q3GauntletAttack, q3LightningFire, q3ShotgunFire, q3RailFire, q3RailStatistics } from "../../../content/q3/base/game/hitscan.ts";

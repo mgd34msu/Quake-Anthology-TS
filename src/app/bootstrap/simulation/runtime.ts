@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
 import { Q3GuestCatalog } from "../../../content/q3/guest-items.ts";
 import { ModClientOutputs } from "../../../world/session/mod-client-outputs.ts";
 import { ModMatchState } from "../../../world/session/mod-match.ts";
@@ -347,7 +348,8 @@ export class SharedSimulation implements Simulation {
   private readonly sourceModels = new Map<ActorId, Extract<Q2PresentationEvent, { readonly kind: "model" }>>();
   private readonly viewModels = new Map<ActorId, { readonly path: string; readonly frame: number;
     readonly q2?: { readonly skin: number; readonly rate: number; readonly kickOrigin: Vec3; readonly kickAngles: Vec3 } }>();
-  private readonly transitions: TransitionIntent[] = [];
+  private readonly transitions = new EventRing<TransitionIntent>(1024);
+  private readonly transitionsCursor: EventCursor = this.transitions.openCursor();
   private levelChange: { readonly map: string; readonly landmark: Q2LandmarkCarry | null; readonly serverFlags: number } | null = null;
   readonly weaponProvider: ProviderReference;
   private readonly q1Movement: Q1MonsterMovement;
@@ -390,7 +392,7 @@ export class SharedSimulation implements Simulation {
   private readonly selectedPickupBindings = new Map<ActorId, () => undefined>();
   private readonly modClientApplications = new ModClientApplications(identity => this.actors.isLive(identity.actor)
     && this.options.identity.owns(identity.client) && this.playerClient(identity.actor)?.equals(identity.client) === true);
-  private readonly modClientDrops: { readonly client: ClientId; readonly actor: ActorId; readonly reason: string; readonly content: ContentId }[] = [];
+  private readonly modClientDrops = new EventRing<{ readonly client: ClientId; readonly actor: ActorId; readonly reason: string; readonly content: ContentId }>(1024);
   private readonly modClientOutputs = new ModClientOutputs(actor => this.actors.isLive(actor) && this.playerClient(actor) !== null);
   readonly modClients: ModClientServices;
   private readonly sourceMatch: ModMatchState;
@@ -433,7 +435,7 @@ export class SharedSimulation implements Simulation {
       return output?.viewOffset !== undefined && (output.stance !== false || !original.crouched)
         ? { ...original, viewOffset: output.viewOffset } : original;
     },
-    drop: (client, reason, content) => { const actor = this.requireModClient(client); this.modClientDrops.push({ client, actor, reason, content }); },
+    drop: (client, reason, content) => { const actor = this.requireModClient(client); this.modClientDrops.admit({ client, actor, reason, content }); },
     subscribe: listener => { this.modClientListeners.add(listener); return () => { this.modClientListeners.delete(listener); return undefined; }; },
     subscribeApplication: listener => this.modClientApplications.subscribe(listener),
   }; }
@@ -482,7 +484,8 @@ export class SharedSimulation implements Simulation {
   private q1Restart = false;
   private readonly lastAttack = new Map<OwnedActor, AttackProvenance>();
   private readonly areaPortals = new Map<number, boolean>();
-  private readonly quakeWorldCommands: ({ readonly kind: "move"; readonly client: ClientId; readonly commands: readonly QwUserCommand[]; readonly sequence: number } | { readonly kind: "action"; readonly client: ClientId; readonly action: () => void })[] = [];
+  private readonly quakeWorldCommands = new EventRing<{ readonly kind: "move"; readonly client: ClientId; readonly commands: readonly QwUserCommand[]; readonly sequence: number } | { readonly kind: "action"; readonly client: ClientId; readonly action: () => void }>(8192);
+  private readonly quakeWorldCursor: EventCursor = this.quakeWorldCommands.openCursor();
   private quakeWorldTouched: Set<number> | null = null;
 
   constructor(readonly options: SimulationOptions, loading?: typeof nativeLoading) {
@@ -2046,7 +2049,7 @@ export class SharedSimulation implements Simulation {
           }
           if (event.kind === "teleport-player") { this.grapple?.release(event.player); const player = this.player(event.player); if (player !== null) { player.viewAngles = event.angles; if (player.state.kind === "q1-netquake") player.state = { ...player.state, viewAngles: event.angles, teleportTimeSeconds: event.lockUntil }; } }
           return this.events.emit(content, { kind: "q1", event }, { kind: "seconds", value: runtime.now() });
-        }, transition: intent => { this.transitions.push(sourceLevelTransition(intent, this.recipe, authority)); return undefined; }, players: () => this.players(), classname: actor => this.classname(actor),
+        }, transition: intent => { this.transitions.admit(sourceLevelTransition(intent, this.recipe, authority)); return undefined; }, players: () => this.players(), classname: actor => this.classname(actor),
         checkClient: observer => {
           const eye = this.q1VisibilityEye(observer.id);
           return eye === null ? null : this.q1ClientVisibility.check(eye, runtime.now(), visibilityNumeric);
@@ -2083,7 +2086,7 @@ export class SharedSimulation implements Simulation {
           const change = this.levelChange;
           return this.source.players.beginIntermission(this.source.game, change?.map ?? intent.map.replace(/^q2:/, ""), change?.landmark ?? null);
         }
-        this.transitions.push(sourceLevelTransition(intent, this.recipe, authority)); return undefined;
+        this.transitions.admit(sourceLevelTransition(intent, this.recipe, authority)); return undefined;
       }, diagnostic: message => this.events.message({ kind: "print", level: 2, text: message }) }, { scene: this.scene, numeric: runtime.numeric, worldActor: () => this.worldActor(), sourceOrder: (a, b) => this.sourceOrder(a, b) });
   }
 
@@ -2806,7 +2809,7 @@ export class SharedSimulation implements Simulation {
         admit: (actor, _slot, source) => this.registerActorExecution({ kind: "quakec", actor, source, content }),
         changeLevel: map => {
           const campaign = recipe.campaign;
-          this.transitions.push(campaign.kind === "campaign"
+          this.transitions.admit(campaign.kind === "campaign"
             ? { kind: "campaign-level", campaign: campaign.mission.provider, map: `q1:${map}`, spawnPoint: "", gates: [], cause: null }
             : { kind: "match-rotation", match: recipe.match.provider, map: `q1:${map}` });
           return undefined;
@@ -2964,8 +2967,8 @@ export class SharedSimulation implements Simulation {
           return weapon !== undefined && game.selectWeapon(this.requirePlayer(actor).actor, weapon); },
         weaponChanged: actor => { const player = this.requirePlayer(actor); player.arsenal = this.arsenal(player); return undefined; },
         promptSupported: actor => { const player = this.player(actor); return player !== null && (this.options.promptSupported?.(player.client) ?? false); },
-        restartSession: (map, flags) => { this.q1Restart = true; this.q1Campaign.flags = flags; this.transitions.push({ kind: "campaign-level", campaign, map: `q1:${map}`, spawnPoint: "", gates: [], cause: null }); return undefined; },
-        finishCampaign: () => { this.transitions.push({ kind: "campaign-complete", campaign, gates: [] }); return undefined; },
+        restartSession: (map, flags) => { this.q1Restart = true; this.q1Campaign.flags = flags; this.transitions.admit({ kind: "campaign-level", campaign, map: `q1:${map}`, spawnPoint: "", gates: [], cause: null }); return undefined; },
+        finishCampaign: () => { this.transitions.admit({ kind: "campaign-complete", campaign, gates: [] }); return undefined; },
       };
       const program = selectedSourceProgram(recipe);
       if (program !== "id1" && program !== "hipnotic" && program !== "rogue" && program !== "dopa" && program !== "mg1" && program !== "mg3" && program !== "ctf") throw new Error(`Unsupported Q1 source program ${program}`);
@@ -4160,13 +4163,13 @@ export class SharedSimulation implements Simulation {
     if (player === undefined) throw new Error("QuakeWorld command client has not begun");
     for (const command of commands) if (!Number.isInteger(command.milliseconds) || command.milliseconds < 0 || command.milliseconds > 255)
       throw new Error("Invalid QuakeWorld command duration");
-    this.quakeWorldCommands.push({ kind: "move", client, commands: structuredClone(commands), sequence });
+    this.quakeWorldCommands.admit({ kind: "move", client, commands: structuredClone(commands), sequence });
   }
   queueQuakeWorldAction(client: ClientId, action: () => void): void {
     this.assertOpen();
     if (this.source.kind !== "quakec" || this.source.game.kind !== "quakeworld" || !this.options.identity.owns(client)
       || !this.source.game.hasClient(client)) throw new Error("QuakeWorld action requires a connected client");
-    this.quakeWorldCommands.push({ kind: "action", client, action });
+    this.quakeWorldCommands.admit({ kind: "action", client, action });
   }
   private runQuakeWorldNewMissile(): void {
     if (this.source.kind !== "quakec" || this.source.game.kind !== "quakeworld") return;
@@ -4181,7 +4184,8 @@ export class SharedSimulation implements Simulation {
   private runQuakeWorldCommands(): void {
     if (this.source.kind !== "quakec" || this.source.game.kind !== "quakeworld") return;
     const source = this.source.game;
-    for (const group of this.quakeWorldCommands.splice(0)) {
+    const groups = this.quakeWorldCommands.take(this.quakeWorldCursor); this.quakeWorldCommands.retire();
+    for (const group of groups) {
       const player = [...this.playerStates.values()].find(player => player.client.equals(group.client));
       if (group.kind === "action") {
         if (!source.hasClient(group.client)) continue;
@@ -4456,7 +4460,7 @@ export class SharedSimulation implements Simulation {
           this.checkingQ2Rules = true;
           try { this.source.product.rerelease.players.fadeFrame(this.source.game); } finally { this.checkingQ2Rules = false; }
           this.sourceFrame = this.clock.enter("frame-exit");
-          if (this.transitions.length !== 0) break;
+          if (this.transitions.pending(this.transitionsCursor) !== 0) break;
           continue;
         }
         if (this.source.kind === "q1") this.source.game.beginFrame(this.timeSeconds, elapsed);
@@ -4763,7 +4767,7 @@ export class SharedSimulation implements Simulation {
         else this.sourceFrame = this.clock.enter("frame-exit");
         this.modOwner?.advance(this.sourceFrame);
       }
-      if (this.source.kind === "q2" && this.transitions.length !== 0) break;
+      if (this.source.kind === "q2" && this.transitions.pending(this.transitionsCursor) !== 0) break;
       }
       if (this.source.kind === "q2") emitQ2ShadowLights(this.source.game);
       return { snapshot: this.snapshot(), events: this.events.take() };
@@ -5063,7 +5067,7 @@ export class SharedSimulation implements Simulation {
     if (preserve) state.fov = previous;
     updateView(previous, state.fov);
   }
-  takeModClientDrops(): readonly { readonly client: ClientId; readonly actor: ActorId; readonly reason: string; readonly content: ContentId }[] { return this.modClientDrops.splice(0); }
+  takeModClientDrops(): readonly { readonly client: ClientId; readonly actor: ActorId; readonly reason: string; readonly content: ContentId }[] { return this.modClientDrops.drainAll(); }
   private rememberModClientCommand(input: ActorCommand): void { this.modClientCommands.set(input.actor, { input, time: this.sourceFrame.time }); }
   private requireModClient(client: ClientId): ActorId {
     this.assertOpen();
@@ -5672,7 +5676,7 @@ export class SharedSimulation implements Simulation {
       }
       this.disposeSourceCombat?.(); this.disposeSourceCombat = null;
       previous.game.close();
-      this.events.take(); this.events.takePresentation(); this.transitions.length = 0; this.levelChange = null;
+      this.events.take(); this.events.takePresentation(); this.transitions.reset(); this.levelChange = null;
       this.debugLineStore.clear(); this.debugLineSnapshot = []; this.worldTextStore.clear(); this.worldTextSnapshot = [];
       const game = new Q3SourceRuntime({ ...previous.game.options, sessionCarry: carry }, previous.game.host);
       this.source = { kind: "q3", game };
@@ -5904,7 +5908,9 @@ export class SharedSimulation implements Simulation {
     const appearances = this.modOwner?.appearanceOverrides();
     return [...this.playerStates].flatMap(([owner, player]): Q3CharacterView[] => {
       const character = this.characters.get(owner), body = this.bodies.read(owner.id), animation = character?.animation.state ?? player.animation.state;
-      if (appearances?.has(owner.id) === true || player.character !== "q3" || player.intermission || player.cutscene !== null || body === null || animation.kind !== "q3") return [];
+      // Native Q3 renders its own intermission podium; foreign worlds show the chosen character.
+      const nativeQ3 = this.source.kind === "q3" || this.source.kind === "q3-qvm";
+      if (appearances?.has(owner.id) === true || player.character !== "q3" || nativeQ3 && (player.intermission || player.cutscene !== null) || body === null || animation.kind !== "q3") return [];
       const q1Player = this.source.kind === "q1" ? this.source.game.player(owner.id) : null;
       const visual = q1Player === null ? { alpha: 1, scale: 1 } : this.q1VisualFields(q1Player.alpha, q1Player.scale);
       return [{ actor: owner.id, origin: body.origin, angles: player.viewAngles, velocity: body.velocity,
@@ -6183,7 +6189,7 @@ export class SharedSimulation implements Simulation {
       source.product.rerelease.entities.restoreCampaign(travel.source.rerelease);
     }
     source.players.intermission = { kind: "playing" };
-    this.levelChange = null; this.transitions.length = 0;
+    this.levelChange = null; this.transitions.reset();
     for (const player of this.playerStates.values()) {
       const carried = travel.players.find(entry => entry.client.equals(player.client));
       const entity = source.game.entity(player.actor.id), state = source.players.states.get(player.actor.id);
@@ -6241,7 +6247,8 @@ export class SharedSimulation implements Simulation {
   sourceObjectives() { return this.sourceMatch.objectives(); }
   takeTransitions(): readonly TransitionIntent[] {
     const gates = this.sourceMatch.gates();
-    return this.transitions.splice(0).map(intent => intent.kind === "campaign-level" || intent.kind === "campaign-complete"
+    const taken = this.transitions.take(this.transitionsCursor); this.transitions.retire();
+    return taken.map(intent => intent.kind === "campaign-level" || intent.kind === "campaign-complete"
       ? { ...intent, gates: [...intent.gates, ...gates] } : intent);
   }
   takeLevelChange() { const change = this.levelChange; this.levelChange = null; return change; }
@@ -6256,10 +6263,10 @@ export class SharedSimulation implements Simulation {
     this.assertOpen();
     this.assertBotRestoreReady();
     if (this.sourceRoundSettlement.kind === "active" || this.sourceRoundSettlement.kind === "failed") throw new Error("Save requires completed source round settlement");
-    if (this.stepping || this.checkpointInProgress || this.transitions.length !== 0 || this.levelChange !== null) throw new Error("Save requires a completed frame without pending world travel");
+    if (this.stepping || this.checkpointInProgress || this.transitions.pending(this.transitionsCursor) !== 0 || this.levelChange !== null) throw new Error("Save requires a completed frame without pending world travel");
     const source = this.source;
     if (source.kind === "loading") throw new Error("The selected source world does not yet expose a complete saved-game checkpoint");
-    if (this.quakeWorldCommands.length !== 0 || this.q3Commands.size !== 0 || this.primaryCommandBlocks.size !== 0) throw new Error("Save requires completed source commands");
+    if (this.quakeWorldCommands.pending(this.quakeWorldCursor) !== 0 || this.q3Commands.size !== 0 || this.primaryCommandBlocks.size !== 0) throw new Error("Save requires completed source commands");
     this.events.assertLocalMediaConsumed();
     if (source.kind === "q3" || source.kind === "q3-qvm") this.events.assertOutputConsumed();
     if (source.kind === "q3" && [...this.playerStates.keys()].some(actor => !this.q3Arsenals.has(actor))) throw new Error("Q3 save requires completed client admission");
@@ -6794,7 +6801,7 @@ export class SharedSimulation implements Simulation {
     try { this.q2Native()?.close(); } catch (error) { errors.push(error); }
     this.closed = true;
     this.modClientApplications.close(); this.modClientOutputs.close();
-    this.modClientListeners.clear(); this.modClientAdmissions.clear(); this.modClientCommands.clear(); this.modClientDrops.length = 0;
+    this.modClientListeners.clear(); this.modClientAdmissions.clear(); this.modClientCommands.clear(); this.modClientDrops.reset();
     this.debugLineStore.clear(); this.debugLineSnapshot = []; this.worldTextStore.clear(); this.worldTextSnapshot = [];
     for (const close of [() => this.selectedAmmoTimers?.close(), () => this.selectedQ3Source?.close(), () => this.actors.close(), () => this.q3Source()?.close(), () => this.disposeSourceCombat?.(), () => this.scheduler.close()]) {
       try { close(); } catch (error) { errors.push(error); }

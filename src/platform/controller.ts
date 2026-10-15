@@ -1,3 +1,4 @@
+import { BoundedQueue } from "../foundation/bounded-queue.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Q1/Q2 gamepad_assign.ts supplies explicit-before-automatic assignment intent.
 // SDL2 SDL_events.h, SDL_gamecontroller.h and SDL_joystick.h define the device ABI.
@@ -426,10 +427,10 @@ export interface VirtualControllerRumble { readonly kind: "rumble" | "trigger-ru
 /** A real SDL virtual joystick, for platform diagnostics without fabricated input records. */
 export class VirtualSdlController {
   private constructor(private pointer: Pointer | null, readonly instance: number,
-    private readonly callbacks: readonly JSCallback[], private readonly effects: VirtualControllerRumble[]) {}
+    private readonly callbacks: readonly JSCallback[], private readonly effects: BoundedQueue<VirtualControllerRumble>) {}
   static attach(options: { readonly name?: string; readonly rumble?: boolean } = {}): VirtualSdlController {
     initialize();
-    const callbacks: JSCallback[] = [], effects: VirtualControllerRumble[] = [];
+    const callbacks: JSCallback[] = [], effects = new BoundedQueue<VirtualControllerRumble>(4096);
     let pointer: Pointer | null = null, index = -1;
     try {
       if (process.arch !== "x64" && process.arch !== "arm64") throw new Error("SDL virtual descriptor requires a 64-bit host");
@@ -474,7 +475,7 @@ export class VirtualSdlController {
     checked(virtualSdl().SDL_JoystickSetVirtualButton(pointer, button, Number(down)), "SDL_JoystickSetVirtualButton");
     virtualSdl().SDL_JoystickUpdate();
   }
-  drainRumble(): readonly VirtualControllerRumble[] { this.opened(); return this.effects.splice(0); }
+  drainRumble(): readonly VirtualControllerRumble[] { this.opened(); return this.effects.takeAll(); }
   close(): void {
     mainThread(); const pointer = this.pointer; if (pointer === null) return;
     const api = virtualSdl(), count = checked(sdl().SDL_NumJoysticks(), "SDL_NumJoysticks virtual detach");

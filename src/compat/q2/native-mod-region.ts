@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { GuestAddress, GuestCallValue } from "../../contracts/execution.ts";
 import type { NativeModProtectionRegion, NativeModRegionLocation } from "../../contracts/native-mod-region.ts";
 import type { NativeModHost } from "../../app/bootstrap/simulation/native-mod-host.ts";
@@ -44,7 +45,7 @@ export class NativeModRegionExecution {
   private before: AbiProcessorSnapshot | null = null;
   private phase: "prologue" | "region" | "executing" | "epilogue" = "prologue";
   private output: GuestCallValue | null = null;
-  private readonly stackInputs: { readonly address: GuestAddress; readonly bytes: Uint8Array }[] = [];
+  private readonly stackInputs = new CleanupStack();
   constructor(private readonly host: Host, private readonly definition: NativeModProtectionRegion,
     private readonly inputs: readonly GuestCallValue[], private readonly authority: NativeModRegionAuthority | undefined) {
     validateNativeModRegion(definition, host.memory.pointerBytes);
@@ -67,7 +68,7 @@ export class NativeModRegionExecution {
   private write(location: NativeModRegionLocation, value: GuestCallValue): void {
     const { memory, entries: { cpu } } = this.host, bytes = encodeValue({ kind: "scalar", storage: location.storage }, value, memory);
     if (location.kind === "stack") {
-      const address = this.stackAddress(location.offset); this.stackInputs.push({ address, bytes: memory.copy(address, bytes.length) }); memory.write(address, bytes);
+      const address = this.stackAddress(location.offset); const saved = memory.copy(address, bytes.length); this.stackInputs.push(() => memory.write(address, saved)); memory.write(address, bytes);
     } else if (location.kind === "simd") cpu.state.simd.xmm.set(bytes, location.index * 16 + location.offset);
     else { const raw = new Uint8Array(8); raw.set(bytes); cpu.state.registers.write(location.register, width(bytes.length), new DataView(raw.buffer).getBigUint64(0, true)); }
   }
@@ -86,7 +87,7 @@ export class NativeModRegionExecution {
         this.phase = "executing"; continuation.execute(); this.assertCurrent();
         this.output = decodeValue({ kind: "scalar", storage: definition.result.storage }, this.read(definition.result), host.memory);
         if (this.before === null) throw new Error("Native donor region skipped its declared prologue");
-        for (const saved of this.stackInputs.splice(0).reverse()) host.memory.write(saved.address, saved.bytes);
+        this.stackInputs.runReverse();
         restoreAbiProcessorState(host.entries.cpu.state, this.before); host.entries.cpu.state.instructionPointer = this.at(definition.join).byteOffset;
         this.phase = "epilogue"; return undefined;
       }, () => this.phase === "region"));

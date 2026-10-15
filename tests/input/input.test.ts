@@ -316,6 +316,18 @@ describe("seat input", () => {
       if (command.kind === "q3") expect(command.upMove).toBe(127);
     }
   });
+  test("q1 move-up bindings also set the jump button", () => {
+    const owner = createIdentityOwner("usercmd-moveup"), seat = owner.seat(0);
+    const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+    for (const frame of [{ kind: "q1-netquake", acknowledgedServerTimeSeconds: 1 }, { kind: "q1-quakeworld" }] as const) {
+      const commands = new CommandBuffer({ dialect: frame.kind, context });
+      const input = new SeatInput({ seat, dialect: frame.kind, context, commands, uiEvent: () => false });
+      input.commandButton("move-up", "space", true, 10);
+      const command = new InputCommandBuilder(frame.kind).build(input.sample(110, 100), frame);
+      expect(command.buttons & 2).toBe(2);
+      expect(command.upMove).toBeGreaterThan(0);
+    }
+  });
 });
 
 const retail = "/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/pak0.pak";

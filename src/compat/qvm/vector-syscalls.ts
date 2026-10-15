@@ -23,7 +23,7 @@ function optionalVector(memory: QvmMemory, word: number): DataView | null {
 
 /**
  * Host SSE binary32 profile, with the double M_PI angle constant and no FMA.
- * These are engine calls, not the q3lcc arithmetic in core/qvm-math.ts.
+ * These are engine calls, not the q3lcc arithmetic in core/math.ts.
  * Required spans preflight before writes; null means another service owns the trap.
  */
 export function qvmVectorSyscall(

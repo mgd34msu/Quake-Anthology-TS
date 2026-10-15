@@ -163,9 +163,22 @@ function selectedQuakeCProgram(catalog: InstalledCatalog, options: Pick<Applicat
     && product.expectation.requiredPrograms.includes("progs.dat") ? "progs.dat" : undefined;
 }
 
+/**
+ * Content standing behind a movement selection. QuakeWorld movement is engine
+ * code, so it needs only base Quake; the `qw` bundle (qwprogs.dat) is required
+ * solely to play native QuakeWorld games, not to borrow its movement.
+ */
+export function movementContentProduct(catalog: InstalledCatalog, movementProduct: string): CatalogProduct {
+  const product = catalog.product(movementProduct);
+  if (product.expectation.id === "q1-quakeworld" && product.availability.kind !== "installed")
+    return catalog.require(product.expectation.baseProduct ?? "q1-classic-id1");
+  return catalog.require(movementProduct);
+}
+
 export function resolveApplicationMovement(catalog: InstalledCatalog, options: ApplicationOptions): ApplicationOptions {
   if (options.movementProduct === undefined) return options;
-  const product = catalog.require(options.movementProduct);
+  const product = catalog.product(options.movementProduct);
+  movementContentProduct(catalog, options.movementProduct);
   return { ...options, movement: product.expectation.family, movementProduct: product.expectation.id };
 }
 
@@ -176,7 +189,7 @@ export function applicationPlayerProducts(catalog: InstalledCatalog,
   const ownPlayer = nativeSource ?? (product.availability.kind === "installed" && (product.expectation.edition === "quakeworld" && options.network.kind !== "qw-client"
     || family === "q3" && options.network.kind !== "q3-client" && !expectedProducts.some(builtin => builtin.id === sourceProgramProduct(catalog, product.id).expectation.id)));
   return {
-    movement: options.movementProduct !== undefined ? catalog.require(options.movementProduct).expectation.id
+    movement: options.movementProduct !== undefined ? movementContentProduct(catalog, options.movementProduct).expectation.id
       : ownPlayer && options.movement === family ? product.expectation.id : baseProduct(options.movement),
     character: ownPlayer && options.character === family ? product.expectation.id : baseProduct(options.character),
   };
@@ -231,7 +244,7 @@ function selectedApplicationPreset(catalog: InstalledCatalog, options: Applicati
   const rerelease = product.expectation.edition === "rerelease";
   const timing = (reference: ProviderReference, source: GameFamily, edition: boolean, movementRole = false) => {
     const native = nativeProviderTiming(reference, source, edition);
-    return source === "q1" && catalog.product(reference.content).expectation.edition === "quakeworld" ? { ...native, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: movementRole && (options.movementProduct !== undefined || nativeSources !== undefined) ? 255 : 50 } satisfies typeof native.clock } : native;
+    return source === "q1" && (catalog.product(reference.content).expectation.edition === "quakeworld" || movementRole && options.movementProduct === "q1-quakeworld") ? { ...native, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: movementRole && (options.movementProduct !== undefined || nativeSources !== undefined) ? 255 : 50 } satisfies typeof native.clock } : native;
   };
   const providerTiming = timing(provider, family, rerelease);
   return { id: createRecipeId("mixed", `${options.product}-${options.movementProduct ?? options.movement}-${options.character}-${options.characterModel}${rules === "standard" ? "" : `-${rules}`}`),
@@ -376,8 +389,9 @@ export function applicationOptionsForRecipe(options: ApplicationOptions, content
   };
   const character = family(recipe.character.definition), prefix = `${character}:model/`;
   if (!recipe.character.appearance.provider.startsWith(prefix)) throw new Error(`Application character has no model selection for ${recipe.character.appearance.provider}`);
+  const quakeworldMovement = recipe.timing.find(profile => profile.provider === recipe.movement.provider)?.clock.kind === "q1-quakeworld";
   return { ...options, product: content.catalog.product(recipe.map.entities.content).expectation.id,
-    map: recipe.map.geometry.requestedPath, mapProduct: content.catalog.product(recipe.map.geometryContent).expectation.id, movement: family(recipe.movement), movementProduct: content.catalog.product(recipe.movement.content).expectation.id, character,
+    map: recipe.map.geometry.requestedPath, mapProduct: content.catalog.product(recipe.map.geometryContent).expectation.id, movement: family(recipe.movement), movementProduct: quakeworldMovement ? "q1-quakeworld" : content.catalog.product(recipe.movement.content).expectation.id, character,
     characterModel: recipe.character.appearance.provider.slice(prefix.length),
     rules: recipe.match.provider === "q2:ctf" ? "ctf" : recipe.match.provider === "q2:lmctf" ? "lmctf" : recipe.match.provider === "q2:tag" ? "tag" : recipe.match.provider === "q2:deathball" ? "deathball" : recipe.match.provider === "q1:horde" ? "horde" : "standard" };
 }

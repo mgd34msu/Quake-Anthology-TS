@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from '../../../foundation/event-ring.ts';
 import { deflateSync, inflateSync } from 'node:zlib';
 import { KEX_DATAGRAM_BYTES, KEX_MESSAGE_BYTES, readKexPacket, writeKexPacket } from './packet.ts';
 export interface KexMessage { readonly kind: number; readonly payload: Uint8Array; }
@@ -7,7 +8,8 @@ export class KexChannel {
     private reliable = 0;
     private incomingSequence = 0;
     private incomingReliable = 0;
-    private readonly pending: Pending[] = [];
+    private readonly pending = new EventRing<Pending>(8192);
+    private readonly pendingCursor: EventCursor = this.pending.openCursor();
     private pendingBytes = 0;
     private retryAt = 0;
     private retries = 0;
@@ -35,8 +37,8 @@ export class KexChannel {
             const bytes = writeKexPacket({ flags: mode | fragmentFlags, sequence: this.sequence, reliable: this.reliable,
                 kind: first ? messageKind : null, payload: data.subarray(position, end) });
             if (mode === 3) {
-                if (this.pending.length === 0) { this.retryAt = now; this.retries = 0; }
-                this.pending.push({ reliable: this.reliable, bytes }); this.pendingBytes += bytes.length;
+                if (this.pending.peek(this.pendingCursor) === null) { this.retryAt = now; this.retries = 0; }
+                this.pending.admit({ reliable: this.reliable, bytes }); this.pendingBytes += bytes.length;
             }
             accepted = this.emit(bytes) && accepted;
             position = end; first = false;
@@ -49,10 +51,12 @@ export class KexChannel {
             if (packet.payload.length !== 3) throw new Error('Invalid KEX acknowledgment');
             const acknowledgment = new DataView(packet.payload.buffer, packet.payload.byteOffset, 3).getUint16(1);
             // Native sender uses an unsigned ordinary comparison, including at wrap.
-            while (this.pending[0] !== undefined && this.pending[0].reliable <= acknowledgment) {
-                const removed = this.pending.shift(); if (removed !== undefined) this.pendingBytes -= removed.bytes.length;
+            let head = this.pending.peek(this.pendingCursor);
+            while (head !== null && head.reliable <= acknowledgment) {
+                this.pending.read(this.pendingCursor); this.pendingBytes -= head.bytes.length; head = this.pending.peek(this.pendingCursor);
                 this.retryAt = now; this.retries = 0;
             }
+            this.pending.retire();
             this.receivedAt = now; return null;
         }
         if (reliable) {
@@ -94,7 +98,7 @@ export class KexChannel {
             new DataView(bytes.buffer).setUint16(1, this.incomingReliable);
             this.emit(writeKexPacket({ flags: 0, sequence: 0, reliable: 0, kind: 130, payload: bytes })); this.acknowledgment = 0;
         }
-        const first = this.pending[0];
+        const first = this.pending.peek(this.pendingCursor) ?? undefined;
         if (first !== undefined && now - this.retryAt >= 500) {
             if (++this.retries >= 40) throw new Error('KEX LAN peer timed out');
             this.retryAt = now; this.emit(first.bytes);

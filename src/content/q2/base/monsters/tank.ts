@@ -1,6 +1,7 @@
 /* Quake II m_tank.c. id Software, GPL-2.0-or-later. */
 import { subtract } from "../../foundation/fields.ts";
-import { anglesVectors, enemyEye, health, projectFlash, targetDistance, vectorAngles, visible } from "../../foundation/monsters/ai.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
+import { enemyEye, health, projectFlash, targetDistance, visible } from "../../foundation/monsters/ai.ts";
 import { throwGib } from "../../foundation/monsters/gibs.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -76,7 +77,7 @@ export const tankDefinition: Q2MonsterDefinition = {
       const frame = context.entity.frame, flash = 4 + frame - tankFrame.attak406;
       const start = projectFlash(context, muzzleOffset(context.game.options.edition, flash));
       const eye = enemyEye(context), angles = context.game.body(context.entity).angles;
-      const direction = anglesVectors({ x: eye === null ? 0 : vectorAngles(subtract(eye, start)).x, y: frame <= tankFrame.attak415 ? angles.y - 8 * (frame - tankFrame.attak411) : angles.y + 8 * (frame - tankFrame.attak419), z: 0 }).forward;
+      const direction = angleVectorsRule({ x: eye === null ? 0 : vectorToAnglesRule(subtract(eye, start), "native-ai").x, y: frame <= tankFrame.attak415 ? angles.y - 8 * (frame - tankFrame.attak411) : angles.y + 8 * (frame - tankFrame.attak419), z: 0 }, "native").forward;
       context.weapons.fireBullet(context.entity, context.game, start, direction, 20, 4, 300, 500, 0);
       return muzzle(context, flash, direction, start);
     },

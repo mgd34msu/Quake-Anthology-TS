@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
 import { UnifiedNativeConsumers } from "./unified-native-consumer.ts";
 import type { ActiveModClientPresentation } from "../../../world/session/mod-client-presentation.ts";
 import { PresentationState } from "../presentation-state.ts";
@@ -48,13 +49,15 @@ export class UnifiedRemotePresentation {
   private readonly actors = new Map<string,ActorId>();
   private readonly clients = new Map<string,ClientId>();
   private readonly resources = new Map<ResourceId,ResolvedResourceReference>();
-  private readonly pendingEvents: {frame:number;events:readonly SimulationPresentationEvent[];simulation:readonly SimulationEvent[]}[]=[];
+  private readonly pendingEvents = new EventRing<{frame:number;events:readonly SimulationPresentationEvent[];simulation:readonly SimulationEvent[]}>(4096);
+  private readonly pendingCursor: EventCursor = this.pendingEvents.openCursor();
   private readonly sourceSequences = new Map<number, number>();
   private mediaValue = new PresentationState(() => this.current?.output.snapshot.frame.time ?? {kind:"milliseconds",value:0}, actor => this.numberOf(actor));
   private components: UnifiedComponentConsumers | null = null;
   private native: UnifiedNativeConsumers | null = null;
   get media(): PresentationState { return this.mediaValue; }
-  private simulationEvents:SimulationEvent[]=[];
+  private readonly simulationEvents = new EventRing<SimulationEvent>(16384);
+  private readonly simulationCursor: EventCursor = this.simulationEvents.openCursor();
   private current:UnifiedPresentationFrame|null=null;
   private binding:Extract<UnifiedControl,{kind:'admitted'}>|null=null;
   private predictor:SelectedMovementPrediction|null=null;
@@ -95,7 +98,7 @@ export class UnifiedRemotePresentation {
       this.worldEpoch=offer.epoch;this.offeredDigest=offer.composition.digest;this.binding=null;};
     if(this.options.publishComponents===undefined)retire();else await this.options.publishComponents(retire);
     const content=await this.options.loadContent(offer,()=>this.assertCurrent(generation));this.assertCurrent(generation);
-    this.clearPrediction();this.world.content=content;this.contentEpoch=offer.epoch;this.current=null;this.actors.clear();this.clients.clear();this.resources.clear();this.sourceSequences.clear();this.mediaValue=new PresentationState(() => this.current?.output.snapshot.frame.time ?? {kind:"milliseconds",value:0}, actor => this.numberOf(actor));this.simulationEvents=[];this.pendingEvents.length=0;this.lastEventSequence=-1;this.lastSimulationSequence=-1;
+    this.clearPrediction();this.world.content=content;this.contentEpoch=offer.epoch;this.current=null;this.actors.clear();this.clients.clear();this.resources.clear();this.sourceSequences.clear();this.mediaValue=new PresentationState(() => this.current?.output.snapshot.frame.time ?? {kind:"milliseconds",value:0}, actor => this.numberOf(actor));this.simulationEvents.reset();this.pendingEvents.reset();this.lastEventSequence=-1;this.lastSimulationSequence=-1;
     this.native = new UnifiedNativeConsumers({ content, events: this.mediaValue, assertCurrent: () => this.assertCurrent(generation), viewer: () => this.player?.actor ?? null });
     const files=this.options.modFiles;
     if(content.preparedMods.some(mod=>mod.presentation!==undefined)){
@@ -128,22 +131,25 @@ export class UnifiedRemotePresentation {
   receiveEvents(epoch:number,frame:number,payload:Uint8Array,simulation:Uint8Array):void{
     if(epoch!==this.worldEpoch||this.closed)return;
     const identity=this.identity();
-    this.pendingEvents.push({frame,events:decodeUnifiedPresentationEvents(payload,identity),simulation:new SaveReader(decodeCheckpointValue(simulation),'unified-events').list(value=>readUnifiedSimulationEvent(value.value,identity))});
+    this.pendingEvents.admit({frame,events:decodeUnifiedPresentationEvents(payload,identity),simulation:new SaveReader(decodeCheckpointValue(simulation),'unified-events').list(value=>readUnifiedSimulationEvent(value.value,identity))});
     this.releaseEvents();
   }
   private releaseEvents():SimulationEvent[] {
     const frame=this.current?.output.snapshot.frame.frame,simulation:SimulationEvent[]=[];if(frame===undefined)return simulation;
-    while(this.pendingEvents[0]!==undefined&&this.pendingEvents[0].frame<=frame){
-      const next=this.pendingEvents.shift();if(next===undefined)break;
+    let next=this.pendingEvents.peek(this.pendingCursor);
+    while(next!==null&&next.frame<=frame){
+      this.pendingEvents.read(this.pendingCursor);
       for(const event of next.events)if(event.sequence>this.lastEventSequence){
         if(event.kind==="presentation-owner" && event.event.kind==="retired")this.native?.retire(event.event.owner);
         this.sourceSequences.set(event.sequence,this.mediaValue.receivePresentation(event));this.lastEventSequence=event.sequence;}
       for(const event of next.simulation)if(event.sequence>this.lastSimulationSequence){const sourceSequence=event.payload.kind==='message'?event.payload.sourcePresentationSequence:undefined;
         const localSequence=sourceSequence===undefined?undefined:this.sourceSequences.get(sourceSequence);
         simulation.push(event.payload.kind==='message'&&localSequence!==undefined?{...event,payload:{...event.payload,sourcePresentationSequence:localSequence}}:event);this.lastSimulationSequence=event.sequence;}
+      next=this.pendingEvents.peek(this.pendingCursor);
     }
+    this.pendingEvents.retire();
     if(this.sourceSequences.size>4096)for(const sequence of this.sourceSequences.keys())if(sequence<this.lastEventSequence-2048)this.sourceSequences.delete(sequence);
-    this.simulationEvents.push(...simulation);return simulation;
+    if(simulation.length!==0)this.simulationEvents.admitAll(simulation);return simulation;
   }
   async receiveFrame(bytes:Uint8Array):Promise<number|null>{
     const envelope=readUnifiedFrame(bytes);
@@ -209,9 +215,9 @@ export class UnifiedRemotePresentation {
   numberOf(actor:ActorId):number|null {for(const [key,value] of this.actors)if(value.equals(actor))return Number(key.split(':')[0]);return null;}
   playerCommand(actor:ActorId,name:string,args:readonly string[]):undefined {if(this.player===null||!this.player.actor.equals(actor))throw new Error('Unified command belongs to another player');this.options.sendCommand(name,args);return undefined;}
   registerResource(_content:ContentId,_path:string,resource:ResolvedResourceReference):undefined {this.resources.set(unifiedResourceId(resource),resource);return undefined;}
-  drainSimulationEvents():readonly SimulationEvent[]{const events=this.simulationEvents;this.simulationEvents=[];return events;}
+  drainSimulationEvents():readonly SimulationEvent[]{const events=this.simulationEvents.take(this.simulationCursor);this.simulationEvents.retire();return events;}
   drainPresentationEvents():readonly SimulationPresentationEvent[]{return this.mediaValue.takePresentation();}
   disconnected(reason:string):void{this.options.disconnected(reason);}
   print(text:string):void{this.options.print(text);}
-  close():void{this.components?.close();this.components=null;this.native?.close();this.native=null;this.clearPrediction();this.contentEpoch=0;this.closed=true;this.generation++;this.current=null;this.pendingEvents.length=0;this.sourceSequences.clear();this.mediaValue.takePresentation();this.simulationEvents=[];this.resources.clear();this.actors.clear();this.clients.clear();}
+  close():void{this.components?.close();this.components=null;this.native?.close();this.native=null;this.clearPrediction();this.contentEpoch=0;this.closed=true;this.generation++;this.current=null;this.pendingEvents.reset();this.sourceSequences.clear();this.mediaValue.takePresentation();this.simulationEvents.reset();this.resources.clear();this.actors.clear();this.clients.clear();}
 }

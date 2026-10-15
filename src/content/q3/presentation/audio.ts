@@ -70,7 +70,8 @@ export class Q3PresentationSoundBank implements ClientSoundBank {
 export interface Q3AudioTarget {
   readonly seat: SeatId;
   readonly sounds: Q3PresentationSoundBank;
-  actor(sourceNumber: number): ActorId;
+  /** Snapshots may retain an entity after its source actor has been released. */
+  actor(sourceNumber: number): ActorId | null;
   frameNumber(): number;
   play(sound: PlaySound): void;
   loop(sound: LoopSound): void;
@@ -84,9 +85,13 @@ export class Q3PresentationAudio {
   startSourceSound(sound: PcmSound | null, options: StartSoundOptions): void {
     const asset = this.target.sounds.asset(sound); if (asset === null) return;
     const actor = options.entity < 0 ? null : this.target.actor(options.entity);
-    const origin: SoundOrigin = options.origin.kind === "entity"
-      ? { kind: "actor", actor: this.target.actor(options.origin.entity) }
-      : options.origin.kind === "fixed" ? { kind: "fixed", position: { ...options.origin.position } } : { kind: "local" };
+    let origin: SoundOrigin;
+    if (options.origin.kind === "entity") {
+      const originActor = this.target.actor(options.origin.entity);
+      if (originActor === null) return;
+      origin = { kind: "actor", actor: originActor };
+    }
+    else origin = options.origin.kind === "fixed" ? { kind: "fixed", position: { ...options.origin.position } } : { kind: "local" };
     this.target.play({ sound: asset, family: "q3", actor, origin,
       audience: { kind: "seat", seat: this.target.seat }, channel: options.channel, volume: options.volume / 127,
       attenuation: origin.kind === "local" ? 0 : 1 });
@@ -96,7 +101,10 @@ export class Q3PresentationAudio {
     const actor = entity < 0 ? null : this.target.actor(entity);
     let source: SoundOrigin;
     if (origin !== null) source = { kind: "fixed", position: { ...origin } };
-    else { if (actor === null) throw new RangeError("Entity-attached sound requires a source actor"); source = { kind: "actor", actor }; }
+    else {
+      if (actor === null) return;
+      source = { kind: "actor", actor };
+    }
     this.target.play({ sound: asset, family: "q3", actor,
       origin: source,
       audience: { kind: "seat", seat: this.target.seat }, channel, volume: 1, attenuation: 1 });
@@ -109,10 +117,17 @@ export class Q3PresentationAudio {
   addLoopSound(entity: number, origin: Vec3, velocity: Vec3, sound: PcmSound | null, realLoop: boolean): void {
     const asset = this.target.sounds.asset(sound); if (asset === null) return;
     const actor = this.target.actor(entity);
+    if (actor === null) return;
     this.target.loop({ sound: asset, family: "q3", actor, origin: { kind: "fixed", position: { ...origin } },
       audience: { kind: "seat", seat: this.target.seat }, velocity: { ...velocity }, volume: 1, attenuation: 1,
       frameNumber: this.target.frameNumber(), lifetime: realLoop ? "persistent" : "frame" });
   }
-  updateSoundPosition(entity: number, origin: Vec3): void { this.target.updateActor(this.target.actor(entity), origin); }
-  stopLoopingSound(entity: number): void { this.target.stopLoop(this.target.seat, this.target.actor(entity)); }
+  updateSoundPosition(entity: number, origin: Vec3): void {
+    const actor = this.target.actor(entity);
+    if (actor !== null) this.target.updateActor(actor, origin);
+  }
+  stopLoopingSound(entity: number): void {
+    const actor = this.target.actor(entity);
+    if (actor !== null) this.target.stopLoop(this.target.seat, actor);
+  }
 }

@@ -1,8 +1,9 @@
 // Rerelease m_chick.cpp. ZeniMax Media, GPL-2.0.
 import { chickDefinition } from "../../../base/monsters/chick.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../../core/math.ts";
 import { aliveEnemy } from "../../../base/monsters/common.ts";
 import { add, length, normalize, scale, subtract } from "../../../foundation/fields.ts";
-import { anglesVectors, clearShot, corpse, enemyBody, finishDodge, health, projectFlash, setDuck, targetDistance, vectorAngles, visible } from "../../../foundation/monsters/ai.ts";
+import { clearShot, corpse, enemyBody, finishDodge, health, projectFlash, setDuck, targetDistance, visible } from "../../../foundation/monsters/ai.ts";
 import { throwGib } from "../../../foundation/monsters/gibs.ts";
 import { muzzleOffset } from "../../../foundation/monsters/muzzle.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../../foundation/monsters/types.ts";
@@ -16,7 +17,7 @@ function run(context: MonsterContext): undefined {
 }
 function rocket(context: MonsterContext, weapons: Q2MissionPackMonsterWeapons): undefined {
   const { entity, state, game } = context, enemy = enemyBody(context); if (enemy === null) return undefined;
-  const start = projectFlash(context, muzzleOffset("rerelease", 57)), right = anglesVectors(game.body(entity).angles).right;
+  const start = projectFlash(context, muzzleOffset("rerelease", 57)), right = angleVectorsRule(game.body(entity).angles, "native").right;
   const target = state.manualSteering ? state.blindFireTarget : enemy.origin, heat = entity.skin > 1, speed = heat ? 500 : 650;
   let point = target;
   if (!state.manualSteering) point = game.host.random() < 0.33 || start.z < enemy.origin.z + enemy.bounds.min.z
@@ -94,7 +95,7 @@ export function createRereleaseChickDefinitions(weapons: Q2MissionPackMonsterWea
     ...chickDefinition.callbacks, chick_run: run, ChickRocket: context => rocket(context, weapons),
     Chick_PreAttack1(context) {
       context.game.sound(context.entity, "chick/chkatck1.wav", 2);
-      if (context.state.manualSteering) context.state.idealYaw = vectorAngles(subtract(context.state.blindFireTarget, context.game.body(context.entity).origin)).y;
+      if (context.state.manualSteering) context.state.idealYaw = vectorToAnglesRule(subtract(context.state.blindFireTarget, context.game.body(context.entity).origin), "native-ai").y;
       return undefined;
     },
     ChickSlash(context) {

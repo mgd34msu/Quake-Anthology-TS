@@ -1,5 +1,6 @@
 /* Quake II m_supertank.c. id Software, GPL-2.0-or-later. */
-import { anglesVectors, enemyEye, targetDistance, visible } from "../../foundation/monsters/ai.ts";
+import { enemyEye, targetDistance, visible } from "../../foundation/monsters/ai.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import { normalize, subtract } from "../../foundation/fields.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -42,7 +43,7 @@ export const supertankDefinition: Q2MonsterDefinition = {
     supertankMachineGun(context) {
       const flash = 64 + context.entity.frame - supertankFrame.attak1_1, body = context.game.body(context.entity), yaw = body.angles.y;
       // Source ignores body pitch for these six gun offsets.
-      const axes = anglesVectors({ x: 0, y: yaw, z: 0 }), offset = muzzleOffset(context.game.options.edition, flash);
+      const axes = angleVectorsRule({ x: 0, y: yaw, z: 0 }, "native"), offset = muzzleOffset(context.game.options.edition, flash);
       const start = { x: body.origin.x + axes.forward.x * offset.x + axes.right.x * offset.y, y: body.origin.y + axes.forward.y * offset.x + axes.right.y * offset.y, z: body.origin.z + offset.z };
       const eye = enemyEye(context), direction = eye === null ? axes.forward : normalize(subtract(eye, start));
       context.weapons.fireBullet(context.entity, context.game, start, direction, 6, 4, 300, 500, 0);

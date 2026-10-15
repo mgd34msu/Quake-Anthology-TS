@@ -3,7 +3,7 @@
 
 import { add3, dot3, scale3, sub3, vec3 } from "../../../core/math.ts";
 import type { Vec3 } from "../../../core/math.ts";
-import { qvmAngleVectors, qvmAnglesToAxis } from "../../../core/qvm-math.ts";
+import { qvmAngleVectors, qvmAnglesToAxis } from "../../../core/math.ts";
 import { copyRefdef, createRefdef, RDF_HYPERSPACE, RDF_NOWORLDMODEL } from "./refdef.ts";
 import type { Refdef } from "./refdef.ts";
 import { copyRefEntity, createModelEntity, createSpriteEntity, RF_DEPTHHACK, RF_FIRST_PERSON, RF_MINLIGHT } from "./ref-entity.ts";

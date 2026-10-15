@@ -1,3 +1,4 @@
+import { StampSet } from "../../../foundation/stamp.ts";
 /* Quake hull selection/PVS derive from id Software world.c/model.c.
  * Arbitrary shapes use derived BSP cells or authored BSPX BRUSHLIST.
  * Copyright (C) 1996 Id Software, Inc. GPL-2.0-or-later. */
@@ -50,7 +51,9 @@ export class Q1Collision implements SceneQueries {
   private clipCellCount = 0;
   private clipFaceCount = 0;
   private clipVertexCount = 0;
+  private readonly leafStamps: StampSet;
   constructor(readonly geometry: Q1WorldGeometry, options: Q1CollisionOptions = {}) {
+    this.leafStamps = new StampSet(geometry.leaves.length);
     this.solidSpace = new Q1SolidSpace(geometry);
     this.blocks = options.blocksContents ?? (contents => contents === -2);
   }
@@ -246,15 +249,14 @@ export class Q1Collision implements SceneQueries {
   boxLeaves(bounds: Bounds, limit: number): LeafQueryResult {
     const root = this.geometry.models[0]?.headnodes[0];
     if (root === undefined) throw new RangeError("Missing Quake world root");
-    const leaves: number[] = [], seen = new Set<number>();
+    const leaves: number[] = [], seen = this.leafStamps; seen.begin();
     let topnode: number | null = null, overflow = false;
     const stack: BspChild[] = [root < 0 ? { kind: "leaf", index: -1 - root } : { kind: "node", index: root }];
     while (stack.length > 0) {
       const child = stack.pop();
       if (child === undefined) break;
       if (child.kind === "leaf") {
-        if (child.index === 0 || seen.has(child.index)) continue;
-        seen.add(child.index);
+        if (child.index === 0 || !seen.mark(child.index)) continue;
         if (leaves.length < limit) leaves.push(child.index); else overflow = true;
         continue;
       }

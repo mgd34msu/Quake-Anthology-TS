@@ -1,3 +1,4 @@
+import { BoundedQueue } from "../../../foundation/bounded-queue.ts";
 // Native QW sv_main, sv_user and sv_send; transport only. GPL-2.0-or-later.
 import type { ClientId } from '../../../contracts/identity.ts';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
@@ -30,7 +31,7 @@ interface Peer {
     signon: QuakeWorldSignonServer;
     replay: QuakeWorldCommandReplay;
     baselines: ReadonlyMap<number, QwEntityStateT>;
-    readonly reliable: Uint8Array[];
+    readonly reliable: BoundedQueue<Uint8Array>;
     reliableLength: number;
     readonly frames: Map<number, Frame>;
     active: boolean;
@@ -81,7 +82,7 @@ export class QwServerNetwork implements ApplicationNetwork {
                     const binding = this.bind(admitted.player);
                     const rate = quakeWorldInfo(request.userinfo).get('rate');
                     const peer: Peer = { remote: request.from, player: admitted.player, channel: new QuakeWorldChannel('server', request.qport, 1450, rate ? this.rate(rate) : 2500),
-                        signon: binding.signon, baselines: binding.baselines, replay: new QuakeWorldCommandReplay(), reliable: [], frames: new Map<number, Frame>(),
+                        signon: binding.signon, baselines: binding.baselines, replay: new QuakeWorldCommandReplay(), reliable: new BoundedQueue<Uint8Array>(8), frames: new Map<number, Frame>(),
                         reliableLength: 0, active: false, reply: false, delta: null, choked: 0, lastReceived: now,
                         messageLevel: nativeAtoi(quakeWorldInfo(request.userinfo).get('msg') ?? '0'), lossPercent: 0,
                         pingFrames: new Map<number, PingFrame>(), chatFlood: new SourceChatFlood(4, 4, 10) };
@@ -171,10 +172,10 @@ export class QwServerNetwork implements ApplicationNetwork {
     private enqueue(peer: Peer, bytes: Uint8Array): void {
         if (bytes.length === 0) return;
         if (bytes.length > 1450) throw new Error('QW reliable block exceeds native message size');
-        const last = peer.reliable[peer.reliable.length - 1];
+        const last = peer.reliable.peekNewest();
         if (last !== undefined && last.length + bytes.length <= 1450) {
             const combined = new Uint8Array(last.length + bytes.length); combined.set(last); combined.set(bytes, last.length);
-            peer.reliable[peer.reliable.length - 1] = combined;
+            peer.reliable.setAt(peer.reliable.length - 1, combined);
         } else {
             if (peer.reliable.length >= 5) throw new Error('QW reliable back buffers overflow');
             peer.reliable.push(bytes.slice());
@@ -199,7 +200,7 @@ export class QwServerNetwork implements ApplicationNetwork {
         for (const { peer, player, binding } of carried) {
             peer.signon.close(); peer.player = player;
             peer.signon = binding.signon; peer.baselines = binding.baselines;
-            peer.active = false; peer.delta = null; peer.choked = 0; peer.frames.clear(); peer.reliable.length = 0; peer.replay = new QuakeWorldCommandReplay();
+            peer.active = false; peer.delta = null; peer.choked = 0; peer.frames.clear(); peer.reliable.clear(); peer.replay = new QuakeWorldCommandReplay();
             this.enqueue(peer, this.bytes([{ kind: 'stufftext', text: 'changing\nreconnect\n' }]));
         }
     }

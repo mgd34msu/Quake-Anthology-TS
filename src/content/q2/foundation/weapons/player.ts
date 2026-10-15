@@ -1,4 +1,5 @@
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { Q2WeaponOwner } from "./types.ts";
 import { q2AttackFrames, q2ReverseFrames, q2WeaponAnimationRate, q2PowerupSound, q2WeaponRecoil, setQ2WeaponRecoil } from "./presentation.ts";
 /* Quake II p_weapon.c / rerelease p_weapon.cpp. Copyright id Software.
@@ -10,7 +11,6 @@ import { Q2Ballistics } from "./ballistics.ts";
 import { q2WeaponDamageMultiplier } from "./damage.ts";
 import { Q2_BASE_WEAPONS } from "./definitions.ts";
 import { calculateHandThrow, handFuseDeadline, handRecoverySeconds } from "./hand-grenade.ts";
-import { angleVectors } from "./vectors.ts";
 import { projectQ2Actor } from "./projection.ts";
 import { millisecondSum, stepQ2ClassicFrame, stepQ2RereleaseFrame } from "./generic-frame.ts";
 import type { Q2RereleaseFrameHooks } from "./generic-frame.ts";
@@ -465,7 +465,7 @@ export class Q2Weapons extends Q2Ballistics {
   private blaster(context: Q2WeaponContext, offset: Vec3, damage: number, hyper: boolean, effects: number): undefined {
     const { self, game, input, rerelease } = context, projection = this.project(context, add({ x: 24, y: 8, z: -8 }, offset));
     const random = () => (game.host.random() * 2 - 1) * 0.7;
-    this.kick(context, scale(angleVectors(input.angles).forward, -2), hyper && rerelease ? { x: random(), y: random(), z: random() } : { x: -1, y: 0, z: 0 });
+    this.kick(context, scale(angleVectorsRule(input.angles, "native").forward, -2), hyper && rerelease ? { x: random(), y: random(), z: random() } : { x: -1, y: 0, z: 0 });
     this.fireBlaster(self, game, projection.start, projection.direction, damage * this.multiplier(context), rerelease && !hyper ? 1500 : 1000, effects, hyper);
     this.flash(context, hyper ? 14 : 0);
     return this.playerNoise(self, game, projection.start, "weapon");
@@ -570,13 +570,13 @@ export class Q2Weapons extends Q2Ballistics {
     const { state, self, game, input, rerelease } = context;
     if (!superShotgun && state.frame === 9) { if (!rerelease) state.frame++; return undefined; }
     const start = this.project(context, { x: 0, y: rerelease ? 0 : 8, z: -8 });
-    this.kick(context, scale(angleVectors(input.angles).forward, -2), { x: -2, y: 0, z: 0 });
+    this.kick(context, scale(angleVectorsRule(input.angles, "native").forward, -2), { x: -2, y: 0, z: 0 });
     const restore = rerelease && this.hooks.lagCompensation.kind === "history" ? this.hooks.lagCompensation.begin(self.actor.id, start.start, start.direction) : null;
     let noiseOrigin = start.start;
     try {
       if (superShotgun) for (const yaw of [-5, 5]) {
         const angles = { ...input.angles, y: input.angles.y + yaw };
-        const projection = rerelease ? this.project(context, { x: 0, y: 0, z: -8 }, angles) : { start: start.start, direction: angleVectors(angles).forward };
+        const projection = rerelease ? this.project(context, { x: 0, y: 0, z: -8 }, angles) : { start: start.start, direction: angleVectorsRule(angles, "native").forward };
         noiseOrigin = projection.start;
         this.fireShotgun(self, game, projection.start, projection.direction, 6 * this.multiplier(context), 12 * this.multiplier(context), 1000, 500, 10, MOD.supershotgun);
       } else this.fireShotgun(self, game, start.start, start.direction, 4 * this.multiplier(context), 8 * this.multiplier(context), 500, 500, 12, MOD.shotgun);
@@ -590,7 +590,7 @@ export class Q2Weapons extends Q2Ballistics {
     const { self, game, input, rerelease, state } = context;
     const angles = rerelease ? { ...input.angles, x: Math.max(-62.5, input.angles.x) } : input.angles;
     const projection = this.project(context, { x: 8, y: rerelease ? 0 : 8, z: -8 }, angles);
-    this.kick(context, scale(angleVectors(input.angles).forward, -2), { x: -1, y: 0, z: 0 });
+    this.kick(context, scale(angleVectorsRule(input.angles, "native").forward, -2), { x: -1, y: 0, z: 0 });
     if (rerelease) {
       const randomOpen = () => -0.9999999403953552 + game.host.random() * 1.9999999403953552;
       const right = randomOpen() * 10, up = 200 + randomOpen() * 10;
@@ -603,7 +603,7 @@ export class Q2Weapons extends Q2Ballistics {
   private rocketLauncher(context: Q2WeaponContext): undefined {
     const { self, game, input, rerelease, state } = context;
     const damage = 100 + Math.floor(game.host.random() * 20), projection = this.project(context, { x: 8, y: 8, z: -8 });
-    this.kick(context, scale(angleVectors(input.angles).forward, -2), { x: -1, y: 0, z: 0 });
+    this.kick(context, scale(angleVectorsRule(input.angles, "native").forward, -2), { x: -1, y: 0, z: 0 });
     this.fireRocket(self, game, projection.start, projection.direction, damage * this.multiplier(context), 650, 120, 120 * this.multiplier(context));
     this.flash(context, 7); if (!rerelease) state.frame++;
     this.playerNoise(self, game, projection.start, "weapon"); return this.consume(context);
@@ -612,7 +612,7 @@ export class Q2Weapons extends Q2Ballistics {
   private railgun(context: Q2WeaponContext): undefined {
     const { self, game, input, rerelease, state } = context;
     const projection = this.project(context, { x: 0, y: 7, z: -8 }), dm = game.options.mode === "deathmatch";
-    this.kick(context, scale(angleVectors(input.angles).forward, -3), { x: -3, y: 0, z: 0 });
+    this.kick(context, scale(angleVectorsRule(input.angles, "native").forward, -3), { x: -3, y: 0, z: 0 });
     const restore = rerelease && this.hooks.lagCompensation.kind === "history" ? this.hooks.lagCompensation.begin(self.actor.id, projection.start, projection.direction) : null;
     try { this.fireRail(self, game, projection.start, projection.direction, (dm ? 100 : rerelease ? 125 : 150) * this.multiplier(context), (dm ? 200 : rerelease ? 225 : 250) * this.multiplier(context)); }
     finally { restore?.(); }
@@ -630,7 +630,7 @@ export class Q2Weapons extends Q2Ballistics {
     if (this.ammo(context) < 50) { if (!rerelease) state.frame++; return undefined; }
     const projection = this.project(context, { x: 8, y: 8, z: -8 });
     this.fireBfg(self, game, projection.start, projection.direction, (game.options.mode === "deathmatch" ? 200 : 500) * this.multiplier(context), 400, 1000);
-    this.kick(context, scale(angleVectors(input.angles).forward, -2), { x: rerelease ? -20 : -40, y: 0, z: (game.host.random() * 2 - 1) * 8 }, rerelease ? 0.6 - game.host.frameSeconds() : 0.5);
+    this.kick(context, scale(angleVectorsRule(input.angles, "native").forward, -2), { x: rerelease ? -20 : -40, y: 0, z: (game.host.random() * 2 - 1) * 8 }, rerelease ? 0.6 - game.host.frameSeconds() : 0.5);
     if (rerelease) this.flash(context, 19); else state.frame++;
     this.playerNoise(self, game, projection.start, "weapon"); return this.consume(context);
   }

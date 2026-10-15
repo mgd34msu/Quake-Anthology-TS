@@ -1,10 +1,10 @@
 /* LM_CTF p_weapon.c hook and g_cmds.c offhand controls. GPL-2.0-or-later. */
 import type { ActorId } from "../../../contracts/identity.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../core/math.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q2CallbackDefinitions } from "../foundation/callbacks.ts";
 import type { Q2Die, Q2Entity, Q2GameServices, Q2Think, Q2Touch } from "../foundation/host.ts";
 import { add, length, normalize, scale, subtract, zero } from "../foundation/fields.ts";
-import { angleVectors, vectorAngles } from "../foundation/weapons/vectors.ts";
 import { LmctfGrappleState, grappleBody, grappleVelocity } from "./grapple-services.ts";
 import type { GrappleHooks } from "./grapple-services.ts";
 
@@ -90,7 +90,7 @@ export class LmctfGrappleEquipment {
     game.host.emit({ kind: "effect", effect: "blaster", origin: game.body(hook).origin, direction: contact.plane?.normal ?? zero, count: 0, color: 0 }); return undefined;
   };
   private launch(player: ActorId, game: Q2GameServices, start: Vec3, direction: Vec3): Q2Entity {
-    const hook = game.create("noclass"), angles = vectorAngles(direction);
+    const hook = game.create("noclass"), angles = vectorToAnglesRule(direction, "native");
     this.state(player).hook = hook.actor.id;
     hook.owner = player; hook.touch = this.touch; hook.die = this.die; hook.damage = 2; hook.maxHealth = 59; hook.model = "models/objects/ghook/tris.md2"; hook.clipMask = 0x6000003;
     game.move(hook, { origin: start, angles: { ...angles, x: angles.x + 90 }, velocity: scale(normalize(direction), 800) });
@@ -114,7 +114,7 @@ export class LmctfGrappleEquipment {
   fire(player: ActorId, game: Q2GameServices): undefined {
     this.bind(game);
     const state = this.state(player), pose = this.hooks.pose(player, game);
-    const body = grappleBody(player, game), basis = angleVectors(pose.angles), side = pose.hand === "left" ? -8 : pose.hand === "center" ? 0 : 8;
+    const body = grappleBody(player, game), basis = angleVectorsRule(pose.angles, "native"), side = pose.hand === "left" ? -8 : pose.hand === "center" ? 0 : 8;
     const start = add(add(add(body.origin, scale(basis.forward, 8)), scale(basis.right, side)), { x: 0, y: 0, z: pose.viewHeight - 8 });
     if (state.hookState === 0) {
       state.hookState = 1; const hook = this.launch(player, game, start, basis.forward); state.hook = hook.actor.id;

@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { MovementBodyShape } from "../../movement/body-shape.ts";
 import type { ModClientMovementOutputs } from "../../contracts/mod-client-outputs.ts";
 import { clientMovementType, clientStanceCommand } from "../../movement/client-outputs.ts";
@@ -58,7 +59,7 @@ export function readClassicUserCommand(view: DataView): Q2UserCommand {
 
 /** Public ClientThink/Pmove boundaries, including calls made inside the original game DLL. */
 export class NativeInputBinding {
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly commands: CommandScope[] = [];
   private current: ModClientApplication | null = null;
   constructor(private readonly source: NativeInputSource, private readonly services: NativeInputServices) {
@@ -229,5 +230,5 @@ export class NativeInputBinding {
     const body = current == null ? undefined : { current, ...(requested === undefined ? {} : { requested }), currentActor: () => this.assertLive(scope) };
     const result = run(body); this.assertLive(scope); return result;
   }
-  close(): undefined { for (const remove of this.removals.splice(0).reverse()) remove(); return undefined; }
+  close(): undefined { this.removals.runReverse(); return undefined; }
 }

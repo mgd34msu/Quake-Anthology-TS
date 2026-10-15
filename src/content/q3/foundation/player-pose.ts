@@ -7,7 +7,7 @@
 import type { PlayerAnimationConfig } from "./animation-config.ts";
 import { CommonError } from "../../../core/common-error.ts";
 import { dot3, length3, normalize3, vec3 } from "../../../core/math.ts";
-import { qvmAngleMod, qvmAnglesToAxis } from "../../../core/qvm-math.ts";
+import { qvmAngleMod, qvmAnglesToAxis } from "../../../core/math.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
 import type { Axis, Vec3 } from "../../../core/math.ts";
 import { PlayerAnimation } from "../../../movement/q3/constants.ts";

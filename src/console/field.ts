@@ -1,3 +1,4 @@
+import { BoundedQueue } from "../foundation/bounded-queue.ts";
 import { KeyCode } from "../input/key-codes.ts";
 export { EditField, type FieldControls, type FieldClipboard } from "./source-field.ts";
 
@@ -123,21 +124,21 @@ export function completeCommand(text: string, names: readonly string[]): Complet
 }
 
 export class ConsoleHistory {
-  private entries: string[] = [];
+  private readonly entries: BoundedQueue<string>;
   private position = 0;
   private draft = "";
-  constructor(readonly capacity = 32) {}
-  get lines(): readonly string[] { return [...this.entries]; }
-  replace(lines: readonly string[]): void { this.entries = lines.filter(line => line.length > 0).slice(-this.capacity); this.position = this.entries.length; }
+  constructor(readonly capacity = 32) { this.entries = new BoundedQueue<string>(capacity); }
+  get lines(): readonly string[] { return this.entries.toArray(); }
+  replace(lines: readonly string[]): void { this.entries.clear(); for (const line of lines) if (line.length > 0) this.entries.push(line); this.position = this.entries.length; }
   add(line: string): void {
     if (line.length === 0) return;
-    this.entries.push(line); if (this.entries.length > this.capacity) this.entries.shift();
+    this.entries.push(line);
     this.position = this.entries.length; this.draft = "";
   }
   previous(current: string): string {
     if (this.position === this.entries.length) this.draft = current;
     this.position = Math.max(0, this.position - 1);
-    return this.entries[this.position] ?? current;
+    return this.entries.at(this.position) ?? current;
   }
-  next(): string { this.position = Math.min(this.entries.length, this.position + 1); return this.entries[this.position] ?? this.draft; }
+  next(): string { this.position = Math.min(this.entries.length, this.position + 1); return this.entries.at(this.position) ?? this.draft; }
 }

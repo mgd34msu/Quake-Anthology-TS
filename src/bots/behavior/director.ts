@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import { botClearActivateGoalStack } from "./q3/ai-navigation.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { botOrderActive, botOrderStatus, sameBotOrder } from "./orders.ts";
@@ -65,7 +66,8 @@ export class SourceBotDirector {
   get options(): SourceBotDirectorOptions { return this.currentOptions; }
   readonly bspEntities: AasBspEntities;
   private readonly sequences = new Map<OwnedActor, number>();
-  private readonly generated: ActorCommand[] = [];
+  private readonly generated = new EventRing<ActorCommand>(4096);
+  private readonly generatedCursor: EventCursor = this.generated.openCursor();
   private loaded = false;
   private closed = false;
   private running = false;
@@ -91,7 +93,7 @@ export class SourceBotDirector {
         if (actor === null) throw new Error(`Bot command has no admitted shared actor for client ${client}`);
         const sequence = this.sequences.get(actor) ?? 0;
         this.sequences.set(actor, sequence + 1);
-        this.generated.push({ actor: actor.id, source: { kind: "bot", provider: host.provider }, sequence,
+        this.generated.admit({ actor: actor.id, source: { kind: "bot", provider: host.provider }, sequence,
           ...host.encodeCommand(client, { ...command, angles: { ...command.angles } }) });
       } });
     const catalog = new GameBotCatalog(game, this.options.files, new CommonParseState(), {
@@ -102,7 +104,7 @@ export class SourceBotDirector {
   }
 
   beginRoundRestart(): void {
-    if (!this.loaded || this.closed || this.running || this.generated.length !== 0 || this.roundPhase !== "active") {
+    if (!this.loaded || this.closed || this.running || this.generated.pending(this.generatedCursor) !== 0 || this.roundPhase !== "active") {
       throw new Error("Bot round restart requires a live idle director");
     }
     this.ai.shutdown(true);
@@ -199,13 +201,13 @@ export class SourceBotDirector {
   /** Called once by the session's source frame phase; it never runs actor physics itself. */
   frame(milliseconds: number): readonly ActorCommand[] {
     if (!this.loaded || this.closed || this.running || this.roundPhase !== "active") throw new Error("Bot commands require a live idle director");
-    if (this.generated.length !== 0) throw new Error("Bot command output from the previous source frame was not drained");
+    if (this.generated.pending(this.generatedCursor) !== 0) throw new Error("Bot command output from the previous source frame was not drained");
     this.running = true;
-    try { this.ai.startFrame(milliseconds); return this.generated.splice(0); }
+    try { this.ai.startFrame(milliseconds); const taken = this.generated.take(this.generatedCursor); this.generated.retire(); return taken; }
     finally { this.running = false; }
   }
   checkpointOrchestration(): SourceBotDirectorOrchestration {
-    if (!this.loaded || this.closed || this.running || this.generated.length !== 0 || this.roundPhase !== "active") throw new Error("Bot director checkpoint requires a completed frame in a live map");
+    if (!this.loaded || this.closed || this.running || this.generated.pending(this.generatedCursor) !== 0 || this.roundPhase !== "active") throw new Error("Bot director checkpoint requires a completed frame in a live map");
     return { version: 1, sequences: [...this.sequences].map(([actor, next]) => ({
       actor: { slot: actor.id.slot, generation: actor.id.generation }, owner: actor.owner, next,
     })) };
@@ -214,7 +216,7 @@ export class SourceBotDirector {
   restoreOrchestration(value: unknown, resolve: (actor: SavedActorId) => OwnedActor | null): void {
     const reader = new SaveReader(value, "bot.director.orchestration"), image = { version: reader.field("version").literal(1),
       sequences: reader.field("sequences").list(entry => ({ actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) }, owner: namespaced(entry.field("owner")), next: entry.field("next").integer(0) })) };
-    if (!this.loaded || this.closed || this.generated.length !== 0) throw new Error("Restore bot director orchestration only after its child owners are live");
+    if (!this.loaded || this.closed || this.generated.pending(this.generatedCursor) !== 0) throw new Error("Restore bot director orchestration only after its child owners are live");
     if (image.version !== 1) throw new Error("Unsupported bot director orchestration version");
     const sequences = new Map<OwnedActor, number>();
     for (const entry of image.sequences) {
@@ -302,6 +304,6 @@ export class SourceBotDirector {
     if (this.closed) return;
     for (const entry of this.roster()) this.catalog.shutdownClient(entry.sourceClient, restart);
     this.bspEntities.dump(); this.library.shutdown();
-    this.sequences.clear(); this.generated.length = 0; this.closed = true;
+    this.sequences.clear(); this.generated.reset(); this.closed = true;
   }
 }

@@ -5,7 +5,7 @@
 import { traceGround } from "./ground.ts";
 import type { ActorTraceResult, ActorSpatialQueries } from "../world.ts";
 import { add3, dot3, scale3, vec3 } from "../../../../core/math.ts";
-import { qvmAngleVectors } from "../../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
 import { EntityType, GameType, ItemType } from "../shared/definitions.ts";

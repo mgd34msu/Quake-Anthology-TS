@@ -13,7 +13,7 @@ import { infoValueForKey } from "../../../core/info-string.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
 import { add3, dot3, length3, normalize3, scale3, sub3, vec3, vectorToAngles } from "../../../core/math.ts";
 import type { Bounds, Vec3 } from "../../../core/math.ts";
-import { qvmAngleMod, qvmAngleVectors } from "../../../core/qvm-math.ts";
+import { qvmAngleMod, qvmAngleVectors } from "../../../core/math.ts";
 import { EntityEvent, EntityType, EV_EVENT_BITS, GameType, MoveType, PersistentIndex, Powerup, Team, Weapon, WeaponState, statSchema } from "../../../content/q3/base/shared/definitions.ts";
 import { EntityState } from "../../../content/q3/base/shared/entity-state.ts";
 import { ENTITYNUM_NONE, ENTITYNUM_WORLD } from "../../../content/q3/base/shared/player-state.ts";

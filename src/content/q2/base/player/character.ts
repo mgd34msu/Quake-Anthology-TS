@@ -1,4 +1,5 @@
 import type { DamageDecision } from "../../../../contracts/gameplay.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { SavedActorId } from "../../../../contracts/session.ts";
@@ -10,7 +11,6 @@ import { Q2Entity } from "../../foundation/host.ts";
 import type { Q2PresentationEvent } from "../../foundation/host.ts";
 import type { Q2PlayerPowerups } from "../../foundation/items.ts";
 import { add, dot, zero } from "../../foundation/fields.ts";
-import { angleVectors } from "../../foundation/weapons/vectors.ts";
 import { q2WorldEffects, q2FallingDamage } from "./environment.ts";
 import { q2BuildView, q2ClientAnimation, q2ClientEffects, q2DamageFeedback, q2DeathAnimationFrames } from "./view.ts";
 import { createQ2PlayerRules, Q2PlayerState } from "./types.ts";
@@ -191,7 +191,7 @@ export class Q2CharacterActor {
     if (intermission) return host.view(actor.id, q2BuildView(context, 0, true));
     this.entity.viewHeight = state.gibbed ? 8 : state.dead || movement.ducked ? -2 : 22;
     if (this.options.environment) q2WorldEffects(context);
-    const body = this.body(), vectors = angleVectors(movement.viewAngles), side = dot(body.velocity, vectors.right);
+    const body = this.body(), vectors = angleVectorsRule(movement.viewAngles, "native"), side = dot(body.velocity, vectors.right);
     const roll = (side < 0 ? -1 : 1) * Math.min(Math.abs(side) * this.rules.rollAngle / this.rules.rollSpeed, this.rules.rollAngle);
     host.bodies.write(actor, { ...body, angles: { x: (movement.viewAngles.x > 180 ? movement.viewAngles.x - 360 : movement.viewAngles.x) / 3, y: movement.viewAngles.y, z: roll * 4 } });
     const speed = Math.hypot(body.velocity.x, body.velocity.y);

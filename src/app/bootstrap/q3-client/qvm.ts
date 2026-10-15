@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../../foundation/cleanup.ts";
 import type { QvmBodyPart } from "../../../contracts/qvm-mod-presentation.ts";
 import type { RefModelEntity } from "../../../content/q3/presentation/ref-entity.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
@@ -110,7 +111,7 @@ export class ApplicationQvmClient {
   private ui: QvmUi | null = null;
   private equipment: Q3EquipmentPresentation | null = null;
   private equipmentProfile: QvmEquipmentPresentationProfile | null = null;
-  private readonly equipmentStatusObservers: (() => void)[] = [];
+  private readonly equipmentStatusObservers = new CleanupStack();
   private equipmentHeldObserver: (() => void) | null = null;
   private readonly heldInvocations: HeldWeaponInvocation[] = [];
   private readonly heldWeapons: QvmHeldWeapon[] = [];
@@ -337,7 +338,7 @@ export class ApplicationQvmClient {
     if (this.retired) return;
     this.retired = true; this.ready = false;
     const failures: unknown[] = [];
-    for (const cleanup of [() => { this.bodySubmissions?.close(); this.bodySubmissions = null; this.equipmentSelector?.(); this.equipmentSelector = null; this.equipmentViewObserver?.(); this.equipmentViewObserver = null; this.equipmentHeldObserver?.(); this.equipmentHeldObserver = null; for (const remove of this.equipmentStatusObservers.splice(0)) remove(); this.heldWeapons.length = 0; this.equipmentViewVisible = false; this.equipment = null; }, () => this.cgame?.retire(), () => this.ui?.retire(),
+    for (const cleanup of [() => { this.bodySubmissions?.close(); this.bodySubmissions = null; this.equipmentSelector?.(); this.equipmentSelector = null; this.equipmentViewObserver?.(); this.equipmentViewObserver = null; this.equipmentHeldObserver?.(); this.equipmentHeldObserver = null; this.equipmentStatusObservers.runAll(); this.heldWeapons.length = 0; this.equipmentViewVisible = false; this.equipment = null; }, () => this.cgame?.retire(), () => this.ui?.retire(),
       () => this.files.cgame.closeAll(), () => this.files.ui.closeAll(),
       () => this.scripts.cgame.closeAll(), () => this.scripts.ui.closeAll(), () => this.globals.clear()]) {
       try { cleanup(); } catch (error) { failures.push(error); }

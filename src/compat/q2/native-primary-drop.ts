@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import { sourceItemNamed } from "../../contracts/source-items.ts";
 import type { ContentDigest } from "../../contracts/content.ts";
 import type { GuestAddress, GuestCallValue, GuestValueLayout, NativeAbi } from "../../contracts/execution.ts";
@@ -45,7 +46,7 @@ const pointer: GuestValueLayout = { kind: "scalar", storage: "pointer" };
 
 /** Original command guards, item callbacks and accepted decrements own each drop. */
 export class NativePrimaryDrop {
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly frames: DropFrame[] = [];
   private closed = false;
   constructor(private readonly host: NativePrimaryWeaponHost, private readonly profile: NativePrimaryDropProfile,
@@ -152,5 +153,5 @@ export class NativePrimaryDrop {
       return descriptor.address;
     } catch (error) { frame.restore(); throw error; }
   }
-  close(): void { if (this.closed) return; for (const frame of [...this.frames].reverse()) frame.restore?.(); this.closed = true; for (const remove of this.removals.splice(0).reverse()) remove(); }
+  close(): void { if (this.closed) return; for (const frame of [...this.frames].reverse()) frame.restore?.(); this.closed = true; this.removals.runReverse(); }
 }

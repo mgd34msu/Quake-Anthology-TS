@@ -1,3 +1,4 @@
+import { EventRing } from "../../../foundation/event-ring.ts";
 /* NetQuake net_dgrm.c and cl_main.c client progression. GPL-2.0-or-later. */
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { Q1UserCommand } from '../../../contracts/protocol.ts';
@@ -55,7 +56,7 @@ export class Q1ClientNetwork implements ApplicationNetwork {
     private peer: IpAddress | IpxAddress | null = null;
     private lastReceived = 0;
     private movementMessages = 0;
-    private readonly reliable: Uint8Array[] = [];
+    private readonly reliable = new EventRing<Uint8Array>(4096);
     constructor(readonly options: Q1ClientNetworkOptions) {
         if (options.seat.extensionFlags !== null)
             throw new Error('Native NetQuake does not negotiate private extensions');
@@ -68,7 +69,7 @@ export class Q1ClientNetwork implements ApplicationNetwork {
             throw new Error('NetQuake client is not connected');
         const bytes = new SizeBuf(8000);
         writeClientStringCommand(bytes, text);
-        this.reliable.push(bytes.bytes());
+        this.reliable.admit(bytes.bytes());
     }
     private reject(reason: string): void { this.state = 'rejected'; this.options.host.disconnected(reason); }
     async poll(now: number): Promise<readonly ActorCommand[]> {
@@ -128,7 +129,7 @@ export class Q1ClientNetwork implements ApplicationNetwork {
                 if (message.kind === 'signon') {
                     const response = this.signon.receive(message.stage);
                     if (response.length > 0)
-                        this.reliable.push(response);
+                        this.reliable.admit(response);
                 }
                 if (message.kind === 'entity')
                     this.signon.firstEntity();
@@ -148,7 +149,7 @@ export class Q1ClientNetwork implements ApplicationNetwork {
             }
             if (this.channel.canSendReliable) {
                 const bytes = this.reliable.shift();
-                if (bytes !== undefined)
+                if (bytes !== null)
                     this.channel.queueReliable(bytes);
             }
             const packet = this.channel.next(now);

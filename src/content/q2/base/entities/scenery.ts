@@ -1,9 +1,9 @@
 /* Quake II g_misc.c clocks, decorative models and teleporters. GPL-2.0-or-later. */
 import type { Bounds } from "../../../../contracts/math.ts";
+import { vectorToAnglesRule } from "../../../../core/math.ts";
 import { add, integerField, scale, zero } from "../../foundation/fields.ts";
 import type { Q2Entity, Q2GameServices, Q2Think, Q2Touch, Q2Use, Q2Die } from "../../foundation/host.ts";
 import { killQ2Box } from "../../foundation/scenery.ts";
-import { vectorAngles } from "../../foundation/weapons/vectors.ts";
 import type { SavedActorId } from "../../../../contracts/session.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import { restoreQ2Actor } from "../../foundation/checkpoint.ts";
@@ -112,7 +112,7 @@ export class Q2BaseScenery {
 
   private readonly bombPrethink: Q2Think = (current, host) => {
     const diff = Math.max(-1, current.timestamp - host.host.now());
-    const angles = vectorAngles({ ...scale(current.movedir, 1 + diff), z: diff });
+    const angles = vectorToAnglesRule({ ...scale(current.movedir, 1 + diff), z: diff }, "native");
     host.move(current, { ground: null, angles: { ...angles, z: host.body(current).angles.z + 10 } }, false);
     return undefined;
   };

@@ -1,3 +1,4 @@
+import { BoundedQueue } from "../../foundation/bounded-queue.ts";
 import type { QvmModProtectionScalar } from "../../contracts/qvm-mod-callbacks.ts";
 import { SourceModClientOutputs, validateModClientOutputs } from "../../world/session/mod-client-outputs.ts";
 import { resolveQvmObjectiveAddress, validateQvmObjectiveAddress } from "./mod-objectives.ts";
@@ -28,7 +29,7 @@ import type { ModCommandPort } from "../../world/session/mod-commands.ts";
 import { modClientInputValues } from "../../world/session/mod-client-input-values.ts";
 import type { CommandInvocation } from "../../core/commands/index.ts";
 import { CvarRegistry, CvarFlag } from "../../core/cvars/index.ts";
-import { float32ToBits, nativeAtoi, Q3_BINARY32_PROFILE } from "../../core/numeric.ts";
+import { bitsToFloat32, float32ToBits, nativeAtoi, Q3_BINARY32_PROFILE } from "../../core/numeric.ts";
 import { createBoxModel, createCapsuleModel } from "../../world/collision/q3/model.ts";
 import { encodeCheckpointValue, decodeCheckpointValue, SaveReader } from "../../persistence/value.ts";
 import { readSavedActor, savedActorId } from "../../persistence/save-image.ts";
@@ -304,7 +305,7 @@ export class QvmModProvider {
   private sceneDirty = true;
   private sceneRevision = 0;
   private sceneCommandSequence = 0;
-  private readonly sceneCommands: { readonly sequence: number; readonly recipient: ActorId | null; readonly text: string }[] = [];
+  private readonly sceneCommands = new BoundedQueue<{ readonly sequence: number; readonly recipient: ActorId | null; readonly text: string }>(64);
   private readonly eventKeys = new Map<ActorId, string>();
   private readonly defaults = new Map<string, Uint8Array>();
   private readonly frames: Frame[] = [];
@@ -383,7 +384,7 @@ export class QvmModProvider {
         entityTokens: this.entityTokens.captureSaveState(),
         presentation: { revision: this.presentationRevision, state: this.presentationState === null ? null : capturePresentationGameState(this.presentationState),
           sceneRevision: this.sceneRevision, dirty: this.sceneDirty, commandSequence: this.sceneCommandSequence,
-          commands: this.sceneCommands.map(command => ({ ...command, recipient: command.recipient === null ? null : savedActorId(command.recipient) })),
+          commands: this.sceneCommands.toArray().map(command => ({ ...command, recipient: command.recipient === null ? null : savedActorId(command.recipient) })),
           current: this.sceneState === null ? null : captureModScenePublication(this.sceneState, this.declaration.abiProfile),
           baseline: this.sceneBaseline === null ? null : captureModScenePublication(this.sceneBaseline, this.declaration.abiProfile) } }) }, random: [], callbacks: [] }),
       restore: state => {
@@ -411,17 +412,17 @@ export class QvmModProvider {
         if (presentation.value === undefined) {
           this.presentationRevision++; this.presentationState = null;
           this.sceneState = null; this.sceneBaseline = null; this.sceneDirty = true; this.sceneRevision = 0;
-          this.sceneCommandSequence = 0; this.sceneCommands.length = 0;
+          this.sceneCommandSequence = 0; this.sceneCommands.clear();
         } else {
           const resolve = (saved: SavedActorId) => this.services.referenceSaved?.(saved) ?? this.services.actors.referenceSaved(saved, "current");
           this.presentationRevision = presentation.field("revision").integer(0);
           this.presentationState = presentation.field("state").nullable(readPresentationGameState);
           this.sceneRevision = presentation.field("sceneRevision").integer(0); this.sceneDirty = presentation.field("dirty").boolean();
-          this.sceneCommandSequence = presentation.field("commandSequence").integer(0); this.sceneCommands.length = 0;
+          this.sceneCommandSequence = presentation.field("commandSequence").integer(0); this.sceneCommands.clear();
           for (const command of presentation.field("commands").list(row => ({ sequence: row.field("sequence").integer(1), text: row.field("text").string(),
             recipient: row.field("recipient").nullable(v => resolve(readSavedActor(v))) }))) {
             if (command.sequence > this.sceneCommandSequence || command.sequence <= this.sceneCommandSequence - 64
-              || command.sequence <= (this.sceneCommands.at(-1)?.sequence ?? 0)) presentation.fail("invalid saved source command ring");
+              || command.sequence <= (this.sceneCommands.peekNewest()?.sequence ?? 0)) presentation.fail("invalid saved source command ring");
             this.sceneCommands.push(command);
           }
           this.sceneState = presentation.field("current").nullable(v => readModScenePublication(v, this.declaration.abiProfile, resolve));
@@ -576,7 +577,6 @@ export class QvmModProvider {
   private sceneCommand(text: string, recipient: ActorId | null): void {
     if (this.declaration.presentation?.runtime !== "qvm-scene") return;
     this.sceneCommands.push({ sequence: ++this.sceneCommandSequence, recipient, text });
-    if (this.sceneCommands.length > 64) this.sceneCommands.shift();
     this.sceneDirty = true;
   }
   private refreshServerInformation(): void {
@@ -609,7 +609,7 @@ export class QvmModProvider {
     }
     const clients = (this.clientBindings?.players() ?? []).filter(row => row.admitted && this.services.actors.isLive(row.actor)).map(row => ({ actor: row.actor, slot: row.slot,
       state: readSourceQvmPlayerState(this.view(this.playerAddress(row.actor), qvmPlayerStateBytes(this.declaration.abiProfile)), this.declaration.abiProfile) }));
-    this.sceneState = { revision: ++this.sceneRevision, serverTime, gameState, gameStateRevision: this.presentationRevision, entities, clients, commands: this.sceneCommands.slice() };
+    this.sceneState = { revision: ++this.sceneRevision, serverTime, gameState, gameStateRevision: this.presentationRevision, entities, clients, commands: this.sceneCommands.toArray() };
     this.sceneDirty = false; return this.sceneState;
   }
   readonly presentationSource: ModQvmPresentationSource = this.createPresentationSource();
@@ -941,7 +941,7 @@ export class QvmModProvider {
       this.completeDirectLifecycle(call, execution.words, result);
       if (call.returns === "void") { succeeded = true; return 0; }
       if (call.returns === "int32") { succeeded = true; return result; }
-      const word = new DataView(new ArrayBuffer(4)); word.setInt32(0, result, true); const value = word.getFloat32(0, true);
+      const value = bitsToFloat32(result);
       if (!Number.isFinite(value)) throw new Error("QVM mod returned a nonfinite scalar"); succeeded = true; return value;
     } finally {
       try { execution.finish(succeeded); } finally { this.finishRetiredProjections(); }

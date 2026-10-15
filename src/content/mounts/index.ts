@@ -129,7 +129,16 @@ export class MountedContent {
   readonly #sources = new Map<MountId, MountedSource>();
   readonly #userMounts = new Set<MountId>();
   readonly #referenced = new Map<MountId, ArchiveMount>();
-  readonly #openedResources = new Map<string, ResolvedResourceReference>();
+  readonly #openedResources = new Map<number, ResolvedResourceReference>();
+  readonly #openedKeys = new Map<MountId, Map<string, number>>();
+  #nextOpenedKey = 1;
+  #openedKey(mount: MountId, requestedPath: string): number {
+    let paths = this.#openedKeys.get(mount);
+    if (paths === undefined) { paths = new Map<string, number>(); this.#openedKeys.set(mount, paths); }
+    let key = paths.get(requestedPath);
+    if (key === undefined) { key = this.#nextOpenedKey++; paths.set(requestedPath, key); }
+    return key;
+  }
   #closed = false;
   #ownership: { readonly kind: "owned" } | { readonly kind: "borrowed"; readonly parent: { assertOpen(): void } } = { kind: "owned" };
 
@@ -194,7 +203,7 @@ export class MountedContent {
     this.assertOpen();
     const mounts = new Map(this.plan.mounts.map(mount => [mount.identity.id, mount]));
     const plan = resolveOrder({ ...order, mounts: this.plan.mounts }, mounts, this.options.pure);
-    const openedResources = new Map<string, ResolvedResourceReference>();
+    const openedResources = new Map<number, ResolvedResourceReference>();
     const open: MountedContentReader["open"] = (path, acceptMount = () => true) => this.#open(plan, path, acceptMount, openedResources);
     return { plan, open, resolve: async path => (await open(path))?.reference ?? null,
       read: async resource => {
@@ -229,11 +238,11 @@ export class MountedContent {
     return { bytes: await readLooseEntry(source.mount.rootPath, actualPath), provenance: { kind: "loose", mount: source.mount, memberPath: actualPath } };
   }
 
-  #opened(requestedPath: string, read: { readonly bytes: Uint8Array; readonly provenance: ResourceProvenance }, resolution: ResourceResolution, openedResources: Map<string, ResolvedResourceReference>): OpenedResource {
+  #opened(requestedPath: string, read: { readonly bytes: Uint8Array; readonly provenance: ResourceProvenance }, resolution: ResourceResolution, openedResources: Map<number, ResolvedResourceReference>): OpenedResource {
     const resource = { requestedPath, provenance: read.provenance, digest: digestBytes(read.bytes), byteLength: read.bytes.length, resolution };
     if (read.provenance.kind === "archive") this.#referenced.set(read.provenance.mount.identity.id, read.provenance.mount);
     const reference = { ...resource, id: createResourceId(resource) };
-    openedResources.set(`${reference.provenance.mount.identity.id}:${requestedPath}`, reference);
+    openedResources.set(this.#openedKey(reference.provenance.mount.identity.id, requestedPath), reference);
     return { reference, bytes: read.bytes };
   }
 
@@ -242,7 +251,7 @@ export class MountedContent {
   }
 
   async #open(plan: ResolvedMountPlan, path: string, acceptMount: (mount: ContentMount) => boolean,
-    openedResources: Map<string, ResolvedResourceReference>): Promise<OpenedResource | null> {
+    openedResources: Map<number, ResolvedResourceReference>): Promise<OpenedResource | null> {
     this.assertOpen();
     const requestedPath = normalizeResourcePath(path);
     if (this.#userMounts.size !== 0) for (const [rank, id] of plan.defaultOrder.entries()) {
@@ -335,7 +344,7 @@ export class MountedContent {
     return this.#read(resource, this.#openedResources);
   }
 
-  async #read(resource: string | ResolvedResourceReference, openedResources: Map<string, ResolvedResourceReference>): Promise<Uint8Array> {
+  async #read(resource: string | ResolvedResourceReference, openedResources: Map<number, ResolvedResourceReference>): Promise<Uint8Array> {
     this.assertOpen();
     if (typeof resource === "string") {
       const opened = await this.open(resource);
@@ -362,7 +371,7 @@ export class MountedContent {
     }
     this.assertOpen();
     if (bytes.length !== resource.byteLength || digestBytes(bytes) !== resource.digest) throw new Error(`Resource bytes changed since resolution: ${resource.requestedPath}`);
-    openedResources.set(`${resource.provenance.mount.identity.id}:${resource.requestedPath}`, resource);
+    openedResources.set(this.#openedKey(resource.provenance.mount.identity.id, resource.requestedPath), resource);
     return bytes;
   }
 

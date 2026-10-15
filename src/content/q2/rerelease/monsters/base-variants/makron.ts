@@ -1,9 +1,10 @@
 // Rerelease m_boss32.cpp. ZeniMax Media, GPL-2.0.
 import { makronDefinition } from "../../../base/monsters/makron.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../../core/math.ts";
 import { stopLoop } from "../../../base/monsters/boss-common.ts";
 import { add, normalize, scale, subtract } from "../../../foundation/fields.ts";
 import type { Q2Think } from "../../../foundation/host.ts";
-import { anglesVectors, corpse, enemyEye, health, projectFlash, vectorAngles } from "../../../foundation/monsters/ai.ts";
+import { corpse, enemyEye, health, projectFlash } from "../../../foundation/monsters/ai.ts";
 import { throwGib } from "../../../foundation/monsters/gibs.ts";
 import type { Q2Monsters } from "../../../foundation/monsters/index.ts";
 import { muzzleOffset } from "../../../foundation/monsters/muzzle.ts";
@@ -22,7 +23,7 @@ const torsoThink: Q2Think = (entity, game) => {
 function spawnTorso(context: MonsterContext): undefined {
   const { entity, game } = context, torso = throwGib(entity, game, "models/monsters/boss3/rider/tris.md2", 0);
   if (torso === null) return undefined;
-  const body = game.body(entity), axes = anglesVectors(body.angles), height = body.bounds.max.z - game.body(torso).bounds.max.z;
+  const body = game.body(entity), axes = angleVectorsRule(body.angles, "native"), height = body.bounds.max.z - game.body(torso).bounds.max.z;
   torso.frame = 346; torso.skin = 1; torso.effects = 2; torso.angularVelocity = { x: 0, y: 0, z: 0 }; torso.sound = "makron/spine.wav";
   game.move(torso, { origin: add({ ...body.origin, z: body.origin.z + height - 15 }, scale(axes.forward, -10)), angles: { ...body.angles, x: 90 }, velocity: add(game.body(torso).velocity, add(scale(axes.up, 120), scale(axes.forward, -120))) });
   game.motion(torso, "toss"); game.show(torso);
@@ -38,7 +39,7 @@ export function tossRereleaseMakron(context: MonsterContext, monsters: Q2Monster
   const target = enemy === null ? null : game.host.bodies.read(enemy), resumed = monsters.context(child.actor.id);
   if (target === null || resumed === null) return child.actor.id;
   const body = game.body(child), difference = subtract(target.origin, body.origin);
-  game.move(child, { angles: { ...body.angles, y: vectorAngles(difference).y }, velocity: { ...scale(normalize(difference), 400), z: 200 }, ground: null });
+  game.move(child, { angles: { ...body.angles, y: vectorToAnglesRule(difference, "native-ai").y }, velocity: { ...scale(normalize(difference), 400), z: 200 }, ground: null });
   child.enemy = enemy; monsters.foundTarget(resumed); resumed.setMove("makron_move_sight"); child.frame = resumed.state.nextFrame = boss32Frame.active01;
   return child.actor.id;
 }
@@ -85,7 +86,7 @@ export const rereleaseMakronDefinition: Q2MonsterDefinition = {
     MakronHyperblaster(context) {
       const frame = context.entity.frame, flash = 102 + frame - boss32Frame.attak405, start = projectFlash(context, muzzleOffset("rerelease", flash));
       const eye = enemyEye(context), yaw = context.game.body(context.entity).angles.y;
-      const direction = anglesVectors({ x: eye === null ? 0 : vectorAngles(subtract(eye, start)).x, y: frame <= boss32Frame.attak413 ? yaw - 10 * (frame - boss32Frame.attak413) : yaw + 10 * (frame - boss32Frame.attak421), z: 0 }).forward;
+      const direction = angleVectorsRule({ x: eye === null ? 0 : vectorToAnglesRule(subtract(eye, start), "native-ai").x, y: frame <= boss32Frame.attak413 ? yaw - 10 * (frame - boss32Frame.attak413) : yaw + 10 * (frame - boss32Frame.attak421), z: 0 }, "native").forward;
       context.weapons.fireBlaster(context.entity, context.game, start, direction, 15, 1000, 8); return monsterFlash(context, flash, start, direction);
     },
   },

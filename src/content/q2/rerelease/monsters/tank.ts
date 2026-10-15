@@ -1,8 +1,9 @@
 // Rerelease m_tank.cpp, including the Quake II 64 commander. ZeniMax Media, GPL-2.0.
 import type { Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import { add, length, normalize, numberField, scale, subtract, zero } from "../../foundation/fields.ts";
 import type { Q2SpawnModule, Q2Think, Q2Use } from "../../foundation/host.ts";
-import { anglesVectors, clearShot, corpse, enemyBody, enemyEye, health, projectFlash, vectorAngles, visible } from "../../foundation/monsters/ai.ts";
+import { clearShot, corpse, enemyBody, enemyEye, health, projectFlash, visible } from "../../foundation/monsters/ai.ts";
 import { throwGib } from "../../foundation/monsters/gibs.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -89,7 +90,7 @@ export function createRereleaseTankDefinitions(weapons: Q2MissionPackMonsterWeap
       }
       if (state.dead) return undefined;
       if (entity.style === 0) {
-        entity.style = 1; const body = game.body(entity), axes = anglesVectors(body.angles), arm = throwGib(entity, game, "models/monsters/tank/gibs/barm.md2", reaction.damage, { skinned: true, upright: true });
+        entity.style = 1; const body = game.body(entity), axes = angleVectorsRule(body.angles, "native"), arm = throwGib(entity, game, "models/monsters/tank/gibs/barm.md2", reaction.damage, { skinned: true, upright: true });
         if (arm !== null) { arm.angularVelocity = { x: (game.host.random() * 2 - 1) * 15, y: (game.host.random() * 2 - 1) * 15, z: 180 }; arm.skin = Math.trunc(arm.skin / 2); game.move(arm, { origin: add(body.origin, add(scale(axes.right, -16), scale(axes.up, 23))), velocity: add(scale(axes.up, 100), scale(axes.right, -120)), angles: { ...body.angles, z: -90 } }); }
       }
       game.sound(entity, "tank/death.wav", 2); state.dead = true; state.canTakeDamage = true;
@@ -97,7 +98,7 @@ export function createRereleaseTankDefinitions(weapons: Q2MissionPackMonsterWeap
     },
     callbacks: {
       ...tankDefinition.callbacks,
-      tank_blind_check(context) { if (context.state.manualSteering) context.state.idealYaw = vectorAngles(subtract(context.state.blindFireTarget, context.game.body(context.entity).origin)).y; return undefined; },
+      tank_blind_check(context) { if (context.state.manualSteering) context.state.idealYaw = vectorToAnglesRule(subtract(context.state.blindFireTarget, context.game.body(context.entity).origin), "native-ai").y; return undefined; },
       tank_dead(context) { corpse(context); return context.game.move(context.entity, { bounds: { min: { x: -16, y: -16, z: -16 }, max: { x: 16, y: 16, z: 0 } } }); },
       tank_shrink(context) { context.entity.serverFlags |= 2; const bounds = context.game.body(context.entity).bounds; return context.game.move(context.entity, { bounds: { min: bounds.min, max: { ...bounds.max, z: 0 } } }); },
       tank_reattack_blaster(context) { if (context.state.manualSteering) { context.state.manualSteering = false; return context.setMove("tank_move_attack_post_blast"); } return context.setMove(visible(context) && health(context.game, context.entity.enemy) > 0 && context.game.host.random() <= 0.6 ? "tank_move_reattack_blast" : "tank_move_attack_post_blast"); },
@@ -105,7 +106,7 @@ export function createRereleaseTankDefinitions(weapons: Q2MissionPackMonsterWeap
       TankBlaster(context) {
         if (enemyBody(context) === null) return undefined;
         const { game, entity } = context, id = entity.frame === frame.attak110 ? 1 : entity.frame === frame.attak113 ? 2 : 3, start = projectFlash(context, muzzleOffset("rerelease", id));
-        const direction = context.state.manualSteering ? blindAim(context, start, context.state.blindFireTarget, anglesVectors(game.body(entity).angles).right) : predictedDirection(context, start, 0, false);
+        const direction = context.state.manualSteering ? blindAim(context, start, context.state.blindFireTarget, angleVectorsRule(game.body(entity).angles, "native").right) : predictedDirection(context, start, 0, false);
         if (direction === null) return undefined;
         context.weapons.fireBlaster(entity, game, start, direction, 30, 800, 8); return monsterFlash(context, id, start, direction);
       },
@@ -114,7 +115,7 @@ export function createRereleaseTankDefinitions(weapons: Q2MissionPackMonsterWeap
         const id = entity.frame === frame.attak324 ? 23 : entity.frame === frame.attak327 ? 24 : 25, start = projectFlash(context, muzzleOffset("rerelease", id)), heat = (entity.spawnflags & 16) !== 0, speed = entity.speed || (heat ? 500 : 650);
         let target = state.manualSteering ? state.blindFireTarget : game.host.random() < 0.66 || start.z < enemy.origin.z + enemy.bounds.min.z ? enemyEye(context) ?? enemy.origin : { ...enemy.origin, z: enemy.origin.z + enemy.bounds.min.z + 1 };
         if (!state.manualSteering && game.host.random() < 0.2 + (3 - game.options.skill) * 0.15) target = predictAim(context, start, speed, false, 0)?.point ?? target;
-        const direction = state.manualSteering ? blindAim(context, start, target, anglesVectors(game.body(entity).angles).right) : normalize(subtract(target, start));
+        const direction = state.manualSteering ? blindAim(context, start, target, angleVectorsRule(game.body(entity).angles, "native").right) : normalize(subtract(target, start));
         if (direction === null) return undefined;
         if (!state.manualSteering) { const trace = game.host.trace({ start, end: target, bounds: null, ignore: entity.actor.id, mask: 0x46004003 }); if (trace.fraction <= 0.5 && trace.hit.kind === "world") return undefined; }
         if (heat) weapons.fireHeatRocket(entity, game, start, direction, 50, speed, 70, 50, entity.accel || 0.075); else context.weapons.fireRocket(entity, game, start, direction, 50, speed, 70, 50);
@@ -123,7 +124,7 @@ export function createRereleaseTankDefinitions(weapons: Q2MissionPackMonsterWeap
       TankMachineGun(context) {
         const eye = enemyEye(context); if (eye === null) return undefined;
         const { entity, game } = context, id = 4 + entity.frame - frame.attak406, start = projectFlash(context, muzzleOffset("rerelease", id)), angles = game.body(entity).angles;
-        const direction = anglesVectors({ x: vectorAngles(subtract(eye, start)).x, y: entity.frame <= frame.attak415 ? angles.y - 8 * (entity.frame - frame.attak411) : angles.y + 8 * (entity.frame - frame.attak419), z: 0 }).forward;
+        const direction = angleVectorsRule({ x: vectorToAnglesRule(subtract(eye, start), "native-ai").x, y: entity.frame <= frame.attak415 ? angles.y - 8 * (entity.frame - frame.attak411) : angles.y + 8 * (entity.frame - frame.attak419), z: 0 }, "native").forward;
         context.weapons.fireBullet(entity, game, start, direction, 20, 4, 300, 500, 0); return monsterFlash(context, id, start, direction);
       },
     },

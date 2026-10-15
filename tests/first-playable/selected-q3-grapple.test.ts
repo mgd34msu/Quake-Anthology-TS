@@ -8,7 +8,7 @@ import type { ActorId } from "../../src/contracts/identity.ts";
 import type { UserCommand } from "../../src/contracts/protocol.ts";
 import type { Vec3 } from "../../src/contracts/math.ts";
 import { decodeSaveImage, encodeSaveImage } from "../../src/persistence/index.ts";
-import { qvmAngleVectors } from "../../src/core/qvm-math.ts";
+import { qvmAngleVectors } from "../../src/core/math.ts";
 import { add3, scale3 } from "../../src/core/math.ts";
 
 function command(kind: UserCommand["kind"], time: number, buttons: number, angles: Vec3): UserCommand {

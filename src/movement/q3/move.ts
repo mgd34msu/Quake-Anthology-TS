@@ -3,7 +3,7 @@ import { q3InvulnerabilityPose } from "./postures.ts";
 // Ported from id Software's code/game/bg_pmove.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { add3, dot3, length3, normalize3, scale3, vec3 } from "../../core/math.ts";
-import { qvmAngleVectors } from "../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../core/math.ts";
 import { q3GrappleVelocity } from "../../content/q3/base/game/grapple.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import type { TraceResult } from "../../contracts/scene.ts";

@@ -125,9 +125,7 @@ export class MessageWriter {
   writeShort(value: number): void { this.writeBits(value, 16); }
   writeLong(value: number): void { this.writeBits(value, 32); }
   writeFloat(value: number): void {
-    const view = new DataView(new ArrayBuffer(4));
-    view.setFloat32(0, value, true);
-    this.writeLong(view.getInt32(0, true));
+    this.writeLong(float32ToBits(value) | 0);
   }
   writeData(data: Uint8Array): void { for (const byte of data) this.writeByte(byte); }
 
@@ -237,9 +235,7 @@ export class MessageReader {
   readFloat(): number {
     const value = this.readBits(32);
     if (this.count > this.data.length) return -1;
-    const view = new DataView(new ArrayBuffer(4));
-    view.setInt32(0, value, true);
-    return view.getFloat32(0, true);
+    return bitsToFloat32(value);
   }
   readData(length: number): Uint8Array {
     if (!Number.isInteger(length) || length < 0 || length > MAX_MESSAGE_LENGTH) throw new RangeError("Invalid message data length");

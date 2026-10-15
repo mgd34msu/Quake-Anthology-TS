@@ -1,8 +1,9 @@
 // Rerelease m_boss2.cpp, including the N64 attacks. ZeniMax Media, GPL-2.0.
 import { boss2Definition } from "../../../base/monsters/boss2.ts";
+import { angleVectorsRule } from "../../../../../core/math.ts";
 import { stopLoop } from "../../../base/monsters/boss-common.ts";
 import { add, length, normalize, scale, subtract, zero } from "../../../foundation/fields.ts";
-import { anglesVectors, enemyBody, health, inFront, projectFlash, targetDistance } from "../../../foundation/monsters/ai.ts";
+import { enemyBody, health, inFront, projectFlash, targetDistance } from "../../../foundation/monsters/ai.ts";
 import { throwGib } from "../../../foundation/monsters/gibs.ts";
 import { muzzleOffset } from "../../../foundation/monsters/muzzle.ts";
 import { defaultCheckAttack } from "../../../foundation/monsters/perception.ts";
@@ -15,7 +16,7 @@ import { rereleaseFlash } from "../tables/flashes.ts";
 function attackMachinegun(context: MonsterContext): undefined { return context.setMove((context.entity.spawnflags & 8) !== 0 ? "boss2_move_attack_hb" : "boss2_move_attack_mg"); }
 function fireRocket(context: MonsterContext, predictive: boolean): undefined {
   const { entity, game } = context, enemy = enemyBody(context); if (enemy === null) return undefined;
-  const right = anglesVectors(game.body(entity).angles).right;
+  const right = angleVectorsRule(game.body(entity).angles, "native").right;
   for (const shot of [{ flash: 78, lead: -0.1, spread: 0.4, lower: true }, { flash: 79, lead: -0.05, spread: 0.025, lower: false }, { flash: 80, lead: 0.05, spread: -0.025, lower: false }, { flash: 81, lead: 0.1, spread: -0.4, lower: true }]) {
     const start = projectFlash(context, muzzleOffset("rerelease", shot.flash));
     const direction = predictive ? predictedDirection(context, start, 750, false, shot.lead) : normalize(add(normalize(subtract({ ...enemy.origin, z: enemy.origin.z - (shot.lower ? 15 : 0) }, start)), scale(right, shot.spread)));
@@ -76,7 +77,7 @@ export const rereleaseBoss2Definition: Q2MonsterDefinition = {
     Boss2Rocket(context) { return fireRocket(context, context.entity.enemy !== null && context.game.host.isPlayer(context.entity.enemy) && context.game.host.random() < 0.9); },
     Boss2Rocket64(context) {
       const { entity, game } = context, enemy = enemyBody(context); if (enemy === null) return undefined;
-      const right = anglesVectors(game.body(entity).angles).right, size = entity.scale || 1;
+      const right = angleVectorsRule(game.body(entity).angles, "native").right, size = entity.scale || 1;
       let start = projectFlash(context, muzzleOffset("rerelease", 78));
       start = subtract({ ...start, z: start.z + 10 * size }, scale(right, (2 + entity.count++ % 4 * 8) * size));
       const target = entity.enemy !== null && game.host.isPlayer(entity.enemy) && game.host.random() < 0.9

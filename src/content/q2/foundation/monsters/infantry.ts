@@ -1,8 +1,9 @@
 /* Infantry callbacks from Q2 game/m_infantry.c and rerelease/m_infantry.cpp. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { DeathReaction, PainReaction } from "../../../../contracts/world.ts";
 import { add, dot, normalize, scale, subtract } from "../fields.ts";
-import { anglesVectors, clearShot, corpse, enemyBody, finishDodge, health, projectFlash, setDuck, targetDistance, walkMove } from "./ai.ts";
+import { clearShot, corpse, enemyBody, finishDodge, health, projectFlash, setDuck, targetDistance, walkMove } from "./ai.ts";
 import { classic_infantryFrames, rerelease_infantryFrames } from "./frames.ts";
 import { throwGib, throwHead } from "./gibs.ts";
 import { muzzleIds, muzzleOffset } from "./muzzle.ts";
@@ -59,7 +60,7 @@ function machineGun(context: MonsterContext): undefined {
   // The rerelease expression MZ2_14 + (frame - MZ2_14) intentionally resolves to frame.
   const flash = normal ? running ? entity.frame : rerelease && entity.frame === rerelease_infantryFrames.attak416 ? muzzleIds.INFANTRY_MACHINEGUN_22 : 26 : 27 + entity.frame - table.death211;
   const start = projectFlash(context, muzzleOffset(game.options.edition, flash));
-  let forward = anglesVectors(game.body(entity).angles).forward;
+  let forward = angleVectorsRule(game.body(entity).angles, "native").forward;
   if (normal && enemy !== null) {
     const observed = game.monsterTarget(entity.enemy); if (observed === null) return undefined;
     const height = observed.viewHeight;
@@ -74,7 +75,7 @@ function machineGun(context: MonsterContext): undefined {
       if (useEye) predicted = { ...predicted, z: predicted.z + height };
       forward = normalize(subtract(predicted, start));
     }
-  } else if (!normal) forward = anglesVectors(subtract(game.body(entity).angles, recordAt(deathAim, flash - 27))).forward;
+  } else if (!normal) forward = angleVectorsRule(subtract(game.body(entity).angles, recordAt(deathAim, flash - 27)), "native").forward;
   context.weapons.fireBullet(entity, game, start, forward, 3, 4, 300, 500, 0);
   game.host.emit({ kind: "monster-muzzleflash", actor: entity.actor.id, flash, origin: start, direction: forward });
   return undefined;
@@ -170,7 +171,7 @@ function fire(context: MonsterContext): undefined {
 }
 
 function jump(context: MonsterContext, high: boolean): undefined {
-  const body = context.game.body(context.entity), basis = anglesVectors(body.angles);
+  const body = context.game.body(context.entity), basis = angleVectorsRule(body.angles, "native");
   context.game.move(context.entity, { velocity: add(body.velocity, add(scale(basis.forward, high ? 150 : 100), scale(basis.up, high ? 400 : 300))), ground: null });
   context.game.motion(context.entity, "step");
   return undefined;
@@ -215,7 +216,7 @@ export const infantryCallbacks = {
     const { game, entity, state } = context, body = game.body(entity);
     if (body.ground !== null) { state.nextFrame = entity.frame + 1; return undefined; }
     state.nextFrame = entity.frame;
-    const forward = anglesVectors(body.angles).forward;
+    const forward = angleVectorsRule(body.angles, "native").forward;
     if (Math.hypot(body.velocity.x * forward.x, body.velocity.y * forward.y, body.velocity.z * forward.z) < 150) { game.move(entity, { velocity: { ...scale(forward, 150), z: body.velocity.z } }); game.motion(entity, "step"); }
     if (state.jumpTime < game.host.now()) state.nextFrame = entity.frame + 1;
     return undefined;

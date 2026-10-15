@@ -1,6 +1,7 @@
 /* Original Rogue m_gunner.c weapon, jump and dodge behavior. GPL-2.0-or-later. */
 import { add, length, normalize, scale, subtract } from "../../foundation/fields.ts";
-import { anglesVectors, enemyBody, finishDodge, projectFlash, targetDistance, vectorAngles, visible } from "../../foundation/monsters/ai.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
+import { enemyBody, finishDodge, projectFlash, targetDistance, visible } from "../../foundation/monsters/ai.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -30,7 +31,7 @@ function grenade(context: MonsterContext): undefined {
   if (index === 3) state.manualSteering = false;
   const blindTarget = blind && !visible(context), point = blindTarget ? state.blindFireTarget : body.origin;
   if (blindTarget && point.x === 0 && point.y === 0 && point.z === 0) return undefined;
-  const flash = 53 + index, axes = anglesVectors(body.angles), start = projectFlash(context, muzzleOffset(game.options.edition, flash));
+  const flash = 53 + index, axes = angleVectorsRule(body.angles, "native"), start = projectFlash(context, muzzleOffset(game.options.edition, flash));
   let aim = subtract(point, body.origin);
   const distance = length(aim);
   if (distance > 512 && aim.z < 64 && aim.z > -64) aim = { ...aim, z: aim.z + distance - 512 };
@@ -60,7 +61,7 @@ function sidestep(context: MonsterContext): undefined {
 }
 function run(context: MonsterContext): undefined { finishDodge(context); return gunnerDefinition.run(context); }
 function jumpNow(context: MonsterContext, up: boolean): undefined {
-  const { entity, game } = context, body = game.body(entity), axes = anglesVectors(body.angles);
+  const { entity, game } = context, body = game.body(entity), axes = angleVectorsRule(body.angles, "native");
   entity.timestamp = game.host.now();
   return game.move(entity, { velocity: add(body.velocity, add(scale(axes.forward, up ? 150 : 100), scale(axes.up, up ? 400 : 300))) });
 }
@@ -112,7 +113,7 @@ export function createRogueGunnerDefinition(monsters: Q2Monsters, source: Q2Miss
         context.weapons.fireBullet(context.entity, context.game, aim.start, aim.direction, 3, 4, 300, 500, 0);
         return monsterFlash(context, flash, aim.start, aim.direction);
       },
-      gunner_blind_check(context) { if (context.state.manualSteering) context.state.idealYaw = vectorAngles(subtract(context.state.blindFireTarget, context.game.body(context.entity).origin)).y; return undefined; },
+      gunner_blind_check(context) { if (context.state.manualSteering) context.state.idealYaw = vectorToAnglesRule(subtract(context.state.blindFireTarget, context.game.body(context.entity).origin), "native-ai").y; return undefined; },
       gunner_jump_now(context) { return jumpNow(context, false); }, gunner_jump2_now(context) { return jumpNow(context, true); },
       gunner_jump_wait_land(context) { context.state.nextFrame = context.entity.frame + (context.game.body(context.entity).ground !== null || monsterJumpFinished(context) ? 1 : 0); return undefined; },
     },

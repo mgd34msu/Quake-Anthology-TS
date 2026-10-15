@@ -1,6 +1,6 @@
 import type { Vec3, Vec4 } from "../../../../contracts/math.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import { add, dot, normalize, scale, subtract, zero } from "../../foundation/fields.ts";
-import { angleVectors } from "../../foundation/weapons/vectors.ts";
 import type { Q2CharacterContext, Q2PlayerView, Q2PlayerState } from "./types.ts";
 
 const clamp = (value: number, minimum: number, maximum: number): number => Math.max(minimum, Math.min(maximum, value));
@@ -43,7 +43,7 @@ export function q2DamageFeedback(context: Q2CharacterContext, painIndex: number)
   if (state.damageKnockback !== 0 && health > 0) {
     const kick = clamp(Math.abs(state.damageKnockback) * 100 / health, count * 0.5, 50);
     const direction = normalize(subtract(state.damageFrom, game.body(entity).origin));
-    const vectors = angleVectors(movement.viewAngles);
+    const vectors = angleVectorsRule(movement.viewAngles, "native");
     state.damageRoll = kick * dot(direction, vectors.right) * 0.3;
     state.damagePitch = kick * -dot(direction, vectors.forward) * 0.3;
     state.damageTime = now + 0.5;
@@ -64,7 +64,7 @@ export function q2BuildView(context: Q2CharacterContext, flashes: number, interm
   const { state, entity, game, movement, rules } = context;
   const body = game.body(entity), now = game.host.now(), health = game.host.combat.read(entity.actor.id)?.health ?? 0;
   const weapon = context.weaponState(), powers = context.powerups();
-  const vectors = angleVectors(movement.viewAngles), speed = Math.hypot(body.velocity.x, body.velocity.y);
+  const vectors = angleVectorsRule(movement.viewAngles, "native"), speed = Math.hypot(body.velocity.x, body.velocity.y);
   const bobTime = movement.ducked ? state.bobTime * 4 : state.bobTime, bobCycle = Math.trunc(bobTime), bob = Math.abs(Math.sin(bobTime * Math.PI));
   let angles = movement.viewAngles;
   let kicks = weapon?.kickAngles ?? zero;

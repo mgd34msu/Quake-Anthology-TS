@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { NativeModArmorField } from "../../contracts/native-mod-callbacks.ts";
 import { SourceModClientOutputs, validateModClientOutputs } from "../../world/session/mod-client-outputs.ts";
 import { ModSourceObjectives } from "../../world/session/mod-objectives.ts";
@@ -643,7 +644,7 @@ export class NativeModProvider implements NativeModProjection {
   }
   private observePickup<Result>(actor: ActorId, execution: OriginalPickupExecution, run: () => Result): Result {
     const frame = this.frames.at(-1); if (frame === undefined) throw new Error("Pickup requires its native source frame");
-    const scope = { actor, execution, frame }, removers: (() => void)[] = [];
+    const scope = { actor, execution, frame }, removers = new CleanupStack();
     this.pickupScopes.push(scope);
     try {
       for (const [projected, slot] of this.projections) for (const record of this.actorRecords(projected))
@@ -653,7 +654,7 @@ export class NativeModProvider implements NativeModProjection {
           this.flush();
         }));
       return run();
-    } finally { for (const remove of removers) remove(); this.pickupScopes.pop(); }
+    } finally { removers.runAll(); this.pickupScopes.pop(); }
   }
   private pickupScope() { const scope = this.pickupScopes.at(-1); return scope?.frame === this.frames.at(-1) ? scope : undefined; }
   private validatePickupWrites(changes: readonly Observation[]): void {

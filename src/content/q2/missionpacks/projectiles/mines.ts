@@ -1,11 +1,11 @@
 /* Rogue g_newweap.c proximity mines and Tesla coils. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
 import { freeQ2Entity } from "../../foundation/callbacks.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import type { Q2Die, Q2Entity, Q2GameServices, Q2Think, Q2Touch } from "../../foundation/host.ts";
 import { add, dot, scale, subtract, zero } from "../../foundation/fields.ts";
-import { angleVectors, vectorAngles } from "../../foundation/weapons/vectors.ts";
 import { q2MissionPackDamage as mod } from "../types.ts";
 import { Q2MissionPackBolts } from "./bolts.ts";
 import { projectile, projectileMask, publishProjectile, sight } from "./common.ts";
@@ -70,7 +70,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
   protected throwMine(self: Pick<Q2Entity, "actor">, game: Q2GameServices, classname: string, start: Vec3, direction: Vec3, speed: number): Q2Entity {
     game.sourceCallbacks.register(this.callbacks);
     const mine = projectile(self, game, classname, start, direction, speed, `models/weapons/g_${classname}/tris.md2`, "bounce", 32);
-    const axes = angleVectors(vectorAngles(direction));
+    const axes = angleVectorsRule(vectorToAnglesRule(direction, "native"), "native");
     const gravity = game.options.edition === "rerelease" && classname !== "nuke" ? (this.hooks.gravity?.() ?? this.hooks.base.inputs.get(self.actor.id)?.gravity ?? 800) / 800 : 1;
     game.move(mine, { velocity: add(add(scale(direction, speed), scale(axes.up, (200 + (game.host.random() * 2 - 1) * 10) * gravity)), scale(axes.right, (game.host.random() * 2 - 1) * 10)) }, false);
     if (classname !== "nuke") this.playerCollision(self, game, mine);
@@ -151,7 +151,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
     const field = game.create("prox_field"); field.owner = entity.actor.id; field.teamMaster = entity.actor.id;
     game.move(field, { origin: game.body(entity).origin, bounds: { min: { x: -96, y: -96, z: -96 }, max: { x: 96, y: 96, z: 96 } } });
     game.solid(field, "trigger"); game.motion(field, "stationary");
-    const angles = vectorAngles(normal); entity.angularVelocity = zero;
+    const angles = vectorToAnglesRule(normal, "native"); entity.angularVelocity = zero;
     game.move(entity, { velocity: zero, angles: { ...angles, x: angles.x + 90 } });
     entity.die = this.proxDie; entity.teamChain = field.actor.id; entity.touch = null;
     game.host.combat.create(entity.actor, { health: 20, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
@@ -161,7 +161,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
 
   private readonly proxFlight: Q2Think = (entity, game) => {
     if (entity.timestamp <= game.host.now()) return this.proxExplode(entity, game);
-    const angles = vectorAngles(game.body(entity).velocity);
+    const angles = vectorToAnglesRule(game.body(entity).velocity, "native");
     game.move(entity, { angles: { ...angles, x: angles.x - 90 } });
     return game.schedule(entity, 0, this.proxFlight);
   };

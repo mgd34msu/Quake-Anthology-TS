@@ -1,3 +1,4 @@
+import { EventRing } from "../../foundation/event-ring.ts";
 import { accessibleColors } from "../common/accessibility.ts";
 import { captionCommands } from "../common/captions.ts";
 import { drawWeaponHud, hudStatusRows } from "./weapon.ts";
@@ -93,7 +94,7 @@ export class SeatHudMessages {
   private sequence = 0;
   private notices: UiNotification[] = [];
   private center: CenterPrintState | null = null;
-  private readonly queuedCenters: CenterPrintState[] = [];
+  private readonly queuedCenters = new EventRing<CenterPrintState>(256);
   private readonly points: HudPointOfInterest[] = [];
   private sourcePoints: readonly HudPointOfInterest[] = [];
   setSourcePoints(seat: SeatId, points: readonly HudPointOfInterest[]): void { this.requireSeat(seat); this.sourcePoints = points; }
@@ -103,15 +104,15 @@ export class SeatHudMessages {
   }
   centerPrint(seat: SeatId, text: string, starts: SourceTime, duration: SourceTime, instant = true, characterMilliseconds = 125): void {
     this.requireSeat(seat);
-    if (instant) { this.queuedCenters.length = 0; this.center = { text, starts, duration, instant }; return; }
-    const prior = this.queuedCenters.at(-1) ?? this.center;
+    if (instant) { this.queuedCenters.reset(); this.center = { text, starts, duration, instant }; return; }
+    const prior = this.queuedCenters.newest() ?? this.center;
     const start = Math.max(milliseconds(starts), prior === null ? 0 : milliseconds(prior.starts) + milliseconds(prior.duration));
     const print: CenterPrintState = { text, starts: { kind: "milliseconds", value: start }, instant, characterMilliseconds,
       duration: { kind: "milliseconds", value: milliseconds(duration) + Array.from(text).length * characterMilliseconds } };
-    if (this.center === null) this.center = print; else this.queuedCenters.push(print);
+    if (this.center === null) this.center = print; else this.queuedCenters.admit(print);
   }
   clearNotify(): void { this.notices = []; }
-  clearCenterPrint(): void { this.center = null; this.queuedCenters.length = 0; }
+  clearCenterPrint(): void { this.center = null; this.queuedCenters.reset(); }
   clear(): void { this.clearNotify(); this.clearCenterPrint(); this.points.length = 0; this.sourcePoints = []; }
   /** Keyed POIs replace matching IDs; unkeyed POIs replace only expired or oldest unkeyed entries. */
   addPoint(seat: SeatId, point: HudPointOfInterest, nowMilliseconds: number, capacity = 64): boolean {

@@ -1,6 +1,7 @@
 /* Original Rogue changes to the base species. ZeniMax Media, GPL-2.0-or-later. */
 import { add, length, normalize, scale, subtract } from "../../foundation/fields.ts";
-import { anglesVectors, enemyBody, enemyEye, projectFlash } from "../../foundation/monsters/ai.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
+import { enemyBody, enemyEye, projectFlash } from "../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -70,7 +71,7 @@ export function createRogueBaseVariants(monsters: Q2Monsters, source: Q2MissionP
   function bossRockets(context: MonsterContext, predictive: boolean): undefined {
     const { entity, game } = context, enemy = enemyBody(context);
     if (enemy === null) return undefined;
-    const right = anglesVectors(game.body(entity).angles).right;
+    const right = angleVectorsRule(game.body(entity).angles, "native").right;
     if (predictive) game.host.diagnostic("predictive fire");
     for (let index = 0; index < 4; index++) {
       const flash = 78 + index, start = projectFlash(context, muzzleOffset(game.options.edition, flash));

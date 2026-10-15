@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
 import { modInstanceProvider, modSelectionKey, readModSelection, type ModSelection } from "../../contracts/mods.ts";
@@ -36,7 +37,8 @@ export function readModCommand(raw: string): { readonly selection: ModSelection;
 export class ModCommands {
   private readonly entries = new Map<symbol, Entry>();
   private readonly selections = new Map<string, Entry>();
-  private pending: PendingCommand[] = [];
+  private readonly pending = new EventRing<PendingCommand>(4096);
+  private readonly pendingCursor: EventCursor = this.pending.openCursor();
 
   constructor(private readonly options: {
     readonly context: CommandContext;
@@ -46,16 +48,17 @@ export class ModCommands {
   private submit(kind: PendingCommand["kind"], text: string, source: CommandContext, dialect: CommandDialect): void {
     if (source.session !== this.options.context.session) throw new Error("Staged command belongs to another session");
     const commands = this.options.commands();
-    if (commands === null) { this.pending.push({ kind, text, source, dialect }); return; }
+    if (commands === null) { this.pending.admit({ kind, text, source, dialect }); return; }
     this.flush(); commands[kind](text, source, dialect);
   }
   append(text: string, source: CommandContext, dialect: CommandDialect): void { this.submit("append", text, source, dialect); }
   insert(text: string, source: CommandContext, dialect: CommandDialect): void { this.submit("insert", text, source, dialect); }
   flush(): void {
-    if (this.pending.length === 0) return;
+    if (this.pending.pending(this.pendingCursor) === 0) return;
     const commands = this.options.commands();
     if (commands === null) throw new Error("Source commands require the candidate's prepared command buffer");
-    for (const entry of this.pending.splice(0)) commands[entry.kind](entry.text, entry.source, entry.dialect);
+    const pending = this.pending.take(this.pendingCursor); this.pending.retire();
+    for (const entry of pending) commands[entry.kind](entry.text, entry.source, entry.dialect);
   }
 
   bind(binding: ModCommandBinding, resources: ResourceScope): ModCommandPort {
@@ -91,7 +94,7 @@ export class ModCommands {
         if (closed) return undefined;
         closed = true;
         this.entries.delete(instance); this.selections.delete(key);
-        this.pending = this.pending.filter(entry => entry.source.producer?.instance !== instance);
+        this.pending.filterLive(entry => entry.source.producer?.instance !== instance);
         const current = this.options.commands(); if (current !== null) buffers.add(current);
         for (const buffer of buffers) buffer.discardProducer(instance);
         return undefined;

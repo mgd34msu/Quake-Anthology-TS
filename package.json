@@ -1,6 +1,6 @@
 {
   "name": "quake-typescript",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "license": "GPL-2.0-or-later",
@@ -19,6 +19,7 @@
     "test:reference": "bun test tools/reference",
     "test:platform": "bun test tests/platform",
     "verify": "bun tools/verify/cli.ts",
+    "bench:foundation": "bun run tools/bench-foundation.ts",
     "verify:generate": "bun tools/verify/generate.ts",
     "test:verification": "bun test tests/verification",
     "check": "bun run typecheck && bun run policy && bun run test && bun run plan:check && bun run plan:test",

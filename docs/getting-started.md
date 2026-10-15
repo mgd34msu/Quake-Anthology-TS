@@ -28,7 +28,11 @@ bun run start --content-root /path/to/qfiles
 ```
 
 Without launch selections, startup opens the menu. Use `--menu` to request the
-menu explicitly. The default game-data root is `~/Projects/qfiles`.
+menu explicitly. Without `--content-root`, the game-data root is found by
+searching the executable's own folder (the working directory from source), then
+the folder above it, then the default Steam library locations; `--steam`
+searches only the Steam locations. Games are recognized by their `id1`,
+`baseq2`, and `baseq3` base directories under any parent folder names.
 
 List products discovered under the installed content root or inspect launch options:
 

@@ -8,7 +8,7 @@ import type { PcmSound } from "../../../audio/wav.ts";
 import { CommonError } from "../../../core/common-error.ts";
 import { add3, cross3, dot3, length3, normalize3, scale3, sub3, vec3, vec4 } from "../../../core/math.ts";
 import type { Bounds, Vec3, Vec4 } from "../../../core/math.ts";
-import { qvmAnglesToAxis } from "../../../core/qvm-math.ts";
+import { qvmAnglesToAxis } from "../../../core/math.ts";
 import { float32ToBits } from "../../../core/numeric.ts";
 import { gameFormat } from "../base/game/format.ts";
 import type { GameFormatArgument } from "../base/game/format.ts";

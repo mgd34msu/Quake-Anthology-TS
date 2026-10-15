@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import { SceneMaterialRegistrations } from "../../render/scene/material-registrations.ts";
 import { CinematicPlayback, cinematicBytes } from "../../media/playback.ts";
 import { cinematicDimensions } from "../../media/presentation.ts";
@@ -102,7 +103,7 @@ export class ApplicationAssets {
   private loadedTypography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
   private imagePolicyValue: ImagePolicy | undefined;
   private modelPolicyValue: ModelReplacementPolicy;
-  private retiredImages: (() => void)[] = [];
+  private readonly retiredImages = new CleanupStack();
 
   constructor(readonly content: LoadedApplicationContent, owner: RendererResourceOwner, private readonly mediaClock: MediaClock = { sample: () => performance.now() },
     options: { readonly imagePolicy?: ImagePolicy; readonly modelPolicy?: ModelReplacementPolicy; readonly imageRegistry?: SceneImageRegistry } = {}) {
@@ -303,7 +304,7 @@ export class ApplicationAssets {
       } };
   }
 
-  finishImageRefresh(): void { for (const retire of this.retiredImages.splice(0)) retire(); }
+  finishImageRefresh(): void { this.retiredImages.runAll(); }
 
   model(content: ContentId, path: string): Promise<ModelAsset> {
     const key = `${content}\0${path}`;

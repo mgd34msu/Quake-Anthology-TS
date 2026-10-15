@@ -1,11 +1,11 @@
 /* LM_CTF g_ctffunc.c and p_client.c flag bonuses. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { SavedActorId } from "../../../../contracts/session.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import type { Q2Entity, Q2GameServices, Q2Think, Q2Touch } from "../../foundation/host.ts";
 import { add, length, subtract, zero } from "../../foundation/fields.ts";
-import { angleVectors } from "../../foundation/weapons/vectors.ts";
 import { q2EntitiesNamed } from "../../base/player/spawns.ts";
 import { CTF_FLAGS, otherCtfTeam } from "../ctf/types.ts";
 import { lmctfActive, lmctfName, lmctfPlayer, lmctfPrint, lmctfScore, lmctfStat, lmctfToss } from "./types.ts";
@@ -102,7 +102,7 @@ export class LmctfFlags {
   drop(player: Q2Entity, game: Q2GameServices): undefined {
     const flag = this.carried(player.actor.id, game); if (flag === null) return undefined;
     this.reset(flag, player.actor.id, game); this.properties(flag, game); flag.owner = player.actor.id; flag.touch = this.dropTouch;
-    game.schedule(flag, 1, this.droppedThink); lmctfToss(flag, player, game, angleVectors(game.host.playerViewState(player.actor.id)?.viewAngles ?? game.body(player).angles).forward);
+    game.schedule(flag, 1, this.droppedThink); lmctfToss(flag, player, game, angleVectorsRule(game.host.playerViewState(player.actor.id)?.viewAngles ?? game.body(player).angles, "native").forward);
     flag.timestamp = game.host.now(); lmctfStat(this.context, player.actor.id, "flag-lost", 1); lmctfScore(this.context, game, player.actor.id, 0, "FC LostFlag");
     return lmctfPrint(game, `${lmctfName(this.context, player.actor.id)} lost the ${this.team(flag) === 1 ? "red" : "blue"} flag.\n`);
   }

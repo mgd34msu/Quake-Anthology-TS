@@ -6,7 +6,7 @@ import { GameType, Holdable, ItemType, MissionpackStatIndex, PersistentIndex,
 import { itemAt, itemList } from "../shared/items.ts";
 import type { ItemDefinition } from "../shared/items.ts";
 import { dot3, length3, normalize3, sub3 } from "../../../../core/math.ts";
-import { qvmAngleVectors } from "../../../../core/qvm-math.ts";
+import { qvmAngleVectors } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import { ConnectionState, GameFlags } from "./state.ts";
 import type { GameClient, GameEntity } from "./state.ts";

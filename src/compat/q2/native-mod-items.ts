@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import { resolveItemIcon } from "../../content/item-icon.ts";
 import { sourceItemActionNames } from "../../contracts/source-items.ts";
 import type { SavedActorId } from "../../contracts/session.ts";
@@ -48,7 +49,7 @@ interface Entry {
   readonly actor: OwnedActor;
   readonly addresses: ReadonlyMap<string, bigint>;
   readonly lease: SourceItemLease;
-  readonly removals: (() => void)[];
+  readonly removals: CleanupStack;
   readonly previous: Map<ItemId, InventoryEntry>;
   removeWeapon: () => undefined;
   request: Request | null;
@@ -226,7 +227,7 @@ export class NativeModItems {
       entry: item => { const storage = this.byItem.get(item); return storage === undefined ? undefined : this.read(actor, storage).find(value => value.item === item); },
       write: value => this.write(actor, value), mutableCapacity: item => { const storage = this.byItem.get(item); return storage?.kind === "counter" && storage.capacity.kind === "field"; },
     } });
-    const entry: Entry = { actor: owner, addresses, lease, previous, removals: [], removeWeapon: () => undefined, request: null, sourceSelection: this.stage?.pending(actor) ?? this.stage?.active(actor) ?? null }; this.entries.set(actor, entry);
+    const entry: Entry = { actor: owner, addresses, lease, previous, removals: new CleanupStack(), removeWeapon: () => undefined, request: null, sourceSelection: this.stage?.pending(actor) ?? this.stage?.active(actor) ?? null }; this.entries.set(actor, entry);
     try {
       for (const storage of this.definition.storage) {
         for (const field of fields(storage)) entry.removals.push(this.host.memory.observeWrites(this.address(actor, field), scalarBytes(field), () => this.changed(entry, [storage])));
@@ -296,7 +297,7 @@ export class NativeModItems {
   }
   release(actor: ActorId): void {
     const entry = this.entries.get(actor); if (entry === undefined) return;
-    this.entries.delete(actor); entry.request = null; for (const remove of entry.removals.splice(0).reverse()) remove();
+    this.entries.delete(actor); entry.request = null; entry.removals.runReverse();
     try { entry.removeWeapon(); } finally { entry.lease.close(); }
   }
   clear(): void { for (const actor of this.entries.keys()) this.release(actor); }

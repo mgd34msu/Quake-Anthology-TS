@@ -1,16 +1,16 @@
 /* Xatrix g_weapon.c Trap_Think. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule, vectorToAnglesRule, cross3Double } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import type { Q2Die, Q2Entity, Q2GameServices, Q2Think } from "../../foundation/host.ts";
 import { add, dot, length, normalize, scale, subtract, zero } from "../../foundation/fields.ts";
 import { changeYaw } from "../../foundation/monsters/ai.ts";
-import { angleVectors, vectorAngles } from "../../foundation/weapons/vectors.ts";
 import { explode, freeProjectile, publishProjectile, sight, velocity } from "./common.ts";
 import { Q2MissionPackNuke } from "./nuke.ts";
 import { q2MissionPackDamage as mod } from "../types.ts";
 
-function cross(a: Vec3, b: Vec3): Vec3 { return { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x }; }
+const cross = cross3Double;
 
 export class Q2MissionPackProjectiles extends Q2MissionPackNuke {
   override get callbacks(): Q2CallbackDefinitions {
@@ -23,7 +23,7 @@ export class Q2MissionPackProjectiles extends Q2MissionPackNuke {
   private readonly trapGib: Q2Think = (entity, game) => {
     const trap = game.entity(entity.owner);
     if (trap === null || trap.frame !== 5) return game.remove(entity);
-    const body = game.body(entity), origin = game.body(trap).origin, axes = angleVectors(game.body(trap).angles);
+    const body = game.body(entity), origin = game.body(trap).origin, axes = angleVectorsRule(game.body(trap).angles, "native");
     const degrees = 150 * game.host.frameSeconds() + trap.delay, radians = degrees * Math.PI / 180, delta = subtract(origin, body.origin);
     const rotated = add(add(scale(delta, Math.cos(radians)), scale(cross(axes.up, delta), Math.sin(radians))), scale(axes.up, dot(axes.up, delta) * (1 - Math.cos(radians))));
     const trace = game.host.trace({ start: body.origin, end: subtract(origin, rotated), bounds: null, ignore: entity.actor.id, mask: 3 });
@@ -102,7 +102,7 @@ export class Q2MissionPackProjectiles extends Q2MissionPackNuke {
       if (entity.frame === 5) {
         if (entity.wait === 64) game.sound(entity, "weapons/trapdown.wav", 2, 1, 2);
         entity.wait -= 2; entity.delay += now;
-        const axes = angleVectors(body.angles);
+        const axes = angleVectorsRule(body.angles, "native");
         for (let index = 0; index < 3; index++) {
           const gib = game.create("trap_gib"), radians = (120 * index + entity.delay) * Math.PI / 180;
           const rotated = add(add(scale(axes.right, Math.cos(radians)), scale(cross(axes.up, axes.right), Math.sin(radians))), scale(axes.up, dot(axes.up, axes.right) * (1 - Math.cos(radians))));
@@ -147,8 +147,8 @@ export class Q2MissionPackProjectiles extends Q2MissionPackNuke {
         if (game.host.isPlayer(best)) velocity(game, best, add(targetBody.velocity, scale(normalize(delta), 250)), true);
         else {
           const monster = this.hooks.monster(best);
-          if (monster !== null) { monster.state.idealYaw = vectorAngles(delta).y; changeYaw(monster); }
-          velocity(game, best, scale(angleVectors(game.host.bodies.read(best)?.angles ?? targetBody.angles).forward, 256), true);
+          if (monster !== null) { monster.state.idealYaw = vectorToAnglesRule(delta, "native").y; changeYaw(monster); }
+          velocity(game, best, scale(angleVectorsRule(game.host.bodies.read(best)?.angles ?? targetBody.angles, "native").forward, 256), true);
         }
         game.sound(entity, "weapons/trapsuck.wav", 2, 1, 2);
         if (distance < 32) {
@@ -167,7 +167,7 @@ export class Q2MissionPackProjectiles extends Q2MissionPackNuke {
   fireTrap(self: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, timer: number, radius: number, held: boolean): Q2Entity {
     const trap = this.throwMine(self, game, "trap", start, direction, speed);
     if (game.options.edition === "rerelease") {
-      const axes = angleVectors(vectorAngles(direction)), body = game.body(trap), baseUp = dot(subtract(body.velocity, scale(direction, speed)), axes.up);
+      const axes = angleVectorsRule(vectorToAnglesRule(direction, "native"), "native"), body = game.body(trap), baseUp = dot(subtract(body.velocity, scale(direction, speed)), axes.up);
       const gravity = this.hooks.gravity?.() ?? this.hooks.base.inputs.get(self.actor.id)?.gravity ?? 800;
       trap.classname = "food_cube_trap"; trap.model = "models/weapons/z_trap/tris.md2"; trap.effects = 0; trap.renderFlags = 0;
       trap.flags = 0x20000 | 0x2000; trap.flags += 2 ** 32; trap.die = this.trapDie; trap.angularVelocity = { x: 0, y: 300, z: 0 };

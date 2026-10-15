@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import { resolveNativeModCamera } from "./simulation/native-mod-camera.ts";
 import { ComponentDrawings } from "./component-drawings.ts";
 import type { ComponentBody } from "./component-bodies.ts";
@@ -89,9 +90,12 @@ export function cameraWithCharacterDeath(camera: SceneCamera, player: PlayerView
 export class WorldSeatPresentation implements SeatPresentation {
   private readonly componentEffects = new Map<ComponentEffectFrame, { readonly owner: PresentationOwner; bodies?(): readonly ComponentBody[]; draw(frames: SceneFrameBuilder, camera: SceneCamera): void } | undefined>();
   private readonly q1Messages: Q1MessageLocalization;
-  private readonly pendingMessages: { readonly text: string; readonly sourcePresentationSequence: number | undefined }[] = [];
-  private readonly pendingQ1Messages: Extract<SimulationPresentationEvent, { readonly kind: "q1" }>[] = [];
-  private readonly pendingQ2Messages: Extract<SimulationPresentationEvent, { readonly kind: "q2" | "q2-player" }>[] = [];
+  private readonly pendingMessages = new EventRing<{ readonly text: string; readonly sourcePresentationSequence: number | undefined }>(4096);
+  private readonly pendingMessagesCursor: EventCursor = this.pendingMessages.openCursor();
+  private readonly pendingQ1Messages = new EventRing<Extract<SimulationPresentationEvent, { readonly kind: "q1" }>>(4096);
+  private readonly pendingQ1Cursor: EventCursor = this.pendingQ1Messages.openCursor();
+  private readonly pendingQ2Messages = new EventRing<Extract<SimulationPresentationEvent, { readonly kind: "q2" | "q2-player" }>>(4096);
+  private readonly pendingQ2Cursor: EventCursor = this.pendingQ2Messages.openCursor();
   private readonly frames: SceneFrameBuilder;
   private readonly text: SeatTextPresentation;
   private readonly finale: SourceFinale;
@@ -263,7 +267,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   receive(events: readonly SimulationEvent[]): undefined {
     for (const event of events) if (event.payload.kind === "message") {
       const message = event.payload.event;
-      if ("text" in message && typeof message.text === "string") this.pendingMessages.push({ text: message.text, sourcePresentationSequence: event.payload.sourcePresentationSequence });
+      if ("text" in message && typeof message.text === "string") this.pendingMessages.admit({ text: message.text, sourcePresentationSequence: event.payload.sourcePresentationSequence });
     }
     return undefined;
   }
@@ -277,7 +281,7 @@ export class WorldSeatPresentation implements SeatPresentation {
     this.componentDrawings.receive(events);
     this.q1Fog.receive(events);
     this.q1Services.receive(events);
-    for (const source of events) if (source.kind === "q1" && source.event.kind === "message" && source.event.player.equals(this.local.player.actor)) this.pendingQ1Messages.push(source);
+    for (const source of events) if (source.kind === "q1" && source.event.kind === "message" && source.event.player.equals(this.local.player.actor)) this.pendingQ1Messages.admit(source);
     if (this.q3Client !== null) {
       if (this.local.builder.dialect === "q3") return;
       for (const source of events) if (source.kind === "view-reset" && source.actor.equals(this.local.player.actor)) this.local.builder.setViewAngles(source.angles);
@@ -296,9 +300,9 @@ export class WorldSeatPresentation implements SeatPresentation {
         const event = source.event;
         if (event.kind === "teleport-player" && owns(event.player)) this.local.builder.setViewAngles(event.angles);
       } else if (source.kind === "q2") {
-        if (["help", "pickup", "print", "centerprint"].includes(source.event.kind)) this.pendingQ2Messages.push(source);
+        if (["help", "pickup", "print", "centerprint"].includes(source.event.kind)) this.pendingQ2Messages.admit(source);
       } else if (source.kind === "q2-player") {
-        if (source.event.kind === "print") this.pendingQ2Messages.push(source);
+        if (source.event.kind === "print") this.pendingQ2Messages.admit(source);
       } else if (source.kind === "q3-source" && source.event.kind === "server-command"
         && (source.event.client < 0 || source.event.client === this.local.player.seat.client.id.slot)) {
         const [command, text] = tokenizeCommand(source.event.text, "q3").argv;
@@ -319,11 +323,12 @@ export class WorldSeatPresentation implements SeatPresentation {
     const bodies = [...this.componentEffects.values()].flatMap(owner => owner?.bodies?.() ?? []);
     const visiblePresentations = presentations.filter(presentation => presentation.renderOwner !== "source-client"
       && this.rerelease?.itemVisible(this.local.player.actor, presentation.actor) !== false);
-    const q1Messages = this.pendingQ1Messages.splice(0);
-    const q2Messages = this.pendingQ2Messages.splice(0);
+    const q1Messages = this.pendingQ1Messages.take(this.pendingQ1Cursor); this.pendingQ1Messages.retire();
+    const q2Messages = this.pendingQ2Messages.take(this.pendingQ2Cursor); this.pendingQ2Messages.retire();
     const mirrored = new Set([...q1Messages.map(source => source.sequence), ...q2Messages.filter(source => source.kind === "q2"
       && (source.event.kind === "help" || source.event.kind === "centerprint" && source.event.actor.equals(this.local.player.actor))).map(source => source.sequence)]);
-    for (const message of this.pendingMessages.splice(0)) {
+    const pendingMessages = this.pendingMessages.take(this.pendingMessagesCursor); this.pendingMessages.retire();
+    for (const message of pendingMessages) {
       if (message.sourcePresentationSequence === undefined || !mirrored.has(message.sourcePresentationSequence)) this.local.console.print(`${message.text}\n`);
     }
     for (const source of q1Messages) {

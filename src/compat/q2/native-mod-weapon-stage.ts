@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import { captureAbiProcessorState, restoreAbiProcessorState } from "../../guest/abi/runner.ts";
 import type { GuestAddress, NativeAbi } from "../../contracts/execution.ts";
 import type { ActorId, ProviderId } from "../../contracts/identity.ts";
@@ -23,7 +24,7 @@ export interface NativeWeaponOperations {
 
 /** The original dispatcher retains firing, latch, animation and callback timing. */
 export class NativeWeaponDispatcher {
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly dispatchers: { readonly actor: ActorId; readonly committedInput: boolean; reachedDecision: boolean }[] = [];
   constructor(definition: Pick<NativeWeaponStage, "dispatcher" | "decisions">, abi: NativeAbi, host: Pick<NativeModHost, "memory" | "entries" | "invoke" | "imageBase" | "entry" | "bindInlineRegion">, provider: ProviderId,
     operations: Pick<NativeWeaponOperations, "actor" | "current" | "selected" | "read" | "write" | "completed" | "cancellation" | "committedInput">) {
@@ -59,7 +60,7 @@ export class NativeWeaponDispatcher {
     } catch (error) { this.close(); throw error; }
   }
   currentActor(): ActorId | null { return this.dispatchers.at(-1)?.actor ?? null; }
-  close(): void { for (const remove of this.removals.splice(0).reverse()) remove(); this.dispatchers.length = 0; }
+  close(): void { this.removals.runReverse(); this.dispatchers.length = 0; }
 }
 
 export class NativeModWeaponStage {

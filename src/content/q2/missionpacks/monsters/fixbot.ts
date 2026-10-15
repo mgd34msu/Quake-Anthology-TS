@@ -1,10 +1,11 @@
 /* Quake II xatrix/m_fixbot.c. ZeniMax Media, GPL-2.0-or-later. */
 import type { OwnedActor } from "../../../../contracts/identity.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import { add, length, scale, subtract, zero } from "../../foundation/fields.ts";
 import { freeQ2Entity } from "../../foundation/callbacks.ts";
 import type { Q2Entity } from "../../foundation/host.ts";
-import { anglesVectors, changeYaw, health, inFront, MASK_SHOT, monsterSolidMask, projectFlash, runAi, vectorAngles, visible } from "../../foundation/monsters/ai.ts";
+import { changeYaw, health, inFront, MASK_SHOT, monsterSolidMask, projectFlash, runAi, visible } from "../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
 import { explode, finishCorpse, move, muzzle, shot } from "../../base/monsters/common.ts";
@@ -19,7 +20,7 @@ function goal(context: MonsterContext): Q2Entity {
 }
 function turn(context: MonsterContext): number {
   const direction = subtract(context.game.body(goal(context)).origin, context.game.body(context.entity).origin);
-  context.state.idealYaw = vectorAngles(direction).y; changeYaw(context);
+  context.state.idealYaw = vectorToAnglesRule(direction, "native-ai").y; changeYaw(context);
   return Math.trunc(length(direction));
 }
 function leaveGoal(context: MonsterContext): undefined {
@@ -31,7 +32,7 @@ function verticalGoal(context: MonsterContext, landing: boolean): undefined {
   const { game, entity } = context, target = game.create("bot_goal"), body = game.body(entity);
   target.owner = entity.actor.id; game.solid(target, "box");
   const bounds = { min: { x: -32, y: -32, z: -24 }, max: { x: 32, y: 32, z: 24 } };
-  const end = add(body.origin, scale(anglesVectors(body.angles).up, landing ? -8096 : 128));
+  const end = add(body.origin, scale(angleVectorsRule(body.angles, "native").up, landing ? -8096 : 128));
   const trace = game.host.trace({ start: body.origin, end, bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) });
   game.move(target, { origin: trace.end, bounds }, false); entity.goal = entity.enemy = target.actor.id;
   return context.setMove(landing ? "fixbot_move_landing" : "fixbot_move_takeoff");
@@ -96,7 +97,7 @@ export function createFixbotDefinition(monsters: Q2Monsters): Q2MonsterDefinitio
         let distance = 0, chosen = zero;
         for (let i = 0; i < 12; i++) {
           const angles = { ...body.angles, y: body.angles.y + (i < 6 ? i * 30 : -(i - 6) * 30) };
-          const trace = game.host.trace({ start: body.origin, end: add(body.origin, scale(anglesVectors(angles).forward, 8192)), bounds: null, ignore: entity.actor.id, mask: MASK_SHOT });
+          const trace = game.host.trace({ start: body.origin, end: add(body.origin, scale(angleVectorsRule(angles, "native").forward, 8192)), bounds: null, ignore: entity.actor.id, mask: MASK_SHOT });
           const size = Math.trunc(length(subtract(body.origin, trace.end))); if (size > distance) { distance = size; chosen = trace.end; }
         }
         game.move(target, { origin: chosen }, false); entity.goal = entity.enemy = target.actor.id;
@@ -106,7 +107,7 @@ export function createFixbotDefinition(monsters: Q2Monsters): Q2MonsterDefinitio
       fly_vertical(context) {
         turn(context);
         if (context.entity.frame === fixbotFrame.landing_58 || context.entity.frame === fixbotFrame.takeoff_16) leaveGoal(context);
-        const body = context.game.body(context.entity), direction = anglesVectors({ ...body.angles, x: body.angles.x + 90 }).forward, spread = 500 + context.entity.frame - fixbotFrame.takeoff_01;
+        const body = context.game.body(context.entity), direction = angleVectorsRule({ ...body.angles, x: body.angles.x + 90 }, "native").forward, spread = 500 + context.entity.frame - fixbotFrame.takeoff_01;
         for (let i = 0; i < 10; i++) context.weapons.fireShotgun(context.entity, context.game, body.origin, direction, 2, 1, spread, spread, 1, 37);
         return undefined;
       },
@@ -152,10 +153,10 @@ export function createFixbotDefinition(monsters: Q2Monsters): Q2MonsterDefinitio
         const patient = monsters.context(target.actor.id); if (patient === null) return undefined;
         if (health(game, target.actor.id) <= patient.state.gibHealth) { context.state.medic = false; return context.setMove("fixbot_move_stand"); }
         game.sound(entity, "misc/lasfly.wav", 0, 1, 3);
-        const body = game.body(entity), targetBody = game.body(target), angles = vectorAngles(subtract(targetBody.origin, body.origin));
-        monsterDabeam(entity, game, target.actor.id, add(body.origin, scale(anglesVectors(angles).forward, 16)), angles, -1, true);
+        const body = game.body(entity), targetBody = game.body(target), angles = vectorToAnglesRule(subtract(targetBody.origin, body.origin), "native-ai");
+        monsterDabeam(entity, game, target.actor.id, add(body.origin, scale(angleVectorsRule(angles, "native").forward, 16)), angles, -1, true);
         if (health(game, target.actor.id) <= (game.host.combat.read(target.actor.id)?.mass ?? 0) / 10) { patient.state.resurrecting = true; return undefined; }
-        const trace = game.host.trace({ start: targetBody.origin, end: scale(anglesVectors(targetBody.angles).up, 48), bounds: targetBody.bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) });
+        const trace = game.host.trace({ start: targetBody.origin, end: scale(angleVectorsRule(targetBody.angles, "native").up, 48), bounds: targetBody.bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) });
         if (trace.hit.kind === "actor" && game.host.combat.read(trace.hit.actor)?.canTakeDamage === true) {
           const victim = game.host.actors.resolveOwned(trace.hit.actor); if (victim !== null) game.host.combat.setHealth(victim, -1000);
           return undefined;

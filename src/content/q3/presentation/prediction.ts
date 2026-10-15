@@ -2,7 +2,7 @@
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { createBoxModel } from "../../../world/collision/q3/model.ts";
 import type { CollisionWorld, TraceQuery } from "./collision-host.ts";
-import { add3, length3, scale3, sub3, vec3 } from "../../../core/math.ts";
+import { add3, length3, scale3, sub3, vec3, lerpAngleRule } from "../../../core/math.ts";
 import type { Bounds, Vec3 } from "../../../core/math.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
 import { EntityEvent, EntityType, GameType, ItemType, MoveType, PersistentIndex, Powerup, Team, Weapon, statSchema } from "../base/shared/definitions.ts";
@@ -90,11 +90,6 @@ function interpolateVector(a: Vec3, b: Vec3, fraction: number): Vec3 {
   return vec3(f32(a.x + f32(fraction * f32(b.x - a.x))), f32(a.y + f32(fraction * f32(b.y - a.y))),
     f32(a.z + f32(fraction * f32(b.z - a.z))));
 }
-function lerpAngle(from: number, to: number, fraction: number): number {
-  if (f32(to - from) > 180) to = f32(to - 360);
-  if (f32(to - from) < -180) to = f32(to + 360);
-  return f32(from + f32(fraction * f32(to - from)));
-}
 
 export class PredictionRuntime {
   private command = emptyCommand();
@@ -142,8 +137,8 @@ export class PredictionRuntime {
     out.bobCycle = qvmFloatToInt(f32(f32(a.bobCycle) + f32(fraction * f32((cycle - a.bobCycle) | 0))));
     out.origin = interpolateVector(a.origin, b.origin, fraction);
     out.velocity = interpolateVector(a.velocity, b.velocity, fraction);
-    if (!grabAngles) out.viewangles = vec3(lerpAngle(a.viewangles.x, b.viewangles.x, fraction),
-      lerpAngle(a.viewangles.y, b.viewangles.y, fraction), lerpAngle(a.viewangles.z, b.viewangles.z, fraction));
+    if (!grabAngles) out.viewangles = vec3(lerpAngleRule(a.viewangles.x, b.viewangles.x, fraction, "float"),
+      lerpAngleRule(a.viewangles.y, b.viewangles.y, fraction, "float"), lerpAngleRule(a.viewangles.z, b.viewangles.z, fraction, "float"));
   }
 
   touchItem(cent: ClientEntity, settings: PredictionSettings): void { this.host.predictItem(cent, () => this.sourceTouchItem(cent, settings)); }

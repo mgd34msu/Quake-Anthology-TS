@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import { QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -9,6 +10,7 @@ import type { ModClientApplication } from "../../world/session/mod-clients.ts";
 import type { QvmFunctionCall, QvmSystemCallResult } from "./interpreter.ts";
 import type { QvmModule } from "./module.ts";
 import { QVM_USER_COMMAND_BYTES, readQvmUserCommand } from "./client-state-record.ts";
+import { float32FromBits } from "../../foundation/binary.ts";
 
 interface Operations {
   readonly module: QvmModule;
@@ -31,15 +33,15 @@ interface Capture {
   readonly commands: CommandCapture[];
   readonly consumed: Extract<ModClientInputOutput, { kind: "consume" }>[];
 }
-function scalar(view: DataView, encoding: "int32" | "float32"): number {
-  const value = encoding === "int32" ? view.getInt32(0, true) : view.getFloat32(0, true);
+function scalar(result: number, encoding: "int32" | "float32"): number {
+  const value = encoding === "int32" ? result | 0 : float32FromBits(result);
   if (!Number.isFinite(value)) throw new Error("QVM input returned a nonfinite scalar");
   return value;
 }
 
 /** Observe original source writes and handler decisions within their actual caller frame. */
 export class QvmModInput {
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly applications: ModClientApplication[] = [];
   private readonly captures: Capture[] = [];
   constructor(private readonly operations: Operations, outputs: readonly QvmModInputOutput[]) {
@@ -106,7 +108,7 @@ export class QvmModInput {
       if (![value.x, value.y, value.z].every(Number.isFinite)) throw new Error("QVM input returned nonfinite angles");
       return { kind: "set", input: "view-angles", value };
     }
-    return { kind: "set", input: output.value.input, value: scalar(view, output.value.encoding) / output.value.scale };
+    return { kind: "set", input: output.value.input, value: scalar(view.getInt32(0, true), output.value.encoding) / output.value.scale };
   }
   private invoke(call: QvmFunctionCall, declarations: readonly Exclude<QvmModInputOutput, { kind: "field" }>[]): QvmSystemCallResult {
     const capture = this.captures.at(-1);
@@ -120,9 +122,8 @@ export class QvmModInput {
       if (!this.active(capture)) return result;
       for (const output of selected) if (output.kind === "handler") {
         if (output.returns !== undefined) {
-          const view = new DataView(new ArrayBuffer(4)); view.setInt32(0, result, true);
           const expected = output.returns.encoding === "float32" ? Math.fround(output.returns.value) : output.returns.value;
-          if (scalar(view, output.returns.encoding) !== expected) continue;
+          if (scalar(result, output.returns.encoding) !== expected) continue;
         }
         capture.consumed.push({ kind: "consume", inputs: output.inputs });
       }
@@ -186,5 +187,5 @@ export class QvmModInput {
       return [...capture.changes, ...capture.consumed];
     } finally { this.captures.pop(); }
   }
-  close(): void { for (const remove of this.removals.splice(0).reverse()) remove(); this.applications.length = 0; this.captures.length = 0; }
+  close(): void { this.removals.runReverse(); this.applications.length = 0; this.captures.length = 0; }
 }

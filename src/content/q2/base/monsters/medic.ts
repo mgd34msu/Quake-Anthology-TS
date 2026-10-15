@@ -1,8 +1,9 @@
 /* Quake II m_medic.c. id Software, GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import { add, length, scale, subtract } from "../../foundation/fields.ts";
 import type { Q2Entity } from "../../foundation/host.ts";
-import { anglesVectors, health, MASK_SHOT, projectFlash, setDuck, vectorAngles, visible } from "../../foundation/monsters/ai.ts";
+import { health, MASK_SHOT, projectFlash, setDuck, visible } from "../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import { defaultCheckAttack } from "../../foundation/monsters/perception.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -83,7 +84,7 @@ export function createMedicDefinition(monsters: Q2Monsters): Q2MonsterDefinition
         if (target === null) return undefined;
         const start = projectFlash(context, recordAt(cableOffsets, entity.frame - medicFrame.attack42)), body = game.body(target);
         const direction = subtract(start, body.origin); if (length(direction) > 256) return undefined;
-        let pitch = vectorAngles(direction).x; if (pitch < -180) pitch += 360; if (Math.abs(pitch) > 45) return undefined;
+        let pitch = vectorToAnglesRule(direction, "native-ai").x; if (pitch < -180) pitch += 360; if (Math.abs(pitch) > 45) return undefined;
         const trace = game.host.trace({ start, end: body.origin, bounds: null, ignore: entity.actor.id, mask: MASK_SHOT });
         if (trace.fraction !== 1 && (trace.hit.kind !== "actor" || trace.hit.actor !== target.actor.id)) return undefined;
         if (entity.frame === medicFrame.attack43) {
@@ -98,7 +99,7 @@ export function createMedicDefinition(monsters: Q2Monsters): Q2MonsterDefinition
           if (context.state.oldEnemy !== null && game.host.isPlayer(context.state.oldEnemy)) { target.enemy = context.state.oldEnemy; monsters.foundTarget(revived); }
         } else if (entity.frame === medicFrame.attack44) game.sound(entity, "medic/medatck4.wav", 1);
         const current = game.body(target), end = { ...current.origin, z: current.origin.z + (current.bounds.min.z + current.bounds.max.z) / 2 };
-        game.host.emit({ kind: "monster-beam", effect: "medic", actor: entity.actor.id, start: add(start, scale(anglesVectors(game.body(entity).angles).forward, 8)), end });
+        game.host.emit({ kind: "monster-beam", effect: "medic", actor: entity.actor.id, start: add(start, scale(angleVectorsRule(game.body(entity).angles, "native").forward, 8)), end });
         return undefined;
       },
     },

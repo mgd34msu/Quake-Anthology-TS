@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import { presentationOwnerKey, samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
 import type { LocalPresentationMedia } from "./presentation-state.ts";
 import { mountedMusicTracks } from "./audio/playlist.ts";
@@ -103,9 +104,12 @@ export class ApplicationAudio {
   private readonly sounds = new Map<string, Promise<SoundAsset | null>>();
   private readonly footsteps = new Map<ContentId, Promise<PlayerFootsteps>>();
   private readonly warned = new Set<string>();
-  private readonly uiSounds: { readonly seat: SeatId; readonly sound: UiSound }[] = [];
-  private readonly effectSounds: ApplicationEffectSound[] = [];
-  private readonly cgameFrames: Q3SeatAudioFrame[] = [];
+  private readonly uiSounds = new EventRing<{ readonly seat: SeatId; readonly sound: UiSound }>(1024);
+  private readonly uiSoundsCursor: EventCursor = this.uiSounds.openCursor();
+  private readonly effectSounds = new EventRing<ApplicationEffectSound>(8192);
+  private readonly effectSoundsCursor: EventCursor = this.effectSounds.openCursor();
+  private readonly cgameFrames = new EventRing<Q3SeatAudioFrame>(1024);
+  private readonly cgameFramesCursor: EventCursor = this.cgameFrames.openCursor();
   private listeners: readonly AudioListener[] = [];
   private seatScenes: readonly { readonly seat: SeatId; readonly scene: SceneQueries }[] = [];
   private snapshot: WorldSnapshot | null = null;
@@ -209,9 +213,9 @@ export class ApplicationAudio {
   set effectsVolume(value: number) { this.volumeCvars?.set("volume", String(value)); this.engine.setEffectsVolume(value); this.volume = value; }
   get musicVolume(): number { return this.volumeCvars === null ? this.music.volume : Math.max(0, Math.min(1, this.volumeCvars.variableValue("bgmvolume"))); }
   set musicVolume(value: number) { this.volumeCvars?.set("bgmvolume", String(value)); this.music.volume = value; }
-  uiSound(sound: UiSound, seat: SeatId): void { this.uiSounds.push({ sound, seat }); }
-  receiveEffectSounds(sounds: readonly ApplicationEffectSound[]): void { this.effectSounds.push(...sounds); }
-  receiveCgameFrame(frame: Q3SeatAudioFrame): void { this.cgameFrames.push(frame); }
+  uiSound(sound: UiSound, seat: SeatId): void { this.uiSounds.admit({ sound, seat }); }
+  receiveEffectSounds(sounds: readonly ApplicationEffectSound[]): void { if (sounds.length !== 0) this.effectSounds.admitAll(sounds); }
+  receiveCgameFrame(frame: Q3SeatAudioFrame): void { this.cgameFrames.admit(frame); }
 
   async command(request: ApplicationAudioCommand): Promise<boolean> {
     if (!applicationAudioCommands.includes(request.name)) return false;
@@ -258,7 +262,7 @@ export class ApplicationAudio {
     }
     if (request.name === "stopsound" || request.name === "s_stop") {
       this.music.stopPlayback("manual"); this.engine.stopAll();
-      this.statics.length = 0; this.loops.length = 0; this.uiSounds.length = 0; this.effectSounds.length = 0; this.cgameFrames.length = 0;
+      this.statics.length = 0; this.loops.length = 0; this.uiSounds.reset(); this.effectSounds.reset(); this.cgameFrames.reset();
       return true;
     }
     if (request.args.length === 0) throw new Error("Usage: play <sound> [sound ...]");
@@ -562,7 +566,8 @@ export class ApplicationAudio {
       this.environmentSeats.push(listener.seat);
     }
     this.engine.beginLoopFrame();
-    for (const event of this.uiSounds.splice(0)) {
+    const uiSounds = this.uiSounds.take(this.uiSoundsCursor); this.uiSounds.retire();
+    for (const event of uiSounds) {
       const content = this.content.recipe.presentation.audio.content, family = this.content.catalog.product(content).expectation.family;
       const sound = await this.sound(content, menuSoundPath(family, event.sound), family);
       if (sound !== null) this.engine.play({ sound, family, actor: null, origin: { kind: "local" }, audience: { kind: "seat", seat: event.seat },
@@ -570,7 +575,8 @@ export class ApplicationAudio {
     }
     await this.receive(events);
     for (const batch of seatEvents) await this.receive(batch.events, { kind: "seat", seat: batch.seat }, batch.music);
-    const effects: { readonly sound: ApplicationEffectSound; readonly audience: AudioAudience }[] = this.effectSounds.splice(0).map(sound => ({ sound, audience: { kind: "world" } }));
+    const effectSounds = this.effectSounds.take(this.effectSoundsCursor); this.effectSounds.retire();
+    const effects: { readonly sound: ApplicationEffectSound; readonly audience: AudioAudience }[] = effectSounds.map(sound => ({ sound, audience: { kind: "world" } }));
     for (const batch of seatEvents) for (const sound of batch.effectSounds ?? []) effects.push({ sound, audience: { kind: "seat", seat: batch.seat } });
     for (const { sound, audience } of effects) {
       const family = this.content.catalog.product(sound.content).expectation.family;
@@ -611,7 +617,8 @@ export class ApplicationAudio {
         this.engine.updateAmbient(listener.seat, [water, wind], leaf?.ambientSound ?? [0, 0], elapsed.value / (elapsed.kind === "milliseconds" ? 1000 : 1));
       }
     }
-    for (const frame of this.cgameFrames.splice(0)) {
+    const cgameFrames = this.cgameFrames.take(this.cgameFramesCursor); this.cgameFrames.retire();
+    for (const frame of cgameFrames) {
       if (!listeners.some(listener => listener.seat.equals(frame.seat))) continue;
       for (const operation of frame.operations) switch (operation.kind) {
         case "play":
@@ -637,7 +644,7 @@ export class ApplicationAudio {
     this.music.stopPlayback("source");
     this.engine.resetRound();
     this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0;
-    this.uiSounds.length = 0; this.effectSounds.length = 0; this.cgameFrames.length = 0;
+    this.uiSounds.reset(); this.effectSounds.reset(); this.cgameFrames.reset();
     this.listeners = []; this.seatScenes = []; this.snapshot = null; this.environmentSeats.length = 0;
   }
 
@@ -646,7 +653,7 @@ export class ApplicationAudio {
     this.closed = true;
     this.geometry = null; this.geometryEnabled = false;
     this.music.stop(); this.engine.close(); this.banks.clear(); this.sounds.clear(); this.footsteps.clear();
-    this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0; this.uiSounds.length = 0; this.effectSounds.length = 0; this.cgameFrames.length = 0;
+    this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0; this.uiSounds.reset(); this.effectSounds.reset(); this.cgameFrames.reset();
     this.listeners = []; this.seatScenes = []; this.snapshot = null;
     return undefined;
   }

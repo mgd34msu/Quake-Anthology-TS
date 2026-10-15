@@ -1,10 +1,10 @@
 import type { ItemId } from "../../../../contracts/gameplay.ts";
+import { vectorToAnglesRule } from "../../../../core/math.ts";
 import type { ProjectileRole } from "../../../../contracts/weapon-behavior.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q2Entity, Q2GameServices, Q2Motion, Q2Think } from "../../foundation/host.ts";
 import { add, scale, zero } from "../../foundation/fields.ts";
-import { vectorAngles } from "../../foundation/weapons/vectors.ts";
 
 export const shotMask = 0x6000003;
 export function projectileMask(game: Q2GameServices): number { return game.options.edition === "rerelease" ? 0x46004003 : shotMask; }
@@ -16,7 +16,7 @@ export function projectile(self: Pick<Q2Entity, "actor">, game: Q2GameServices, 
   entity.owner = self.actor.id; entity.projectile = true; entity.dodgeable = true;
   entity.speed = speed; entity.model = model; entity.effects = effects; entity.clipMask = projectileMask(game); entity.motion = motion;
   entity.movedir = direction;
-  game.move(entity, { origin: start, velocity: scale(direction, speed), angles: vectorAngles(direction), bounds: { min: zero, max: zero } }, false);
+  game.move(entity, { origin: start, velocity: scale(direction, speed), angles: vectorToAnglesRule(direction, "native"), bounds: { min: zero, max: zero } }, false);
   return entity;
 }
 

@@ -1,3 +1,4 @@
+import { add3, angleVectorsRule, boundsOverlap, dot3, length3, scale3, sub3 } from "../../../core/math.ts";
 import type { WeaponBehaviorProjectilePort } from "../../../contracts/weapon-behavior.ts";
 /* Q1 gameplay adapted from id Software Quake / Quake rerelease QuakeC.
  * Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
@@ -195,18 +196,12 @@ export const WEAPONS: readonly Q1BaseWeapon[] = ["axe", "shotgun", "supershotgun
 export const Q1_WEAPON_IDS: readonly Q1Weapon[] = [...WEAPONS, "hipnotic:laser", "hipnotic:mjolnir", "hipnotic:proximity", "rogue:lava-nailgun", "rogue:lava-supernailgun", "rogue:multi-grenade", "rogue:multi-rocket", "rogue:plasma", "rogue:grapple", "mg3:laser", "mg3:mjolnir", "ctf:grapple"];
 export function isQ1BaseWeapon(weapon: Q1Weapon): weapon is Q1BaseWeapon { return WEAPONS.some(candidate => candidate === weapon); }
 export function weaponItem(weapon: Q1Weapon): ItemId { return `q1:weapon/${weapon}`; }
-export function vadd(a: Vec3, b: Vec3): Vec3 { return { x: Math.fround(a.x + b.x), y: Math.fround(a.y + b.y), z: Math.fround(a.z + b.z) }; }
-export function vsub(a: Vec3, b: Vec3): Vec3 { return { x: Math.fround(a.x - b.x), y: Math.fround(a.y - b.y), z: Math.fround(a.z - b.z) }; }
-export function vscale(a: Vec3, scale: number): Vec3 { return { x: Math.fround(a.x * scale), y: Math.fround(a.y * scale), z: Math.fround(a.z * scale) }; }
-export function dot(a: Vec3, b: Vec3): number { return Math.fround(Math.fround(Math.fround(a.x * b.x) + Math.fround(a.y * b.y)) + Math.fround(a.z * b.z)); }
-export function length(a: Vec3): number { return Math.fround(Math.sqrt(dot(a, a))); }
-export function normalize(a: Vec3): Vec3 { const magnitude = length(a); return magnitude === 0 ? ZERO : vscale(a, 1 / magnitude); }
-export function vectors(angles: Vec3): Q1Basis {
-  const yaw = angles.y * Math.PI / 180, pitch = angles.x * Math.PI / 180, roll = angles.z * Math.PI / 180;
-  const sy = Math.sin(yaw), cy = Math.cos(yaw), sp = Math.sin(pitch), cp = Math.cos(pitch), sr = Math.sin(roll), cr = Math.cos(roll);
-  return { forward: { x: Math.fround(cp * cy), y: Math.fround(cp * sy), z: Math.fround(-sp) },
-    right: { x: Math.fround(-sr * sp * cy + cr * sy), y: Math.fround(-sr * sp * sy - cr * cy), z: Math.fround(-sr * cp) },
-    up: { x: Math.fround(cr * sp * cy + sr * sy), y: Math.fround(cr * sp * sy - sr * cy), z: Math.fround(cr * cp) } };
-}
+export const vadd = add3;
+export const vsub = sub3;
+export const vscale = scale3;
+export const dot = dot3;
+export const length = length3;
+export function normalize(a: Vec3): Vec3 { const magnitude = length3(a); return magnitude === 0 ? ZERO : scale3(a, 1 / magnitude); }
+export function vectors(angles: Vec3): Q1Basis { return angleVectorsRule(angles, "q1"); }
 export function yawFor(direction: Vec3): number { const yaw = Math.atan2(direction.y, direction.x) * 180 / Math.PI; return yaw < 0 ? yaw + 360 : yaw; }
-export function overlaps(a: Bounds, b: Bounds): boolean { return a.min.x <= b.max.x && a.max.x >= b.min.x && a.min.y <= b.max.y && a.max.y >= b.min.y && a.min.z <= b.max.z && a.max.z >= b.min.z; }
+export const overlaps = boundsOverlap;

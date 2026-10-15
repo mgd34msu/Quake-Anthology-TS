@@ -1,3 +1,4 @@
+import { EventRing } from "../../../foundation/event-ring.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Q1ExtendedEntityState } from "../../../contracts/protocol.ts";
 import type { Q1ApplicationMessage, Q1ApplicationPlayer, Q1ApplicationServerHost } from "../network/q1-types.ts";
@@ -69,7 +70,7 @@ export async function createQuakeCNetQuakeHost(options: Q1ApplicationServerBindi
     };
     interface Routed { readonly recipient: ActorId | null; readonly reliable: boolean; readonly message: Q1ApplicationMessage; }
     let routed: Routed[] = [];
-    const commandMessages: Routed[] = [];
+    const commandMessages = new EventRing<Routed>(4096);
     let previousPause = simulation.q1Paused;
     const board = new Map<number, { readonly name: string; readonly colors: number; readonly frags: number }>();
     const send = (message: Q1ApplicationMessage, reliable = false, recipient: ActorId | null = null): void => { routed.push({ message, reliable, recipient }); };
@@ -97,7 +98,7 @@ export async function createQuakeCNetQuakeHost(options: Q1ApplicationServerBindi
         return messages;
     };
     const observe = (_output: SimulationOutput, events: readonly SimulationPresentationEvent[]): void => {
-        routed = commandMessages.splice(0); sourceMessages();
+        routed = commandMessages.drainAll(); sourceMessages();
         if (previousPause !== simulation.q1Paused) { previousPause = simulation.q1Paused; send({ kind: "pause", paused: previousPause }, true); }
         for (const player of clients.values()) {
             const slot = player.sourceEntity, info = game.clientInfo(player.client), previous = board.get(player.client.slot);
@@ -174,7 +175,7 @@ export async function createQuakeCNetQuakeHost(options: Q1ApplicationServerBindi
         command: (player, name, args) => {
             if (name === "pause") {
                 const before = simulation.q1Paused, text = simulation.toggleQ1Pause(player.actor);
-                commandMessages.push({ recipient: before === simulation.q1Paused ? player.actor : null, reliable: true, message: { kind: "print", text } });
+                commandMessages.admit({ recipient: before === simulation.q1Paused ? player.actor : null, reliable: true, message: { kind: "print", text } });
             } else if (name === "name" || name === "color") {
                 const info = new Map(game.clientInfo(player.client));
                 if (name === "name") info.set("name", (args[0] ?? "unconnected").slice(0, 15));
@@ -184,7 +185,7 @@ export async function createQuakeCNetQuakeHost(options: Q1ApplicationServerBindi
             } else if (name === "say" || name === "say_team") {
                 const text = `\x01${string(player.sourceEntity, "netname")}: ${args.join(" ").slice(0, 126)}\n`;
                 for (const recipient of clients.values()) if (name !== "say_team" || game.cvars.variableValue("teamplay") === 0 || scalar(recipient.sourceEntity, "team") === scalar(player.sourceEntity, "team"))
-                    commandMessages.push({ message: { kind: "print", text }, reliable: true, recipient: recipient.actor });
+                    commandMessages.admit({ message: { kind: "print", text }, reliable: true, recipient: recipient.actor });
             } else simulation.playerCommand(player.actor, name, args);
         }, observe, print: options.print,
     };

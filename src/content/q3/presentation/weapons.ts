@@ -7,7 +7,7 @@ import type { PcmSound } from "../../../audio/wav.ts";
 import { CommonError } from "../../../core/common-error.ts";
 import { modelBounds } from "./model-access.ts";
 import { add3, dot3, length3, normalize3, perpendicularVector, scale3, sub3, vec3, vec4 } from "../../../core/math.ts";
-import { qvmAngleMod as angleMod, qvmAngleVectors as angleVectors, qvmAnglesToAxis as anglesToAxis, qvmRotatePointAroundVector as rotatePointAroundVector } from "../../../core/qvm-math.ts";
+import { qvmAngleMod as angleMod, qvmAngleVectors as angleVectors, qvmAnglesToAxis as anglesToAxis, qvmRotatePointAroundVector as rotatePointAroundVector } from "../../../core/math.ts";
 import type { Axis, Vec3, Vec4 } from "../../../core/math.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
 import type { GameRandom } from "../base/game/numeric.ts";

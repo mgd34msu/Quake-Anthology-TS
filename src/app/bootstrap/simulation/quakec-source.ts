@@ -1,3 +1,4 @@
+import { EventRing } from "../../../foundation/event-ring.ts";
 import { qcDamageInputs, validateQcModCombat } from "../../../compat/qc/mod-combat.ts";
 import { withQcSourceCall } from "../../../compat/qc/source-call.ts";
 import type { ModCallbackDeclaration } from "../../../contracts/mod-callbacks.ts";
@@ -224,12 +225,12 @@ export class QuakeCSource {
   private originalSaveExtensionText = "";
   private readonly spectatorSlots = new Set<number>();
   private readonly preparedClients = new Set<number>();
-  private readonly fragRecords: { readonly killer: ActorId; readonly victim: ActorId }[] = [];
-  private readonly routed: { readonly entries: readonly QcRoutedMessage[]; readonly destination: QcMessageDestination }[] = [];
+  private readonly fragRecords = new EventRing<{ readonly killer: ActorId; readonly victim: ActorId }>(4096);
+  private readonly routed = new EventRing<{ readonly entries: readonly QcRoutedMessage[]; readonly destination: QcMessageDestination }>(8192);
   private readonly signon: QcRoutedMessage[] = [];
   private readonly netQuakeSignon: NetQuakeMessage[] = [];
   private readonly netQuakeSignonViews = new Map<number, ActorId | null>();
-  private readonly netQuakeRouted: { readonly messages: readonly NetQuakeMessage[]; readonly destination: QcMessageDestination; readonly viewTargets: ReadonlyMap<number, ActorId | null> }[] = [];
+  private readonly netQuakeRouted = new EventRing<{ readonly messages: readonly NetQuakeMessage[]; readonly destination: QcMessageDestination; readonly viewTargets: ReadonlyMap<number, ActorId | null> }>(8192);
   private readonly localMessages = new QuakeCLocalMessages();
   private localMessagesStarted = false;
   private netQuakeWireAttached = false;
@@ -275,7 +276,7 @@ export class QuakeCSource {
     this.clients = new QcClientHost(this.worldHost, { scene: options.scene, maxClients: this.reservedClientSlots, serverTime: () => this.currentTime });
     const qw: QcQuakeWorldMessageServices | undefined = binding.kind === "quakeworld" ? {
       loading: () => this.spawning, client: actor => this.isReservedClient(actor), phs: () => this.cvars.variableValue("sv_phs") !== 0,
-      route: (entries, destination) => { if (destination.kind === "signon") this.signon.push(...entries); else this.routed.push({ entries, destination }); return undefined; },
+      route: (entries, destination) => { if (destination.kind === "signon") this.signon.push(...entries); else this.routed.admit({ entries, destination }); return undefined; },
     } : undefined;
     const nq: QcNetQuakeMessageServices | undefined = binding.kind === "netquake" ? {
       messageDialect: prepared.messageDialect ?? "known-retail",
@@ -290,9 +291,9 @@ export class QuakeCSource {
         }
         else if (this.netQuakeWireAttached || this.spawning || !this.localMessagesStarted) {
           const bytes = this.messages.captureNetQuakeMessages(messages).length;
-          const queued = this.netQuakeRouted.reduce((sum, entry) => sum + this.messages.captureNetQuakeMessages(entry.messages).length, 0);
+          let queued = 0; this.netQuakeRouted.forEachLive(entry => { queued += this.messages.captureNetQuakeMessages(entry.messages).length; });
           if (queued + bytes > 8000 * (options.maxClients + 2)) throw new Error("NetQuake source output overflow");
-          this.netQuakeRouted.push({ messages, destination, viewTargets });
+          this.netQuakeRouted.admit({ messages, destination, viewTargets });
         }
         if (this.localMessagesStarted) this.receiveLocalMessages(messages, destination, viewTargets);
         return undefined;
@@ -347,7 +348,7 @@ export class QuakeCSource {
       });
       host.set("logfrag", vm => {
         const killer = this.slots.at(this.entities.slot(vm.argInt(0))), victim = this.slots.at(this.entities.slot(vm.argInt(1)));
-        if (killer !== null && victim !== null && this.isReservedClient(killer.id) && this.isReservedClient(victim.id)) this.fragRecords.push({ killer: killer.id, victim: victim.id });
+        if (killer !== null && victim !== null && this.isReservedClient(killer.id) && this.isReservedClient(victim.id)) this.fragRecords.admit({ killer: killer.id, victim: victim.id });
       });
     }
     this.attacks = new Id1SynchronousAttacks(this.worldHost.options, () => this.machine);
@@ -467,14 +468,14 @@ export class QuakeCSource {
       spectatorSlots: [...this.spectatorSlots], originalSaveExtensionText: this.originalSaveExtensionText,
       spawnParameters: [...this.spawnParameters].map(([slot, values]) => ({ slot, values })),
       clientIdentities: [...this.clientIdentities].map(([slot, client]) => ({ slot, clientSlot: client.slot })), preparedClients: [...this.preparedClients],
-      fragRecords: this.fragRecords.map(entry => ({ killer: savedQcActor(entry.killer), victim: savedQcActor(entry.victim) })),
-      routed: this.routed.map(entry => ({ entries: this.messages.captureEntries(entry.entries), destination: captureQcDestination(entry.destination) })),
+      fragRecords: this.fragRecords.snapshot().map(entry => ({ killer: savedQcActor(entry.killer), victim: savedQcActor(entry.victim) })),
+      routed: this.routed.snapshot().map(entry => ({ entries: this.messages.captureEntries(entry.entries), destination: captureQcDestination(entry.destination) })),
       localMessages: { started: this.localMessagesStarted, baseline: this.messages.captureNetQuakeMessages(this.localMessages.capture().baseline),
         clients: this.localMessages.capture().clients.map(entry => ({ actor: savedQcActor(entry.actor), bytes: this.messages.captureNetQuakeMessages(entry.messages) })),
         views: { baseline: savedQcActor(this.localMessages.captureViews().baseline), clients: this.localMessages.captureViews().clients.map(entry => ({ actor: savedQcActor(entry.actor), target: savedQcActor(entry.target) })) } },
       netQuakeSignon: this.messages.captureNetQuakeMessages(this.netQuakeSignon),
       netQuakeSignonViews: [...this.netQuakeSignonViews].map(([index, actor]) => ({ index, actor: savedQcActor(actor) })),
-      netQuakeRouted: this.netQuakeRouted.map(entry => ({ bytes: this.messages.captureNetQuakeMessages(entry.messages), destination: captureQcDestination(entry.destination),
+      netQuakeRouted: this.netQuakeRouted.snapshot().map(entry => ({ bytes: this.messages.captureNetQuakeMessages(entry.messages), destination: captureQcDestination(entry.destination),
         views: [...entry.viewTargets].map(([index, actor]) => ({ index, actor: savedQcActor(actor) })) })),
       signon: this.messages.captureEntries(this.signon), models: [...this.models].map(([name, model]) => ({ name, ...model })),
       precached: [...this.precached].map(([key, entry]) => ({ key, index: entry.index, id: entry.resource.id, digest: entry.resource.digest })),
@@ -545,9 +546,9 @@ export class QuakeCSource {
       const slot = this.sourceSlot(actor);
       if (slot === null || !this.clientIdentities.has(slot) || (this.kind === "quakeworld" && !this.preparedClients.has(slot))) reader.fail("incomplete saved client phase");
     }
-    this.fragRecords.length = 0; this.fragRecords.push(...reader.field("fragRecords").list(item => ({ killer: reference(item.field("killer")), victim: reference(item.field("victim")) })));
+    this.fragRecords.reset(); { const restored = reader.field("fragRecords").list(item => ({ killer: reference(item.field("killer")), victim: reference(item.field("victim")) })); if (restored.length !== 0) this.fragRecords.admitAll(restored); }
     const resolve = (saved: Parameters<SessionActorRegistry["referenceSaved"]>[0]) => this.options.actors.referenceSaved(saved);
-    this.routed.length = 0; this.routed.push(...reader.field("routed").list(item => ({ entries: this.messages.restoreEntries(item.field("entries").value, resolve), destination: readQcDestination(item.field("destination"), resolve) })));
+    this.routed.reset(); { const restored = reader.field("routed").list(item => ({ entries: this.messages.restoreEntries(item.field("entries").value, resolve), destination: readQcDestination(item.field("destination"), resolve) })); if (restored.length !== 0) this.routed.admitAll(restored); }
     this.signon.length = 0; this.signon.push(...this.messages.restoreEntries(reader.field("signon").value, resolve));
     this.netQuakeSignon.length = 0;
     const nqSignon = reader.field("netQuakeSignon");
@@ -564,12 +565,12 @@ export class QuakeCSource {
     };
     this.netQuakeSignonViews.clear();
     for (const [index, actor] of views(reader.field("netQuakeSignonViews"), this.netQuakeSignon)) this.netQuakeSignonViews.set(index, actor);
-    this.netQuakeRouted.length = 0;
+    this.netQuakeRouted.reset();
     const nqRouted = reader.field("netQuakeRouted");
-    if (nqRouted.value !== undefined) this.netQuakeRouted.push(...nqRouted.list(item => {
+    if (nqRouted.value !== undefined) { const restored = nqRouted.list(item => {
       const messages = this.messages.restoreNetQuakeMessages(item.field("bytes").bytes());
       return { messages, destination: readQcDestination(item.field("destination"), resolve), viewTargets: views(item.field("views"), messages) };
-    }));
+    }); if (restored.length !== 0) this.netQuakeRouted.admitAll(restored); }
     const vector = (item: SaveReader): Vec3 => ({ x: item.field("x").finite(), y: item.field("y").finite(), z: item.field("z").finite() });
     this.models.clear(); for (const entry of reader.field("models").list(item => item)) {
       const name = entry.field("name").string(), bounds = entry.field("bounds");
@@ -730,8 +731,8 @@ export class QuakeCSource {
     }
     this.preparedClients.add(slot);
   }
-  drainFragLog(): readonly { readonly killer: ActorId; readonly victim: ActorId }[] { return this.fragRecords.splice(0); }
-  drainMessages(): readonly { readonly entries: readonly QcRoutedMessage[]; readonly destination: QcMessageDestination }[] { this.messages.flush(); return this.routed.splice(0); }
+  drainFragLog(): readonly { readonly killer: ActorId; readonly victim: ActorId }[] { return this.fragRecords.drainAll(); }
+  drainMessages(): readonly { readonly entries: readonly QcRoutedMessage[]; readonly destination: QcMessageDestination }[] { this.messages.flush(); return this.routed.drainAll(); }
   signonMessages(): readonly QcRoutedMessage[] { return this.signon; }
   attachNetQuakeWire(): void {
     if (this.kind !== "netquake" || this.netQuakeWireAttached) throw new Error("NetQuake wire already attached or source ABI differs");
@@ -740,7 +741,7 @@ export class QuakeCSource {
   netQuakeSignonMessages(): readonly NetQuakeMessage[] { return this.netQuakeSignon; }
   drainNetQuakeMessages(): readonly { readonly messages: readonly NetQuakeMessage[]; readonly destination: QcMessageDestination }[] {
     if (!this.netQuakeWireAttached) throw new Error("NetQuake wire is not attached");
-    this.messages.flush(); return this.netQuakeRouted.splice(0);
+    this.messages.flush(); return this.netQuakeRouted.drainAll();
   }
   connectedClientIdentities(): readonly ClientId[] { return [...this.clientIdentities.values()].sort((a, b) => a.slot - b.slot); }
   clientActor(client: ClientId): ActorId | null {
@@ -875,7 +876,7 @@ export class QuakeCSource {
         this.localMessagesStarted = true;
         this.localMessages.admit(actor.id);
         this.receiveLocalMessages(this.netQuakeSignon, {kind:"signon"}, this.netQuakeSignonViews);
-        for (const entry of this.netQuakeRouted) this.receiveLocalMessages(entry.messages, entry.destination, entry.viewTargets);
+        this.netQuakeRouted.forEachLive(entry => { this.receiveLocalMessages(entry.messages, entry.destination, entry.viewTargets); });
       }
       this.localMessages.admit(actor.id);
     }
@@ -1409,7 +1410,7 @@ export class QuakeCSource {
     if (frame.time.kind !== "seconds" || frame.elapsed.kind !== "seconds" || !Number.isFinite(frame.time.value)) throw new Error("QC frame requires source seconds");
     if (!this.netQuakeWireAttached && this.kind === "netquake") {
       if (this.netQuakeSignon.length !== 0) throw new Error("QuakeC MSG_INIT requires a native NetQuake wire consumer");
-      for (const entry of this.netQuakeRouted.splice(0)) this.netQuakeRoute?.route(entry.messages, entry.destination, entry.viewTargets);
+      for (const entry of this.netQuakeRouted.drainAll()) this.netQuakeRoute?.route(entry.messages, entry.destination, entry.viewTargets);
     }
     this.currentTime = frame.time.value;
     this.machine.globals.setFloat(this.machine.globalOffset("frametime"), frame.elapsed.value);
@@ -1425,7 +1426,7 @@ export class QuakeCSource {
   }
   endFrame(): undefined {
     this.messages.flush();
-    if (this.localMessagesStarted && !this.netQuakeWireAttached) this.netQuakeRouted.length = 0;
+    if (this.localMessagesStarted && !this.netQuakeWireAttached) this.netQuakeRouted.reset();
     const offset = this.machine.globalOffset("force_retouch"), current = this.machine.globals.float(offset);
     if (current !== 0) this.machine.globals.setFloat(offset, this.machine.numeric.subtract(current, 1));
     return undefined;

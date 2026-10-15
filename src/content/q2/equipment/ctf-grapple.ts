@@ -1,11 +1,11 @@
 /* Classic CTF 1.09b g_ctf.c and rerelease ctf/g_ctf.cpp grapple. GPL-2.0-or-later. */
 import { projectQ2Actor, q2ActorShotMask } from "../foundation/weapons/projection.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../core/math.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { DeathReaction, TouchContact } from "../../../contracts/world.ts";
 import type { Q2CallbackDefinitions } from "../foundation/callbacks.ts";
 import type { Q2Entity, Q2GameServices, Q2Touch, Q2Die } from "../foundation/host.ts";
 import { add, length, normalize, scale, subtract, zero } from "../foundation/fields.ts";
-import { angleVectors, vectorAngles } from "../foundation/weapons/vectors.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import { CtfGrappleState, grappleBody, grappleVelocity } from "./grapple-services.ts";
 import type { GrappleHooks } from "./grapple-services.ts";
@@ -154,7 +154,7 @@ export class Q2CtfGrappleEquipment {
       game.host.combat.create(hook.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null, noKnockback: true });
     }
     hook.projectile = true; hook.effects = effects; hook.model = "models/weapons/grapple/hook/tris.md2"; hook.owner = owner; hook.touch = this.sourceTouch; hook.damage = damage;
-    game.move(hook, { origin: start, angles: vectorAngles(normalized), velocity: scale(normalized, speed), bounds: { min: zero, max: zero } }, false);
+    game.move(hook, { origin: start, angles: vectorToAnglesRule(normalized, "native"), velocity: scale(normalized, speed), bounds: { min: zero, max: zero } }, false);
     source.grapple = hook.actor.id; source.grappleState = "fly"; game.solid(hook, "box"); game.motion(hook, "fly-missile");
     const trajectory = game.host.isPlayer(owner) ? game.host.weaponBehavior?.launch({ projectile: hook.actor, shooter: owner, weapon: "q2:weapon_grapple", role: "grapple", timeSeconds: game.host.now(), body: game.body(hook) }) ?? null : null;
     if (trajectory !== null) { game.projectTrajectory(hook, trajectory); }
@@ -181,7 +181,7 @@ export class Q2CtfGrappleEquipment {
       const shot = projectQ2Actor(owner, game, { hand: pose.hand, viewHeight: pose.viewHeight, playersCollide: this.settings(owner, game).playersCollide }, pose.angles, { x: 7, y: 2, z: -9 });
       return this.hooks.emit({ kind: "grapple-cable", actor: owner, start: shot.start, end, offset: zero });
     }
-    const axes = angleVectors(pose.angles), hand = pose.hand;
+    const axes = angleVectorsRule(pose.angles, "native"), hand = pose.hand;
     const start = add(add(add(origin, scale(axes.forward, 16)), scale(axes.right, hand === "left" ? -16 : hand === "center" ? 0 : 16)), { x: 0, y: 0, z: pose.viewHeight - 8 });
     if (length(subtract(start, end)) < 64) return undefined;
     return this.hooks.emit({ kind: "grapple-cable", actor: owner, start: origin, end, offset: subtract(start, origin) });

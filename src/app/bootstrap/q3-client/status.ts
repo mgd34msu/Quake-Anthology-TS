@@ -29,6 +29,7 @@ export function cgameStatusCvars(source: QvmCvarServices, visible: () => boolean
 export class CgameStatusView {
   readonly cvars: QvmCvarServices;
   private readonly records = new Map<number, { readonly memory: QvmMemory; readonly handle: number }>();
+  private readonly refreshWords = new DataView(new ArrayBuffer(8));
   constructor(source: QvmCvarServices, visible: () => boolean) { this.cvars = cgameStatusCvars(source, visible); }
   syscall(words: DataView, memory: QvmMemory): number | null {
     const result = qvmCvarSyscall("cgame", words, memory, this.cvars), trap = words.getInt32(0, true);
@@ -43,7 +44,7 @@ export class CgameStatusView {
     return result;
   }
   refresh(): void {
-    const words = new DataView(new ArrayBuffer(8)); words.setInt32(0, 4, true);
+    const words = this.refreshWords; words.setInt32(0, 4, true);
     for (const [pointer, record] of this.records) {
       if (record.memory.view(pointer, 272).getInt32(0, true) !== record.handle) { this.records.delete(pointer); continue; }
       words.setInt32(4, pointer, true);

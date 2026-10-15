@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import { readSeatLanguage, writeSeatLanguage } from "../../ui/settings/language.ts";
 /* Q2 rerelease configstrings, svc_locprint and cg_screen.cpp story draws. GPL-2.0-or-later. */
 import type { ContentId } from "../../contracts/content.ts";
@@ -40,8 +41,10 @@ export function q2PlayerNameTokens(text: string, names: ReadonlyMap<number, stri
 export class ApplicationRereleasePresentation {
   private seats: readonly SeatState[];
   private readonly names = new Map<number, string>();
-  private readonly pending: (RereleaseSource | Extract<SimulationPresentationEvent, { readonly kind: "q2-player" }>)[] = [];
-  private readonly prints: SimulationPresentationEvent[] = [];
+  private readonly pending = new EventRing<RereleaseSource | Extract<SimulationPresentationEvent, { readonly kind: "q2-player" }>>(8192);
+  private readonly pendingCursor: EventCursor = this.pending.openCursor();
+  private readonly prints = new EventRing<SimulationPresentationEvent>(8192);
+  private readonly printsCursor: EventCursor = this.prints.openCursor();
   private readonly skies = new Map<ContentId, Map<string, Promise<readonly RendererImage[]>>>();
   private sky: RereleaseSkyView | null = null;
   private skySource: { readonly content: ContentId; readonly name: string } | null = null;
@@ -68,7 +71,7 @@ export class ApplicationRereleasePresentation {
 
   receive(events: readonly SimulationPresentationEvent[]): void {
     for (const source of events) {
-      if (source.kind === "q2-player" && source.event.kind === "userinfo") this.pending.push(source);
+      if (source.kind === "q2-player" && source.event.kind === "userinfo") this.pending.admit(source);
       if (source.kind !== "q2-rerelease") continue;
       const event = source.event;
       if (event.kind === "item-visibility") {
@@ -78,7 +81,7 @@ export class ApplicationRereleasePresentation {
         }
       }
       if (event.kind === "fog") { for (const seat of this.seats) if (seat.binding.actor.equals(event.actor) && (source.recipient === undefined || source.recipient.equals(seat.binding.actor))) { seat.fog.receive(event.value, event.transitionMilliseconds, source.seconds); seat.fogReceived = true; } }
-      else if (event.kind === "story" || event.kind === "localized-print" || event.kind === "sky") this.pending.push(source);
+      else if (event.kind === "story" || event.kind === "localized-print" || event.kind === "sky") this.pending.admit(source);
     }
   }
 
@@ -175,7 +178,8 @@ export class ApplicationRereleasePresentation {
   }
 
   async prepare(): Promise<void> {
-    for (const source of this.pending.splice(0)) {
+    const pending = this.pending.take(this.pendingCursor); this.pending.retire();
+    for (const source of pending) {
       if (source.kind === "q2-player") {
         if (source.event.kind === "userinfo") {
           const { slot, name } = source.event;
@@ -198,7 +202,7 @@ export class ApplicationRereleasePresentation {
         if (event.kind === "localized-print" && event.actor !== null && !seat.binding.actor.equals(event.actor)) continue;
         const text = await this.localizeMessage(seat.binding.seat, source.content, event.text, event.kind === "localized-print" ? event.args : []);
         if (event.kind === "story") { seat.story = text; seat.storySource = { content: source.content, text: event.text }; }
-        else this.prints.push({ kind: "q2-player", content: source.content, seconds: source.seconds, sequence: source.sequence,
+        else this.prints.admit({ kind: "q2-player", content: source.content, seconds: source.seconds, sequence: source.sequence,
           ...(source.recipient === undefined ? {} : { recipient: source.recipient }),
           ...(source.sourceEntity === undefined ? {} : { sourceEntity: source.sourceEntity }), event: { kind: "print", target: seat.binding.actor, level: event.level, text } });
       }
@@ -208,7 +212,7 @@ export class ApplicationRereleasePresentation {
     }
   }
 
-  drainPrints(): readonly SimulationPresentationEvent[] { return this.prints.splice(0); }
+  drainPrints(): readonly SimulationPresentationEvent[] { const taken = this.prints.take(this.printsCursor); this.prints.retire(); return taken; }
   storyActive(actor: ActorId): boolean { return this.seats.some(seat => seat.binding.actor.equals(actor) && seat.story !== ""); }
   view(actor: ActorId, seconds: number): Pick<WorldViewInput, "q2Fog"> & { readonly q2Sky?: RereleaseSkyView } {
     const seat = this.seats.find(seat => seat.binding.actor.equals(actor));

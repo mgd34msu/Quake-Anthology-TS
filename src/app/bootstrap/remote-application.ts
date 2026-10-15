@@ -1,3 +1,4 @@
+import { EventRing } from "../../foundation/event-ring.ts";
 import type { ApplicationModPresentationsOptions } from "./mod-presentations.ts";
 import type { SystemCinematicHost } from "./q3-client/cinematics.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
@@ -240,7 +241,7 @@ export class RemoteApplication {
   get presentedCinematic(): boolean { return this.cinematicPresented; }
   get hasCinematic(): boolean { return this.cinematic !== null; }
 
-  private readonly retiredFrontends: { readonly frontend: RemoteWorldFrontend; readonly content: LoadedApplicationContent | null }[] = [];
+  private readonly retiredFrontends = new EventRing<{ readonly frontend: RemoteWorldFrontend; readonly content: LoadedApplicationContent | null }>(1024);
   private controls: ApplicationInput | null = null;
   private capture: ApplicationCapture | null = null;
   private ownedVideoRestart: ApplicationVideoRestart | null = null;
@@ -621,7 +622,7 @@ export class RemoteApplication {
 
   private async retireFrontends(): Promise<void> {
     const failures: unknown[] = [];
-    for (const retired of this.retiredFrontends.splice(0)) {
+    for (const retired of this.retiredFrontends.drainAll()) {
       try { this.releaseFrontend(retired.frontend); } catch (error) { failures.push(error); }
       try { await retired.content?.close(); } catch (error) { failures.push(error); }
     }
@@ -1195,7 +1196,7 @@ export class RemoteApplication {
       if (previous !== null) {
         frontend.audio.effectsVolume = previous.audio.effectsVolume;
         frontend.audio.musicVolume = previous.audio.musicVolume;
-        if (this.ownership.kind === "borrowed") this.retiredFrontends.push({ frontend: previous, content: replaceContent ? oldContent : null });
+        if (this.ownership.kind === "borrowed") this.retiredFrontends.admit({ frontend: previous, content: replaceContent ? oldContent : null });
         else this.releaseFrontend(previous);
       }
       this.frontend = frontend; this.loadedContent = content; this.launchOptions = options;

@@ -333,6 +333,7 @@ async function createQ3Presentation(input: Q3ClientPresentationOptions | Q3Scene
     });
     const eventServices = {
       presentEvent: (entity: ClientEntity, position: Vec3, source: () => Promise<void>) => primary === null ? source() : primary.event(entity, position, source),
+      prepareWeapon: (weapon: number) => media.weaponRegistry.registerWeapon(weapon),
       media: media.events, get options() { return { gameType: staticState.gameType, debugEvents: enabled("cg_debugEvents"),
         footsteps: enabled("cg_footsteps"), autoswitch: enabled("cg_autoswitch"), demoPlayback: context.demoPlayback, noPredict: enabled("cg_nopredict"),
         synchronousClients: enabled("cg_synchronousClients"), singlePlayerActive: missionEnabled("cg_singlePlayerActive"), cameraOrbit: enabled("cg_cameraOrbit") }; },

@@ -1,3 +1,4 @@
+import { BoundedQueue } from "../foundation/bounded-queue.ts";
 import type { CommandBuffer } from "../core/commands/index.ts";
 import type { CvarRegistry } from "../core/cvars/index.ts";
 
@@ -5,11 +6,11 @@ export type RestartKind = "video" | "input" | "audio";
 export interface RestartService { restart(): void | Promise<void>; }
 /** Resource owners perform their own restart, retaining session state outside their lease. */
 export class RestartControls {
-  private readonly pending: RestartKind[] = [];
+  private readonly pending = new BoundedQueue<RestartKind>(4);
   private running = false;
   constructor(private readonly services: Readonly<Record<RestartKind, RestartService>>, private readonly cvars: CvarRegistry,
     private readonly latched: Readonly<Record<RestartKind, readonly string[]>>) {}
-  request(kind: RestartKind): void { if (!this.pending.includes(kind)) this.pending.push(kind); }
+  request(kind: RestartKind): void { if (this.pending.findIndex(pending => pending === kind) < 0) this.pending.push(kind); }
   async drain(): Promise<void> {
     if (this.running) throw new Error("Restart controls already have an active operation");
     this.running = true;

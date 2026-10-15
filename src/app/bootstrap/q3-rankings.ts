@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import type { RankingAccountActions } from "../../ui/settings/rankings.ts";
 import { RankingLifecycle } from "../../network/services/rankings.ts";
 import type { RankingAccountRequest, RankingPlayerState, RankingServiceProvider, RankingServiceState } from "../../network/services/rankings.ts";
@@ -23,7 +24,8 @@ export interface Q3RankingHost {
 /** Source slots are local to this match. Account IDs never become ActorIds or local progress identities. */
 export class ApplicationQ3Rankings {
   readonly lifecycle: RankingLifecycle;
-  private readonly reports: Q3RankingReport[] = [];
+  private readonly reports = new EventRing<Q3RankingReport>(65536);
+  private readonly reportCursor: EventCursor = this.reports.openCursor();
   private readonly observed = new Map<number, RankingPlayerState>();
   private readonly detach: () => void;
   private readonly weapons = new Map<number, { weapon: number; since: number }>();
@@ -34,12 +36,10 @@ export class ApplicationQ3Rankings {
     this.lifecycle = new RankingLifecycle(provider, (slot, state) => host.status(slot, state), state => host.serviceStatus?.(state));
     this.detach = pool.rankings.attach(report => {
       if (this.lifecycle.state().kind !== "active" || this.ended) return;
-      if (this.reports.length >= 65536) {
-        this.reports.length = 0;
+      if (this.reports.append(report) === 0) {
+        this.reports.reset();
         this.lifecycle.unavailable("Ranking provider cannot keep up with source reports; this match cannot be submitted completely.");
-        return;
       }
-      this.reports.push(report);
     }, () => level.warmupTime !== 0);
   }
   private assertOpen(): void { if (this.closed) throw new Error("Ranking match owner is closed"); }
@@ -67,7 +67,7 @@ export class ApplicationQ3Rankings {
       throw new Error("Ranking account requires a connected source client");
   }
   private async flush(): Promise<void> {
-    const reports = this.reports.splice(0);
+    const reports = this.reports.take(this.reportCursor); this.reports.retire();
     for (const report of reports) {
       if (this.lifecycle.state().kind !== "active") break;
       if (report.kind === "integer") await this.lifecycle.reportInt(report.self, report.other, report.key, report.value, report.accumulate);

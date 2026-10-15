@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../persistence/value.ts";
 import { savedActorId, readSavedActor } from "../../persistence/save-image.ts";
 import { readGuest } from "../../persistence/execution.ts";
@@ -11,7 +12,7 @@ import type { QvmModPresentationDeclaration, QvmPresentationArgument, QvmPresent
 import type { Q3SourcePlayerEvent } from "../../app/bootstrap/simulation/q3/types.ts";
 import type { SourceGameStateRecord } from "../../network/q3/game-state.ts";
 import { dot3, vectorToAngles } from "../../core/math.ts";
-import { qvmAnglesToAxis } from "../../core/qvm-math.ts";
+import { qvmAnglesToAxis } from "../../core/math.ts";
 import { float32ToBits } from "../../core/numeric.ts";
 import { QvmModule, type QvmModuleOptions } from "./module.ts";
 import { QvmOpcode, QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
@@ -146,7 +147,7 @@ export class QvmModPresentation {
   private readonly players = new Map<number, ActorId>();
   private defaults: Uint8Array | null = null;
   private activeEvent: Q3SourcePlayerEvent | undefined;
-  private readonly removals: (() => void)[] = [];
+  private readonly removals = new CleanupStack();
   private readonly snapshots = new Map<number, QvmSourceSnapshot>();
   private snapshotNumber = 0;
   private sceneRevision = -1;
@@ -526,6 +527,6 @@ export class QvmModPresentation {
   }
   release(actor: ActorId): void { for (const [slot, player] of this.players) if (player.equals(actor)) this.players.delete(slot); }
   close(): void { if (this.phase === "closed") return; this.phase = "closed";
-    for (const remove of this.removals) remove(); this.removals.length = 0;
+    this.removals.runAll();
     this.bodyFrame = []; this.players.clear(); this.sceneActors.clear(); this.snapshots.clear(); this.commands.clear(); this.defaults = null; this.currentGameState = null; this.module.retire(); }
 }

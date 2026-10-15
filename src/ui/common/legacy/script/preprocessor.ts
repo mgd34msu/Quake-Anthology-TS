@@ -1,3 +1,4 @@
+import { float64Bits } from "../../../../foundation/binary.ts";
 import type { ScriptMemoryAllocation } from "./memory.ts";
 import { SaveReader } from "../../../../persistence/value.ts";
 import { readScriptDiagnostic } from "./lexer.ts";
@@ -229,9 +230,7 @@ function frozenLocation(location: SourceLocation): SourceLocation {
 
 /** l_precomp.c sprintf("%1.2f", fabs(value)), binary64 and nearest-even. */
 function evaluationDecimal(magnitude: number, precision = 2): string {
-  const binary = new DataView(new ArrayBuffer(8));
-  binary.setFloat64(0, magnitude, true);
-  const bits = binary.getBigUint64(0, true);
+  const bits = float64Bits(magnitude);
   const exponent = Number((bits >> 52n) & 0x7ffn);
   const fraction = bits & 0xfffffffffffffn;
   if (exponent === 0x7ff) return fraction === 0n ? "inf" : "nan";

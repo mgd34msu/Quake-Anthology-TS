@@ -1,3 +1,4 @@
+import { BoundedQueue } from "../foundation/bounded-queue.ts";
 /** Portable replacement for Q3's optional macOS OmniTimer stack and stamp lists. */
 export interface TimerReport { readonly name: string; readonly calls: number; readonly totalMilliseconds: number; readonly selfMilliseconds: number; readonly maximumMilliseconds: number; }
 export interface TimerStamp { readonly name: string; readonly milliseconds: number; }
@@ -6,11 +7,12 @@ interface Aggregate { calls: number; totalMilliseconds: number; selfMilliseconds
 export class OmniTimer {
   private readonly stack: ActiveTimer[] = [];
   private readonly totals = new Map<string, Aggregate>();
-  private readonly stamps: TimerStamp[] = [];
+  private readonly stamps: BoundedQueue<TimerStamp>;
   private epoch: number;
   private active = false;
   constructor(private readonly clock: () => number = () => performance.now(), readonly stampCapacity = 4096) {
     if (!Number.isSafeInteger(stampCapacity) || stampCapacity < 1) throw new RangeError("Invalid timer stamp capacity");
+    this.stamps = new BoundedQueue<TimerStamp>(stampCapacity);
     this.epoch = clock();
   }
   get enabled(): boolean { return this.active; }
@@ -32,14 +34,13 @@ export class OmniTimer {
   measure<T>(name: string, operation: () => T): T { if (!this.active) return operation(); this.push(name); try { return operation(); } finally { this.pop(); } }
   stamp(name: string): void {
     if (!this.active) return;
-    if (this.stamps.length === this.stampCapacity) this.stamps.shift();
     this.stamps.push({ name, milliseconds: this.clock() - this.epoch });
   }
   report(): readonly TimerReport[] { return [...this.totals].map(([name, total]) => ({ name, ...total })); }
-  stampList(): readonly TimerStamp[] { return this.stamps.slice(); }
+  stampList(): readonly TimerStamp[] { return this.stamps.toArray(); }
   reset(): void {
     if (this.stack.length !== 0) throw new Error("Cannot reset timers inside an active scope");
-    this.totals.clear(); this.stamps.length = 0; this.epoch = this.clock();
+    this.totals.clear(); this.stamps.clear(); this.epoch = this.clock();
   }
   format(): string {
     return "name\tcalls\ttotal_ms\tself_ms\tmax_ms\n" + this.report().map(row =>

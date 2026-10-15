@@ -27,7 +27,7 @@ import type { Q3PresentedScene } from "../../../../src/content/q3/presentation/s
 import { lerpModelTag } from "../../../../src/content/q3/presentation/model-access.ts";
 import { Q3PresentationAudio, Q3PresentationSoundBank } from "../../../../src/content/q3/presentation/audio.ts";
 import { DEFAULT_RAIL_SETTINGS } from "../../../../src/render/scene/particles/primitives.ts";
-import { qvmAnglesToAxis } from "../../../../src/core/qvm-math.ts";
+import { qvmAnglesToAxis } from "../../../../src/core/math.ts";
 
 const archivePath = resolve(import.meta.dir, "../../../../../qfiles/q3a/baseq3/pak0.pk3");
 

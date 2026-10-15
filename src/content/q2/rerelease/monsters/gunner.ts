@@ -1,6 +1,7 @@
 // Rerelease m_gunner.cpp. ZeniMax Media, GPL-2.0.
 import { add, length, normalize, scale, subtract } from "../../foundation/fields.ts";
-import { anglesVectors, clearShot, corpse, enemyBody, finishDodge, health, projectFlash, setDuck, targetDistance, vectorAngles, visible } from "../../foundation/monsters/ai.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
+import { clearShot, corpse, enemyBody, finishDodge, health, projectFlash, setDuck, targetDistance, visible } from "../../foundation/monsters/ai.ts";
 import { throwGib } from "../../foundation/monsters/gibs.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
@@ -28,7 +29,7 @@ function grenade(context: MonsterContext): undefined {
   if (current >= frame.attak301 && current <= frame.attak324) id = rereleaseFlash.GUNNER_GRENADE2_1 + 56 - id;
   const target = blind && !visible(context) ? state.blindFireTarget : enemy.origin;
   if (blind && !visible(context) && length(target) === 0) return undefined;
-  const body = game.body(entity), axes = anglesVectors(body.angles), start = projectFlash(context, muzzleOffset("rerelease", id));
+  const body = game.body(entity), axes = angleVectorsRule(body.angles, "native"), start = projectFlash(context, muzzleOffset("rerelease", id));
   let delta = subtract(target, body.origin); const distance = length(delta);
   if (distance > 512 && delta.z < 64 && delta.z > -64) delta = { ...delta, z: delta.z + distance - 512 };
   const pitch = Math.max(-0.5, Math.min(0.4, normalize(delta).z)), aim = add(add(axes.forward, scale(axes.right, spread)), scale(axes.up, pitch));
@@ -37,7 +38,7 @@ function grenade(context: MonsterContext): undefined {
   return monsterFlash(context, id, start, predicted ?? aim);
 }
 function jump(context: MonsterContext, up: boolean): undefined {
-  const body = context.game.body(context.entity), axes = anglesVectors(body.angles);
+  const body = context.game.body(context.entity), axes = angleVectorsRule(body.angles, "native");
   return context.game.move(context.entity, { velocity: add(body.velocity, add(scale(axes.forward, up ? 150 : 100), scale(axes.up, up ? 400 : 300))) });
 }
 
@@ -89,7 +90,7 @@ export const rereleaseGunnerDefinition: Q2MonsterDefinition = {
     gunner_fidget(context) { if (!context.state.standGround && context.entity.enemy === null && context.game.host.random() <= 0.05) context.setMove("gunner_move_fidget"); return undefined; },
     gunner_shrink(context) { context.entity.serverFlags |= 2; const bounds = context.game.body(context.entity).bounds; return context.game.move(context.entity, { bounds: { min: bounds.min, max: { ...bounds.max, z: -4 } } }); },
     gunner_runandshoot: context => context.setMove("gunner_move_runandshoot"),
-    gunner_blind_check(context) { if (context.state.manualSteering) context.state.idealYaw = vectorAngles(subtract(context.state.blindFireTarget, context.game.body(context.entity).origin)).y; return undefined; },
+    gunner_blind_check(context) { if (context.state.manualSteering) context.state.idealYaw = vectorToAnglesRule(subtract(context.state.blindFireTarget, context.game.body(context.entity).origin), "native-ai").y; return undefined; },
     GunnerFire(context) { if (enemyBody(context) === null) return undefined; const id = 45 + context.entity.frame - frame.attak216, start = projectFlash(context, muzzleOffset("rerelease", id)), direction = predictedDirection(context, start, 0, true, -0.2); if (direction === null) return undefined; context.weapons.fireBullet(context.entity, context.game, start, direction, 3, 4, 300, 500, 0); return monsterFlash(context, id, start, direction); },
     gunner_refire_chain(context) { return context.setMove(health(context.game, context.entity.enemy) > 0 && visible(context) && context.game.host.random() <= 0.5 ? "gunner_move_fire_chain" : "gunner_move_endfire_chain", false); },
     gunner_jump_now: context => jump(context, false), gunner_jump2_now: context => jump(context, true),

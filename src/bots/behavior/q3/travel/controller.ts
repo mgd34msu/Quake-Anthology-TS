@@ -1,6 +1,6 @@
 // BotMoveInDirection/BotMoveToGoal and travel helpers from id Software be_ai_move.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
-import { add3, cross3, dot3, length3, normalize3, scale3, sub3, vec3 } from "../../../../core/math.ts";
+import { add3, cross3, dot3, length3, normalize3, scale3, sub3, vec3, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { Bounds, Vec3 } from "../../../../contracts/math.ts";
 import { finishCalls } from "../../library/call-steps.ts";
 import type { CallSteps } from "../../library/call-steps.ts";
@@ -22,18 +22,6 @@ function copyResult(target: BotMoveResult, source: BotMoveResult): void {
   target.failure = source.failure; target.type = source.type; target.blocked = source.blocked;
   target.blockEntity = source.blockEntity; target.travelType = source.travelType; target.flags = source.flags;
   target.weapon = source.weapon; target.moveDirection = source.moveDirection; target.idealViewAngles = source.idealViewAngles;
-}
-function vectorToAngles(value: Vec3): Vec3 {
-  let yaw: number, pitch: number;
-  if (value.y === 0 && value.x === 0) { yaw = 0; pitch = value.z > 0 ? 90 : 270; }
-  else {
-    yaw = value.x !== 0 ? f(Math.atan2(value.y, value.x) * 180 / Math.PI) : value.y > 0 ? 90 : 270;
-    if (yaw < 0) yaw = f(yaw + 360);
-    const forward = f(Math.sqrt(f(f(value.x * value.x) + f(value.y * value.y))));
-    pitch = f(Math.atan2(value.z, forward) * 180 / Math.PI);
-    if (pitch < 0) pitch = f(pitch + 360);
-  }
-  return vec3(-pitch, yaw, 0);
 }
 function reachabilityTime(reach: TravelReachability): number {
   switch (reach.travelType & TravelType.MASK) {
@@ -75,7 +63,7 @@ class TravelStep implements BotTravelContext {
     if (weapon === null) throw new Error(`Selected arsenal cannot execute ${mode}`);
     return weapon;
   }
-  vectorToAngles(direction: Vec3): Vec3 { return vectorToAngles(direction); }
+  vectorToAngles(direction: Vec3): Vec3 { return vectorToAnglesRule(direction, "bot-q3"); }
   bounds(presence: number): Bounds { return this.host.navigation.presenceBounds(presence === 2 ? 2 : 4); }
   traceBox(start: Vec3, end: Vec3, presence: number, entity: number) {
     return this.host.trace(start, end, this.bounds(presence), entity, SOLID | PLAYERCLIP | BODY);
@@ -254,7 +242,7 @@ class TravelStep implements BotTravelContext {
     const direction = normalize3(delta), distance = Math.min(length3(delta), 100);
     let speed = f(400 - f(400 - f(4 * distance))); if (speed < 10) speed = 0;
     this.checkBlocked(state, direction, true, result); this.actions.move(state.client, direction, speed); result.moveDirection = direction;
-    if (swimming) { result.idealViewAngles = vectorToAngles(direction); result.flags |= BotMoveResultFlag.SWIMVIEW; }
+    if (swimming) { result.idealViewAngles = vectorToAnglesRule(direction, "bot-q3"); result.flags |= BotMoveResultFlag.SWIMVIEW; }
     state.lastReachability = 0; state.lastArea = 0; state.lastGoalArea = goal.area; state.lastOrigin = state.origin;
     return result;
   }

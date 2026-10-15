@@ -1,5 +1,6 @@
 /* mg3_oldone_new.qc projectiles and sphere managers. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../../contracts/identity.ts";
+import { cross3Double } from "../../../../../core/math.ts";
 import { sameActor } from "../../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../../contracts/math.ts";
 import type { Q1Actor } from "../../../foundation/entity.ts";
@@ -16,7 +17,7 @@ export function bossWorld(context: Q1AddonContext): ActorId {
   const world = context.game.world; if (world === null) throw new Error("MG3 boss damage requires worldspawn"); return world.actor.id;
 }
 export function bossTarget(context: Q1AddonContext, entity: Q1Actor): Vec3 { const enemy = bossEnemy(context, entity); return enemy === null ? ZERO : context.game.host.bodies.read(enemy)?.origin ?? ZERO; }
-export function cross(a: Vec3, b: Vec3): Vec3 { return { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x }; }
+export const cross = cross3Double;
 function flatDot(a: Vec3, b: Vec3): number { return dot(normalize({ ...a, z: 0 }), normalize({ ...b, z: 0 })); }
 function missile(context: Q1AddonContext, manager: Q1Actor, origin: Vec3, direction: Vec3, model: string, velocity: Vec3): Q1Actor {
   const { game } = context, shot = launchSpike(game, manager.owner, origin, direction); shot.model = model; shot.touch = game.named.touch(shot, oldnewPrefix + "sphere_mis_touch"); game.setBody(shot, { velocity, bounds: POINT }); return shot;

@@ -1,5 +1,6 @@
 // Bun transport adapted from quake-3-ts/src/platform/network.ts. GPL-2.0-or-later.
 import type { udp } from "bun";
+import { BoundedQueue } from "../../foundation/bounded-queue.ts";
 import { addressHost, ipAddress, portNumber } from "./endpoint.ts";
 import type { IpAddress, NetworkAddress } from "./endpoint.ts";
 import { readSocksDatagram, socksDatagram, SocksAssociation } from "./socks.ts";
@@ -24,12 +25,13 @@ export interface DatagramTransport<TAddress extends NetworkAddress> {
 }
 
 export class PacketQueue<TAddress extends NetworkAddress> {
-  private readonly events: ReceiveEvent<TAddress>[] = [];
+  private readonly events: BoundedQueue<ReceiveEvent<TAddress>>;
   private readonly listeners = new Set<() => void>();
   private ended = false;
   dropped = 0;
   constructor(readonly limits: DatagramLimits, private readonly now: () => number) {
     if (!Number.isSafeInteger(limits.maxBytes) || limits.maxBytes < 1 || !Number.isSafeInteger(limits.queuePackets) || limits.queuePackets < 1) throw new RangeError("Invalid datagram limits");
+    this.events = new BoundedQueue<ReceiveEvent<TAddress>>(limits.queuePackets);
   }
   accept(from: TAddress, payload: Uint8Array, truncated = false): void {
     if (this.ended) return;
@@ -38,7 +40,7 @@ export class PacketQueue<TAddress extends NetworkAddress> {
   }
   push(event: ReceiveEvent<TAddress>): void {
     if (this.ended) return;
-    if (this.events.length === this.limits.queuePackets) { this.events.shift(); this.dropped++; }
+    if (this.events.length === this.limits.queuePackets) this.dropped++;
     this.events.push(event);
     for (const listener of [...this.listeners]) if (this.listeners.has(listener)) listener();
   }
@@ -50,7 +52,7 @@ export class PacketQueue<TAddress extends NetworkAddress> {
   }
   close(): void {
     if (this.ended) return;
-    this.ended = true; this.events.length = 0;
+    this.ended = true; this.events.clear();
     const listeners = [...this.listeners]; this.listeners.clear();
     for (const listener of listeners) listener();
   }

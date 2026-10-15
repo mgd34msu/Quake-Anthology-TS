@@ -1,7 +1,7 @@
 import { parseWeaponBehaviorTool, type WeaponBehaviorToolCommand } from "./weapon-behavior-tool-options.ts";
 import { readStartupCommand, startupRequestsWorld } from "./startup-commands.ts";
-import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { resolveDefaultContentRoot, type ContentRootSearch } from "../../content/roots.ts";
 import type { GameFamily } from "../../contracts/content.ts";
 import { readModSelection, type ModSelection } from "../../contracts/mods.ts";
 import type { Q1ProtocolIdentity, Q2ProtocolIdentity } from "../../contracts/protocol.ts";
@@ -73,7 +73,8 @@ Usage: bun run src/main.ts [options]
   +command [arguments]       Run source startup command (use '+bind x "+attack"' as one shell argument)
   --menu                     Open the startup menu (default without launch selections)
   --preset q2-q1-q3|q1-q2     Select an initial mixed-game profile
-  --content-root PATH        Game data root (default ~/Projects/qfiles)
+  --content-root PATH        Game data root (default: search own folder, its parent, then Steam)
+  --steam                    Look only in the default Steam library locations
   --user-content-root PATH   Writable user content root (default ~/.local/share/quake-typescript/content)
   --game PRODUCT             Installed catalog product, e.g. q2-classic-baseq2
   --map-game PRODUCT         Select map content independently from the game module
@@ -138,10 +139,11 @@ export function mapResourcePath(name: string): string {
   return `${normalized.startsWith("maps/") ? "" : "maps/"}${normalized.endsWith(".bsp") ? normalized : `${normalized}.bsp`}`;
 }
 
-export function parseApplicationCommand(argv: readonly string[]): ApplicationCommand {
+export function parseApplicationCommand(argv: readonly string[], search: ContentRootSearch = {}): ApplicationCommand {
   if (argv[0] === "weapon-behavior") return { kind: "weapon-behavior", command: parseWeaponBehaviorTool(argv.slice(1)) };
+  let contentRoot: { readonly kind: "auto" } | { readonly kind: "steam" } | { readonly kind: "explicit"; readonly path: string } = { kind: "auto" };
   let options: ApplicationOptions = {
-    corpusRoot: resolve(homedir(), "Projects/qfiles"), product: "q2-classic-baseq2", map: "maps/base1.bsp",
+    corpusRoot: "", product: "q2-classic-baseq2", map: "maps/base1.bsp",
     movement: "q1", character: "q3", characterModel: "sarge", renderer: "gl", rendererSelection: "default", gamma: 1, dedicated: false,
     width: 960, height: 600, seats: 1, skill: 1, mode: "singleplayer", seed: 1, frameLimit: null, hidden: false, network: { kind: "offline" },
   };
@@ -156,7 +158,8 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
       const command = readStartupCommand(argv, index); startupCommands.push(command.text); index = command.end; continue;
     }
     if (flag === "--menu") { menu = true; continue; }
-    if (flag !== undefined && !["--content-root", "--user-content-root", "--renderer", "--render-worker", "--gamma", "--width", "--height", "--hidden", "--list-content"].includes(flag)) explicitLaunch = true;
+    if (flag === "--steam") { contentRoot = { kind: "steam" }; continue; }
+    if (flag !== undefined && !["--content-root", "--steam", "--user-content-root", "--renderer", "--render-worker", "--gamma", "--width", "--height", "--hidden", "--list-content"].includes(flag)) explicitLaunch = true;
     if (flag === "--help" || flag === "-h") return { kind: "help" };
     if (flag === "--version") return { kind: "version" };
     if (flag === "--dedicated") { options = { ...options, dedicated: true }; continue; }
@@ -182,7 +185,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         break;
       }
       case "--user-content-root": options = { ...options, userContentRoot: resolve(value) }; break;
-      case "--content-root": options = { ...options, corpusRoot: resolve(value) }; break;
+      case "--content-root": contentRoot = { kind: "explicit", path: resolve(value) }; break;
       case "--map-game": options = { ...options, mapProduct: value }; break;
       case "--game": options = { ...options, product: value }; break;
       case "--mod": options = { ...options, mods: [...options.mods ?? [], readModSelection(value)] }; break;
@@ -276,6 +279,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
     }
   }
   if (options.rules === "ctf" || options.rules === "lmctf" || options.rules === undefined && (options.product === "q2-classic-ctf" || options.product === "q2-classic-lmctf")) options = { ...options, mode: "deathmatch" };
+  options = { ...options, corpusRoot: contentRoot.kind === "explicit" ? contentRoot.path : resolveDefaultContentRoot(search, contentRoot.kind === "steam") };
   if (startupCommands.length > 0) options = { ...options, startupCommands };
   explicitLaunch ||= startupRequestsWorld(startupCommands);
   if (list) return { kind: "list-content", corpusRoot: options.corpusRoot };

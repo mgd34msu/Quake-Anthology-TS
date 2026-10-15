@@ -11,7 +11,7 @@ import { loadQ3Character, Q3CharacterPresenter, Q3CharacterActor, Q3DeathAnimati
   Q3CharacterEventPresenter, createPlayerPoseState } from "../../../../src/content/q3/foundation/index.ts";
 import type { Q3CharacterEvent } from "../../../../src/content/q3/foundation/index.ts";
 import { identityMat4 } from "../../../../src/core/math.ts";
-import { qvmAnglesToAxis } from "../../../../src/core/qvm-math.ts";
+import { qvmAnglesToAxis } from "../../../../src/core/math.ts";
 import { GameRandom } from "../../../../src/core/game-numeric.ts";
 import { EntityEvent, Weapon } from "../../../../src/movement/q3/constants.ts";
 import { prepareSceneEntity } from "../../../../src/render/scene/models/index.ts";

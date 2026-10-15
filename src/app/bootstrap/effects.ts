@@ -1,3 +1,5 @@
+import { BoundedQueue } from "../../foundation/bounded-queue.ts";
+import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import { presentationOwnerKey, samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
 import { addQ2Blend } from "../../content/q2/base/player/view.ts";
 import type { Q3Hardware } from "../../render/q3-hardware.ts";
@@ -87,15 +89,17 @@ export class ApplicationEffects {
   private readonly q3WeaponTimes = new Map<ContentId, number>();
   private entityTrails = new Map<ActorId, { readonly content: ContentId; readonly origin: Vec3; readonly count: number }>();
   private q1Trails = new Map<ActorId, { readonly content: ContentId; readonly path: string; readonly origin: Vec3 }>();
-  private pending: SimulationPresentationEvent[] = [];
+  private readonly pending = new EventRing<SimulationPresentationEvent>(32768);
+  private readonly pendingCursor: EventCursor = this.pending.openCursor();
   private readonly retiredOwners = new Set<string>();
   private readonly ownerRevisions = new Map<string, number>();
-  private unhandled: UnhandledApplicationEffect[] = [];
+  private readonly unhandled = new EventRing<UnhandledApplicationEffect>(4096);
+  private readonly unhandledCursor: EventCursor = this.unhandled.openCursor();
   private beams: Beam[] = [];
   private explosions: Explosion[] = [];
   private readonly staticBrushes: { readonly presentationOwner?: PresentationOwner; readonly scene: WorldScene; readonly model: number; readonly transform: ModelTransform; readonly frame: number }[] = [];
   private styles: readonly SceneLightStyle[] = [];
-  private lights: TimedLight[] = [];
+  private readonly lights = new BoundedQueue<TimedLight>(32);
   private sampledLights: SurfaceDynamicLight[] = [];
   private readonly flashlights = new Map<ActorId, Extract<SimulationPresentationEvent, { readonly kind: "q2-rerelease" }>["event"] & { readonly kind: "flashlight"; readonly presentationOwner?: PresentationOwner }>();
   private readonly shadowLights = new Map<ActorId, Q2ShadowLightState & { readonly presentationOwner?: PresentationOwner }>();
@@ -104,7 +108,8 @@ export class ApplicationEffects {
   private readonly bonusFlashes = new Map<ActorId, number>();
   private readonly trackerPain = new Map<ActorId, { readonly content: ContentId; readonly until: number }>();
   private steam: Steam[] = [];
-  private readonly sounds: SourceEffectSound[] = [];
+  private readonly sounds = new EventRing<SourceEffectSound>(8192);
+  private readonly soundsCursor: EventCursor = this.sounds.openCursor();
   private poses: readonly Pick<SimulationPresentation, "actor" | "origin" | "angles">[] = [];
   private time: number | null = null;
   private sequence = -1;
@@ -120,7 +125,7 @@ export class ApplicationEffects {
         const owner = event.event.owner, key = presentationOwnerKey(owner);
         if (event.event.kind === "retired") this.retiredOwners.add(key);
         this.ownerRevisions.set(key, event.sequence);
-        this.pending = this.pending.filter(source => !samePresentationOwner(source.owner, owner));
+        this.pending.filterLive(source => !samePresentationOwner(source.owner, owner));
         for (const effects of this.recipients.values()) effects.receive([event]);
         if (event.event.kind === "refreshed") continue;
         this.beams = this.beams.filter(beam => !samePresentationOwner(beam.presentationOwner, owner));
@@ -147,11 +152,11 @@ export class ApplicationEffects {
       }
       if (event.kind === "q1-fog") continue;
       if (event.sequence <= this.sequence) continue;
-      this.sequence = event.sequence; this.pending.push(event);
+      this.sequence = event.sequence; this.pending.admit(event);
     }
   }
   drainUnhandled(): readonly UnhandledApplicationEffect[] {
-    const result = this.unhandled; this.unhandled = [];
+    const result = this.unhandled.take(this.unhandledCursor); this.unhandled.retire();
     for (const [recipient, effects] of this.recipients) for (const entry of effects.drainUnhandled()) result.push({ ...entry, source: { ...entry.source, recipient } });
     return result;
   }
@@ -162,7 +167,7 @@ export class ApplicationEffects {
     }
     return result;
   }
-  drainSounds() { return [...this.sounds.splice(0), ...[...this.q3.values(), ...this.q3Weapons.values()].flatMap(effects => effects.drainSounds())]; }
+  drainSounds() { const taken = this.sounds.take(this.soundsCursor); this.sounds.retire(); return [...taken, ...[...this.q3.values(), ...this.q3Weapons.values()].flatMap(effects => effects.drainSounds())]; }
   playerView(actor: ActorId, camera: SceneCamera): Q2EffectPlayerView {
     const shared = this.sharedPlayerView(actor, camera), effects = this.recipients.get(actor);
     if (effects === undefined) return shared;
@@ -180,7 +185,7 @@ export class ApplicationEffects {
     return { ...view, blend: addQ2Blend(view.blend ?? { x: 0, y: 0, z: 0, w: 0 },
       { x: 215 / 255, y: 186 / 255, z: 69 / 255 }, percent / 255) };
   }
-  private reject(source: SimulationPresentationEvent, reason: string): void { this.unhandled.push({ source, reason }); }
+  private reject(source: SimulationPresentationEvent, reason: string): void { this.unhandled.admit({ source, reason }); }
   private pose(actor: ActorId) { return this.poses.find(pose => pose.actor.equals(actor)); }
   private async group(content: ContentId): Promise<Group> {
     const prior = this.groups.get(content); if (prior !== undefined) return prior;
@@ -243,9 +248,7 @@ export class ApplicationEffects {
     await renderer.preloadModel(asset, {}, false);
   }
   private light(origin: Vec3, time: number, radius: number, duration: number, color: Vec3, decay = 0, minimum = 0, actor: ActorId | null = null): void {
-    const prior = actor === null ? -1 : this.lights.findIndex(light => light.actor?.equals(actor));
-    if (prior >= 0) this.lights.splice(prior, 1);
-    if (this.lights.length >= 32) this.lights.shift();
+    if (actor !== null) this.lights.removeFirst(light => light.actor?.equals(actor) === true);
     this.lights.push({ origin, born: time, die: time + duration, radius, color, decay, minimum, actor });
   }
   private beam(beam: Beam): void {
@@ -264,7 +267,7 @@ export class ApplicationEffects {
     this.poses = [...characters, ...presentations.filter(pose => !pose.viewWeapon),
       ...snapshot.bodies.map(({ actor, body }) => ({ actor, origin: body.origin, angles: body.angles }))];
     for (const group of this.groups.values()) { group.models = []; group.beams = []; }
-    const pending = this.pending; this.pending = [];
+    const pending = this.pending.take(this.pendingCursor); this.pending.retire();
     for (const source of pending) await this.event(source);
     const liveActors = new Set(snapshot.actors.map(actor => actor.id));
     for (const actor of this.flashlights.keys()) if (!liveActors.has(actor)) this.flashlights.delete(actor);
@@ -280,9 +283,10 @@ export class ApplicationEffects {
     }
     this.beams = this.beams.filter(beam => beam.die >= now);
     this.explosions = this.explosions.filter(explosion => Math.floor((Math.round(now * 1000) - Math.round(explosion.start * 1000)) / 100) < explosion.frames - 1);
-    this.lights = this.lights.filter(light => light.die >= now && light.radius - light.decay * (now - light.born) > 0);
+    this.lights.retain(light => light.die >= now && light.radius - light.decay * (now - light.born) > 0);
     if (!this.eventsOnly) await this.q1Entities(presentations, now, elapsed > 0 || this.time === null);
-    this.sampledLights = this.lights.map(light => ({ origin: light.origin, radius: Math.max(0, light.radius - light.decay * (now - light.born)), minimum: light.minimum, color: light.color }));
+    this.sampledLights = [];
+    this.lights.forEach(light => { this.sampledLights.push({ origin: light.origin, radius: Math.max(0, light.radius - light.decay * (now - light.born)), minimum: light.minimum, color: light.color }); });
     this.sampledLights.push(...this.sourceLights.values());
     if (!this.eventsOnly) await this.q2Entities(presentations, now, elapsed > 0 || this.time === null);
     for (const [actor, effect] of this.trackerPain) {
@@ -400,7 +404,7 @@ export class ApplicationEffects {
     if (source.kind === "q3-source") {
       if (source.event.kind === "sound") {
         const sound = source.event;
-        this.sounds.push({ content: source.content, path: sound.path, origin: sound.origin, channel: sound.channel, volume: sound.volume, seconds: source.seconds,
+        this.sounds.admit({ content: source.content, path: sound.path, origin: sound.origin, channel: sound.channel, volume: sound.volume, seconds: source.seconds,
           playback: sound.loop ? { kind: "loop", actor: sound.actor, velocity: sound.velocity } : { kind: "actor", actor: sound.actor } });
       }
       if (source.event.kind === "entity-event") this.reject(source, "Native Q3 entity event requires its per-seat cgame snapshot and weapon presentation context");
@@ -475,7 +479,7 @@ export class ApplicationEffects {
       const group = await this.group(source.content), particles = group.particles, seconds = source.seconds;
       if (!current()) return;
       if (event.kind === "beam") { this.beam({ ...(source.owner === undefined ? {} : { presentationOwner: source.owner }), content: source.content, actor: event.actor, start: event.start, end: event.end, die: seconds + 0.2, width: 0, color: 0, model: q1BeamModels[event.style], family: "q1" }); return; }
-      const sound = (path: string): void => { this.sounds.push({ content: source.content, path, origin: event.origin,
+      const sound = (path: string): void => { this.sounds.admit({ content: source.content, path, origin: event.origin,
         channel: 0, volume: 1, seconds, playback: { kind: "once" } }); };
       if (event.kind === "colored-explosion") {
         particles.q1ColorExplosion(event.origin, seconds, event.colorStart, event.colorLength);
@@ -584,11 +588,11 @@ export class ApplicationEffects {
     switch (name) {
       case "heatbeam-sparks": case "heatbeam-steam":
         p.q2Steam(event.origin, event.direction, name === "heatbeam-sparks" ? 8 : 0xe0, name === "heatbeam-sparks" ? 50 : 20, 60, time);
-        this.sounds.push({ content: source.content, path: "weapons/lashit.wav", origin: event.origin, channel: 0, volume: 1, seconds: time, playback: { kind: "once" } }); break;
+        this.sounds.admit({ content: source.content, path: "weapons/lashit.wav", origin: event.origin, channel: 0, volume: 1, seconds: time, playback: { kind: "once" } }); break;
       case "chainfist-smoke": p.q2Steam(event.origin, { x: 0, y: 0, z: 1 }, 0, 20, 20, time, true); break;
       case "tracker-explosion":
         p.q2ColorExplosion(event.origin, time, 0, 1); this.light(event.origin, time, 150, 0.1, { x: -1, y: -1, z: -1 }, 0, 250);
-        this.sounds.push({ content: source.content, path: "weapons/disrupthit.wav", origin: event.origin, channel: 0, volume: 1, seconds: time, playback: { kind: "once" } }); break;
+        this.sounds.admit({ content: source.content, path: "weapons/disrupthit.wav", origin: event.origin, channel: 0, volume: 1, seconds: time, playback: { kind: "once" } }); break;
       case "blood": p.q2Impact(event.origin, event.direction, 0xe8, 60, time); break;
       case "moreblood": p.q2Impact(event.origin, event.direction, 0xe8, 250, time); break;
       case "gunshot": case "shotgun": p.q2Impact(event.origin, event.direction, 0, name === "gunshot" ? 40 : 20, time); break;
@@ -622,7 +626,7 @@ export class ApplicationEffects {
         this.explosions.push({ content: source.content, origin: event.origin, angles: { x: 0, y: this.random.nextInteger() % 360, z: 0 },
           start: time - 0.1, frames: 15, baseFrame: this.random.nextUnit() < 0.5 ? 15 : 0,
           path: Q2_TRANSIENT_MODELS.rocketExplosion, kind: "poly", flags: 8, skin: 0, light: { radius: 350, color: orange } });
-        this.sounds.push({ content: source.content, path: "weapons/rocklx1a.wav", origin: event.origin, channel: 0, volume: 1, seconds: time, playback: { kind: "once" } });
+        this.sounds.admit({ content: source.content, path: "weapons/rocklx1a.wav", origin: event.origin, channel: 0, volume: 1, seconds: time, playback: { kind: "once" } });
         break;
 
       case "explosion1": case "explosion2": case "rocket-explosion": case "rocket-explosion-water": case "grenade-explosion": case "grenade-explosion-water": case "bfg-explosion": {
@@ -633,7 +637,7 @@ export class ApplicationEffects {
           frames, baseFrame: bfg ? 0 : grenade ? 30 : this.random.nextUnit() < 0.5 ? 15 : 0,
           path: bfg ? Q2_TRANSIENT_MODELS.bfgExplosion : Q2_TRANSIENT_MODELS.rocketExplosion, kind: "poly", flags: bfg ? 8 | 32 : 8, skin: 0,
           light: { radius: 350, color: bfg ? { x: 0, y: 1, z: 0 } : orange } });
-        if (!bfg) this.sounds.push({ content: source.content,
+        if (!bfg) this.sounds.admit({ content: source.content,
           path: name.endsWith("-water") ? "weapons/xpld_wat.wav" : grenade ? "weapons/grenlx1a.wav" : "weapons/rocklx1a.wav",
           origin: event.origin, channel: 0, volume: 1, seconds: time, playback: { kind: "once" } });
         break;
@@ -754,10 +758,10 @@ export class ApplicationEffects {
   resetRound(): void {
     if (this.closed) throw new Error("Effect world is closed");
     for (const effects of this.recipients.values()) effects.resetRound();
-    this.pending = []; this.unhandled = []; this.beams = []; this.explosions = [];
-    this.staticBrushes.length = 0; this.styles = []; this.lights = []; this.sampledLights = [];
+    this.pending.reset(); this.unhandled.reset(); this.beams = []; this.explosions = [];
+    this.staticBrushes.length = 0; this.styles = []; this.lights.clear(); this.sampledLights = [];
     this.entityTrails.clear(); this.q1Trails.clear(); this.shadowLights.clear(); this.sourceLights.clear(); this.flashlights.clear();
-    this.playerViews.clear(); this.bonusFlashes.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
+    this.playerViews.clear(); this.bonusFlashes.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.reset();
     this.poses = []; this.time = null; this.q3WeaponTimes.clear();
     for (const group of this.groups.values()) {
       group.particles.clear(); group.models = []; group.statics.length = 0; group.beams = []; group.sampled = [];
@@ -768,12 +772,12 @@ export class ApplicationEffects {
     if (this.closed) return;
     for (const effects of this.recipients.values()) effects.close();
     this.recipients.clear();
-    this.closed = true; this.pending = []; this.unhandled = []; this.beams = []; this.explosions = []; this.lights = []; this.sampledLights = [];
+    this.closed = true; this.pending.reset(); this.unhandled.reset(); this.beams = []; this.explosions = []; this.lights.clear(); this.sampledLights = [];
     this.staticBrushes.length = 0; this.styles = [];
     for (const effects of [...this.q3.values(), ...this.q3Weapons.values(), ...this.preparedQ3Weapons.values()]) effects.close();
     this.preparedQ3Weapons.clear();
     for (const image of this.images.values()) this.assets.images.release(image);
     this.images.clear(); this.groups.clear(); this.preparedRenderers.clear(); this.q3.clear(); this.q3Weapons.clear(); this.q3WeaponTimes.clear(); this.entityTrails.clear(); this.q1Trails.clear();
-    this.shadowLights.clear(); this.sourceLights.clear(); this.flashlights.clear(); this.playerViews.clear(); this.bonusFlashes.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
+    this.shadowLights.clear(); this.sourceLights.clear(); this.flashlights.clear(); this.playerViews.clear(); this.bonusFlashes.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.reset();
   }
 }

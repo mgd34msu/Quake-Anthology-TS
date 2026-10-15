@@ -6,7 +6,7 @@ import type { CollisionWorld, TraceResult } from "./collision-host.ts";
 import { add3, cross3, dot3, length3, normalize3, scale3, sub3, vec3, vec4 } from "../../../core/math.ts";
 import type { Axis, Vec3, Vec4 } from "../../../core/math.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
-import { qvmAnglesToAxis as anglesToAxis } from "../../../core/qvm-math.ts";
+import { qvmAnglesToAxis as anglesToAxis } from "../../../core/math.ts";
 import type { GameRandom } from "../base/game/numeric.ts";
 import type { DynamicLight } from "./scene-host.ts";
 import { copyRefEntity, createModelEntity, RF_LIGHTING_ORIGIN } from "./ref-entity.ts";

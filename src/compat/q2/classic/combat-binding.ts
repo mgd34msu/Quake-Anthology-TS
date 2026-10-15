@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../../foundation/cleanup.ts";
 import { normalizeLegacyPowerOnlyArmor } from "../../../world/gameplay/authority.ts";
 import type { GuestAddress, GuestCallValue, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
@@ -25,8 +26,8 @@ interface DamageFrame { readonly request: DamageRequest; readonly view: RawEntit
 export class ClassicCombatBindings {
   private readonly frames: DamageFrame[] = [];
   private readonly armorBindings = new Map<OwnedActor, Partial<Record<ProtectionChannel, ArmorIntercept>>>();
-  private readonly armorHooks: (() => void)[] = [];
-  private readonly damageHooks: (() => void)[] = [];
+  private readonly armorHooks = new CleanupStack();
+  private readonly damageHooks = new CleanupStack();
   private closed = false;
   private armorBypass: { readonly channel: ProtectionChannel; stack: bigint | "pending" } | null = null;
   private readonly damageSignature: GuestCallSignature;
@@ -116,11 +117,11 @@ export class ClassicCombatBindings {
       if (entry[channel] !== undefined) throw new Error("Classic source armor stage already has an owner");
       entry[channel] = intercept; this.armorBindings.set(actor, entry);
       try { if (this.armorHooks.length === 0) this.installArmorHooks(); }
-      catch (error) { delete entry[channel]; if (entry.regular === undefined && entry.powered === undefined) this.armorBindings.delete(actor); for (const remove of this.armorHooks.splice(0)) remove(); throw error; }
+      catch (error) { delete entry[channel]; if (entry.regular === undefined && entry.powered === undefined) this.armorBindings.delete(actor); this.armorHooks.runAll(); throw error; }
       return () => {
         if (entry[channel] === intercept) delete entry[channel];
         if (entry.regular === undefined && entry.powered === undefined) this.armorBindings.delete(actor);
-        if (this.armorBindings.size === 0) for (const remove of this.armorHooks.splice(0)) remove();
+        if (this.armorBindings.size === 0) this.armorHooks.runAll();
         return undefined;
       };
     } };
@@ -128,8 +129,8 @@ export class ClassicCombatBindings {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    for (const remove of this.damageHooks.splice(0)) remove();
-    for (const remove of this.armorHooks.splice(0)) remove();
+    this.damageHooks.runAll();
+    this.armorHooks.runAll();
     this.armorBindings.clear();
   }
   private targetAtEntry(call: NativeCombatCall, signature: GuestCallSignature): OwnedActor | null {
@@ -214,8 +215,8 @@ export class ClassicCombatBindings {
       const frame: DamageFrame = { request, view, stack: null }; this.frames.push(frame);
       let health = memory.readInt32(this.at(view, profile.fields.health)), armor = this.armor(view), velocity = readClassicVector(memory, this.at(view, profile.fields.velocity));
       let result: SourceDamageResult = { appliedDamage: 0, reaction: "none" }, reacting = false;
-      const writes: (() => void)[] = [], reactions: (() => void)[] = [], temporary: GuestAddress[] = [];
-      const stopWrites = () => { for (const remove of writes.splice(0)) remove(); };
+      const writes = new CleanupStack(), reactions = new CleanupStack(), temporary: GuestAddress[] = [];
+      const stopWrites = () => { writes.runAll(); };
       const current = () => this.frames.at(-1) === frame && !reacting;
       const address = (actor: ActorId | null): GuestAddress => {
         if (actor === null) return host.edicts.at(0).address;
@@ -268,7 +269,7 @@ export class ClassicCombatBindings {
         }
         return result;
       } finally {
-        stopWrites(); for (const remove of reactions) remove();
+        stopWrites(); reactions.runAll();
         try { for (const value of temporary) host.invoke(this.entry(profile.entries.free), classicSignature([q2Pointer]), [pointer(value)]); }
         finally { memory.unmap(vectors, 36); this.frames.pop(); host.edicts.reconcile(); }
       }

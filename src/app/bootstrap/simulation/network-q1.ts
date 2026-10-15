@@ -1,3 +1,4 @@
+import { EventRing } from "../../../foundation/event-ring.ts";
 import { createQuakeCNetQuakeHost } from "./network-q1-quakec.ts";
 import type { ResourceId } from '../../../contracts/content.ts';
 import type { ActorId } from '../../../contracts/identity.ts';
@@ -113,9 +114,9 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
         return [];
     });
     let previousPause = simulation.q1Paused;
-    const operatorMessages: { recipient: ActorId | null; reliable: boolean; message: Q1ApplicationMessage }[] = [];
+    const operatorMessages = new EventRing<{ recipient: ActorId | null; reliable: boolean; message: Q1ApplicationMessage }>(4096);
     const observe = (output: SimulationOutput, events: readonly SimulationPresentationEvent[]): void => {
-        routed = operatorMessages.splice(0);
+        routed = operatorMessages.drainAll();
         if (previousPause !== simulation.q1Paused) { previousPause = simulation.q1Paused; routed.push({ recipient: null, reliable: true, message: { kind: "pause", paused: previousPause } }); }
         muzzleFlashes.clear();
         const capturedSounds = output.events.flatMap(event => event.payload.kind === 'sound' ? [event.payload] : []);
@@ -276,7 +277,7 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
         input: (player, command, sequence) => ({ actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command }),
         command: (player, name, args) => { if (name === 'pause') {
             const previous = simulation.q1Paused, text = simulation.toggleQ1Pause(player.actor);
-            operatorMessages.push({ recipient: previous === simulation.q1Paused ? player.actor : null, reliable: true, message: { kind: 'print', text } });
+            operatorMessages.admit({ recipient: previous === simulation.q1Paused ? player.actor : null, reliable: true, message: { kind: 'print', text } });
         } else if (name === 'name') {
             const values = new Map(source.composition.clients.require(player.actor).userinfo);
             values.set('name', (args[0] ?? 'unconnected').slice(0, 15));

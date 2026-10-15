@@ -1,3 +1,4 @@
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 /* Walking-monster movement and perception from Q2 g_ai.c/m_move.c and the rerelease DLL. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
@@ -15,19 +16,7 @@ export const MASK_OPAQUE = 1 | 8 | 16;
 export const MASK_WATER = 8 | 16 | 32;
 export const FL_NOTARGET = 32;
 
-export function anglesVectors(angles: Vec3): { readonly forward: Vec3; readonly right: Vec3; readonly up: Vec3 } {
-  const yaw = angles.y * Math.PI / 180, pitch = angles.x * Math.PI / 180, roll = angles.z * Math.PI / 180;
-  const sy = Math.sin(yaw), cy = Math.cos(yaw), sp = Math.sin(pitch), cp = Math.cos(pitch), sr = Math.sin(roll), cr = Math.cos(roll);
-  return { forward: { x: cp * cy, y: cp * sy, z: -sp },
-    right: { x: -sr * sp * cy + cr * sy, y: -sr * sp * sy - cr * cy, z: -sr * cp },
-    up: { x: cr * sp * cy + sr * sy, y: cr * sp * sy - sr * cy, z: cr * cp } };
-}
 
-export function vectorAngles(direction: Vec3): Vec3 {
-  const yaw = direction.x === 0 && direction.y === 0 ? 0 : Math.atan2(direction.y, direction.x) * 180 / Math.PI;
-  const pitch = Math.atan2(direction.z, Math.hypot(direction.x, direction.y)) * 180 / Math.PI;
-  return { x: -pitch, y: yaw < 0 ? yaw + 360 : yaw, z: 0 };
-}
 
 export function health(game: Q2GameServices, actor: ActorId | null): number { return actor === null ? 0 : game.host.combat.read(actor)?.health ?? 0; }
 export function enemyBody(context: MonsterContext) { return context.entity.enemy === null ? null : context.game.host.bodies.read(context.entity.enemy); }
@@ -64,12 +53,12 @@ export function inFront(context: MonsterContext, actor: ActorId): boolean {
   const body = context.game.host.bodies.read(actor);
   if (body === null) return false;
   const self = context.game.body(context.entity);
-  return dot(anglesVectors(self.angles).forward, normalize(subtract(body.origin, self.origin))) > 0.3;
+  return dot(angleVectorsRule(self.angles, "native").forward, normalize(subtract(body.origin, self.origin))) > 0.3;
 }
 
 export function projectFlash(context: MonsterContext, offset: Vec3, angles = context.game.body(context.entity).angles): Vec3 {
   const body = context.game.body(context.entity);
-  const { forward, right } = anglesVectors(angles);
+  const { forward, right } = angleVectorsRule(angles, "native");
   const size = context.game.options.edition === "rerelease" ? context.entity.scale : 1;
   return add(body.origin, add(scale(forward, offset.x * size), add(scale(right, offset.y * size), { x: 0, y: 0, z: offset.z * size })));
 }
@@ -111,7 +100,7 @@ export function changeYaw(context: MonsterContext): undefined {
 export function faceEnemy(context: MonsterContext): undefined {
   const target = context.state.manualSteering ? context.state.blindFireTarget : enemyBody(context)?.origin;
   if (target === undefined) return undefined;
-  context.state.idealYaw = vectorAngles(subtract(target, context.game.body(context.entity).origin)).y;
+  context.state.idealYaw = vectorToAnglesRule(subtract(target, context.game.body(context.entity).origin), "native-ai").y;
   return changeYaw(context);
 }
 
@@ -299,7 +288,7 @@ export function runAi(context: MonsterContext, ai: Extract<MonsterFrame["ai"], s
     if (state.standGround) {
       if (entity.enemy !== null) {
         const enemy = enemyBody(context);
-        if (enemy !== null) state.idealYaw = vectorAngles(subtract(enemy.origin, game.body(entity).origin)).y;
+        if (enemy !== null) state.idealYaw = vectorToAnglesRule(subtract(enemy.origin, game.body(entity).origin), "native-ai").y;
         if (game.body(entity).angles.y !== state.idealYaw && state.temporaryStandGround) { state.standGround = false; state.temporaryStandGround = false; context.run(); }
         if (!rogue || !state.manualSteering) changeYaw(context);
         const attacking = context.checkAttack(0);
@@ -391,7 +380,7 @@ export function proneShot(context: MonsterContext): boolean {
   if (enemy === null || health(context.game, context.entity.enemy) <= 0) return false;
   const self = context.game.body(context.entity);
   const difference = subtract(enemy.origin, self.origin);
-  return dot(anglesVectors(self.angles).forward, normalize({ ...difference, z: 0 })) >= 0.8;
+  return dot(angleVectorsRule(self.angles, "native").forward, normalize({ ...difference, z: 0 })) >= 0.8;
 }
 
 export function setDuck(context: MonsterContext, down: boolean): undefined {

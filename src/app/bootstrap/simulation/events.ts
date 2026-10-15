@@ -12,13 +12,17 @@ import type { SaveReader } from "../../../persistence/value.ts";
 import { PresentationState } from "../presentation-state.ts";
 import type { SimulationQ1FogOptions } from "./q1-fog.ts";
 import type { SimulationPresentationEvent, SourcePresentationEvent } from "./types.ts";
+import { EventRing, type EventCursor } from "../../../foundation/index.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
+/** Undrained authoritative events retained between publications; sized at load like the C output ring. */
+const SIMULATION_EVENT_CAPACITY = 16384;
 
 /** Adds authoritative native protocol output to the shared presentation history. */
 export class SimulationEvents extends PresentationState {
   private sequence = 0;
-  private readonly emitted: SimulationEvent[] = [];
+  private readonly emitted = new EventRing<SimulationEvent>(SIMULATION_EVENT_CAPACITY);
+  private readonly emittedCursor: EventCursor = this.emitted.openCursor();
   constructor(private readonly bodies: SharedBodyTable, now: () => SourceTime,
     private readonly clientFor: (actor: ActorId) => ClientId | null, sourceSlot: (actor: ActorId) => number | null,
     fogOptions: SimulationQ1FogOptions | null = null) { super(now, sourceSlot, fogOptions); }
@@ -46,8 +50,12 @@ export class SimulationEvents extends PresentationState {
   append(payload: SimulationEventPayload, actor: ActorId | null = null): undefined {
     const client = actor === null ? null : this.clientFor(actor);
     if (actor !== null && client === null) return undefined;
-    this.emitted.push({ sequence: this.sequence++, time: this.now(), payload,
+    const admitted = this.emitted.append({ sequence: this.sequence, time: this.now(), payload,
       audience: client === null ? { kind: "world" } : { kind: "client", client } });
+    if (admitted === 0) {
+      throw new Error(`Simulation event capacity exhausted (${SIMULATION_EVENT_CAPACITY} undrained events); publish output before admitting more`);
+    }
+    this.sequence++;
     return undefined;
   }
 
@@ -55,22 +63,34 @@ export class SimulationEvents extends PresentationState {
     return this.append({ kind: "message", event, ...(sourcePresentationSequence === undefined ? {} : { sourcePresentationSequence }) }, actor);
   }
 
-  take(): readonly SimulationEvent[] { return this.emitted.splice(0); }
+  take(): readonly SimulationEvent[] {
+    const taken = this.emitted.take(this.emittedCursor);
+    this.emitted.retire();
+    return taken;
+  }
+
+  /** Zero-allocation drain for consumers that can visit events in place. */
+  drainEvents(visit: (event: SimulationEvent) => void): number {
+    const count = this.emitted.drain(this.emittedCursor, (event) => { visit(event); });
+    this.emitted.retire();
+    return count;
+  }
+
   override assertOutputConsumed(): undefined {
     super.assertOutputConsumed();
-    if (this.emitted.length !== 0) throw new Error("Save requires consumed source output");
+    if (this.emitted.pending(this.emittedCursor) !== 0) throw new Error("Save requires consumed source output");
     return undefined;
   }
 
   override capture() { return { ...super.capture(), sequence: this.sequence }; }
 
   override restore(reader: SaveReader, reference: (actor: SavedActorId) => ActorId): undefined {
-    this.sequence = reader.field("sequence").integer(0); this.emitted.length = 0;
+    this.sequence = reader.field("sequence").integer(0); this.emitted.reset();
     return super.restore(reader, reference);
   }
 
   private sound(content: ContentId, path: string, actor: ActorId | null, origin: Vec3, channel: number, volume: number, attenuation: number, recipient?: ActorId): undefined {
-    const resource = this.resources.get(`${content}/${path}`) ?? this.resources.get(`${content}/sound/${path}`);
+    const resource = this.resourceFor(content, path) ?? this.resourceFor(content, `sound/${path}`);
     if (resource !== undefined) this.append({ kind: "sound", resource: resource.id, actor, origin, channel, volume, attenuation }, recipient ?? null);
     return undefined;
   }

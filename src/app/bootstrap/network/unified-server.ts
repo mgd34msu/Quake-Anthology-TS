@@ -1,3 +1,4 @@
+import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
 import { UnifiedComponentPublisher } from "./unified-component-publication.ts";
 import { randomBytes } from 'node:crypto';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
@@ -59,7 +60,8 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
   private composition: CompositionIdentity;
   private readonly pending = new Map<string, PendingPeer<TAddress>>();
   private readonly peers = new Map<string, Peer<TAddress>>();
-  private readonly commands: ActorCommand[] = [];
+  private readonly commands = new EventRing<ActorCommand>(16384);
+  private readonly commandCursor: EventCursor = this.commands.openCursor();
   constructor(private readonly options: UnifiedServerOptions<TAddress>) {
     this.host = options.host; this.composition = options.composition;
   }
@@ -86,7 +88,7 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
     peer.closing = now; peer.ready = false;
     const player = peer.player; peer.player = null;
     if (player !== null) {
-      for (let index = this.commands.length - 1; index >= 0; index--) if (this.commands[index]?.actor.equals(player.actor)) this.commands.splice(index, 1);
+      this.commands.filterLive(command => !command.actor.equals(player.actor));
       hostCall(() => this.host.disconnect(player));
     }
     this.options.print(`Unified peer ${addressKey(peer.address)} disconnected: ${reason}\n`);
@@ -135,7 +137,7 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
     for (const input of batch.commands) {
       if (input.sequence <= peer.lastQueuedInput) continue;
       const command = this.host.input(peer.player, input.sequence, input.command, input.arsenal);
-      this.commands.push(command); peer.lastQueuedInput = input.sequence;
+      this.commands.admit(command); peer.lastQueuedInput = input.sequence;
     }
   }
   async poll(now: number): Promise<readonly ActorCommand[]> {
@@ -189,7 +191,7 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
       try { this.flush(peer, now); }
       catch (error) { this.drop(peer, error instanceof Error ? error.message : String(error), now); }
     }
-    const pending = this.commands.splice(0), latest = new Map<number, ActorCommand>();
+    const pending = this.commands.take(this.commandCursor), latest = new Map<number, ActorCommand>(); this.commands.retire();
     for (const command of pending) {
       const previous = latest.get(command.actor.slot);
       if (command.command.kind !== 'q1-netquake' || previous?.command.kind !== 'q1-netquake') {
@@ -243,7 +245,7 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
   changeWorld(host: UnifiedApplicationServerHost, composition: CompositionIdentity): void {
     if (this.ended) throw new Error('Unified server is closed');
     if (this.epoch === 4294967295) throw new Error('Unified world sequence exhausted');
-    this.host = host; this.composition = composition; this.epoch++; this.commands.length = 0;
+    this.host = host; this.composition = composition; this.epoch++; this.commands.reset();
     for (const peer of this.peers.values()) {
       if (peer.closing !== null) continue;
       if (peer.player !== null) peer.player = host.carriedPlayer(peer.player.client);
@@ -258,7 +260,7 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
       try { if (peer.player !== null) this.host.disconnect(peer.player); } catch (error) { failures.push(error); }
       peer.channel.close();
     }
-    this.peers.clear(); this.pending.clear(); this.commands.length = 0;
+    this.peers.clear(); this.pending.clear(); this.commands.reset();
     try { this.options.transport.close(); } catch (error) { failures.push(error); }
     if (failures.length > 0) throw new AggregateError(failures, 'Unified server shutdown failed');
   }

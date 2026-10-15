@@ -1,10 +1,10 @@
 import type { ActorId } from "../../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import { add, normalize, scale, subtract } from "../fields.ts";
 import type { Q2GameServices } from "../host.ts";
 import { PLAYER_CONTENTS, PROJECTILE_MASK, SHOT_MASK } from "./types.ts";
 import type { Q2WeaponInput } from "./types.ts";
-import { angleVectors } from "./vectors.ts";
 
 export interface Q2ActorView {
   readonly hand: Q2WeaponInput["hand"];
@@ -18,7 +18,7 @@ export function q2ActorShotMask(game: Q2GameServices, playersCollide: boolean): 
 }
 
 export function projectQ2Actor(actor: ActorId, game: Q2GameServices, view: Q2ActorView, angles: Vec3, offset: Vec3): { start: Vec3; direction: Vec3 } {
-  const axes = angleVectors(angles), side = view.hand === "left" ? -offset.y : view.hand === "center" ? 0 : offset.y;
+  const axes = angleVectorsRule(angles, "native"), side = view.hand === "left" ? -offset.y : view.hand === "center" ? 0 : offset.y;
   const body = game.host.bodies.read(actor);
   if (body === null) throw new Error("Q2 projection requires a shared actor body");
   const origin = body.origin;

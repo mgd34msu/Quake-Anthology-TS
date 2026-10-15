@@ -1,3 +1,4 @@
+import { add3Double, angleVectorsRule, dot3Double, hypot3, normalize3DoubleHypot, scale3Double, sub3Double } from "../../../core/math.ts";
 import { nativeAtof, nativeAtoi } from "../../../core/numeric.ts";
 import { parseQ2Token } from "../../../core/common-parse.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -69,14 +70,13 @@ export function inhibitQ2Spawn(fields: Q2SpawnFields, options: Q2GameOptions): b
 export function movedir(angles: Vec3): Vec3 {
   if (angles.x === 0 && angles.y === -1 && angles.z === 0) return { x: 0, y: 0, z: 1 };
   if (angles.x === 0 && angles.y === -2 && angles.z === 0) return { x: 0, y: 0, z: -1 };
-  const yaw = angles.y * Math.PI / 180, pitch = angles.x * Math.PI / 180;
-  return { x: Math.cos(pitch) * Math.cos(yaw), y: Math.cos(pitch) * Math.sin(yaw), z: -Math.sin(pitch) };
+  return angleVectorsRule({ x: angles.x, y: angles.y, z: 0 }, "native").forward;
 }
 
-export function add(a: Vec3, b: Vec3): Vec3 { return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }; }
-export function subtract(a: Vec3, b: Vec3): Vec3 { return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }; }
-export function scale(a: Vec3, factor: number): Vec3 { return { x: a.x * factor, y: a.y * factor, z: a.z * factor }; }
-export function dot(a: Vec3, b: Vec3): number { return a.x * b.x + a.y * b.y + a.z * b.z; }
-export function length(a: Vec3): number { return Math.hypot(a.x, a.y, a.z); }
-export function normalize(a: Vec3): Vec3 { const magnitude = length(a); return magnitude === 0 ? a : scale(a, 1 / magnitude); }
+export const add = add3Double;
+export const subtract = sub3Double;
+export const scale = scale3Double;
+export const dot = dot3Double;
+export const length = hypot3;
+export const normalize = normalize3DoubleHypot;
 export const zero: Vec3 = { x: 0, y: 0, z: 0 };

@@ -2,7 +2,7 @@ import type { Q3CharacterPass, Q3CharacterView } from "../../content/q3/foundati
 import { Powerup } from "../../movement/q3/constants.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { SceneEntity } from "../../contracts/scene.ts";
-import { qvmAnglesToAxis } from "../../core/qvm-math.ts";
+import { qvmAnglesToAxis } from "../../core/math.ts";
 import { GameRandom } from "../../core/game-numeric.ts";
 import { createLerpFrame, runLerpFrame } from "../../content/q3/foundation/animation.ts";
 import { parsePlayerAnimationConfig } from "../../content/q3/foundation/animation-config.ts";

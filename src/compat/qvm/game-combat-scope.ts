@@ -1,3 +1,4 @@
+import { CleanupStack } from "../../foundation/cleanup.ts";
 import type { ArmorState, DamageRequest } from "../../contracts/gameplay.ts";
 import type { OwnedActor } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
@@ -69,7 +70,7 @@ export class QvmDamageScopes {
     const readVelocity = (): Vec3 => ({ x: velocityView.getFloat32(0, true), y: velocityView.getFloat32(4, true), z: velocityView.getFloat32(8, true) });
     let health = entity.getInt32(this.options.health, true), armor = this.options.armor(slot), velocity = readVelocity();
     let result: SourceDamageResult = { appliedDamage: 0, reaction: "none" };
-    const removals: (() => void)[] = [];
+    const removals = new CleanupStack();
     const current = (): boolean => {
       for (let index = this.frames.length - 1; index >= 0; index--) {
         const entry = this.frames[index];
@@ -130,7 +131,7 @@ export class QvmDamageScopes {
       catch (error) { if (frame.cancelled?.error !== error) throw error; }
       return result;
     } finally {
-      for (const remove of removals) remove();
+      removals.runAll();
       this.frames.pop();
     }
   }

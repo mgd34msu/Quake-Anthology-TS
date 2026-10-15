@@ -29,7 +29,7 @@ export interface ApplicationQ3ServiceOptions {
   readonly seat: SeatId;
   readonly viewport: Rect;
   readonly queries: SceneQueries;
-  actorAt(number: number): ActorId;
+  actorAt(number: number): ActorId | null;
   readonly clock: { now(): number; frameNumber(): number };
   readonly output: {
     scene(scene: Q3PresentedScene): void;

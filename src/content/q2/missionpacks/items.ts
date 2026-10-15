@@ -1,4 +1,5 @@
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
+import { angleVectorsRule } from "../../../core/math.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
 import type { Q2Edition, Q2Entity, Q2GameServices, Q2SpawnModule } from "../foundation/host.ts";
@@ -9,7 +10,6 @@ import type { Q2MissionPack, Q2MissionPackPlayerEffect } from "./types.ts";
 import type { Q2MissionPackProjectiles } from "./projectiles/index.ts";
 import type { Q2MissionPackSpheres, Q2SphereKind } from "./spheres.ts";
 import type { Q2MissionPackDoppleganger } from "./doppleganger.ts";
-import { angleVectors } from "../foundation/weapons/vectors.ts";
 import { rogueWeaponDefinitions, xatrixWeaponDefinitions } from "./weapons/definitions.ts";
 import { q2RandomItem } from "./random-items.ts";
 import type { Q2RandomItemSettings } from "./random-items.ts";
@@ -151,7 +151,7 @@ export class Q2MissionPackItems implements Q2SpawnModule {
           if (entity === null || !game.host.inventory.consume(player, "q2:ammo_nuke", 1)) return false;
           const powers = this.powerups(player.id), quad = (input?.quadUntil ?? 0) > game.host.now();
           const multiplier = (quad ? 4 : 1) * (Math.max(powers.doubleUntil, input?.doubleUntil ?? 0) > game.host.now() && !(quad && input?.noStackDouble === true) ? 2 : 1);
-          projectiles.fireNuke(entity, game, game.body(entity).origin, angleVectors(input?.angles ?? game.body(entity).angles).forward, 100, multiplier);
+          projectiles.fireNuke(entity, game, game.body(entity).origin, angleVectorsRule(input?.angles ?? game.body(entity).angles, "native").forward, 100, multiplier);
           return true;
         } });
       for (const kind of ["defender", "hunter", "vengeance"] satisfies readonly Q2SphereKind[]) {

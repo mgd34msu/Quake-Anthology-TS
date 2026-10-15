@@ -1,7 +1,8 @@
 import type { MonsterContext } from "../../foundation/monsters/types.ts";
+import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { TraceResult } from "../../../../contracts/scene.ts";
-import { anglesVectors, attackTraceMask, changeYaw, enemyBody, finishDodge, health, monsterSolidMask, vectorAngles } from "../../foundation/monsters/ai.ts";
+import { attackTraceMask, changeYaw, enemyBody, finishDodge, health, monsterSolidMask } from "../../foundation/monsters/ai.ts";
 import { add, dot, length, normalize, scale, subtract } from "../../foundation/fields.ts";
 import type { Q2RereleaseRandomSource } from "../../../../core/random/q2-rerelease.ts";
 
@@ -14,12 +15,12 @@ export function rereleaseRandom(context: MonsterContext): Q2RereleaseRandomSourc
 function traceContents(trace: TraceResult): number { return trace.kind === "q1" ? 0 : trace.contents; }
 
 export function calculatePitchToFire(context: MonsterContext, target: Vec3, start: Vec3, aim: Vec3, speed: number, seconds: number, mortar: boolean, destroyOnTouch = false): Vec3 | null {
-  const angles = vectorAngles(aim);
+  const angles = vectorToAnglesRule(aim, "native-ai");
   const gravity = context.game.host.gravity();
   let bestPitch = 0, bestDistance = Infinity;
   for (const pitch of [-80, -70, -60, -50, -40, -30, -20, -10, -5]) {
     if (mortar && pitch >= -30) break;
-    let velocity = scale(anglesVectors({ ...angles, x: pitch }).forward, speed), origin = start;
+    let velocity = scale(angleVectorsRule({ ...angles, x: pitch }, "native").forward, speed), origin = start;
     for (let remaining = seconds; remaining > 0; remaining -= 0.1) {
       velocity = { ...velocity, z: velocity.z - gravity * 0.1 };
       const trace = context.game.host.trace({ start: origin, end: add(origin, scale(velocity, 0.1)), bounds: null, ignore: null, mask: 3 | 0x2000000 | 0x4000000 | 0x40000000 });
@@ -34,7 +35,7 @@ export function calculatePitchToFire(context: MonsterContext, target: Vec3, star
       if (destroyOnTouch || (traceContents(trace) & (0x2000000 | 0x4000000 | 0x40000000)) !== 0) break;
     }
   }
-  return Number.isFinite(bestDistance) ? anglesVectors({ ...angles, x: bestPitch }).forward : null;
+  return Number.isFinite(bestDistance) ? angleVectorsRule({ ...angles, x: bestPitch }, "native").forward : null;
 }
 
 export function chainfist(context: MonsterContext): boolean {
@@ -90,7 +91,7 @@ export function blockedCheckPlatform(context: MonsterContext, distance: number):
   if (!above && !below) return false;
   let platform = game.entity(body.ground);
   if (!platform?.classname.startsWith("func_plat")) {
-    const start = add(body.origin, scale(anglesVectors(body.angles).forward, distance));
+    const start = add(body.origin, scale(angleVectorsRule(body.angles, "native").forward, distance));
     const trace = game.host.trace({ start, end: add(start, { x: 0, y: 0, z: -384 }), bounds: null, ignore: entity.actor.id, mask: monsterSolidMask(game) });
     platform = trace.fraction < 1 && !trace.allSolid && !trace.startSolid && trace.hit.kind === "actor" ? game.entity(trace.hit.actor) : null;
   }
@@ -106,7 +107,7 @@ export function blockedCheckPlatform(context: MonsterContext, distance: number):
 export function monsterJumpFinished(context: MonsterContext): boolean {
   const { game, entity } = context;
   if (game.options.edition === "classic") return game.host.now() - entity.timestamp > 3;
-  const body = game.body(entity), forward = anglesVectors(body.angles).forward;
+  const body = game.body(entity), forward = angleVectorsRule(body.angles, "native").forward;
   if (length({ x: body.velocity.x * forward.x, y: body.velocity.y * forward.y, z: body.velocity.z * forward.z }) < 150) {
     game.move(entity, { velocity: { ...scale(forward, 150), z: body.velocity.z } });
   }
@@ -124,14 +125,14 @@ export function blockedCheckJump(context: MonsterContext, _distance: number, dro
   const startJump = (): undefined => { if (rerelease) { finishDodge(context); state.jumpTime = game.host.now() + 3; } return undefined; };
   if (rerelease && navigation.kind === "path") {
     if (!navigation.traversalPending) return "none";
-    state.idealYaw = vectorAngles(normalize(subtract(navigation.first, navigation.second))).y + 180;
+    state.idealYaw = vectorToAnglesRule(normalize(subtract(navigation.first, navigation.second)), "native-ai").y + 180;
     if (state.idealYaw > 360) state.idealYaw -= 360;
     const delta = ((body.angles.y - state.idealYaw) % 360 + 360) % 360;
     if (delta > 45 && delta < 315) { changeYaw(context); return "turn"; }
     startJump(); return navigation.second.z > navigation.first.z ? "up" : "down";
   }
   const minZ = body.origin.z + body.bounds.min.z, enemyMin = enemy.origin.z + enemy.bounds.min.z;
-  const forward = anglesVectors(body.angles).forward, ahead = add(body.origin, scale(forward, 48));
+  const forward = angleVectorsRule(body.angles, "native").forward, ahead = add(body.origin, scale(forward, 48));
   const down = enemyMin < minZ - (rerelease ? 18 : 16), up = enemyMin > minZ + (rerelease ? 18 : 16);
   if (down && dropHeight !== 0) {
     if (game.host.trace({ start: body.origin, end: ahead, bounds: body.bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) }).fraction < 1) return "none";
@@ -151,7 +152,7 @@ export function blockedCheckJump(context: MonsterContext, _distance: number, dro
     if (trace.fraction === 1 || trace.allSolid || trace.startSolid || trace.end.z - minZ > jumpHeight || (traceContents(trace) & (rerelease ? 35 : 3)) === 0) return "none";
     const wall = game.host.trace({ start: body.origin, end: add(body.origin, scale(forward, 64)), bounds: null, ignore: entity.actor.id, mask: monsterSolidMask(game) });
     if (wall.fraction < 1 && !wall.allSolid && !wall.startSolid && wall.contact.kind === "plane") {
-      state.idealYaw = vectorAngles(wall.contact.plane.normal).y + 180;
+      state.idealYaw = vectorToAnglesRule(wall.contact.plane.normal, "native-ai").y + 180;
       if (state.idealYaw > 360) state.idealYaw -= 360;
       changeYaw(context);
     }

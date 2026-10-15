@@ -9,7 +9,7 @@ import { Characteristic } from "../library/character.ts";
 import { dot3, vec3 } from "../../../core/math.ts";
 import type { Vec3 } from "../../../core/math.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
-import { qvmAngleMod, qvmAngleVectors } from "../../../core/qvm-math.ts";
+import { qvmAngleMod, qvmAngleVectors } from "../../../core/math.ts";
 import { CommandButtons } from "../../../content/q3/base/shared/player-state.ts";
 import type { UserCommand } from "../../../content/q3/base/shared/player-state.ts";
 import type { GameAiContext } from "./ai-context.ts";
