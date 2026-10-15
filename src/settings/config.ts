@@ -100,6 +100,21 @@ export function parseSeatSettings(value: unknown): SeatSettings {
     ...(input["alwaysRun"] === undefined ? {} : { alwaysRun: boolean(input["alwaysRun"]) }),
     gamepad: gamepad(input["gamepad"]), mouse: mouse(input["mouse"]), history: strings(input["history"]), rumble: boolean(input["rumble"]), rumbleStrength: rumbleStrength(input["rumbleStrength"]), controller: controller(input["controller"]) };
 }
+/** Input tuning shared by every game; bindings stay in per-product seat settings. */
+export interface GlobalInputTuning {
+  readonly version: 1;
+  readonly mouse: MouseTuning;
+  readonly alwaysRun?: boolean;
+  readonly rumble: boolean;
+  readonly rumbleStrength?: number;
+}
+export function parseGlobalInputTuning(value: unknown): GlobalInputTuning {
+  const input = record(value);
+  if (input["version"] !== 1) throw new Error("Unsupported global input tuning document");
+  return { version: 1, mouse: mouse(input["mouse"]),
+    ...(input["alwaysRun"] === undefined ? {} : { alwaysRun: boolean(input["alwaysRun"]) }),
+    rumble: boolean(input["rumble"]), rumbleStrength: rumbleStrength(input["rumbleStrength"]) };
+}
 export function settingsPath(root: string, name: string): string {
   const path = resolve(root, name), child = relative(resolve(root), path);
   if (child === "" || child === ".." || child.startsWith("../") || isAbsolute(child)) throw new Error("Settings path escapes the writable directory");
@@ -138,6 +153,13 @@ export class ConfigStore {
   }
   async saveSeat(name: string, settings: SeatSettings): Promise<void> {
     await writeAtomic(settingsPath(this.root, name), `${JSON.stringify(settings, null, 2)}\n`);
+  }
+  async loadGlobalTuning(name: string): Promise<GlobalInputTuning | null> {
+    const text = await this.loadText(name); if (text === null) return null;
+    const value: unknown = JSON.parse(text); return parseGlobalInputTuning(value);
+  }
+  async saveGlobalTuning(name: string, tuning: GlobalInputTuning): Promise<void> {
+    await this.dump(name, `${JSON.stringify(parseGlobalInputTuning(tuning), null, 2)}\n`);
   }
   async loadSeat(name: string): Promise<SeatSettings | null> {
     const file = Bun.file(settingsPath(this.root, name));

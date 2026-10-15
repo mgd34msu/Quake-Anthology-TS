@@ -9,7 +9,7 @@ import type { MouseTuning } from "../../input/mouse.ts";
 import { MouseSettings } from "../../input/mouse-settings.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
 import { createIdentityOwner } from "../../contracts/identity.ts";
-import type { ConfigStore, SeatSettings } from "../../settings/config.ts";
+import type { ConfigStore, GlobalInputTuning, SeatSettings } from "../../settings/config.ts";
 import { defaultViewInputTuning } from "../../input/user-command.ts";
 import { bindAudioSettings, bindPrimaryInputSettings, bindMouseMotionSettings, bindControllerVibration } from "../../ui/settings/index.ts";
 import type { AudioSettings, PrimaryInputSettings, MouseMotionSettings, ControllerVibrationSettings, SettingBinding } from "../../ui/settings/index.ts";
@@ -89,7 +89,29 @@ export class FrontendPreferences {
   private alwaysRunBaseline: boolean | undefined;
   private vibrationBaseline = { controllerVibration: true, controllerVibrationStrength: 1 };
   private mouseBaseline: MouseTuning = defaultMouseTuning;
-  constructor(private readonly dialect: () => CommandDialect) {}
+  /** Notified (coalesced) after any binding write so the owner can persist immediately. */
+  onChange: (() => void) | null = null;
+  private changeTimer: ReturnType<typeof setTimeout> | null = null;
+  constructor(private readonly dialect: () => CommandDialect, private readonly sharedSettings?: ConfigStore) {}
+  private changed(): void {
+    if (this.onChange === null || this.changeTimer !== null) return;
+    this.changeTimer = setTimeout(() => { this.changeTimer = null; this.onChange?.(); }, 100);
+  }
+  private effectiveTuning(): GlobalInputTuning {
+    const alwaysRun = this.values.alwaysRun ?? this.alwaysRunBaseline;
+    return { version: 1, mouse: frontendMouseTuning(this.values, this.mouseBaseline),
+      ...(alwaysRun === undefined ? {} : { alwaysRun }),
+      rumble: this.values.controllerVibration ?? this.vibrationBaseline.controllerVibration,
+      rumbleStrength: this.values.controllerVibrationStrength ?? this.vibrationBaseline.controllerVibrationStrength };
+  }
+  async saveGlobal(): Promise<void> {
+    if (this.sharedSettings === undefined) return;
+    const tuning = this.effectiveTuning();
+    await this.sharedSettings.saveGlobalTuning("input/global-tuning.json", tuning);
+    this.mouseBaseline = tuning.mouse;
+    this.alwaysRunBaseline = tuning.alwaysRun;
+    this.vibrationBaseline = { controllerVibration: tuning.rumble, controllerVibrationStrength: tuning.rumbleStrength ?? 1 };
+  }
   async loadBaseline(settings: ConfigStore): Promise<void> {
     this.audioBaseline = await loadAudioSettings(settings);
     const saved = await settings.loadSeat("input/seat-1.json"), identity = createIdentityOwner("frontend-mouse-baseline");
@@ -99,6 +121,24 @@ export class FrontendPreferences {
     this.mouseBaseline = mouse.read();
     this.alwaysRunBaseline = saved?.alwaysRun;
     this.vibrationBaseline = { controllerVibration: saved?.rumble ?? true, controllerVibrationStrength: saved?.rumbleStrength ?? 1 };
+    if (this.sharedSettings !== undefined) {
+      let global: GlobalInputTuning | null = null;
+      try { global = await this.sharedSettings.loadGlobalTuning("input/global-tuning.json"); } catch { global = null; }
+      if (global !== null) {
+        mouse.write(global.mouse);
+        this.mouseBaseline = mouse.read();
+        if (global.alwaysRun !== undefined) this.alwaysRunBaseline = global.alwaysRun;
+        this.vibrationBaseline = { controllerVibration: global.rumble, controllerVibrationStrength: global.rumbleStrength ?? 1 };
+      }
+      // Seed session overrides from the effective global tuning so existing
+      // per-product saves and game launches materialize the shared values.
+      this.values = { ...this.values,
+        sensitivity: this.mouseBaseline.sensitivity, pitch: this.mouseBaseline.pitch, yaw: this.mouseBaseline.yaw,
+        invertMouse: this.mouseBaseline.invertPitch, acceleration: this.mouseBaseline.acceleration, filter: this.mouseBaseline.filter,
+        lookSpring: this.mouseBaseline.lookSpring === true, lookStrafe: this.mouseBaseline.lookStrafe === true, freeLook: this.mouseBaseline.freeLook,
+        controllerVibration: this.vibrationBaseline.controllerVibration, controllerVibrationStrength: this.vibrationBaseline.controllerVibrationStrength,
+        ...(this.alwaysRunBaseline === undefined ? {} : { alwaysRun: this.alwaysRunBaseline }) };
+    }
   }
   async saveAudioBaseline(settings: ConfigStore): Promise<void> {
     if (this.audioOutput === undefined && this.musicSettings === undefined && this.values.effectsVolume === undefined && this.values.musicVolume === undefined) return;
@@ -115,17 +155,16 @@ export class FrontendPreferences {
   }
   bindings(output?: AudioOutputSettings, musicSettings?: () => MusicPreferences): readonly SettingBinding[] {
     this.audioOutput = output; this.musicSettings = musicSettings;
+    const write = (values: FrontendPreferenceOverrides): void => { this.values = { ...this.values, ...values }; this.changed(); };
     return [...bindControllerVibration({ read: () => ({ controllerVibration: this.values.controllerVibration ?? this.vibrationBaseline.controllerVibration, controllerVibrationStrength: this.values.controllerVibrationStrength ?? this.vibrationBaseline.controllerVibrationStrength }),
-      write: values => { this.values = { ...this.values, ...values }; } }), ...bindAudioSettings({ read: () => this.audioValues,
-      write: values => { this.values = { ...this.values, ...values }; } }, output),
+      write }), ...bindAudioSettings({ read: () => this.audioValues, write }, output),
     ...bindPrimaryInputSettings({ read: () => ({ sensitivity: this.values.sensitivity ?? this.mouseBaseline.sensitivity,
       pitch: this.values.pitch ?? this.mouseBaseline.pitch, yaw: this.values.yaw ?? this.mouseBaseline.yaw,
       invertMouse: this.values.invertMouse ?? this.mouseBaseline.invertPitch,
-      alwaysRun: this.values.alwaysRun ?? this.alwaysRunBaseline ?? defaultViewInputTuning(this.dialect()).alwaysRun }),
-      write: values => { this.values = { ...this.values, ...values }; } }),
+      alwaysRun: this.values.alwaysRun ?? this.alwaysRunBaseline ?? defaultViewInputTuning(this.dialect()).alwaysRun }), write }),
     ...bindMouseMotionSettings({ read: () => ({ acceleration: this.values.acceleration ?? this.mouseBaseline.acceleration,
       lookSpring: this.values.lookSpring ?? this.mouseBaseline.lookSpring ?? false, lookStrafe: this.values.lookStrafe ?? this.mouseBaseline.lookStrafe ?? false,
       filter: this.values.filter ?? this.mouseBaseline.filter, freeLook: this.values.freeLook ?? this.mouseBaseline.freeLook }),
-      write: values => { this.values = { ...this.values, ...values }; } }, () => this.dialect() === "q1-netquake" || this.dialect() === "q1-quakeworld")];
+      write }, () => this.dialect() === "q1-netquake" || this.dialect() === "q1-quakeworld")];
   }
 }

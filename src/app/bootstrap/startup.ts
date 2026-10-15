@@ -193,7 +193,8 @@ export class StartupApplication {
       leave: async () => { if (!this.closed && this.lobbySource !== null) this.pending = { kind: "frontend" }; this.lobbySource = null; },
       completed: async () => undefined,
     });
-    this.preferences = new FrontendPreferences(() => movementDialect(model.options));
+    this.preferences = new FrontendPreferences(() => movementDialect(model.options), new ConfigStore(join(saveDirectory, "..", "settings")));
+    this.preferences.onChange = () => { if (!this.closed) void this.persistPreferences().catch(error => this.print(`Could not save controls: ${error instanceof Error ? error.message : String(error)}\n`)); };
     this.saves = new StartupSaves(model.catalog, saveDirectory);
     this.addons = new AddonLibrary({ edition: model.catalog.products.some(product => product.expectation.id === "q1-classic-id1" && product.availability.kind === "installed") ? "classic" : "rerelease", root: model.options.userContentRoot ?? defaultUserContentRoot(),
       changed: async () => { await model.refreshCatalog(); this.saves = new StartupSaves(model.catalog, saveDirectory); this.refreshSaves = true; },
@@ -237,12 +238,17 @@ export class StartupApplication {
     this.frontendRoutingBaseline = routing;
   }
 
+  private async persistPreferences(): Promise<void> {
+    await this.saveFrontendInput();
+    if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore);
+    await this.preferences.saveGlobal();
+  }
+
   private async refreshPreferenceBaseline(force = false): Promise<void> {
     const options = this.model.options;
     const inputKey = JSON.stringify([movementDialect(options), this.model.bindingItems()]);
     if (!force && this.baselineProduct === options.product && this.baselineInput === inputKey) return;
-    await this.saveFrontendInput();
-    if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore);
+    await this.persistPreferences();
     const product = this.model.catalog.product(options.product);
     const settings = new ConfigStore(product.userContent?.root
       ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
@@ -1148,8 +1154,7 @@ export class StartupApplication {
     this.closeFrontendMovie();
     const previous = this.client?.source.current;
     if (this.game !== null) this.preferences.values = this.game.frontendSettings;
-    await this.saveFrontendInput();
-    if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore);
+    await this.persistPreferences();
     this.graphics?.menu.setStatus("Loading...", true);
     this.graphics?.draw(previous ?? null);
     try {
@@ -1414,7 +1419,8 @@ export class StartupApplication {
     this.gtv = null;
     this.movieGeneration++; this.pendingMovie = null;
     await Promise.all(this.moviePreparations);
-    try { await this.saveFrontendInput(); }
+    if (this.game !== null) this.preferences.values = this.game.frontendSettings;
+    try { await this.saveFrontendInput(); await this.preferences.saveGlobal(); }
     catch (error) { this.print(`Could not save controls: ${error instanceof Error ? error.message : String(error)}\n`); }
     try { if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore); }
     catch (error) { this.print(`Could not save audio settings: ${error instanceof Error ? error.message : String(error)}\n`); }
