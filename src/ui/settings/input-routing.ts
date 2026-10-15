@@ -19,14 +19,14 @@ export function bindInputRoutingSettings(router: () => InputRouter, devices: () 
  const selected = () => router().inputs.find(input => input.seat.index === selectedSeat) ?? router().inputs[0];
  const seats = () => router().inputs.map(input => ({ id: String(input.seat.index), label: `Player ${input.seat.index + 1}` }));
  return [
-  { id: 'ui:input:keyboard-player', label: 'Keyboard and mouse player', category: 'input', kind: 'choice', enabled: () => true,
+  { id: 'ui:input:keyboard-player', label: 'Keyboard and mouse player', category: 'input', group: 'Player assignment', kind: 'choice', enabled: () => true,
    read: () => String(router().keyboardSeat()?.index ?? 'none'), choices: () => [...seats(), { id: 'none', label: 'None' }],
    write: value => { const current = router(), input = current.inputs.find(input => String(input.seat.index) === value);
     if (value !== 'none' && input === undefined) throw new Error('Unknown keyboard player'); current.setKeyboardSeat(input?.seat ?? null); current.updateCapture(); } },
-  { id: 'ui:input:controller-player', label: 'Assign controller to', category: 'input', kind: 'choice', enabled: () => router().inputs.length > 1,
+  { id: 'ui:input:controller-player', label: 'Assign controller to', category: 'input', group: 'Player assignment', kind: 'choice', enabled: () => router().inputs.length > 1,
    read: () => String(selected()?.seat.index ?? 0), choices: seats,
    write: value => { const input = router().inputs.find(input => String(input.seat.index) === value); if (input === undefined) throw new Error('Unknown controller player'); selectedSeat = input.seat.index; } },
-  { id: 'ui:input:controller-device', label: 'Controller device', category: 'input', kind: 'choice', enabled: () => selected() !== undefined,
+  { id: 'ui:input:controller-device', label: 'Controller device', category: 'input', group: 'Player assignment', kind: 'choice', enabled: () => selected() !== undefined,
    read: () => { const input = selected(); return input === undefined ? 'none' : selectionKey(router().controllerSelection(input.seat)); },
    choices: () => {
     const choices = [{ id: 'automatic', label: 'Automatic' }, { id: 'none', label: 'None' }];

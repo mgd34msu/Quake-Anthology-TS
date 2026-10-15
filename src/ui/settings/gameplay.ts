@@ -18,11 +18,11 @@ export function bindGameplaySettings(source: GameplaySettingsSource): readonly S
     : client.dialect === "q1-netquake" || client.dialect === "q1-quakeworld" ? "qts_weapon_autoswitch" : null;
   if (autoSwitch !== null && client.find(autoSwitch) !== undefined) {
     if (autoSwitch === "qts_weapon_autoswitch" && source.weaponPickupPolicy !== "shared") settings.push({
-      id: "ui:gameplay:source-weapon-switching", label: "This game controls weapon pickup switching", kind: "button", category: "input",
+      id: "ui:gameplay:source-weapon-switching", label: "This game controls weapon pickup switching", kind: "button", category: "input", group: "Weapons",
       enabled: () => false, activate: () => {},
     });
-    else if (client.dialect === "q3") settings.push(bindCvarSetting(client, { name: autoSwitch, label: "Switch to picked-up weapons", kind: "toggle", category: "input", restart: null }, null));
-    else settings.push(bindCvarSetting(client, { name: autoSwitch, label: "Switch to picked-up weapons", kind: "choice", category: "input", restart: null,
+    else if (client.dialect === "q3") settings.push(bindCvarSetting(client, { name: autoSwitch, label: "Switch to picked-up weapons", kind: "toggle", category: "input", group: "Weapons", restart: null }, null));
+    else settings.push(bindCvarSetting(client, { name: autoSwitch, label: "Switch to picked-up weapons", kind: "choice", category: "input", group: "Weapons", restart: null,
       choices: client.dialect === "q2-rerelease" ? [{ id: "0", label: "Smart" }, { id: "1", label: "Always" }, { id: "2", label: "Except consumable weapons" }, { id: "3", label: "Never" }]
         : [{ id: "always", label: "Always" }, { id: "new", label: "New weapons" }, { id: "never", label: "Never" }] }, null));
   }

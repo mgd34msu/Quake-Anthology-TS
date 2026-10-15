@@ -91,23 +91,23 @@ export class InputDevices {
     await this.store.dump("cvars/input/devices.json", `${JSON.stringify({ version: 1, dialect: "q3", entries })}\n`);
   }
   bindings(): readonly SettingBinding[] {
-    const toggle = (name: string, label: string): SettingBinding => ({ id: `ui:input:${name}`, label, category: "input", kind: "toggle", enabled: () => true,
+    const toggle = (name: string, label: string, group: string): SettingBinding => ({ id: `ui:input:${name}`, label, category: "input", group, kind: "toggle", enabled: () => true,
       read: () => this.cvars.variableValue(name) !== 0, write: value => this.cvars.set(name, value ? "1" : "0", true) });
-    const seat = (name: string, label: string): SettingBinding => ({ id: `ui:input:${name}`, label, category: "input", kind: "choice", enabled: () => true,
+    const seat = (name: string, label: string, group: string): SettingBinding => ({ id: `ui:input:${name}`, label, category: "input", group, kind: "choice", enabled: () => true,
       read: () => this.cvars.variableString(name), write: value => this.cvars.set(name, value),
       choices: () => (this.router?.inputs ?? []).map(input => ({ id: String(input.seat.index + 1), label: `Player ${input.seat.index + 1}` })) });
-    return [toggle("in_midi", "MIDI input"), seat("in_midiseat", "MIDI player"),
-      { id: "ui:input:midi-device", label: "MIDI device", category: "input", kind: "choice", enabled: () => true,
+    return [toggle("in_midi", "MIDI input", "MIDI"), seat("in_midiseat", "MIDI player", "MIDI"),
+      { id: "ui:input:midi-device", label: "MIDI device", category: "input", group: "MIDI", kind: "choice", enabled: () => true,
         read: () => this.cvars.variableString("in_mididevice"), write: value => this.cvars.set("in_mididevice", value),
         choices: () => { try { return this.midi.availableDevices().map((device, index) => ({ id: String(index), label: device.name })); }
           catch (error) { this.print(`MIDI devices unavailable: ${String(error)}\n`); return []; } } },
-      { id: "ui:input:midi-channel", label: "MIDI channel", category: "input", kind: "slider", enabled: () => true, minimum: 1, maximum: 16, step: 1,
+      { id: "ui:input:midi-channel", label: "MIDI channel", category: "input", group: "MIDI", kind: "slider", enabled: () => true, minimum: 1, maximum: 16, step: 1,
         read: () => this.cvars.variableValue("in_midichannel"), write: value => this.cvars.set("in_midichannel", String(value)) },
-      toggle("in_joystick", "Source joystick input"), seat("in_joystickSeat", "Joystick player"),
-      { id: "ui:input:joystick-profile", label: "Joystick profile", category: "input", kind: "choice", enabled: () => true,
+      toggle("in_joystick", "Source joystick input", "Joystick"), seat("in_joystickSeat", "Joystick player", "Joystick"),
+      { id: "ui:input:joystick-profile", label: "Joystick profile", category: "input", group: "Joystick", kind: "choice", enabled: () => true,
         read: () => this.cvars.variableString("in_joystickProfile"), write: value => this.cvars.set("in_joystickProfile", value, true),
         choices: () => [{ id: "linux", label: "Linux axes" }, { id: "windows", label: "Windows POV and ball" }] },
-      { id: "ui:input:joystick-threshold", label: "Joystick axis threshold", category: "input", kind: "slider", enabled: () => true, minimum: 0.01, maximum: 1, step: 0.01,
+      { id: "ui:input:joystick-threshold", label: "Joystick axis threshold", category: "input", group: "Joystick", kind: "slider", enabled: () => true, minimum: 0.01, maximum: 1, step: 0.01,
         read: () => this.cvars.variableValue("joy_threshold"), write: value => this.cvars.set("joy_threshold", String(value)) },
     ];
   }

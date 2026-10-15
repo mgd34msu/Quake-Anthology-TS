@@ -7,7 +7,7 @@ import type { SettingBinding } from "./index.ts";
 import type { SettingCvars } from "./index.ts";
 
 export function bindEffectsVolume(audio: UnifiedAudio, read: () => number): SettingBinding {
-  return { id: "ui:audio:effects", label: "Sound volume", category: "audio", kind: "slider", minimum: 0, maximum: 1, step: 0.05,
+  return { id: "ui:audio:effects", label: "Sound volume", category: "audio", group: "Output", kind: "slider", minimum: 0, maximum: 1, step: 0.05,
     enabled: () => audio.outputState !== "closed", read, write: value => audio.setEffectsVolume(value) };
 }
 export function bindRendererSettings(options: {

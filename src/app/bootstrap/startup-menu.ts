@@ -78,12 +78,6 @@ const accessibilityMenu: UiMenuId = "menu:settings:accessibility:0";
 const selectMenu: UiMenuId = "menu:startup:select";
 const rosterMenu: UiMenuId = "menu:startup:roster";
 const loadMenu: UiMenuId = "menu:startup:load";
-const groups: readonly { readonly title: string; readonly fields: readonly StartupSelectionField[] }[] = [
-  { title: "World", fields: ["product", "mapProduct", "map"] },
-  { title: "Player", fields: ["movement", "character", "model", "seats"] },
-  { title: "Combat", fields: ["weapons", "enemies", "skill", "mode", "rules"] },
-  { title: "Equipment", fields: ["grapple", "grappleStyle", "grenades"] },
-];
 
 export class StartupMenu {
   readonly controller: NativeUiController;
@@ -187,29 +181,60 @@ export class StartupMenu {
     const mods = registerModMenu(this.controller, options.model.mods);
     this.disposers.push(mods.dispose);
     this.disposers.push(this.controller.register(session, () => {
-      const scrolled: UiControl[] = [];
-      const fitScroll = (control: UiControl): UiControl => ({ ...control, rect: { ...control.rect, width: 496 } });
-      const header = (title: string): void => {
-        scrolled.push(fitScroll({ ...this.button(`group:${title.toLowerCase()}`, title, scrolled.length, () => undefined, true), enabled: false }));
+      // Sentence builder: every field on one screen; connectives are drawn in draw().
+      const all = new Map(this.safeRows().map(row => [row.id, row]));
+      const token = (field: StartupSelectionField, rect: { x: number; y: number; width: number }, picker: boolean): UiControl[] => {
+        const row = all.get(field); if (row === undefined) return [];
+        const full = { ...rect, height: 30 };
+        if (!picker && row.id !== "grenades") return [{ id: `ui:startup:${row.id}`, kind: "choice", label: "", rect: full, visible: true, enabled: !this.busy,
+          selected: row.value, choices: row.choices.filter(choice => choice.unavailable === null)
+            .map(choice => ({ id: choice.id, label: this.fit(choice.label, rect.width - 16, 2.2) })),
+          select: (_seat, value) => { this.options.model.select(field, value); return undefined; } }];
+        const control = this.row(row, 0);
+        const selected = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
+        return [{ ...control, label: row.id === "grenades" ? "" : this.fit(selected, rect.width - 16, 2.2), rect: full }];
       };
-      for (const group of groups) {
-        header(group.title);
-        for (const row of this.rows(group.fields)) scrolled.push(fitScroll(this.row(row, scrolled.length)));
-      }
-      header("Session");
-      scrolled.push(fitScroll(this.button("hosting", options.model.hosting().kind === "offline" ? "Network: local only" : "Network: hosting", scrolled.length, () => {
-        this.hostDraft = options.model.hosting(); this.hostPort = String(this.hostDraft.port); this.status = ""; this.controller.openMenu(hostingMenu);
-      }, true)));
-      scrolled.push(fitScroll(this.button("mods", "Mods", scrolled.length, () => this.controller.openMenu(mods.root), true)));
-      if (options.browser !== undefined) scrolled.push(fitScroll(this.button("browse", "Find servers", scrolled.length, () => this.controller.openMenu(browserMenu), true)));
-      if (lobby !== null) scrolled.push(fitScroll(this.button("local-lobby", "Local lobby", scrolled.length, () => this.controller.openMenu(lobby.root), true)));
-      const footer: UiControl[] = [
-        { ...this.button("play", options.model.hosting().kind === "offline" ? "Play" : "Start server", 0, options.play), rect: { x: 64, y: 392, width: 248, height: 30 } },
-        { ...this.button("back", "Back", 0, () => this.controller.closeMenu()), rect: { x: 328, y: 392, width: 248, height: 30 } },
+      const line = (rowIndex: number): number => 112 + rowIndex * 38;
+      const sessionEntries: { readonly control: UiControl; readonly width: number }[] = [
+        { control: this.button("hosting", options.model.hosting().kind === "offline" ? "Network: local only" : "Network: hosting", 0, () => {
+          this.hostDraft = options.model.hosting(); this.hostPort = String(this.hostDraft.port); this.status = ""; this.controller.openMenu(hostingMenu);
+        }), width: 0 },
+        { control: this.button("mods", "Mods", 0, () => this.controller.openMenu(mods.root)), width: 80 },
+        ...(options.browser === undefined ? [] : [{ control: this.button("browse", "Find servers", 0, () => this.controller.openMenu(browserMenu)), width: 104 }]),
+        ...(lobby === null ? [] : [{ control: this.button("local-lobby", "Local lobby", 0, () => this.controller.openMenu(lobby.root)), width: 112 }]),
       ];
-      return { id: session, title: "", fullScreen: false,
-        scroll: { rect: { x: 64, y: 118, width: 512, height: 262 }, contentHeight: scrolled.length * 34, controls: scrolled.map(control => control.id) },
-        controls: [...scrolled, ...footer], open: () => undefined, close: () => undefined };
+      const sessionButtons: UiControl[] = [];
+      {
+        const gaps = (sessionEntries.length - 1) * 8;
+        const fixed = sessionEntries.reduce((sum, entry) => sum + entry.width, 0);
+        let x = 64;
+        for (const entry of sessionEntries) {
+          const width = entry.width === 0 ? 512 - fixed - gaps : entry.width;
+          sessionButtons.push({ ...entry.control, rect: { x, y: line(7), width, height: 30 } });
+          x += width + 8;
+        }
+      }
+      const controls: UiControl[] = [
+        ...token("product", { x: 128, y: line(0), width: 448 }, true),
+        ...token("mapProduct", { x: 184, y: line(1), width: 196 }, true),
+        ...token("map", { x: 420, y: line(1), width: 156 }, true),
+        ...token("character", { x: 216, y: line(2), width: 196 }, false),
+        ...token("model", { x: 428, y: line(2), width: 148 }, true),
+        ...token("movement", { x: 196, y: line(3), width: 176 }, false),
+        ...token("weapons", { x: 428, y: line(3), width: 148 }, false),
+        ...token("enemies", { x: 156, y: line(4), width: 264 }, true),
+        ...token("seats", { x: 428, y: line(4), width: 56 }, false),
+        ...token("mode", { x: 96, y: line(5), width: 150 }, false),
+        ...token("rules", { x: 296, y: line(5), width: 124 }, false),
+        ...token("skill", { x: 452, y: line(5), width: 124 }, false),
+        ...token("grapple", { x: 112, y: line(6), width: 110 }, false),
+        ...token("grappleStyle", { x: 278, y: line(6), width: 130 }, false),
+        ...token("grenades", { x: 520, y: line(6), width: 56 }, true),
+        ...sessionButtons,
+        { ...this.button("play", options.model.hosting().kind === "offline" ? "Play" : "Start server", 0, options.play), rect: { x: 64, y: line(8), width: 248, height: 30 } },
+        { ...this.button("back", "Back", 0, () => this.controller.closeMenu()), rect: { x: 328, y: line(8), width: 248, height: 30 } },
+      ];
+      return { id: session, title: "", fullScreen: false, controls, open: () => undefined, close: () => undefined };
     }));
     this.register(hostingMenu, () => [
       { id: "ui:startup:host-kind", kind: "choice", label: "Connections", rect: menuRow(0), visible: true, enabled: !this.busy,
@@ -506,11 +531,17 @@ export class StartupMenu {
     commands.push({ kind: "fill", rect: { x: 64, y: 104, width: active === main ? 224 : 512, height: 1 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.65 } });
 
     if (active === session) {
-      const fields: readonly StartupSelectionField[] = ["product", "map", "mode", "character", "weapons"];
-      const summary = this.safeRows().filter(row => fields.includes(row.id))
-        .map(row => (row.choices.find(choice => choice.id === row.value)?.label ?? row.value)
-          .replace(" (campaign default)", "").replace(" authored monsters", " monsters"));
-      text(this.fit(summary.join("  -  "), 512, 1.7), 64, 86, 1.7, true);
+      const line = (rowIndex: number): number => 112 + rowIndex * 38 + 6;
+      const word = (value: string, x: number, rowIndex: number): void => text(value, x, line(rowIndex), 2, true);
+      word("Play", 64, 0);
+      word("maps from", 64, 1); word("on", 390, 1);
+      word("character from", 64, 2); word(":", 416, 2);
+      word("moving like", 64, 3); word("with", 382, 3);
+      word("against", 64, 4); word("players", 492, 4);
+      word("in", 64, 5); word("with", 254, 5); word("at", 428, 5);
+      word("hook", 64, 6);
+      if (this.safeRows().some(row => row.id === "grappleStyle")) word("style", 230, 6);
+      word("grenades", 416, 6);
     }
     if (active === browserMenu && this.options.browser !== undefined && this.status.length === 0) {
       const browser = this.options.browser, selected = browser.rows().find(entry => addressKey(entry.address) === browser.selected);

@@ -122,7 +122,7 @@ export function registerSettingsMenus(controller: NativeUiController, bindings: 
   for (const category of categories) {
     const selected = bindings.filter(binding => binding.category === category.id);
     if (selected.length === 0) continue;
-    const groupOrder = ["Mouse", "Movement", "Gamepad", "Output", "Music"];
+    const groupOrder = ["Mouse", "Movement", "Weapons", "Gamepad", "Joystick", "MIDI", "Player assignment", "Output", "Music"];
     const groups = [...new Set(selected.flatMap(binding => binding.group === undefined ? [] : [binding.group]))]
       .sort((a, b) => (groupOrder.indexOf(a) === -1 ? groupOrder.length : groupOrder.indexOf(a)) - (groupOrder.indexOf(b) === -1 ? groupOrder.length : groupOrder.indexOf(b)));
     const direct = selected.filter(binding => binding.group === undefined);
@@ -212,7 +212,7 @@ export function bindMusicPlaylistSettings(registry: SettingCvars | null, tracks?
   return settings;
 }
 export function bindAudioGeometrySettings(registry: SettingCvars | null): readonly SettingBinding[] {
-  return registry === null ? [] : [{ id: "ui:audio:geometry", label: "Geometry sound obstruction", category: "audio", kind: "toggle", enabled: () => true,
+  return registry === null ? [] : [{ id: "ui:audio:geometry", label: "Geometry sound obstruction", category: "audio", group: "Output", kind: "toggle", enabled: () => true,
     read: () => registry.variableValue("s_geometryAcoustics") !== 0, write: value => { registry.set("s_geometryAcoustics", value ? "1" : "0"); } }];
 }
 export function bindAudioSettings(service: SettingsValueService<AudioSettings>, output?: AudioOutputSettings): readonly SettingBinding[] {
@@ -237,9 +237,9 @@ export function bindAudioSettings(service: SettingsValueService<AudioSettings>, 
     write: value => { try { format.select(audioOutputFormat({ ...format.read(), [spec.field]: Number(value) })); }
       catch (error) { output?.report(`Audio format selection failed: ${error instanceof Error ? error.message : String(error)}`); } },
   }));
-  return [...device, ...formats, { id: "ui:audio:effects", label: "Effects volume", category: "audio", kind: "slider", enabled: () => true,
+  return [...device, ...formats, { id: "ui:audio:effects", label: "Effects volume", category: "audio", group: "Output", kind: "slider", enabled: () => true,
     minimum: 0, maximum: 1, step: 0.05, read: () => service.read().effectsVolume, write: value => service.write({ effectsVolume: value }) },
-  { id: "ui:audio:music", label: "Music volume", category: "audio", kind: "slider", enabled: () => true,
+  { id: "ui:audio:music", label: "Music volume", category: "audio", group: "Music", kind: "slider", enabled: () => true,
     minimum: 0, maximum: 1, step: 0.05, read: () => service.read().musicVolume, write: value => service.write({ musicVolume: value }) }];
 }
 
