@@ -44,7 +44,7 @@ test("subscription discovers with account auth, defaults to server priority, per
   const bodies: unknown[] = [];
   const { service, directory } = await fixture({ request: { fetch: async (url, init) => {
     expect(new Headers(init.headers).get("chatgpt-account-id")).toBe("fake-account");
-    if (init.method === "GET") { expect(url).toBe("https://chatgpt.com/backend-api/codex/models?client_version=0.154.0"); return await response("codex"); }
+    if (init.method === "GET") { expect(url).toBe("https://chatgpt.com/backend-api/codex/models?client_version=0.162.1"); return await response("codex"); }
     const body: unknown = init.body; if (typeof body !== "string") throw new Error("Expected body");
     const value: unknown = JSON.parse(body); bodies.push(value); return answer(true);
   } } });

@@ -122,8 +122,8 @@ export async function discoverApiModels(baseUrl: string, apiKey: string, openai:
   return parseApiModels(await modelJson(response, signal), openai);
 }
 export async function discoverCodexModels(credential: SubscriptionCredential, fetcher: LlmFetch, signal: AbortSignal): Promise<readonly LlmModel[]> {
-  // Compatibility version matches installed released Codex 0.154.0. Upstream ModelsManager sends its built package semver.
-  const response = await fetchLlmResponse("https://chatgpt.com/backend-api/codex/models?client_version=0.154.0", { method: "GET", headers: {
+  // Compatibility version matches installed released Codex 0.162.1; the backend hides newer models from older clients.
+  const response = await fetchLlmResponse("https://chatgpt.com/backend-api/codex/models?client_version=0.162.1", { method: "GET", headers: {
     authorization: `Bearer ${credential.accessToken}`, "chatgpt-account-id": subscriptionAccountId(credential.accessToken), originator: "pi", accept: "application/json",
   } }, fetcher, signal);
   return parseCodexModels(await modelJson(response, signal));
