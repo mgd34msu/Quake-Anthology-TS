@@ -30,7 +30,7 @@ export function q1MusicFallback(content: ContentId, catalog: InstalledCatalog): 
   return product?.id ?? null;
 }
 
-/** Classic Q2 installs have no music files; the identical soundtrack ships with the rerelease. */
+/** Supplement a classic Q2 install only when its own music files do not satisfy a cue. */
 export function musicFallback(content: ContentId, catalog: InstalledCatalog): ContentId | null {
   const paired = q1MusicFallback(content, catalog);
   if (paired !== null) return paired;

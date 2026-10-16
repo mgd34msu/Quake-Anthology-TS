@@ -18,6 +18,7 @@ import type { GyroSettingsUi } from "../../ui/settings/gyro.ts";
 import { addressKey } from "../../network/common/endpoint.ts";
 import { browserAddress, browserSortOrders } from "./server-browser.ts";
 import type { StartupServerBrowser, BrowserConnection } from "./server-browser.ts";
+import type { ResourceId } from "../../contracts/content.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { RenderCommand } from "../../contracts/render.ts";
 import type { SeatInputEvent, UiControl, UiDrawCommand, UiDrawContext, UiMenuId } from "../../contracts/ui.ts";
@@ -35,6 +36,9 @@ import type { TextFontSelection } from "../../text/atlas.ts";
 import type { MaterialTextDraw } from "../../text/draw2d.ts";
 import type { StartupHosting, StartupNativePreset, StartupSelectionField, StartupSelectionModel, StartupSelectionRow } from "./startup-selection.ts";
 import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
+import type { CharacterTurntableView } from "./character-turntable.ts";
+
+const characterAppearanceFields: ReadonlySet<StartupSelectionField> = new Set(["character", "model", "skin", "topColor", "bottomColor"]);
 
 export interface StartupMenuOptions {
   readonly lobby?: { current(): ApplicationLocalLobby | null; selection(): Promise<LocalLobbySelection>; seats(): number };
@@ -43,6 +47,7 @@ export interface StartupMenuOptions {
   readonly clipboard?: () => string | null;
   readonly seat: SeatId;
   readonly model: StartupSelectionModel;
+  readonly characterTurntable?: CharacterTurntableView;
   readonly art: NativeUiArt;
   readonly font: TextFontSelection;
   readonly titleFont: TextFontSelection;
@@ -103,6 +108,7 @@ export class StartupMenu {
   private hostDraft: StartupHosting = { kind: "offline", port: 27910, q1Protocol: null };
   private hostPort = "27910";
   private builderDropdown: { readonly field: StartupSelectionField; page: number } | null = null;
+  private builderPreviewFocusArmed = false;
 
   constructor(private readonly options: StartupMenuOptions) {
     this.text = new UiTextRenderer(options.seat);
@@ -185,7 +191,8 @@ export class StartupMenu {
       // Two-column create-game screen: every field on one page. Section
       // heads, the column divider, and picker values are drawn in draw().
       const spec = this.builderLayout();
-      const controls: UiControl[] = [...(spec.dropdown?.items.map(item => item.control) ?? []), ...spec.fields.map(field => field.control)];
+      const controls: UiControl[] = [...(spec.dropdown?.items.map(item => item.control) ?? []),
+        ...(spec.viewer === null ? [] : [spec.viewer.control]), ...spec.fields.map(field => field.control)];
       const sessionEntries: { readonly control: UiControl; readonly width: number }[] = [
         { control: this.button("hosting", options.model.hosting().kind === "offline" ? "Network: local only" : "Network: hosting", 0, () => {
           this.hostDraft = options.model.hosting(); this.hostPort = String(this.hostDraft.port); this.status = ""; this.controller.openMenu(hostingMenu);
@@ -424,11 +431,17 @@ export class StartupMenu {
       readonly value: { readonly text: string; readonly width: number } | null }[];
     readonly heads: readonly { readonly x: number; readonly y: number; readonly label: string }[];
     readonly dropdown: { readonly x: number; readonly title: string; readonly page: number; readonly pages: number; readonly itemScale: number;
-      readonly items: readonly { readonly control: UiControl; readonly label: string; readonly selected: boolean; readonly unavailable: string | null }[] } | null;
+      readonly items: readonly { readonly control: UiControl; readonly choice: string; readonly label: string; readonly selected: boolean; readonly unavailable: string | null }[] } | null;
+    readonly viewer: { readonly resource: ResourceId;
+      readonly panel: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+      readonly rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+      readonly label: string; readonly control: UiControl } | null;
   } {
     const all = new Map(this.safeRows().map(row => [row.id, row]));
     const dropdown = this.builderDropdown;
-    const panelX = dropdown === null ? -1 : ["product", "mapProduct", "map", "character", "model", "skin", "topColor", "bottomColor", "movement", "weapons"].includes(dropdown.field) ? 328 : 64;
+    const appearanceDropdown = dropdown !== null && this.options.characterTurntable !== undefined && characterAppearanceFields.has(dropdown.field);
+    const panelX = dropdown === null ? -1 : appearanceDropdown ? 64
+      : ["product", "mapProduct", "map", "character", "model", "skin", "topColor", "bottomColor", "movement", "weapons"].includes(dropdown.field) ? 328 : 64;
     const sections: readonly { readonly title: string; readonly x: number; readonly startY: number;
       readonly fields: readonly { readonly field: StartupSelectionField; readonly label: string; readonly picker: boolean }[] }[] = [
       { title: "WORLD", x: 64, startY: 110, fields: [
@@ -462,7 +475,7 @@ export class StartupMenu {
       value: { text: string; width: number } | null }[] = [];
     const heads: { x: number; y: number; label: string }[] = [];
     for (const section of sections) {
-      if (section.x === panelX) continue;
+      if (appearanceDropdown || section.x === panelX) continue;
       const present = section.fields.filter(spec => all.has(spec.field));
       if (present.length === 0) continue;
       heads.push({ x: section.x, y: section.startY, label: section.title });
@@ -479,6 +492,7 @@ export class StartupMenu {
           fields.push({ control: { ...this.button(row.id, "", 0, () => {
               const selectedIndex = Math.max(0, row.choices.findIndex(choice => choice.id === row.value));
               this.builderDropdown = { field: spec.field, page: Math.floor(selectedIndex / 8) };
+              this.builderPreviewFocusArmed = false;
               if (spec.field === "map") this.prepareBuilderDropdownPage(this.builderDropdown.page);
             }), rect, enabled }, rect, label: spec.label, value: { text: `${display} >`, width: valueWidth } });
         } else {
@@ -493,7 +507,7 @@ export class StartupMenu {
       });
     }
     let dropdownSpec: { x: number; title: string; page: number; pages: number; itemScale: number;
-      items: { control: UiControl; label: string; selected: boolean; unavailable: string | null }[] } | null = null;
+      items: { control: UiControl; choice: string; label: string; selected: boolean; unavailable: string | null }[] } | null = null;
     if (dropdown !== null) {
       const row = all.get(dropdown.field);
       if (row === undefined) this.builderDropdown = null;
@@ -503,29 +517,65 @@ export class StartupMenu {
         let itemScale: number = menuText.field;
         for (const choice of row.choices)
           itemScale = Math.min(itemScale, this.fitScale(choice.label, 224, menuText.field));
-        const items: { control: UiControl; label: string; selected: boolean; unavailable: string | null }[] = row.choices.slice(page * 8, page * 8 + 8).map((choice, index) => {
+        const items: { control: UiControl; choice: string; label: string; selected: boolean; unavailable: string | null }[] = row.choices.slice(page * 8, page * 8 + 8).map((choice, index) => {
           const rect = { x: panelX, y: 138 + index * 27, width: 248, height: 26 };
           const selected = row.value === choice.id;
-          const control: UiControl = { id: selected ? `ui:startup:${row.id}` : `ui:startup:choice:${choice.id}`, kind: "button", label: "", rect,
+          const control: UiControl = { id: appearanceDropdown || !selected ? `ui:startup:choice:${choice.id}` : `ui:startup:${row.id}`, kind: "button", label: "", rect,
             visible: true, enabled: choice.unavailable === null && !this.busy,
             activate: () => {
+              const wasSelected = this.options.model.rows().find(candidate => candidate.id === dropdown.field)?.value === choice.id;
               this.options.model.select(dropdown.field, choice.id);
-              this.status = ""; this.builderDropdown = null;
+              this.status = "";
+              if (!appearanceDropdown || wasSelected) { this.builderDropdown = null; this.builderPreviewFocusArmed = false; }
               if (dropdown.field === "enemies" && choice.id === "custom") this.openRoster();
               return undefined;
             } };
-          return { control, label: `${selected ? "> " : ""}${choice.label}`, selected, unavailable: choice.unavailable };
+          return { control, choice: choice.id, label: `${selected ? "> " : ""}${choice.label}`, selected, unavailable: choice.unavailable };
         });
         if (pages > 1) {
           items.push(
-            { control: { ...this.button("previous", "< Prev", 0, () => this.prepareBuilderDropdownPage((page + pages - 1) % pages)), rect: { x: panelX, y: 356, width: 120, height: 24 } }, label: "", selected: false, unavailable: null },
-            { control: { ...this.button("next", "Next >", 0, () => this.prepareBuilderDropdownPage((page + 1) % pages)), rect: { x: panelX + 128, y: 356, width: 120, height: 24 } }, label: "", selected: false, unavailable: null },
+            { control: { ...this.button("previous", "< Prev", 0, () => this.prepareBuilderDropdownPage((page + pages - 1) % pages)), rect: { x: panelX, y: 356, width: 120, height: 24 } }, choice: row.value, label: "", selected: false, unavailable: null },
+            { control: { ...this.button("next", "Next >", 0, () => this.prepareBuilderDropdownPage((page + 1) % pages)), rect: { x: panelX + 128, y: 356, width: 120, height: 24 } }, choice: row.value, label: "", selected: false, unavailable: null },
           );
         }
         dropdownSpec = { x: panelX, title: row.label, page, pages, itemScale, items };
       }
     }
-    return { fields, heads, dropdown: dropdownSpec };
+    let viewer: { resource: ResourceId; panel: { x: number; y: number; width: number; height: number };
+      rect: { x: number; y: number; width: number; height: number }; label: string; control: UiControl } | null = null;
+    if (appearanceDropdown && dropdown !== null && dropdownSpec !== null && this.options.characterTurntable !== undefined) {
+      const state = this.controller.state(), focusedId = state.focus.kind === "menu" ? state.focus.control : null;
+      const candidates = dropdownSpec.items.filter(item => item.label !== "" && item.unavailable === null);
+      const hoveredCandidate = candidates.find(item => contains(item.control.rect, state.cursor));
+      const focusedCandidate = candidates.find(item => item.control.id === focusedId);
+      const candidate = hoveredCandidate ?? (focusedCandidate !== undefined
+        && (this.builderPreviewFocusArmed || candidates[0] !== focusedCandidate || focusedCandidate.selected)
+        ? focusedCandidate : undefined);
+      const overrides: Parameters<StartupSelectionModel["characterPreview"]>[0] = {};
+      if (candidate !== undefined) {
+        if (dropdown.field === "character") overrides.character = candidate.choice;
+        else if (dropdown.field === "model") overrides.model = candidate.choice;
+        else if (dropdown.field === "skin") overrides.skin = candidate.choice;
+        else if (dropdown.field === "topColor") overrides.topColor = candidate.choice;
+        else if (dropdown.field === "bottomColor") overrides.bottomColor = candidate.choice;
+      }
+      const preview = this.options.model.characterPreview(overrides);
+      const colorLabel = (field: "topColor" | "bottomColor", value: number): string =>
+        all.get(field)?.choices.find(choice => choice.id === String(value))?.label ?? String(value);
+      const modelLabel = preview.family === "q1" && preview.model === "player" ? "Quake player" : preview.model;
+      const label = preview.family === "q1"
+        ? `${modelLabel} · ${colorLabel("topColor", preview.topColor)} / ${colorLabel("bottomColor", preview.bottomColor)}`
+        : `${modelLabel} · ${preview.skin === "" ? "Default" : preview.skin}`;
+      viewer = {
+        resource: this.options.characterTurntable.request(preview, this.options.now()),
+        panel: { x: 320, y: 110, width: 264, height: 272 },
+        rect: { x: 368, y: 118, width: 168, height: 224 },
+        label,
+        control: { ...this.button("preview-done", "", 0, () => { this.builderDropdown = null; this.builderPreviewFocusArmed = false; }),
+          rect: { x: 328, y: 358, width: 248, height: 20 }, enabled: !this.busy },
+      };
+    }
+    return { fields, heads, dropdown: dropdownSpec, viewer };
   }
   private row(row: StartupSelectionRow, index: number): UiControl {
     const rect = { x: 64, y: 118 + index * 34, width: 512, height: 30 };
@@ -558,7 +608,7 @@ export class StartupMenu {
     const area = context.binding.safeArea, commands: RenderCommand[] = [];
     const draws = mediaCaptionCommands(captions, { x: area.x + 8, y: area.y + area.height * 0.65, width: area.width - 16, height: area.height * 0.3 },
       this.options.art.skin.font, appearance.textScale * Math.min(area.width / 640, area.height / 480), (text, scale) => this.measure(text, scale));
-    renderUiCommands(context, draws, { text: this.text, white: this.options.art.white, picture: resource => this.options.art.picture(resource),
+    renderUiCommands(context, draws, { text: this.text, white: this.options.art.white, picture: resource => this.options.characterTurntable?.picture(resource) ?? this.options.art.picture(resource),
       emit: command => commands.push(command), material: () => { throw new Error("Caption text requested a material draw"); } });
     return commands;
   }
@@ -583,7 +633,9 @@ export class StartupMenu {
   input(event: SeatInputEvent): boolean {
     if (this.busy) return true;
     if (this.controller.activeMenu === session && this.builderDropdown !== null) {
-      if (event.kind === "key" && event.code === KeyCode.Escape) { this.builderDropdown = null; return true; }
+      if (event.kind === "key" && event.code === KeyCode.Escape) { this.builderDropdown = null; this.builderPreviewFocusArmed = false; return true; }
+      if (event.kind === "key" && [KeyCode.Tab, KeyCode.Up, KeyCode.Down, KeyCode.Left, KeyCode.Right,
+        KeyCode.PageUp, KeyCode.PageDown, KeyCode.Home, KeyCode.End].includes(event.code)) this.builderPreviewFocusArmed = true;
       if (event.kind === "mouse-wheel" && event.delta.y !== 0) {
         const row = this.safeRows().find(candidate => candidate.id === this.builderDropdown?.field);
         const pages = Math.max(1, Math.ceil((row?.choices.length ?? 0) / 8));
@@ -666,6 +718,19 @@ export class StartupMenu {
           text(pageLabel, spec.dropdown.x + 248 - this.measure(pageLabel, menuText.section), 116, menuText.section);
         }
       }
+      if (spec.viewer !== null) {
+        const panelColor = { x: 0.6, y: 0.39, z: 0.18, w: 0.55 }, panel = spec.viewer.panel;
+        commands.push({ kind: "fill", rect: panel, color: { x: 0.02, y: 0.03, z: 0.04, w: 0.97 } },
+          { kind: "fill", rect: { x: panel.x, y: panel.y, width: panel.width, height: 1 }, color: panelColor },
+          { kind: "fill", rect: { x: panel.x, y: panel.y + panel.height - 1, width: panel.width, height: 1 }, color: panelColor },
+          { kind: "fill", rect: { x: panel.x, y: panel.y, width: 1, height: panel.height }, color: panelColor },
+          { kind: "fill", rect: { x: panel.x + panel.width - 1, y: panel.y, width: 1, height: panel.height }, color: panelColor },
+          { kind: "image", resource: spec.viewer.resource, rect: spec.viewer.rect,
+            texCoords: [{ x: 0, y: 0 }, { x: 1, y: 1 }], color: { x: 1, y: 1, z: 1, w: 1 } });
+        text("CHARACTER", panel.x + 8, panel.y + 6, menuText.section, true);
+        const labelScale = this.fitScale(spec.viewer.label, 232, menuText.small);
+        text(spec.viewer.label, panel.x + (panel.width - this.measure(spec.viewer.label, labelScale)) / 2, 344, labelScale);
+      }
       for (const head of spec.heads) text(head.label, head.x, head.y, menuText.section, true);
       overlay = true;
       for (const field of spec.fields) {
@@ -673,6 +738,11 @@ export class StartupMenu {
         if (field.value === null) continue;
         const scale = this.fitScale(field.value.text, field.value.width, menuText.field);
         text(field.value.text, field.rect.x + field.rect.width - 10 - this.measure(field.value.text, scale), field.rect.y + 5, scale, focusedId === field.control.id);
+      }
+      if (spec.viewer !== null) {
+        const rect = spec.viewer.control.rect;
+        overlayCommands.push({ kind: "text", origin: { x: rect.x + 10, y: rect.y + 3 }, text: "Done", font: this.options.art.skin.font,
+          scale: menuText.field, color: focusedId === spec.viewer.control.id ? colors.accent : colors.text, align: "left", shadow: true });
       }
       if (spec.dropdown !== null) {
         for (const item of spec.dropdown.items) {
@@ -711,11 +781,11 @@ export class StartupMenu {
       if (hoveredItem?.unavailable) text(this.fit(hoveredItem.unavailable, 512, menuText.small), 64, 450, menuText.small, true);
     }
     renderUiCommands(context, [backdrop, panel, ...commands.map(command => transformUi(command, transform))], { text: this.text, white: this.options.art.white,
-      picture: resource => this.options.art.picture(resource), emit, material });
+      picture: resource => this.options.characterTurntable?.picture(resource) ?? this.options.art.picture(resource), emit, material });
     renderUiCommands(context, this.controller.draw(context), { text: this.text, white: this.options.art.white,
-      picture: resource => this.options.art.picture(resource), emit, material });
+      picture: resource => this.options.characterTurntable?.picture(resource) ?? this.options.art.picture(resource), emit, material });
     renderUiCommands(context, overlayCommands.map(command => transformUi(command, transform)), { text: this.text, white: this.options.art.white,
-      picture: resource => this.options.art.picture(resource), emit, material });
+      picture: resource => this.options.characterTurntable?.picture(resource) ?? this.options.art.picture(resource), emit, material });
   }
   bindGyro(settings: GyroSettingsUi): void {
     const menu = registerGyroSettingsMenu(this.controller, settings, ""); this.gyroMenu = menu.root; this.disposers.push(menu.dispose);

@@ -49,13 +49,21 @@ export interface StartupNativePreset extends StartupSelectionChoice {
   readonly defaultSkill: string;
 }
 export interface StartupLaunch { readonly options: ApplicationOptions; readonly recipe: ExecutableRecipe; }
+export interface StartupCharacterPreview {
+  readonly product: CatalogProduct["id"];
+  readonly family: GameFamily;
+  readonly model: string;
+  readonly skin: string;
+  readonly topColor: number;
+  readonly bottomColor: number;
+}
 export interface StartupHosting {
   readonly kind: "offline" | "native-server" | "unified-server";
   readonly port: number;
   readonly q1Protocol: Q1ProtocolIdentity | null;
 }
 const choice = (id: string, label = id, unavailable: string | null = null): StartupSelectionChoice => ({ id, label, unavailable });
-const q1ColorNames = ["White", "Brown", "Slate", "Green", "Red", "Gold", "Pink", "Rust", "Purple", "Lavender", "Teal", "Yellow", "Orange", "Maroon"] as const;
+const q1ColorNames = ["White", "Brown", "Slate", "Olive", "Red", "Ochre", "Rust", "Peach", "Mauve", "Rose", "Khaki", "Teal", "Yellow", "Blue"] as const;
 const monsterNames: Readonly<Record<string, string>> = { monster_army: "Grunt", monster_demon1: "Fiend", monster_wizard: "Scrag", monster_shalrath: "Vore", monster_tarbaby: "Spawn" };
 function monsterLabel(classname: string): string {
   return monsterNames[classname] ?? classname.replace("monster_", "").split("_").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
@@ -425,7 +433,10 @@ export class StartupSelectionModel {
     return [...models].sort().map(name => choice(name));
   }
   private skins(): readonly StartupSelectionChoice[] {
-    const product = this.product("character"), family = product.expectation.family, model = this.values.model.toLowerCase();
+    return this.skinsFor(this.product("character"), this.values.model);
+  }
+  private skinsFor(product: CatalogProduct, modelValue: string): readonly StartupSelectionChoice[] {
+    const family = product.expectation.family, model = modelValue.toLowerCase();
     if (family === "q1" || model === "") return [choice("", "Default")];
     const skins = new Set<string>();
     for (const path of this.files(product)) {
@@ -442,6 +453,23 @@ export class StartupSelectionModel {
   }
   private colorChoices(): readonly StartupSelectionChoice[] {
     return q1ColorNames.map((name, index) => choice(String(index), name));
+  }
+  characterPreview(overrides: Partial<Pick<Record<StartupSelectionField, string>, "character" | "model" | "skin" | "topColor" | "bottomColor">> = {}): StartupCharacterPreview {
+    const product = overrides.character === undefined ? this.product("character") : this.catalog.product(overrides.character);
+    const family = product.expectation.family;
+    let model = overrides.model;
+    if (model === undefined) {
+      if (overrides.character === undefined) model = this.values.model;
+      else {
+        const preferred = this.selectedModels.get(overrides.character) ?? (family === "q1" ? "player" : family === "q2" ? "male" : "sarge");
+        model = this.modelsFor(product).find(choice => choice.id === preferred)?.id ?? this.modelsFor(product)[0]?.id ?? "";
+      }
+    }
+    let skin = overrides.skin ?? this.values.skin;
+    if (family === "q1" || !this.skinsFor(product, model).some(choice => choice.id === skin)) skin = "";
+    const color = (value: string | undefined, current: string): number => Math.min(13, Math.max(0, Math.trunc(Number(value ?? current) || 0)));
+    return { product: product.id, family, model, skin,
+      topColor: color(overrides.topColor, this.values.topColor), bottomColor: color(overrides.bottomColor, this.values.bottomColor) };
   }
   private roster() {
     let roster = this.rosters.get(this.values.product);

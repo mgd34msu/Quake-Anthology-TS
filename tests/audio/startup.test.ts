@@ -504,6 +504,32 @@ test("manual cd tracks preserve selected Q2 edition mapping and Q1 fallback", as
   } finally { music.stop(); }
 });
 
+test("classic Q2 music directory wins over the rerelease fallback", async () => {
+  const content = createContentId({ family: "q2", edition: "classic", package: "baseq2", revision: "test" });
+  using localMounts = new MenuMemoryMounts(content, new Map([["music/02.wav", menuWave(1000)], ["music/custom.wav", menuWave(1000)]]));
+  using fallbackMounts = new MenuMemoryMounts(content, new Map([["music/02.wav", menuWave(2000)], ["music/03.wav", menuWave(2000)], ["music/custom.wav", menuWave(2000)], ["music/fallback.wav", menuWave(2000)]]));
+  using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+  const music = new ApplicationMusic(engine, () => undefined), localBank = new SoundBank(localMounts), fallbackBank = new SoundBank(fallbackMounts);
+  const fallbackPaths: string[] = [];
+  const fallback = async (path: string) => { fallbackPaths.push(path); return fallbackBank.openMusic(path); };
+  try {
+    await music.play({ content, family: "q2", edition: "classic", campaign: "baseq2" }, localBank, "0", fallback);
+    await music.cdCommand(["loop", "2"]);
+    expect([...new Set(engine.mix(64))]).toEqual([250]);
+    expect(fallbackPaths).toEqual([]);
+    await music.musicCommand(["custom.wav"]);
+    expect([...new Set(engine.mix(32))]).toEqual([250]);
+    expect(fallbackPaths).toEqual([]);
+    await music.cdCommand(["loop", "3"]);
+    expect([...new Set(engine.mix(64))]).toEqual([500]);
+    expect(fallbackPaths.length).toBeGreaterThan(0);
+    fallbackPaths.length = 0;
+    await music.musicCommand(["fallback.wav"]);
+    expect([...new Set(engine.mix(32))]).toEqual([500]);
+    expect(fallbackPaths).toEqual(["music/fallback.wav"]);
+  } finally { music.stop(); }
+});
+
 test("shared client music controls survive dormant menu and replacement owners without moving gain", async () => {
   const controls = new MusicControls(), content = createContentId({ family: "q2", edition: "test", package: "shared-cd", revision: "1" });
   const source = { content, family: "q2", edition: "classic", campaign: "baseq2" } satisfies Parameters<ApplicationMusic["play"]>[0];

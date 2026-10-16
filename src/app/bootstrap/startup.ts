@@ -77,6 +77,7 @@ import { NativeRenderer } from "./renderer.ts";
 import { loadMenuArtImage } from "./menu-art.ts";
 import { loadMenuFont, loadMenuTypography } from "./menu-font.ts";
 import { StartupMenu } from "./startup-menu.ts";
+import { CharacterTurntable } from "./character-turntable.ts";
 import { createStartupSelection } from "./startup-selection.ts";
 import type { StartupSelectionModel, StartupLaunch } from "./startup-selection.ts";
 import { FrontendPreferences } from "./frontend-preferences.ts";
@@ -305,6 +306,7 @@ export class StartupApplication {
     let art: Awaited<ReturnType<typeof loadNativeUiArt>> | null = null;
     let typography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
     let renderer: NativeRenderer | null = null, controllers: SdlControllers | null = null, router: InputRouter | null = null, menu: StartupMenu | null = null;
+    let characterTurntable: CharacterTurntable | null = null;
     try {
       const imageSettings = initial.image;
       const devices = new InputDevices(imageSettings.cvars, inputDeviceStore(options.userContentRoot), this.host.print);
@@ -331,6 +333,8 @@ export class StartupApplication {
       const activeAudio = audio;
       const currentAudio = (): StartupAudio["engine"] => this.client?.output.current ?? activeAudio.engine;
       const accessibility = new SeatUiPreferences(seat, imageSettings.cvars);
+      characterTurntable = new CharacterTurntable({ catalog: () => this.model.catalog, images, print: this.host.print });
+      const activeTurntable = characterTurntable;
       menu = new StartupMenu({ lobby: { current: () => this.lobby, seats: () => this.model.options.seats,
         selection: async () => {
           const selected = await this.model.resolve();
@@ -343,7 +347,7 @@ export class StartupApplication {
             return { composition };
           } finally { await content.close(); }
         } }, appearance: () => accessibility.values, teamArena: this.model.teamArena, libraries: { addons: this.addons, playerProgress: this.playerProgressLibrary(), movies: this.movieLibraryMenu(), demos: this.demoLibraryMenu(), configurations: this.configurationLibrary(), serverProfiles: this.serverProfileLibrary() }, sound: sound => { const volume = this.preferences.audioValues; activeAudio.setVolumes(volume.effectsVolume, volume.musicVolume); activeAudio.sound(sound); }, ...(this.host.llm === undefined ? {} : { llm: this.host.llm }),
-        clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, seat, model: this.model, art, font: typography.body, titleFont: typography.title, now: () => performance.now(),
+        clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, seat, model: this.model, characterTurntable: activeTurntable, art, font: typography.body, titleFont: typography.title, now: () => performance.now(),
         ...(this.browser === null ? {} : { browser: this.browser, connect: (connection: BrowserConnection) => { this.pending = { kind: "connect", connection }; } }),
         playPreset: (id, skill, arenaMap) => { this.pending = { kind: "preset", id, skill, ...(arenaMap === undefined ? {} : { arenaMap }) }; },
         play: () => { this.pending = { kind: "play" }; }, load: id => {
@@ -439,7 +443,7 @@ export class StartupApplication {
           }
           native.execute(builder.finish());
         },
-        close: () => { activeMenu.close(); (this.graphics?.controllerSettings ?? controllerSettings).close(); devices.close(); activeAudio.close(); activeThemeMounts?.close();
+        close: () => { activeMenu.close(); activeTurntable.close(); (this.graphics?.controllerSettings ?? controllerSettings).close(); devices.close(); activeAudio.close(); activeThemeMounts?.close();
           (this.graphics?.router ?? activeRouter).close(); pads.close(); activeArt.close(); activeTypography.close(); activeFont.close(); images.close(); native.close(); mounted.close(); } };
       const locals = initial.prepared.seats.map(prepared => {
         const local = [...localSeats.values()].find(candidate => candidate.id.equals(prepared.id));
@@ -525,7 +529,7 @@ export class StartupApplication {
     } catch (error) {
       this.client?.videoRestart.close();
       await this.client?.capture.close();
-      menu?.close(); inputDevices?.close(); audio?.close(); themeMounts?.close(); router?.close(); controllers?.close(); art?.close(); typography?.close(); font?.close(); images.close(); renderer?.close(); mounted.close();
+      menu?.close(); characterTurntable?.close(); inputDevices?.close(); audio?.close(); themeMounts?.close(); router?.close(); controllers?.close(); art?.close(); typography?.close(); font?.close(); images.close(); renderer?.close(); mounted.close();
       await session.close(); await initial.image.close(); await initial.scripts.close();
       throw error;
     }

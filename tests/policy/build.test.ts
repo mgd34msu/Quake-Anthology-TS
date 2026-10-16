@@ -39,6 +39,8 @@ test("compiled output runs away from sources and rejected builds preserve publis
     "if (liveFile !== undefined) await Bun.write(liveFile, 'export const changed = true;\\n');",
   ].join("\n"));
   await Bun.write(join(project, "src/main.ts"), "process.stdout.write(`${6 * 7}\\n`);\n");
+  await Bun.write(join(project, "src/render/worker-entry.ts"), "export {};\n");
+  await Bun.write(join(project, "src/llm/auth-worker.ts"), "export {};\n");
   const evidence = await buildWorkspace(project, "runtime");
   expect(evidence.bun.version).toBe(Bun.version);
   expect(evidence.typescript).toBe("5.9.3");

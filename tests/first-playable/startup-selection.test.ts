@@ -547,6 +547,11 @@ test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3") || !corpusHasFile("q2/baseq2/p
   expect(q3Skins).toContain("blue");
   model.select("skin", "blue");
   expect(model.options.characterSkin).toBe("blue");
+  expect(model.characterPreview()).toMatchObject({ family: "q3", model: "sarge", skin: "blue" });
+  expect(model.characterPreview({ skin: "red" })).toMatchObject({ family: "q3", model: "sarge", skin: "red" });
+  expect(model.characterPreview({ character: "q2-classic-baseq2" })).toMatchObject({ family: "q2", model: "male", skin: "" });
+  expect(model.characterPreview({ character: "q1-classic-id1", topColor: "4", bottomColor: "11" }))
+    .toMatchObject({ family: "q1", model: "player", skin: "", topColor: 4, bottomColor: 11 });
 
   model.select("character", "q2-classic-baseq2");
   const q2Skins = model.rows().find(row => row.id === "skin")?.choices.map(choice => choice.id) ?? [];
