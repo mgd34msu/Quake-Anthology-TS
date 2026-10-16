@@ -51,9 +51,12 @@ export function registerLlmCommands(commands: CommandBuffer, print: (text: strin
           const instructions = definition.name === "llm_exec" ? llmExecInstructions(commands, source, prompt)
             : `Answer the user's question concisely, including general questions unrelated to the game. Your answer is displayed in a plain-text game console without Markdown rendering. Use short paragraphs and put command or code examples on their own lines. Do not use Markdown code fences, language headers, inline backticks, headings, or tables. Preserve meaningful code syntax and indentation.\nFor advice about this running engine, use only command and setting names from the registered catalog below. Follow their documented usage and allowed values. Do not assume that commands from another Quake engine exist here. If a requested setting or command is absent, say it is not registered; do not present a guessed name or a set command creating an unregistered variable as a working solution. If usage is undocumented, say so instead of inventing arguments. The catalog describes available commands, not current values or proof that an action is permitted. You have no console history, current settings, files, or game state. You only answer questions; do not claim to have executed commands.\n${llmConsoleCatalog(commands, source, prompt)}`;
           print("LLM request started. Use llm_cancel to cancel.\n", source);
-          const answer = await requester.request({ prompt, instructions, signal: controller.signal });
+          // Stream ask answers as they arrive; exec must stay buffered so the whole batch can be validated first.
+          let streamed = false;
+          const onText = definition.name === "llm_ask" ? (chunk: string) => { if (current() && chunk !== "") { streamed = true; print(chunk, source); } } : undefined;
+          const answer = await requester.request({ prompt, instructions, signal: controller.signal, ...(onText === undefined ? {} : { onText }) });
           if (!current()) return;
-          if (definition.name === "llm_ask") { print(`${answer}\n`, source); return; }
+          if (definition.name === "llm_ask") { print(streamed ? "\n" : `${answer}\n`, source); return; }
           const batch = validateLlmBatch(answer, commands, source);
           if (!current()) return;
           print(`${batch.join("; ")}\n`, source);

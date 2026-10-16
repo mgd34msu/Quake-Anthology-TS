@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { requestCodex } from "../../src/llm/codex.ts";
+import { promptCacheKey, requestCodex } from "../../src/llm/codex.ts";
 import { LlmHttpError } from "../../src/llm/errors.ts";
 import type { SubscriptionCredential } from "../../src/llm/auth.ts";
 import type { TransportRequest } from "../../src/llm/request.ts";
@@ -33,7 +33,7 @@ test("subscription uses account-scoped Responses transport and decodes fragmente
     if (typeof requestBody !== "string") throw new Error("Expected JSON request");
     const body: unknown = JSON.parse(requestBody);
     expect(body).toMatchObject({ model: "test-model", store: false, stream: true, instructions: "Reply plainly.",
-      input: [{ role: "user", content: [{ type: "input_text", text: "hello" }] }], prompt_cache_key: headers.get("session_id") });
+      input: [{ role: "user", content: [{ type: "input_text", text: "hello" }] }], prompt_cache_key: promptCacheKey("test-model") });
     return response(event({ type: "response.created" }) + event({ type: "response.output_text.delta", delta: "café " })
       + event({ type: "response.output_text.delta", delta: "🎮" }) + event({ type: "response.completed", response: { status: "completed" } }));
   });

@@ -44,6 +44,12 @@ const apiReasoning: Readonly<Record<string, readonly string[]>> = {
   "gpt-5.6-terra": ["none", "low", "medium", "high", "xhigh", "max"],
   "gpt-5.6-luna": ["none", "low", "medium", "high", "xhigh", "max"],
 };
+/** Fastest supported reasoning level, cheapest first; undefined when the model has none known. */
+export function fastestReasoningEffort(model: LlmModel | undefined): string | undefined {
+  if (model === undefined || model.reasoningEfforts.length === 0) return undefined;
+  for (const preferred of ["none", "minimal", "low"]) if (model.reasoningEfforts.includes(preferred)) return preferred;
+  return model.reasoningEfforts[0];
+}
 export function apiModel(id: string): LlmModel {
   const efforts = apiReasoning[id.replace(/-\d{4}-\d{2}-\d{2}$/, "")];
   return { id, name: id, reasoningEfforts: efforts ?? [], defaultReasoningEffort: null,

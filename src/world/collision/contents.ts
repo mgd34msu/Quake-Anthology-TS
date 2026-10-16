@@ -22,7 +22,10 @@ export function convertContents(contents: number, from: CollisionFamily, to: Col
         }
     }
     if (to === 'q1') {
-        if ((contents & (from === 'q2' ? 0xc6000003 : 0x06000001)) !== 0)
+        // Playerclip and ladder brushes block players in their home families; Q1 has no
+        // clip concept, so they must read as solid or Q1-family movement falls through them.
+        // Monsterclip stays non-solid: it only fences monsters in its home family.
+        if ((contents & (from === 'q2' ? 0xe6010003 : 0x06010001)) !== 0)
             return -2;
         if ((contents & 8) !== 0)
             return -5;
@@ -87,7 +90,9 @@ export function adaptTraceResult(result: TraceResult, policy: TracePolicy): Trac
     const contents = convertContents(nativeContents, result.kind, policy.kind);
     const sourcePlane = planeWithType(result);
     switch (policy.kind) {
-        case 'q1': return { ...fields, kind: 'q1', sourcePlane, surfaceFlags: result.kind === 'q2' ? result.surface?.flags ?? 0 : result.kind === 'q3' ? result.surfaceFlags : 0, inOpen: !result.allSolid, inWater: (nativeContents & 56) !== 0 };
+        case 'q1': return { ...fields, kind: 'q1', sourcePlane, surfaceFlags: (result.kind === 'q2' ? result.surface?.flags ?? 0 : result.kind === 'q3' ? result.surfaceFlags : 0)
+            // Unified ladder marker: Q1-family movement checks surfaceFlags bit 8 (SURF_LADDER).
+            | (result.kind === 'q2' && (result.contents & 0x20000000) !== 0 ? 8 : 0), inOpen: !result.allSolid, inWater: (nativeContents & 56) !== 0 };
         case 'q2': {
             const sky = result.kind === 'q1' && (nativeContents === -6 || ((result.surfaceFlags ?? 0) & 4) !== 0);
             // Q2 ground friction requires a surface, including ordinary Q1 solid faces.

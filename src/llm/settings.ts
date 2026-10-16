@@ -1,4 +1,4 @@
-import { apiModel, discoverApiModels, discoverCodexModels, parseReasoningEffort, type LlmModel, type LlmModelCatalog } from "./models.ts";
+import { apiModel, discoverApiModels, discoverCodexModels, fastestReasoningEffort, parseReasoningEffort, type LlmModel, type LlmModelCatalog } from "./models.ts";
 import { requestChatCompletions, requestOpenAiResponses } from "./api.ts";
 import { requestCodex } from "./codex.ts";
 import { checkRequestAbort, withRequestAbort, type LlmRequestInput, type LlmRequestOptions, type TransportRequest } from "./request.ts";
@@ -165,7 +165,8 @@ export class LlmSettingsService {
       const name = model(value), current = parsePreferences(await this.load("llm.json"));
       if (this.catalogs[selected].status === "ready" && !this.catalogs[selected].models.some(item => item.id === name)) throw new LlmSettingsError("Choose a model from the loaded provider list.");
       const metadata = this.modelMetadata(selected, name), effort = current.reasoningEfforts[selected];
-      const nextEffort = effort !== null && metadata?.reasoningEfforts.includes(effort) ? effort : metadata?.defaultReasoningEffort ?? null;
+      // Only an explicit user choice is stored; never persist the provider's default as if chosen.
+      const nextEffort = effort !== null && metadata?.reasoningEfforts.includes(effort) ? effort : null;
       const next: Preferences = { ...current, models: selected === "other-api" ? current.models : { ...current.models, [selected]: name },
         reasoningEfforts: { ...current.reasoningEfforts, [selected]: nextEffort } };
       if (selected === "other-api") {
@@ -195,7 +196,7 @@ export class LlmSettingsService {
       if (connectionChanged || modelChanged) {
         const current = parsePreferences(await this.load("llm.json"));
         const metadata = this.modelMetadata("other-api", next.model), previousEffort = current.reasoningEfforts["other-api"];
-        const effort = previousEffort !== null && metadata?.reasoningEfforts.includes(previousEffort) ? previousEffort : metadata?.defaultReasoningEffort ?? null;
+        const effort = previousEffort !== null && metadata?.reasoningEfforts.includes(previousEffort) ? previousEffort : null;
         const preferences = { ...current, reasoningEfforts: { ...current.reasoningEfforts, "other-api": effort } };
         await this.write("llm.json", JSON.stringify(preferences) + "\n"); this.preferences = preferences;
       }
@@ -233,7 +234,7 @@ export class LlmSettingsService {
         const selectedModel = models.find(item => item.id === name) ?? (name === "" ? models.find(item => item.recommended) : undefined);
         const defaultModel = name === "" ? selectedModel : undefined;
         const oldEffort = current.reasoningEfforts[selected];
-        const effort = defaultModel?.defaultReasoningEffort ?? (oldEffort !== null && !selectedModel?.reasoningEfforts.includes(oldEffort) ? null : oldEffort);
+        const effort = oldEffort !== null && !selectedModel?.reasoningEfforts.includes(oldEffort) ? null : oldEffort;
         if (defaultModel === undefined && effort === oldEffort) return;
         const next = { ...current, models: defaultModel !== undefined && selected !== "other-api" ? { ...current.models, [selected]: defaultModel.id } : current.models,
           reasoningEfforts: { ...current.reasoningEfforts, [selected]: effort } };
@@ -393,7 +394,9 @@ export class LlmSettingsService {
       if (selectedEffort !== null && this.modelMetadata(selected, selectedModel) === undefined) await this.refreshModels(selected, signal);
       const metadata = this.modelMetadata(selected, selectedModel);
       if (selectedEffort !== null && !metadata?.reasoningEfforts.includes(selectedEffort)) throw new LlmSettingsError("The selected reasoning effort is not supported by this model. Choose a supported effort or Model default in LLM options.");
-      const effort = selectedEffort ?? undefined;
+      // Interactive console requests must stay responsive: with no explicit user choice,
+      // use the fastest reasoning level the model offers instead of its (slow) default.
+      const effort = selectedEffort ?? fastestReasoningEffort(metadata);
       const request: TransportRequest = { prompt: input.prompt, instructions: input.instructions, model: selectedModel, signal, ...(effort === undefined ? {} : { reasoningEffort: effort }),
         ...(input.onText === undefined ? {} : { onText: input.onText }) };
       if (selected === "chatgpt-subscription") {

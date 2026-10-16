@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { arch, platform, release } from "node:os";
 import type { SubscriptionCredential } from "./auth.ts";
 import { LlmHttpError, LlmSettingsError } from "./errors.ts";
@@ -18,8 +19,14 @@ export function subscriptionAccountId(token: string): string {
   } catch { throw new LlmSettingsError("Subscription credential has no valid ChatGPT account ID. Sign in again."); }
 }
 
+/** Stable per-model cache key so the server can reuse the large static instruction prefix across turns. */
+export function promptCacheKey(model: string): string {
+  return createHash("sha256").update(`quake-typescript:${model.replace(/^openai[:/]/, "")}`).digest("hex");
+}
+
 export async function requestCodex(input: TransportRequest, credential: SubscriptionCredential, fetcher: LlmFetch): Promise<string> {
   const id = subscriptionAccountId(credential.accessToken), session = crypto.randomUUID();
+  const model = input.model.replace(/^openai[:/]/, "");
   const response = await fetchLlmResponse("https://chatgpt.com/backend-api/codex/responses", {
     method: "POST", signal: input.signal,
     headers: {
@@ -28,11 +35,11 @@ export async function requestCodex(input: TransportRequest, credential: Subscrip
       "content-type": "application/json", "User-Agent": `pi (${platform()} ${release()}; ${arch()})`, session_id: session,
     },
     body: JSON.stringify({
-      model: input.model.replace(/^openai[:/]/, ""), store: false, stream: true,
+      model, store: false, stream: true,
       instructions: input.instructions.trim() || "You are a helpful assistant.",
       input: [{ role: "user", content: [{ type: "input_text", text: input.prompt }] }],
       ...(input.reasoningEffort === undefined ? {} : { reasoning: { effort: input.reasoningEffort } }),
-      text: { verbosity: "medium" }, include: ["reasoning.encrypted_content"], prompt_cache_key: session,
+      text: { verbosity: "low" }, prompt_cache_key: promptCacheKey(model),
     }),
   }, fetcher, input.signal);
   if (!response.ok) {

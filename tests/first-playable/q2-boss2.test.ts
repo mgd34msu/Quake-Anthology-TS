@@ -48,6 +48,102 @@ test.skipIf(!corpus)("Jorg presents the outer shell attached to the rider on bos
   } finally { simulation.close(); await content.close(); }
 });
 
+const movements = ["q1", "qw", "q2", "q2-rerelease-baseq2", "q3"] as const;
+type Movement = (typeof movements)[number];
+
+async function bootMovement(movement: Movement) {
+  const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "boss2", "--movement", movement, "--dedicated", "--content-root", testCorpusRoot()]);
+  if (command.kind !== "run") throw new Error("Expected application launch");
+  const content = await loadApplicationContent(command.options);
+  const identity = createIdentityOwner(`boss2-matrix-${movement}`);
+  const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
+    skill: 1, mode: "singleplayer", seed: 1, maxClients: 1, playerIdentity: client => ({ seat: client.slot, socialId: "" }) });
+  const client = identity.client(0, 0), seat = identity.seat(0), admission = simulation.admitPlayer(client);
+  const kind = movement === "q1" ? "q1-netquake" : movement === "qw" ? "q1-quakeworld" : movement === "q2" ? "q2-classic"
+    : movement === "q2-rerelease-baseq2" ? "q2-rerelease" : "q3";
+  let sequence = 0, timeMs = 0, serverTime = 0;
+  const step = (forwardMove = 0, yaw = 0, pitch = 0) => {
+    timeMs += 25;
+    const cmd = kind === "q1-netquake"
+      ? { kind, acknowledgedServerTimeSeconds: serverTime, viewAngles: { x: pitch, y: yaw, z: 0 }, forwardMove, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 }
+      : kind === "q1-quakeworld"
+        ? { kind, milliseconds: 25, angles: { x: pitch, y: yaw, z: 0 }, forwardMove, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 }
+        : kind === "q2-classic"
+          ? { kind, milliseconds: 25, angleShorts: [Math.trunc(pitch * 65536 / 360) & 0xffff, Math.trunc(yaw * 65536 / 360) & 0xffff, 0], forwardMove, sideMove: 0, upMove: 0, buttons: 0, impulse: 0, lightLevel: 0 }
+          : kind === "q2-rerelease"
+            ? { kind, milliseconds: 25, angles: { x: pitch, y: yaw, z: 0 }, forwardMove, sideMove: 0, buttons: 0, serverFrame: sequence }
+            : { kind, serverTimeMilliseconds: timeMs, angleWords: [Math.trunc(pitch * 65536 / 360), Math.trunc(yaw * 65536 / 360), 0], forwardMove: forwardMove > 0 ? 127 : 0, rightMove: 0, upMove: 0, buttons: 0, weapon: 0 };
+    simulation.step({ elapsedMilliseconds: 25, commands: [{ actor: admission.actor, source: { kind: "local-seat", client, seat }, sequence: sequence++, command: cmd as never }] });
+    simulation.drainPresentationEvents();
+    const frameTime = simulation.currentOutput().snapshot.frame.time;
+    serverTime = frameTime.kind === "seconds" ? frameTime.value : frameTime.value / 1000;
+  };
+  for (let i = 0; i < 20; i++) step();
+  const source = simulation.q2Source();
+  if (source === null) throw new Error("Missing Q2 source");
+  const game = source.game, player = game.entity(admission.actor);
+  if (player === null || player === undefined) throw new Error("Missing player entity");
+  return { content, simulation, step, game, player, entities: [...game.entities.values()], forward: kind === "q3" ? 127 : 320 };
+}
+
+for (const movement of movements) {
+  test.skipIf(!corpus)(`${movement} movement walks onto a boss2 floor button, picks up an item, rides a plat, and climbs the ladder`, async () => {
+    // Walk onto floor button *44 from the south; its door *12 must move.
+    {
+      const { content, simulation, step, game, player, entities, forward } = await bootMovement(movement);
+      try {
+        const button = entities.find(entity => entity.model === "*44"), door = entities.find(entity => entity.model === "*12");
+        if (button === undefined || door === undefined) throw new Error("Missing button or door");
+        const body = game.body(button);
+        const lo = { x: body.origin.x + body.bounds.min.x, y: body.origin.y + body.bounds.min.y, z: body.origin.z + body.bounds.min.z };
+        const cx = lo.x + (body.bounds.max.x - body.bounds.min.x) / 2;
+        const floor = game.host.trace({ start: { x: cx, y: lo.y - 70, z: lo.z + 120 }, end: { x: cx, y: lo.y - 70, z: lo.z - 80 }, bounds: null, ignore: null, mask: 3 });
+        const before = { ...game.body(door).origin };
+        game.move(player, { origin: { x: cx, y: lo.y - 70, z: floor.end.z + 26 }, velocity: { x: 0, y: 0, z: 0 } });
+        for (let i = 0; i < 20; i++) step();
+        for (let i = 0; i < 120; i++) step(forward, 90);
+        const after = game.body(door).origin;
+        expect(Math.abs(after.x - before.x) + Math.abs(after.y - before.y) + Math.abs(after.z - before.z)).toBeGreaterThan(10);
+      } finally { simulation.close(); await content.close(); }
+    }
+    // Pick up the armor shard in the trench at (56,-472) and ride the func_plat.
+    {
+      const { content, simulation, step, game, player, entities, forward } = await bootMovement(movement);
+      try {
+        const shard = entities.find(entity => entity.classname === "item_armor_shard" && Math.abs(game.body(entity).origin.x - 56) < 2 && Math.abs(game.body(entity).origin.y + 472) < 2);
+        if (shard === undefined) throw new Error("Missing armor shard");
+        const so = game.body(shard).origin;
+        game.move(player, { origin: { x: so.x - 60, y: so.y, z: so.z + 10 }, velocity: { x: 0, y: 0, z: 0 } });
+        for (let i = 0; i < 15; i++) step();
+        for (let i = 0; i < 60; i++) step(forward, 0);
+        const after = game.entity(shard.actor.id);
+        expect(after === null || after === undefined || !after.visible).toBe(true);
+      } finally { simulation.close(); await content.close(); }
+    }
+    {
+      const { content, simulation, step, game, player, entities } = await bootMovement(movement);
+      try {
+        const plat = entities.find(entity => entity.classname === "func_plat");
+        if (plat === undefined) throw new Error("Missing func_plat");
+        const body = game.body(plat), startZ = body.origin.z;
+        game.move(player, { origin: { x: body.origin.x + (body.bounds.min.x + body.bounds.max.x) / 2,
+          y: body.origin.y + (body.bounds.min.y + body.bounds.max.y) / 2, z: body.origin.z + body.bounds.max.z + 26 }, velocity: { x: 0, y: 0, z: 0 } });
+        for (let i = 0; i < 120; i++) step();
+        expect(Math.abs(game.body(plat).origin.z - startZ)).toBeGreaterThan(20);
+      } finally { simulation.close(); await content.close(); }
+    }
+    // Climb the only ladder brush on boss2: x -2144..-2112, y -679..-674, z -350..13.
+    {
+      const { content, simulation, step, game, player, forward } = await bootMovement(movement);
+      try {
+        game.move(player, { origin: { x: -2128, y: -696, z: -320 }, velocity: { x: 0, y: 0, z: 0 } });
+        for (let i = 0; i < 80; i++) step(forward, 90, -45);
+        expect(game.body(player).origin.z).toBeGreaterThan(-100);
+      } finally { simulation.close(); await content.close(); }
+    }
+  });
+}
+
 test.skipIf(!corpus)("Q3 movement activates a boss2 floor button by standing on it", async () => {
   const { content, simulation, admission, step, game } = await bootBoss2("q3");
   try {

@@ -40,7 +40,7 @@ test("API model listing capability is reference metadata, while Other receives n
   expect(other.every(entry => entry.reasoningSource === "unknown" && entry.reasoningEfforts.length === 0)).toBe(true);
 });
 
-test("subscription discovers with account auth, defaults to server priority, persists effort and sends Responses reasoning", async () => {
+test("subscription discovers with account auth, defaults to server priority, keeps effort unchosen and sends Responses reasoning", async () => {
   const bodies: unknown[] = [];
   const { service, directory } = await fixture({ request: { fetch: async (url, init) => {
     expect(new Headers(init.headers).get("chatgpt-account-id")).toBe("fake-account");
@@ -50,7 +50,8 @@ test("subscription discovers with account auth, defaults to server priority, per
   } } });
   await subscription(directory);
   await service.refreshModels();
-  expect(service.read().model).toBe("test-default"); expect(service.read().reasoningEffort).toBe("low");
+  // The provider default is resolved at request time, never persisted as a user choice.
+  expect(service.read().model).toBe("test-default"); expect(service.read().reasoningEffort).toBeNull();
   await service.setModel("chatgpt-subscription", "test-reasoner"); await service.setReasoningEffort("chatgpt-subscription", "xhigh");
   expect(await service.request({ prompt: "hello", instructions: "commands" })).toBe("ok");
   expect(bodies[0]).toMatchObject({ reasoning: { effort: "xhigh" } });

@@ -19,6 +19,7 @@ interface FlyResult { readonly blocked: number; readonly stepTrace: TraceResult 
 
 class NetQuakeMove {
   state: MutableState;
+  private ladder = false;
   readonly context: MovementContext;
   readonly frameSeconds: number;
   readonly timeSeconds: number;
@@ -266,9 +267,34 @@ class NetQuakeMove {
       s.velocity = m.vec(s.waterJumpDirection.x, s.waterJumpDirection.y, s.velocity.z);
       return;
     }
+    this.ladder = s.moveType === Q1_MOVE_WALK && s.waterLevel < 2
+      && c.ladderAhead(s.origin, m.angles(s.viewAngles).forward);
     if (s.moveType === Q1_MOVE_NOCLIP && this.input.profile.noClipAngleHack) this.alternateNoclip();
     else if (s.waterLevel >= 2 && s.moveType !== Q1_MOVE_NOCLIP) this.waterMove();
+    else if (this.ladder) this.ladderMove();
     else this.airMove();
+  }
+  private ladderMove(): void {
+    const c = this.context, m = c.math, n = m.n, s = this.state, p = this.input.profile.parameters, command = this.input.command;
+    const axes = m.angles(s.viewAngles);
+    const wish = m.vec(n.add(n.multiply(axes.forward.x, this.context.speed(command.forwardMove)), n.multiply(axes.right.x, this.context.speed(command.sideMove))),
+      n.add(n.multiply(axes.forward.y, this.context.speed(command.forwardMove)), n.multiply(axes.right.y, this.context.speed(command.sideMove))),
+      n.add(n.multiply(axes.forward.z, this.context.speed(command.forwardMove)), n.multiply(axes.right.z, this.context.speed(command.sideMove))));
+    const wishVel = m.vec(wish.x, wish.y, c.ladderWishZ(wish.z, command.forwardMove, command.upMove, s.velocity.z));
+    const normalized = m.normalize(wishVel);
+    const wishSpeed = Math.min(normalized.length, this.context.speed(p.maxSpeed));
+    // Velocity shaping follows waterMove: friction first, then accelerate toward the wish.
+    const speed = m.length(s.velocity);
+    let newSpeed = 0;
+    if (speed !== 0) {
+      newSpeed = Math.max(0, n.subtract(speed, n.multiply(n.multiply(this.frameSeconds, speed), p.friction)));
+      s.velocity = m.scale(s.velocity, n.divide(newSpeed, speed));
+    }
+    if (wishSpeed > 0) {
+      const add = n.subtract(wishSpeed, newSpeed);
+      if (add > 0) s.velocity = m.ma(s.velocity, Math.min(add, n.multiply(n.multiply(p.accelerate, wishSpeed), this.frameSeconds)), normalized.direction);
+    } else if (s.velocity.z > 0) s.velocity = m.vec(s.velocity.x, s.velocity.y, Math.max(0, n.subtract(s.velocity.z, n.multiply(p.gravity, this.frameSeconds))));
+    else s.velocity = m.vec(s.velocity.x, s.velocity.y, Math.min(0, n.add(s.velocity.z, n.multiply(p.gravity, this.frameSeconds))));
   }
   private playerActions(): void {
     const c = this.context, s = this.state;
@@ -336,6 +362,9 @@ class NetQuakeMove {
   physics(): Q1MovementResult { return this.physicsStep(); }
   private physicsStep(): Q1MovementResult {
     const c = this.context, s = this.state;
+    // Prepare and physics run as separate instances; recompute the ladder probe for the gravity gate.
+    this.ladder = this.ladder || (s.moveType === Q1_MOVE_WALK && s.waterLevel < 2
+      && c.ladderAhead(s.origin, c.math.angles(s.viewAngles).forward));
     this.setState(c.lifecycle(s, "beforePhysics"));
     if (!c.removed && this.input.environment.pose === undefined) this.playerActions();
     // Preserve the existing extension paths; the branch-local order below is SV_Physics_Client's classic set.
@@ -350,7 +379,7 @@ class NetQuakeMove {
         case Q1_MOVE_NONE: think(); break;
         case Q1_MOVE_WALK:
           if (!think()) break;
-          if (!this.checkWater() && (s.flags & Q1_FLAG_WATERJUMP) === 0) this.gravity();
+          if (!this.checkWater() && !this.ladder && (s.flags & Q1_FLAG_WATERJUMP) === 0) this.gravity();
           this.checkStuck();
           if (!c.removed) this.walkMove();
           break;

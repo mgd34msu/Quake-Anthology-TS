@@ -108,6 +108,23 @@ export class MovementContext {
     const trace = this.trace(origin, origin);
     return !trace.startSolid && !trace.allSolid;
   }
+  // Unified-engine extension: stock Q1/QW physics has no ladders, so foreign
+  // ladder surfaces (Q2 CONTENTS_LADDER, Q3 SURF_LADDER) use Quake II's model.
+  ladderAhead(origin: Vec3, forward: Vec3): boolean {
+    const flat = this.math.normalize(this.math.vec(forward.x, forward.y, 0));
+    if (flat.length === 0) return false;
+    const trace = this.trace(origin, this.math.add(origin, flat.direction));
+    return trace.fraction < 1 && trace.kind === "q1" && ((trace.surfaceFlags ?? 0) & 8) !== 0;
+  }
+  /** Vertical ladder wish velocity from pitch-driven forward wish and upmove, per Q2's PM_AddCurrents. */
+  ladderWishZ(wishZ: number, forwardMove: number, upMove: number, velocityZ: number): number {
+    if (Math.abs(velocityZ) > 200) return wishZ;
+    if (forwardMove > 0 && wishZ > 0) return 200;
+    if (forwardMove > 0 && wishZ < 0) return -200;
+    if (upMove > 0) return 200;
+    if (upMove < 0) return -200;
+    return wishZ;
+  }
   effect(effect: MovementEffect): void {
     this.effects.push({ substep: this.substep, sequence: this.effects.length, time: this.input.frame.time, effect });
   }

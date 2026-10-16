@@ -32,6 +32,7 @@ class QuakeWorldMove {
   private forward: Vec3 = ZERO;
   private right: Vec3 = ZERO;
   private waterLevel = 0;
+  private ladder = false;
   private waterType = Q1_CONTENTS_EMPTY;
   private readonly touched: TraceHit[] = [];
   private command: QwUserCommand;
@@ -142,6 +143,19 @@ class QuakeWorldMove {
     if (!trace.startSolid && !trace.allSolid) { s.origin = trace.end; return; }
     this.flyMove();
   }
+  private ladderMove(): void {
+    const c = this.context, m = c.math, n = m.n, s = this.state, p = this.input.profile.parameters, command = this.command;
+    const wish = this.wishVelocity();
+    const wishVel = m.vec(wish.x, wish.y, c.ladderWishZ(wish.z, command.forwardMove, command.upMove, s.velocity.z));
+    const normalized = m.normalize(wishVel), speed = Math.min(normalized.length, this.context.speed(p.maxSpeed));
+    this.accelerate(normalized.direction, speed, p.accelerate);
+    if (wishVel.z === 0) {
+      const gravity = n.multiply(n.multiply(n.multiply(p.entityGravity, this.input.environment.gravityMultiplier), p.gravity), this.frameSeconds);
+      if (s.velocity.z > 0) s.velocity = m.vec(s.velocity.x, s.velocity.y, Math.max(0, n.subtract(s.velocity.z, gravity)));
+      else s.velocity = m.vec(s.velocity.x, s.velocity.y, Math.min(0, n.add(s.velocity.z, gravity)));
+    }
+    this.flyMove();
+  }
   private airMove(): void {
     const m = this.context.math, n = m.n, s = this.state, p = this.input.profile.parameters;
     this.forward = m.normalize(m.vec(this.forward.x, this.forward.y, 0)).direction;
@@ -172,6 +186,7 @@ class QuakeWorldMove {
       }
       if (trace.hit.kind === "actor") this.record(trace);
     }
+    this.ladder = s.waterJumpTimeSeconds === 0 && c.ladderAhead(s.origin, this.forward);
     this.waterLevel = 0; this.waterType = Q1_CONTENTS_EMPTY;
     let point = m.vec(s.origin.x, s.origin.y, n.add(n.add(s.origin.z, c.bounds.min.z), 1));
     const contents = c.contents(point);
@@ -281,7 +296,7 @@ class QuakeWorldMove {
     if (this.state.velocity.z < 0) this.state.waterJumpTimeSeconds = 0;
     if ((command.buttons & 2) !== 0) this.jump(); else this.state.oldButtons &= ~2;
     this.friction();
-    if (this.waterLevel >= 2) this.waterMove(); else this.airMove();
+    if (this.waterLevel >= 2) this.waterMove(); else if (this.ladder) this.ladderMove(); else this.airMove();
     }
     this.categorize();
     c.options.hooks?.qwState?.(this.waterLevel, this.waterType);
