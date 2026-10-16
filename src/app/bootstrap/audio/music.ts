@@ -30,6 +30,16 @@ export function q1MusicFallback(content: ContentId, catalog: InstalledCatalog): 
   return product?.id ?? null;
 }
 
+/** Classic Q2 installs have no music files; the identical soundtrack ships with the rerelease. */
+export function musicFallback(content: ContentId, catalog: InstalledCatalog): ContentId | null {
+  const paired = q1MusicFallback(content, catalog);
+  if (paired !== null) return paired;
+  const selected = catalog.product(content);
+  if (selected.expectation.family !== "q2" || selected.expectation.edition !== "classic") return null;
+  const product = catalog.products.find(candidate => candidate.expectation.id === "q2-rerelease-baseq2" && candidate.availability.kind === "installed");
+  return product?.id ?? null;
+}
+
 /** One world soundtrack owns the shared engine's intro/loop stream. */
 export class ApplicationMusic {
   private current: {
@@ -183,9 +193,10 @@ export class ApplicationMusic {
     const current = this.current;
     if (current === null || !current.cd.enabled || !active()) return;
     const { source: { content, family, edition, campaign }, bank, fallback, player, cd, opener } = current;
-    const numeric = /^[0-9]+$/.test(selected) && (family !== "q3" || numbered);
+    const bare = selected.replace(/\.(?:ogg|wav)$/i, "");
+    const numeric = /^[0-9]+$/.test(bare) && (family !== "q3" || numbered);
     const mapped = !numeric ? null : family === "q2"
-      ? remapQ2MusicTrack(Number(selected), edition === "rerelease" ? { kind: "remastered", campaign } : { kind: "disc" }) : Number(selected);
+      ? remapQ2MusicTrack(Number(bare), edition === "rerelease" ? { kind: "remastered", campaign } : { kind: "disc" }) : Number(bare);
     if (current.track === selected && current.looping === looping && player.playing
       && (mapped === null || cd.playingTrack === (cd.remappedTracks[mapped - 1] ?? mapped))) return;
     this.clearPlayback();
@@ -195,7 +206,7 @@ export class ApplicationMusic {
     this.engine.attachMusic({ id: "world", audience: { kind: "world" }, gain: 1 }, player);
     if (mapped !== null) {
       let played = await cd.play(mapped, looping);
-      if (!played && family === "q1" && fallback !== null && request === this.request) {
+      if (!played && family !== "q3" && fallback !== null && request === this.request) {
         opener.open = fallback; played = await cd.play(mapped, looping);
       }
       if (request !== this.request || !this.controls.enabled) return;
@@ -207,7 +218,7 @@ export class ApplicationMusic {
       const normalized = name.replaceAll("\\", "/");
       const path = normalized.startsWith("music/") ? normalized : `music/${normalized}`;
       const candidates = /\.(?:wav|ogg)$/i.test(path) ? [path] : family === "q3" ? [`${path}.wav`, `${path}.ogg`] : [`${path}.ogg`, `${path}.wav`];
-      for (const openTrack of [opener.open, family === "q1" ? fallback : null]) {
+      for (const openTrack of [opener.open, family !== "q3" ? fallback : null]) {
         if (openTrack === null) continue;
         for (const candidate of candidates) {
           const stream = await openTrack(candidate);

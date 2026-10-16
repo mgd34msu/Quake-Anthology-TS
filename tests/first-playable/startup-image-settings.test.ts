@@ -1,3 +1,4 @@
+import { testCorpusRoot } from "../support/corpus.ts";
 import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -12,7 +13,7 @@ for (const backend of ["cpu", "gl"]) test(`actual startup ${backend} fonts honor
   try {
     await mkdir(join(root, "q2/baseq2/pics"), { recursive: true }); await mkdir(join(root, "settings"));
     await writeFile(join(root, "q2/baseq2/pics/conchars.png"), encodePng(256, 256, new Uint8Array(256 * 256 * 4).fill(255)));
-    const parsed = parseApplicationCommand(["--content-root", join(import.meta.dir, "../../../qfiles"), "--user-content-root", root,
+    const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--user-content-root", root,
       "--game", "q2-classic-baseq2", "--renderer", backend, "--hidden", "--width", "320", "--height", "240"]);
     if (parsed.kind !== "run") throw new Error("Expected startup options");
     for (const level of [0, 1]) {

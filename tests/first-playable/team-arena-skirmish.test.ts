@@ -1,3 +1,4 @@
+import { corpusHasFile, testCorpusRoot } from "../support/corpus.ts";
 import { resolveStartupRules } from "../../src/app/bootstrap/startup-source.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { PreparedStartup } from "../../src/app/bootstrap/prepared-startup.ts";
@@ -11,14 +12,12 @@ import { CommandBuffer } from "../../src/core/commands/index.ts";
 import { CvarFlag, CvarRegistry } from "../../src/core/cvars/index.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { expect, test } from "bun:test";
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { discoverInstalledContent } from "../../src/content/catalog/index.ts";
 import { GameType } from "../../src/content/q3/base/shared/definitions.ts";
 import { currentTeamArenaCursor, nextTeamArenaCursor, parseTeamArenaCampaign, planTeamArenaSkirmish, readTeamArenaSkirmish, teamArenaSourceCvars, teamArenaClientCvars, teamArenaServerOverrides, TeamArenaLaunchOverrides } from "../../src/app/bootstrap/team-arena-skirmish.ts";
 
-const corpus = resolve(import.meta.dir, "../../../qfiles");
-test.skipIf(!existsSync(resolve(corpus, "q3a/missionpack/pak0.pk3")))("Team Arena skirmish uses installed source teams, alias fallback, limits and campaign progression", async () => {
+const corpus = testCorpusRoot();
+test.skipIf(!corpusHasFile("q3a/missionpack/pak0.pk3"))("Team Arena skirmish uses installed source teams, alias fallback, limits and campaign progression", async () => {
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
   const setup = await readTeamArenaSkirmish(catalog, 4);
   expect(setup).toMatchObject({ kind: "team-arena", map: "maps/mpteam1.bsp", title: "Base Siege", gameType: GameType.GT_CTF,

@@ -1,6 +1,5 @@
+import { corpusHasFile, testCorpusRoot } from "../support/corpus.ts";
 import { expect, test } from "bun:test";
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CvarFlag } from "../../src/core/cvars/index.ts";
 import { infoValueForKey } from "../../src/core/info-string.ts";
@@ -68,8 +67,8 @@ test("serverinfo capture and restore preserve pending metadata and exact cvar st
   expect(restored.captureSaveState()).toEqual(source.captureSaveState());
 });
 
-const corpus = resolve(import.meta.dir, "../../../qfiles");
-test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("actual Q3 source arsenal refresh never asks botlib for WP_NONE", async () => {
+const corpus = testCorpusRoot();
+test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3"))("actual Q3 source arsenal refresh never asks botlib for WP_NONE", async () => {
   const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map", "q3dm1", "--dedicated"]);
   if (launch.kind !== "run") throw new Error("Expected Q3 runtime options");
   const content = await loadApplicationContent(launch.options);

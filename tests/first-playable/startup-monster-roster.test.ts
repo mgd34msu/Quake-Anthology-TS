@@ -1,4 +1,5 @@
 import { decodePng } from "../../src/formats/images/png.ts";
+import { testCorpusRoot } from "../support/corpus.ts";
 import { expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -20,7 +21,7 @@ import { encodePng } from "../../src/formats/images/png.ts";
 import { loadNativeUiArt } from "../../src/ui/common/index.ts";
 
 test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults and retained overrides", async () => {
-  const corpusRoot = resolve(import.meta.dir, "../../../qfiles"), catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
+  const corpusRoot = testCorpusRoot(), catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
   const command = parseApplicationCommand(["--content-root", corpusRoot, "--game", "q2-classic-baseq2", "--map", "base1"]);
   if (command.kind !== "run") throw new Error("Expected Q2 base1 options");
   const model = new StartupSelectionModel(catalog, command.options); await model.prepareMaps();
@@ -102,6 +103,11 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
           if (preset.unavailable !== null) {
             expect(menu.controller.activeMenu).toBe("menu:startup:native-campaign"); expect(nativeLaunches).toHaveLength(before); continue;
           }
+          if (preset.id === "q3-baseq3") {
+            for (let attempt = 0; attempt < 100 && menu.controller.activeMenu !== "menu:library:arena-selection"; attempt++) await Bun.sleep(1);
+            expect(menu.controller.activeMenu).toBe("menu:library:arena-selection");
+            focusControl("ui:arena-select:play"); key(KeyCode.Enter);
+          }
           expect(menu.controller.activeMenu).toBe("menu:startup:native-difficulty");
           if (index === 0) await capture(`native-${family}-${edition}-difficulty`);
           click(100, 368);
@@ -109,6 +115,7 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
           click(100, 130); click(100, 368);
           expect(nativeLaunches.at(-1)).toEqual({ id: preset.id, skill: Number(preset.difficulties[0]?.id) });
           key(KeyCode.Escape);
+          if (preset.id === "q3-baseq3") key(KeyCode.Escape);
           expect(menu.controller.activeMenu).toBe("menu:startup:native-campaign");
         }
         key(KeyCode.Escape); key(KeyCode.Escape);
@@ -128,19 +135,26 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
     key(KeyCode.Enter);
     expect(menu.controller.activeMenu).toBe("menu:startup:session");
-    click(450, 407);
+    focusControl("ui:startup:back"); key(KeyCode.Enter);
     expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
     key(KeyCode.Escape);
     expect(menu.controller.activeMenu).toBe("menu:startup:main");
     click(100, 130); click(100, 300);
+    const dropdownPick = (choiceId: string): void => {
+      const choices = model.rows().find(row => row.id === "enemies")?.choices ?? [];
+      const index = choices.findIndex(option => option.id === choiceId);
+      if (index < 0) throw new Error(`Missing enemies choice ${choiceId}`);
+      for (let p = 0; p < Math.floor(index / 8); p++) click(252, 368);
+      click(100, 138 + index % 8 * 27 + 12);
+    };
     focusControl("ui:startup:enemies"); key(KeyCode.Enter);
     await capture("roster-combat-source-presets");
-    const preset = model.rows().find(row => row.id === "enemies")?.choices.findIndex(option => option.id === "q1:monsters/classic/id1") ?? -1;
-    expect(preset).toBeGreaterThanOrEqual(0); click(100, 130 + preset * 34);
+    dropdownPick("q1:monsters/classic/id1");
+    expect(menu.controller.activeMenu).toBe("menu:startup:session");
     expect(model.monsterSourceRow().value).toBe("q1:monsters/classic/id1");
     expect(model.rows().find(row => row.id === "enemies")?.value).toBe("q1:monsters/classic/id1");
     await capture("roster-selected-preset-summary");
-    focusControl("ui:startup:enemies"); key(KeyCode.Enter); await capture("roster-selected-preset-choice"); click(100, 164);
+    focusControl("ui:startup:enemies"); key(KeyCode.Enter); await capture("roster-selected-preset-choice"); dropdownPick("custom");
     for (let attempt = 0; attempt < 100 && menu.controller.activeMenu !== "menu:startup:roster"; attempt++) await Bun.sleep(1);
     expect(menu.controller.activeMenu).toBe("menu:startup:roster");
     await source("q1:monsters/classic/id1", "roster-source-choice");

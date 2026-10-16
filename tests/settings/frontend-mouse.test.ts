@@ -1,4 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
+import { testCorpusRoot } from "../support/corpus.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -83,13 +84,13 @@ test("startup reads selected product profiles, preserves other seats through pla
   await q1.saveSeat("input/seat-2.json", { ...profile, mouse: { ...profile.mouse, sensitivity: 12, yaw: 0.044, filter: false } });
   await q2.saveSeat("input/seat-1.json", { ...profile, mouse: { ...defaultMouseTuning, sensitivity: 9, acceleration: 1 } });
   const parsed = parseApplicationCommand(["--game", "q1-classic-id1", "--movement", "q1", "--character", "q1", "--mode", "coop", "--seats", "2", "--frames", "1",
-    "--renderer", "cpu", "--hidden", "--width", "640", "--height", "480", "--user-content-root", root]);
+    "--renderer", "cpu", "--hidden", "--width", "640", "--height", "480", "--content-root", testCorpusRoot(), "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Missing startup options");
   const observed: { controller: NativeUiController | null } = { controller: null }, register = NativeUiController.prototype.register;
   const registration = spyOn(NativeUiController.prototype, "register").mockImplementation(function(this: NativeUiController, id, factory) {
     observed.controller = this; return register.call(this, id, factory);
   });
-  const opened = spyOn(ApplicationInput, "open"), prints: string[] = []; let app: StartupApplication | null = null;
+  const opened = spyOn(ApplicationInput, "open"), prepared = spyOn(ApplicationInput, "prepareForClient"), prints: string[] = []; let app: StartupApplication | null = null;
   try {
     app = await StartupApplication.open(parsed.options, { print: text => { prints.push(text); return undefined; } }, join(root, "saves"));
     const startup = app;
@@ -100,7 +101,7 @@ test("startup reads selected product profiles, preserves other seats through pla
     } throw new Error(`Unreachable ${id}`); };
     const read = (id: string): number | boolean => { const binding = control(startup.preferences.bindings(), id);
       if (binding.kind !== "slider" && binding.kind !== "toggle") throw new Error("Missing mouse value"); return binding.read(); };
-    expect(startup.preferences.values.sensitivity).toBe(7.5); expect(read("sensitivity")).toBe(7.5); expect(read("acceleration")).toBe(0.75);
+    expect(startup.preferences.values.sensitivity).toBeUndefined(); expect(read("sensitivity")).toBe(7.5); expect(read("acceleration")).toBe(0.75);
     focus("ui:startup:options"); key(KeyCode.Enter); focus("ui:startup:controls"); key(KeyCode.Enter);
     expect(read("mouse-pitch")).toBeCloseTo(50); expect(read("mouse-yaw")).toBeCloseTo(150);
     expect(read("invert-mouse")).toBe(true); expect(read("filter")).toBe(true); expect(read("freelook")).toBe(false);
@@ -112,9 +113,9 @@ test("startup reads selected product profiles, preserves other seats through pla
     expect(read("sensitivity")).toBe(7.5); expect(read("filter")).toBe(true);
     const capture = startup.captureNextFrame(); await startup.step();
     await Bun.write("/tmp/frontend-mouse-baseline.png", encodePng(640, 480, await capture));
-    key(KeyCode.Escape); key(KeyCode.Escape); key(KeyCode.Escape); focus("ui:startup:multi"); key(KeyCode.Enter); focus("ui:startup:play"); key(KeyCode.Enter);
+    key(KeyCode.Escape); key(KeyCode.Escape); key(KeyCode.Escape); focus("ui:startup:native"); key(KeyCode.Enter); focus("ui:startup:custom"); key(KeyCode.Enter); focus("ui:startup:play"); key(KeyCode.Enter);
     await startup.step();
-    const result = opened.mock.results.at(-1); if (result?.type !== "return") throw new Error(`Game did not open: ${prints.join("")}`);
+    const result = prepared.mock.results.at(-1) ?? opened.mock.results.at(-1); if (result?.type !== "return") throw new Error(`Game did not open: ${prints.join("")}`);
     const input = await result.value;
     expect(input.locals.length).toBe(2); expect(input.locals[0]?.builder.mouse.tuning.sensitivity).toBe(7.5);
     expect(input.locals[1]?.builder.mouse.tuning.sensitivity).toBe(12); expect(input.locals[1]?.builder.mouse.tuning.filter).toBe(false);
@@ -127,12 +128,12 @@ test("startup reads selected product profiles, preserves other seats through pla
     app = await StartupApplication.open(parsed.options, { print: () => undefined }, join(root, "saves"));
     const restored = control(app.preferences.bindings(), "acceleration"); if (restored.kind !== "slider") throw new Error("Missing restored acceleration");
     expect(restored.read()).toBe(Math.fround(0.8)); expect(app.preferences.values).toEqual({});
-  } finally { await app?.close(); opened.mockRestore(); registration.mockRestore(); await rm(root, { recursive: true, force: true }); }
+  } finally { await app?.close(); opened.mockRestore(); prepared.mockRestore(); registration.mockRestore(); await rm(root, { recursive: true, force: true }); }
 }, 60000);
 
 for (const width of [320, 640]) test(`startup Controls at ${width} reaches shared mouse settings and Gyro across pages`, async () => {
   const root = await mkdtemp(join(tmpdir(), "frontend-mouse-")), height = width * 3 / 4;
-  const parsed = parseApplicationCommand(["--game", "q1-classic-id1", "--renderer", "cpu", "--hidden", "--width", String(width), "--height", String(height), "--user-content-root", root]);
+  const parsed = parseApplicationCommand(["--game", "q1-classic-id1", "--renderer", "cpu", "--hidden", "--width", String(width), "--height", String(height), "--content-root", testCorpusRoot(), "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Missing startup options");
   const menus = new Map<UiMenuId, () => UiMenu>(), observed: { controller: NativeUiController | null } = { controller: null };
   const register = NativeUiController.prototype.register;
@@ -145,9 +146,6 @@ for (const width of [320, 640]) test(`startup Controls at ${width} reaches share
     const startup = app, seat = startup.inputSeat, controller = observed.controller;
     if (seat === null || controller === null) throw new Error("Missing startup input");
     const key = (code: number): void => { for (const down of [true, false]) startup.input({ seat, kind: "key", code, down, repeat: false, timeMilliseconds: performance.now() }); };
-    for (let i = 0; i < 3; i++) key(KeyCode.Down); key(KeyCode.Enter);
-    key(KeyCode.Down); key(KeyCode.Down); key(KeyCode.Enter);
-    expect(controller.activeMenu).toBe("menu:settings:input:0");
     const focus = (id: string): void => {
       for (let i = 0; i < 40; i++) {
         const current = controller.state().focus; if (current.kind === "menu" && current.control === id) return;
@@ -155,6 +153,9 @@ for (const width of [320, 640]) test(`startup Controls at ${width} reaches share
       }
       throw new Error(`Unreachable startup control ${id}`);
     };
+    focus("ui:startup:options"); key(KeyCode.Enter);
+    focus("ui:startup:controls"); key(KeyCode.Enter);
+    expect(controller.activeMenu).toBe("menu:settings:input:0");
     const page = menus.get("menu:settings:input:0")?.(); if (page === undefined) throw new Error("Missing Controls menu");
     expect(page.scroll?.rect.y).toBe(92); expect(page.scroll?.rect.height).toBe(300);
     expect(page.controls.some(row => row.label === "Next page")).toBe(false);

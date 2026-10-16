@@ -90,6 +90,15 @@ export class ServerBrowser {
   }
   request(address: NetworkAddress, now: number, kind: DiscoveryRequestKind = "info", timeoutMilliseconds?: number | null): DiscoveryRequestHandle | null {
     if (timeoutMilliseconds !== undefined && timeoutMilliseconds !== null && (!Number.isFinite(timeoutMilliseconds) || timeoutMilliseconds < 0)) throw new RangeError("Invalid discovery request timeout");
+    // An explicit request adopts an identical in-flight background query
+    // instead of issuing a second challenge the response cannot satisfy both.
+    for (const pending of this.queries.values()) {
+      if (!pending.retainResult && pending.requestKind === kind && addressKey(pending.address) === addressKey(address)) {
+        this.queries.set(pending.handle, { ...pending, retainResult: true, timeoutMilliseconds });
+        this.results.set(pending.handle, Object.freeze({ kind: "pending", address: pending.address, requestKind: pending.requestKind, sentAt: pending.sentAt }));
+        return pending.handle;
+      }
+    }
     return this.startRequest(address, now, kind, true, timeoutMilliseconds);
   }
   requestResult(handle: DiscoveryRequestHandle): DiscoveryRequestResult | null { return this.results.get(handle) ?? null; }

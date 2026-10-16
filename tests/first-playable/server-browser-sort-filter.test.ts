@@ -1,4 +1,5 @@
 import { decodePng } from "../../src/formats/images/png.ts";
+import { testCorpusRoot } from "../support/corpus.ts";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -61,7 +62,7 @@ async function populate(browser: StartupServerBrowser, peers: readonly UdpTransp
 test("ordinary shared browser controls sort and filter received Q1/Q2/Q3 servers and render offscreen", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "quake-browser-sorting-")), config = new ConfigStore(directory);
   const browser = await StartupServerBrowser.open(config), peers: UdpTransport[] = [];
-  const corpusRoot = resolve(import.meta.dir, "../../../qfiles"), catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
+  const corpusRoot = testCorpusRoot(), catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
   const command = parseApplicationCommand(["--content-root", corpusRoot]);
   if (command.kind !== "run" && command.kind !== "menu") throw new Error("Expected menu options");
   const model = new StartupSelectionModel(catalog, command.options), identity = createIdentityOwner("browser-sort-filter"), seat = identity.seat(0);
@@ -81,6 +82,14 @@ test("ordinary shared browser controls sort and filter received Q1/Q2/Q3 servers
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
   };
   const key = (code: number, down: boolean): void => { menu.input({ seat, timeMilliseconds: 0, kind: "key", code, down, repeat: false }); };
+  const activate = (id: string): void => {
+    for (let i = 0; i < 40; i++) {
+      const current = menu.controller.state().focus;
+      if (current.kind === "menu" && current.control === id) break;
+      key(KeyCode.Tab, true); key(KeyCode.Tab, false);
+    }
+    key(KeyCode.Enter, true); key(KeyCode.Enter, false);
+  };
   const search = (text: string): void => {
     click(100, 230); key(KeyCode.Control, true); key(117, true); key(117, false); key(KeyCode.Control, false);
     menu.input({ seat, timeMilliseconds: 0, kind: "text", text });
@@ -111,10 +120,12 @@ test("ordinary shared browser controls sort and filter received Q1/Q2/Q3 servers
     key(KeyCode.Escape, true); key(KeyCode.Escape, false);
     expect(menu.controller.activeMenu).toBe("menu:startup:main");
     for (let index = 0; index < 5; index++) peers.push(await UdpTransport.bind({ host: "127.0.0.1", port: 0 }));
-    click(100, 130); click(100, 300); click(100, 400);
+    click(100, 130); click(100, 300);
+    activate("ui:startup:browse");
     expect(menu.controller.activeMenu).toBe("menu:startup:servers");
     const protocols: readonly BrowserProtocol[] = ["q1", "q2", "q3"];
     for (const protocol of protocols) {
+      for (let step = 0; step < 4 && browser.protocol !== protocol; step++) click(400, 122);
       expect(browser.protocol).toBe(protocol);
       await populate(browser, peers, protocol);
       if (process.env["QUAKE_BROWSER_CAPTURE_STAGE"] === "before") {
@@ -143,13 +154,13 @@ test("ordinary shared browser controls sort and filter received Q1/Q2/Q3 servers
       click(100, 198); expect(browser.hideFull).toBe(true); expect(names()).toContain("Unknown capacity"); expect(names()).toContain("Unanswered");
       expect(names()).not.toContain("Bravo Base"); expect(names()).toContain("Charlie Coop");
       if (protocol === "q2") await capture("after-filters");
-      click(100, 266);
+      activate("ui:startup:server-filters-back");
       expect(menu.controller.activeMenu).toBe("menu:startup:servers");
       if (protocol === "q2") await capture("after-browser");
       search("mhub"); expect(names()).toEqual(["Charlie Coop"]);
       search("absent-server"); expect(names()).toEqual([]); expect(browser.emptyMessage).toBe("No servers match these filters.");
       if (protocol === "q2") await capture("after-empty");
-      search(""); click(470, 230); click(100, 164); click(100, 198); click(450, 130); click(100, 266);
+      search(""); click(470, 230); click(100, 164); click(100, 198); click(450, 130); activate("ui:startup:server-filters-back");
       expect(browser.rows()).toHaveLength(5); expect(browser.sortOrder).toBe("ping-low");
       click(400, 122);
     }

@@ -1,3 +1,4 @@
+import { corpusHasFile, testCorpusRoot } from "../support/corpus.ts";
 import { defaultUserContentRoot } from "../../src/content/user-data.ts";
 import { applicationWeaponBehaviorChoices } from "../../src/app/bootstrap/weapon-behavior-selection.ts";
 import { createContentId, type GameFamily, type ProviderTiming } from "../../src/contracts/content.ts";
@@ -5,7 +6,6 @@ import { expectedProducts, type CatalogProduct } from "../../src/content/catalog
 import { preflightApplicationMatch } from "../../src/app/bootstrap/match-preflight.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { discoverInstalledContent, InstalledCatalog, presetChoice, resolveLaunch } from "../../src/content/catalog/index.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { openMountPlan } from "../../src/content/mounts/index.ts";
@@ -13,8 +13,8 @@ import { applicationPreset, applicationOptionsForRecipe, resolveApplicationMovem
 import { StartupSelectionModel } from "../../src/app/bootstrap/startup-selection.ts";
 import { defaultNetQuakeProfile } from "../../src/network/q1/profile.ts";
 
-const corpus = resolve(import.meta.dir, "../../../qfiles");
-test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("startup choices resolve independent installed source selections without starting a world", async () => {
+const corpus = testCorpusRoot();
+test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3") || !corpusHasFile("q2/baseq2/pak0.pak"))("startup choices resolve independent installed source selections without starting a world", async () => {
   const command = parseApplicationCommand(["--content-root", corpus]);
   if (command.kind !== "run" && command.kind !== "menu") throw new Error("Expected launch options");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
@@ -102,7 +102,7 @@ test("Q1 hosting selects native protocol and removes stale protocol outside NetQ
   }
 });
 
-test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup roster edits actual map classes with native defaults and exceptions", async () => {
+test.skipIf(!corpusHasFile("q1/id1/PAK0.PAK"))("mouse startup roster edits actual map classes with native defaults and exceptions", async () => {
   const { StartupMenu } = await import("../../src/app/bootstrap/startup-menu.ts");
   const { createIdentityOwner } = await import("../../src/contracts/identity.ts");
   const { createMountPlanId } = await import("../../src/contracts/content.ts");
@@ -186,7 +186,28 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
     click(1); click(0);
     expect((await model.resolve()).recipe.presentation.doppler).toEqual({ kind: "source" });
     menu.controller.closeMenu(); menu.controller.closeMenu();
-    click(0); click(5); click(2); click(1); click(1);
+    click(0); click(5);
+    expect(menu.controller.activeMenu).toBe("menu:startup:session");
+    const pressEnter = (): void => {
+      menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 13, down: true, repeat: false });
+      menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 13, down: false, repeat: false });
+    };
+    for (let i = 0; i < 40; i++) {
+      const current = menu.controller.state().focus;
+      if (current.kind === "menu" && current.control === "ui:startup:enemies") break;
+      menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 9, down: true, repeat: false });
+      menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 9, down: false, repeat: false });
+    }
+    pressEnter();
+    const customIndex = model.rows().find(row => row.id === "enemies")?.choices.findIndex(option => option.id === "custom") ?? -1;
+    expect(customIndex).toBeGreaterThanOrEqual(0);
+    const clickAt = (x: number, y: number) => {
+      menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x, y }, delta: { x: 0, y: 0 } });
+      menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });
+      menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
+    };
+    for (let page = 0; page < Math.floor(customIndex / 8); page++) clickAt(252, 368);
+    clickAt(100, 138 + customIndex % 8 * 27 + 12);
     await model.prepareMonsterRoster();
     expect(menu.controller.activeMenu).toBe("menu:startup:roster");
     expect(model.monsterRosterRows()[0]?.value).toBe("native");
@@ -263,7 +284,7 @@ for (const profile of [{ family: "q1", product: "q1-classic-id1", map: "e1m1" },
   const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const directory = await mkdtemp(`${tmpdir()}/quake-browser-`), config = new ConfigStore(directory);
-  const command = parseApplicationCommand(["--game", profile.product, "--map", profile.map, "--character", profile.family, "--movement", profile.family, "--dedicated", "--listen", "0", "--bind", "127.0.0.1"]);
+  const command = parseApplicationCommand(["--content-root", corpus, "--game", profile.product, "--map", profile.map, "--character", profile.family, "--movement", profile.family, "--dedicated", "--listen", "0", "--bind", "127.0.0.1"]);
   if (command.kind !== "run") throw new Error("Missing host options");
   const app = await Application.open(command.options, { print: () => undefined });
   const browser = await StartupServerBrowser.open(config);
@@ -289,7 +310,7 @@ for (const profile of [{ family: "q1", product: "q1-classic-id1", map: "e1m1" },
   } finally { browser.close(); await app.close(); await rm(directory, { recursive: true, force: true }); }
 }, 30000);
 
-test.skipIf(!existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("native campaign presets replace gameplay choices without changing the custom draft", async () => {
+test.skipIf(!corpusHasFile("q2/baseq2/pak0.pak"))("native campaign presets replace gameplay choices without changing the custom draft", async () => {
   const command = parseApplicationCommand(["--content-root", corpus]);
   if (command.kind !== "run" && command.kind !== "menu") throw new Error("Expected launch options");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
@@ -326,7 +347,7 @@ test.skipIf(!existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("native campaign
   await expect(model.resolvePreset("q1-rerelease-id1", 5)).rejects.toThrow("Invalid preset difficulty");
 }, 60000);
 
-test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("native Q3 preset uses the authored training arena and bot difficulty", async () => {
+test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3"))("native Q3 preset uses the authored training arena and bot difficulty", async () => {
   const command = parseApplicationCommand(["--content-root", corpus]);
   if (command.kind !== "run" && command.kind !== "menu") throw new Error("Expected launch options");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
@@ -355,7 +376,7 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("native Q3 pres
 }, 60000);
 
 
-test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")))("native rerelease presets do not depend on installed classic providers", async () => {
+test.skipIf(!corpusHasFile("q2/rerelease/baseq2/pak0.pak"))("native rerelease presets do not depend on installed classic providers", async () => {
   const command = parseApplicationCommand(["--content-root", corpus, "--game", "q2-rerelease-baseq2", "--movement", "q2", "--character", "q2"]);
   if (command.kind !== "run" && command.kind !== "menu") throw new Error("Expected launch options");
   const installed = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
@@ -374,7 +395,7 @@ test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")))("nativ
 }, 60000);
 
 
-test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("mixed match eligibility uses source rules on Q3 geometry before launch", async () => {
+test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3"))("mixed match eligibility uses source rules on Q3 geometry before launch", async () => {
   const command = parseApplicationCommand(["--content-root", corpus, "--game", "q2-rerelease-baseq2", "--mode", "deathmatch", "--rules", "deathball"]);
   if (command.kind !== "run") throw new Error("Expected launch options");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
@@ -389,7 +410,7 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("mixed match el
 }, 30000);
 
 
-test.skipIf(!existsSync(resolve(corpus, "q3a/missionpack/pak0.pk3")))("configured Team Arena objectives preflight preserves explicit foreign anchors", async () => {
+test.skipIf(!corpusHasFile("q3a/missionpack/pak0.pk3"))("configured Team Arena objectives preflight preserves explicit foreign anchors", async () => {
   const command = parseApplicationCommand(["--content-root", corpus, "--game", "q3-missionpack", "--map", "mpteam1", "--mode", "deathmatch"]);
   if (command.kind !== "run") throw new Error("Expected launch options");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });

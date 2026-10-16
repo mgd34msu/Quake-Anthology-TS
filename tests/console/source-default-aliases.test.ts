@@ -1,8 +1,8 @@
+import { corpusFile, corpusHasFile } from "../support/corpus.ts";
 import { expect, test } from "bun:test";
-import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { openArchive } from "../../src/content/archive/index.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { CommandDialect } from "../../src/contracts/common.ts";
@@ -10,10 +10,9 @@ import { CommandBuffer } from "../../src/core/commands/index.ts";
 import { ApplicationImageSettings } from "../../src/app/bootstrap/image-settings.ts";
 import { ApplicationConsoleRouting } from "../../src/app/bootstrap/console.ts";
 
-const corpus = resolve(import.meta.dir, "../../../qfiles");
 for (const donor of [{ path: "q1/id1/PAK0.PAK", q1Settings: true }, { path: "q2/baseq2/pak0.pak", q1Settings: false }, { path: "q3a/baseq3/pak0.pk3", q1Settings: false }]) {
-  test.skipIf(!existsSync(join(corpus, donor.path)))(`${donor.path} complete retail default.cfg reaches canonical controls in every world dialect`, async () => {
-    const archive = await openArchive(join(corpus, donor.path)), root = await mkdtemp(join(tmpdir(), "retail-default-aliases-"));
+  test.skipIf(!corpusHasFile(donor.path))(`${donor.path} complete retail default.cfg reaches canonical controls in every world dialect`, async () => {
+    const archive = await openArchive(corpusFile(donor.path)), root = await mkdtemp(join(tmpdir(), "retail-default-aliases-"));
     try {
       const entry = archive.findEntries("default.cfg")[0]; if (entry === undefined) throw new Error("Missing retail default.cfg");
       const contents = new TextDecoder().decode(await archive.readEntry(entry)); expect(contents.length).toBeGreaterThan(1000);

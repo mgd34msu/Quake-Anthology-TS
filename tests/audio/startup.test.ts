@@ -1,3 +1,4 @@
+import { corpusHasFile, testCorpusRoot } from "../support/corpus.ts";
 import { defaultAudioOutputFormat } from "../../src/audio/output.ts";
 import { bindMusicPlaylistSettings } from "../../src/ui/settings/index.ts";
 import { registerMusicSettings } from "../../src/app/bootstrap/audio/playlist-settings.ts";
@@ -11,7 +12,6 @@ import type { CommandContext, CommandDialect } from "../../src/contracts/common.
 import { expect, spyOn, test } from "bun:test";
 import { ApplicationMusic, worldMusicTrack } from "../../src/app/bootstrap/audio/music.ts";
 import { SoundBank, UnifiedAudio, remapQ2MusicTrack } from "../../src/audio/index.ts";
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { StartupAudio } from "../../src/app/bootstrap/startup-audio.ts";
@@ -58,8 +58,8 @@ test("frontend audio uses saved gains, preserves selected overrides, and saves t
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test.skipIf(!existsSync(join(import.meta.dir, "../../../qfiles/q3a/baseq3/pak0.pk3")) || !existsSync(join(import.meta.dir, "../../../qfiles/q2/rerelease/baseq2/music/track77.ogg")))("frontend shares real menu PCM and Q2 rerelease title music, with mute and cleanup", async () => {
-  const catalog = await discoverInstalledContent({ corpusRoot: join(import.meta.dir, "../../../qfiles"), discoverMods: false, userContentRoot: join(evidence, "unused-user-content") });
+test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3") || !corpusHasFile("q2/rerelease/baseq2/music/track77.ogg"))("frontend shares real menu PCM and Q2 rerelease title music, with mute and cleanup", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: testCorpusRoot(), discoverMods: false, userContentRoot: join(evidence, "unused-user-content") });
   const q3 = catalog.product("q3-baseq3");
   const theme = catalog.products.find(product => product.expectation.family === "q2" && product.expectation.edition === "rerelease" && product.expectation.campaign === "baseq2");
   if (theme === undefined) throw new Error("Q2 rerelease test corpus missing");

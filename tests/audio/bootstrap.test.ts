@@ -1,3 +1,4 @@
+import { testCorpusRoot } from "../support/corpus.ts";
 import type { Q3SeatAudioFrame } from "../../src/app/bootstrap/audio/q3.ts";
 import { ApplicationInput } from "../../src/app/bootstrap/input.ts";
 import { InputRouter } from "../../src/input/router.ts";
@@ -5,7 +6,6 @@ import { SdlControllers } from "../../src/platform/controller.ts";
 import { SdlAudioDevice } from "../../src/platform/audio.ts";
 import type { ControllerOperationResult } from "../../src/platform/controller.ts";
 import { FrontendPreferences, applyFrontendPreferences } from "../../src/app/bootstrap/frontend-preferences.ts";
-import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { UnifiedAudio } from "../../src/audio/engine.ts";
 import { Application } from "../../src/app/bootstrap/application.ts";
@@ -40,7 +40,7 @@ test("audio diagnostics and play use the actual common console and queued PCM fo
   };
   try {
     for (const fixture of fixtures) {
-      const parsed = parseApplicationCommand(["--game", fixture.game, "--map", fixture.map, "--movement", fixture.family, "--character", fixture.family,
+      const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", fixture.game, "--map", fixture.map, "--movement", fixture.family, "--character", fixture.family,
         "--renderer", "cpu", "--hidden", "--width", "160", "--height", "120"]);
       if (parsed.kind !== "run") throw new Error("Expected audio console launch");
       const messages: string[] = [];
@@ -89,7 +89,7 @@ test("audio diagnostics and play use the actual common console and queued PCM fo
 
 // Run with SDL_AUDIODRIVER=dummy; this exercises the normal shared mixer/device path.
 test("bootstrap plays source player events, filters a wet listener, replaces music and closes world audio", async () => {
-  const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--character", "q2", "--movement", "q2"]);
+  const command = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q2-classic-baseq2", "--character", "q2", "--movement", "q2"]);
   if (command.kind !== "run") throw new Error("Expected run options");
   const content = await loadApplicationContent(command.options);
   const identity = createIdentityOwner("bootstrap-audio");
@@ -205,7 +205,7 @@ test("measured audio work respects explicit lookahead and the device queue limit
 
 
 test("explicit Quake II environments preserve native Q1 and Q3 audio and trace actual geometry", async () => {
-  const corpus = join(import.meta.dir, "../../../qfiles");
+  const corpus = testCorpusRoot();
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
   const audioContent = catalog.require("q2-rerelease-baseq2").id;
   const cgameFrames: Q3SeatAudioFrame[] = [], tactileRequests: { readonly content: string; readonly sound: string }[] = [];
@@ -232,7 +232,7 @@ test("explicit Quake II environments preserve native Q1 and Q3 audio and trace a
   try {
     for (const [game, map] of [["q2-rerelease-baseq2", "base1"], ["q1-classic-id1", "e1m1"], ["q3-baseq3", "q3dm1"]]) {
       if (game === undefined || map === undefined) throw new Error("Missing actual map pair");
-      const command = parseApplicationCommand(["--content-root", corpus, "--game", game, "--map", map, "--renderer", "cpu", "--hidden", "--width", "320", "--height", "200"]);
+      const command = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", game, "--map", map, "--renderer", "cpu", "--hidden", "--width", "320", "--height", "200"]);
       if (command.kind !== "run") throw new Error("Expected actual map command");
       const preset = applicationPreset(catalog, command.options);
       const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), presentation: { kind: "selected", value: { ...preset.presentation, environment: { kind: "selected", resource: { content: audioContent, path: "sound/default.environments" } } } } } });
@@ -304,7 +304,7 @@ test("explicit Quake II environments preserve native Q1 and Q3 audio and trace a
 }, 60000);
 
 test("actual rerelease sound dispatch scopes genuine tactile data to its owning input seat", async () => {
-  const command = parseApplicationCommand(["--game", "q2-rerelease-baseq2", "--character", "q2", "--movement", "q2", "--map", "base1", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "200", "--seats", "2"]);
+  const command = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q2-rerelease-baseq2", "--character", "q2", "--movement", "q2", "--map", "base1", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "200", "--seats", "2"]);
   if (command.kind !== "run") throw new Error("Expected actual map command");
   const joined: { readonly audio: ApplicationAudio; readonly input: ApplicationInput }[] = [];
   const pendingHaptics: Promise<void>[] = [];

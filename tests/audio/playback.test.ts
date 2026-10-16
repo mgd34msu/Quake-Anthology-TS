@@ -1,3 +1,4 @@
+import { corpusFile } from "../support/corpus.ts";
 import { expect, test } from "bun:test";
 import { openArchive } from "../../src/content/archive/index.ts";
 import { CvarRegistry } from "../../src/core/cvars/index.ts";
@@ -43,10 +44,9 @@ test("component Q3 loops and channels remain independent on the same actor and s
     expect(audio.mix(1).every(value => value === 0)).toBe(true);
 });
 test("real Q1, Q2 rerelease and Q3 archive sounds decode and mix", async () => {
-    const corpus = join(import.meta.dir, "../../../qfiles");
     const cases = [{ path: "q1/rerelease/id1/pak0.pak", family: "q1" }, { path: "q2/rerelease/baseq2/pak0.pak", family: "q2" }, { path: "q3a/baseq3/pak0.pk3", family: "q3" }];
     for (const entry of cases) {
-        const archive = await openArchive(join(corpus, entry.path));
+        const archive = await openArchive(corpusFile(entry.path));
         try {
             const wav = archive.entries.find(value => entry.family === "q2" ? value.path === "sound/player/steps/splash1.wav" : value.path.startsWith("sound/") && value.path.endsWith(".wav"));
             if (wav === undefined)
@@ -105,7 +105,7 @@ test("music changes intro to loop and keeps pause position", () => {
     player.close();
 });
 test("Q2 environment data selects presets and the owned DSP produces a tail", async () => {
-    const archive = await openArchive(join(import.meta.dir, "../../../qfiles/q2/rerelease/baseq2/pak0.pak"));
+    const archive = await openArchive(corpusFile("q2/rerelease/baseq2/pak0.pak"));
     try {
         const entry = archive.entries.find(value => value.path === "sound/default.environments");
         if (entry === undefined)
@@ -279,7 +279,7 @@ test("dense mixed voices clip once without positive or negative accumulator wrap
 });
 
 test("actual id1 PCM survives source-supported trailing authoring metadata", async () => {
-    const archive = await openArchive(join(import.meta.dir, "../../../qfiles/q1/id1/PAK0.PAK"));
+    const archive = await openArchive(corpusFile("q1/id1/PAK0.PAK"));
     try {
         for (const entry of [{ path: "sound/knight/ksight.wav", frames: 13436 }, { path: "sound/doors/baseuse.wav", frames: 16360 }]) {
             const file = archive.entries.find(value => value.path === entry.path);

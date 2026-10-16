@@ -222,7 +222,7 @@ export class StartupApplication {
   private async saveFrontendInput(): Promise<void> {
     const graphics = this.graphics, client = this.client;
     if (graphics === null) return;
-    await graphics.inputProfile.save(this.preferences.values, this.frontendHistory);
+    await graphics.inputProfile.save(this.preferences.effectiveValues(), this.frontendHistory);
     if (client === null || client.platform.current?.kind !== "menu") return;
     const settings = this.preferenceStore ?? client.settings, router = client.platform.current.router;
     const routing = this.frontendRoutingState(router);
@@ -249,7 +249,9 @@ export class StartupApplication {
     const options = this.model.options;
     const inputKey = JSON.stringify([movementDialect(options), this.model.bindingItems()]);
     if (!force && this.baselineProduct === options.product && this.baselineInput === inputKey) return;
-    await this.persistPreferences();
+    // Never persist before the first baseline load: writing the (default)
+    // global tuning first would clobber the per-product seat profile being read.
+    if (this.baselineProduct !== null) await this.persistPreferences();
     const product = this.model.catalog.product(options.product);
     const settings = new ConfigStore(product.userContent?.root
       ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));

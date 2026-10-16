@@ -189,7 +189,12 @@ async function openMenu(config: ConfigStore) {
   expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
   key(KeyCode.Enter, true); key(KeyCode.Enter, false);
   expect(menu.controller.activeMenu).toBe("menu:startup:session");
-  click(450, 407);
+  for (let i = 0; i < 80; i++) {
+    const current = menu.controller.state().focus;
+    if (current.kind === "menu" && current.control === "ui:startup:back") break;
+    key(KeyCode.Tab, true); key(KeyCode.Tab, false);
+  }
+  key(KeyCode.Enter, true); key(KeyCode.Enter, false);
   expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
   click(100, 436);
   expect(menu.controller.activeMenu).toBe("menu:startup:main");
@@ -201,7 +206,7 @@ async function openMenu(config: ConfigStore) {
   }
   key(KeyCode.Enter, true); key(KeyCode.Enter, false);
   expect(menu.controller.activeMenu).toBe("menu:startup:servers");
-  click(400, 122);
+  for (let i = 0; i < 4 && browser.protocol !== "q2"; i++) click(400, 122);
   expect(browser.protocol).toBe("q2");
   return { browser, menu, connections, click, address,
     async close() { menu.close(); await browser.close(); art.close(); images.close(); } };

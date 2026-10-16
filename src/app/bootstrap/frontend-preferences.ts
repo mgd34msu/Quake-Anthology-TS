@@ -23,7 +23,8 @@ export type FrontendPreferenceOverrides = Partial<FrontendPreferenceValues>;
 export function applyFrontendPreferences(values: FrontendPreferenceOverrides, input: ApplicationInput, audio: ApplicationAudio): void {
   if (values.effectsVolume !== undefined) audio.effectsVolume = values.effectsVolume;
   if (values.musicVolume !== undefined) audio.musicVolume = values.musicVolume;
-  for (const local of input.locals) applyFrontendInput(values, local);
+  // Frontend values belong to the frontend seat; other seats keep their own profiles.
+  const local = input.locals[0]; if (local !== undefined) applyFrontendInput(values, local);
 }
 export function readFrontendInput(local: LocalInput): FrontendInputValues {
   const mouse = local.builder.mouse.tuning;
@@ -104,6 +105,15 @@ export class FrontendPreferences {
       rumble: this.values.controllerVibration ?? this.vibrationBaseline.controllerVibration,
       rumbleStrength: this.values.controllerVibrationStrength ?? this.vibrationBaseline.controllerVibrationStrength };
   }
+  /** Effective frontend-seat values: saved/global baseline overlaid with explicit edits. */
+  effectiveValues(): FrontendPreferenceOverrides {
+    const mouse = this.mouseBaseline;
+    return { sensitivity: mouse.sensitivity, pitch: mouse.pitch, yaw: mouse.yaw, invertMouse: mouse.invertPitch,
+      acceleration: mouse.acceleration, filter: mouse.filter, lookSpring: mouse.lookSpring === true, lookStrafe: mouse.lookStrafe === true,
+      freeLook: mouse.freeLook, controllerVibration: this.vibrationBaseline.controllerVibration,
+      controllerVibrationStrength: this.vibrationBaseline.controllerVibrationStrength,
+      ...(this.alwaysRunBaseline === undefined ? {} : { alwaysRun: this.alwaysRunBaseline }), ...this.values };
+  }
   async saveGlobal(): Promise<void> {
     if (this.sharedSettings === undefined) return;
     const tuning = this.effectiveTuning();
@@ -130,14 +140,6 @@ export class FrontendPreferences {
         if (global.alwaysRun !== undefined) this.alwaysRunBaseline = global.alwaysRun;
         this.vibrationBaseline = { controllerVibration: global.rumble, controllerVibrationStrength: global.rumbleStrength ?? 1 };
       }
-      // Seed session overrides from the effective global tuning so existing
-      // per-product saves and game launches materialize the shared values.
-      this.values = { ...this.values,
-        sensitivity: this.mouseBaseline.sensitivity, pitch: this.mouseBaseline.pitch, yaw: this.mouseBaseline.yaw,
-        invertMouse: this.mouseBaseline.invertPitch, acceleration: this.mouseBaseline.acceleration, filter: this.mouseBaseline.filter,
-        lookSpring: this.mouseBaseline.lookSpring === true, lookStrafe: this.mouseBaseline.lookStrafe === true, freeLook: this.mouseBaseline.freeLook,
-        controllerVibration: this.vibrationBaseline.controllerVibration, controllerVibrationStrength: this.vibrationBaseline.controllerVibrationStrength,
-        ...(this.alwaysRunBaseline === undefined ? {} : { alwaysRun: this.alwaysRunBaseline }) };
     }
   }
   async saveAudioBaseline(settings: ConfigStore): Promise<void> {

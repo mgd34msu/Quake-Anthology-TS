@@ -109,10 +109,17 @@ export class UdpTransport implements DatagramTransport<IpAddress> {
     const proxied = to.kind === "ipv4" && relay !== undefined && relay !== null && !to.host.every(value => value === 255);
     const destination = proxied ? relay : to;
     const bytes = proxied ? socksDatagram(to, payload) : payload.slice();
-    try { return this.socket.send(bytes, destination.port, addressHost(destination)); }
-    catch (error) {
-      if (!(error instanceof Error) || !("syscall" in error) || error.syscall !== "send") throw error;
-      this.queue.push({ kind: "error", error }); return false;
+    // Linux delivers pending ICMP errors (e.g. port-unreachable from an
+    // earlier datagram to a dead endpoint) by failing the next sendmsg
+    // without transmitting. The failed call consumes one queued error, so
+    // retry a bounded number of times before reporting the send as lost.
+    for (let attempt = 0; ; attempt++) {
+      try { return this.socket.send(bytes, destination.port, addressHost(destination)); }
+      catch (error) {
+        if (!(error instanceof Error) || !("syscall" in error) || error.syscall !== "send") throw error;
+        this.queue.push({ kind: "error", error });
+        if (attempt >= 8) return false;
+      }
     }
   }
   poll(): ReceiveEvent<IpAddress> | null {

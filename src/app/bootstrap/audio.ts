@@ -31,7 +31,7 @@ import type { Q3CharacterPresentationEvent } from "./simulation/types.ts";
 import type { LoadedApplicationContent } from "./content.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import type { UiSound } from "../../ui/common/controller.ts";
-import { ApplicationMusic, q1MusicFallback, worldMusicTrack } from "./audio/music.ts";
+import { ApplicationMusic, musicFallback, worldMusicTrack } from "./audio/music.ts";
 import { q2EntitySound, q2MuzzleSounds, q2MonsterMuzzleSounds } from "./audio/q2-events.ts";
 import { q3VoiceFallback } from "./audio/q3.ts";
 import type { Q3SeatAudioFrame } from "./audio/q3.ts";
@@ -356,7 +356,7 @@ export class ApplicationAudio {
     if (owner !== undefined && this.retiredOwners.has(presentationOwnerKey(owner))) return;
     const request = ++this.musicRequest; this.musicOwner = owner;
     const bank = await this.bank(content), product = this.content.catalog.product(content).expectation;
-    const alternate = q1MusicFallback(content, this.content.catalog);
+    const alternate = musicFallback(content, this.content.catalog);
     let tracks: readonly string[] = [];
     if (product.family === "q2") {
       let pending = this.playlists.get(content);

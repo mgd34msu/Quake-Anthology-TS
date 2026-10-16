@@ -1,6 +1,6 @@
-import { join } from "node:path";
+import { corpusFile } from "../support/corpus.ts";
 import { UnifiedAudio, MusicPlayer, VorbisPcmStream } from "../../src/audio/index.ts";
-const stream = VorbisPcmStream.open(join(import.meta.dir, "../../../qfiles/q1/rerelease/rogue/music/track02.ogg"));
+const stream = VorbisPcmStream.open(corpusFile("q1/rerelease/rogue/music/track02.ogg"));
 using audio = new UnifiedAudio({ sampleRate: 48000, milliseconds: () => 100, random: () => 123 });
 const music = new MusicPlayer(48000, "q1");
 music.setVolume(0.25);

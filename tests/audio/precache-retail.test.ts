@@ -1,3 +1,4 @@
+import { testCorpusRoot } from "../support/corpus.ts";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,7 +21,7 @@ test("native source precaches feed the shared list and actual decoded sound cach
       { game: "q2-rerelease-baseq2", map: "base1", family: "q2", sound: "weapons/grenlf1a.wav" },
     ]) {
       const parsed = parseApplicationCommand(["--game", fixture.game, "--map", fixture.map, "--movement", fixture.family, "--character", fixture.family,
-        "--content-root", join(import.meta.dir, "../../../qfiles"), "--user-content-root", root, "--dedicated"]);
+        "--content-root", testCorpusRoot(), "--user-content-root", root, "--dedicated"]);
       if (parsed.kind !== "run") throw new Error("Expected source precache fixture");
       const content = await loadApplicationContent(parsed.options), identity = createIdentityOwner(`precache-${fixture.game}`);
       const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts, skill: 0, mode: "singleplayer", seed: 17, maxClients: 1 });
