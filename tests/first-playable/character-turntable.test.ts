@@ -53,6 +53,45 @@ test.skipIf(!corpusAvailable)("turntable renders installed Q1 colors and Q2/Q3 s
     const q3Rotated = await render("q3-baseq3", { family: "q3", model: "sarge", skin: "blue", topColor: 0, bottomColor: 0 }, 2.1);
     expect(differingBytes(q3Blue, q3Red)).toBeGreaterThan(500);
     expect(differingBytes(q3Blue, q3Rotated)).toBeGreaterThan(1000);
+
+    // Q3 diffuse TGA alpha is ancillary data, not cutout transparency. Skins
+    // such as Ranger/Wrack and models such as Tank Jr. and Xaero encode most
+    // of that channel near zero while their RGB geometry is fully opaque.
+    const q3RangerDefault = await render("q3-baseq3", { family: "q3", model: "ranger", skin: "", topColor: 0, bottomColor: 0 });
+    const q3RangerWrack = await render("q3-baseq3", { family: "q3", model: "ranger", skin: "wrack", topColor: 0, bottomColor: 0 });
+    expect(visiblePixels(q3RangerWrack)).toBe(visiblePixels(q3RangerDefault));
+    expect(differingBytes(q3RangerDefault, q3RangerWrack)).toBeGreaterThan(500);
+    for (const request of [
+      { family: "q3", model: "ranger", skin: "wrack", topColor: 0, bottomColor: 0 },
+      { family: "q3", model: "tankjr", skin: "", topColor: 0, bottomColor: 0 },
+      { family: "q3", model: "xaero", skin: "", topColor: 0, bottomColor: 0 },
+    ] satisfies readonly Omit<CharacterTurntableRequest, "product">[]) {
+      const { product, mounts } = await mountedFor("q3-baseq3");
+      const scene = await loadCharacterTurntableScene(mounts, { product, ...request });
+      let nonOpaque = 0;
+      for (const texture of scene.textures)
+        for (let offset = 3; offset < texture.pixels.length; offset += 4)
+          if (texture.pixels[offset] !== 255) nonOpaque++;
+      expect(nonOpaque).toBe(0);
+    }
+
+    // Several retail skins name Quake 3 script shaders rather than image
+    // files. Those surfaces must resolve through scripts/*.shader instead
+    // of falling back to the missing-texture checker.
+    const isMissingChecker = (texture: { readonly width: number; readonly height: number; readonly pixels: Uint8Array }): boolean =>
+      texture.width === 16 && texture.height === 16
+      && texture.pixels[0] === 72 && texture.pixels[1] === 72 && texture.pixels[2] === 78
+      && texture.pixels[4] === 38 && texture.pixels[5] === 38 && texture.pixels[6] === 44;
+    for (const request of [
+      { family: "q3", model: "crash", skin: "", topColor: 0, bottomColor: 0 },
+      { family: "q3", model: "hunter", skin: "harpy", topColor: 0, bottomColor: 0 },
+      { family: "q3", model: "razor", skin: "patriot", topColor: 0, bottomColor: 0 },
+      { family: "q3", model: "tim", skin: "red", topColor: 0, bottomColor: 0 },
+    ] satisfies readonly Omit<CharacterTurntableRequest, "product">[]) {
+      const { product, mounts } = await mountedFor("q3-baseq3");
+      const scene = await loadCharacterTurntableScene(mounts, { product, ...request });
+      expect(scene.textures.some(isMissingChecker)).toBe(false);
+    }
   } finally {
     for (const mounts of openedMounts.reverse()) mounts.close();
   }

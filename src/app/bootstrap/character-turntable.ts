@@ -1,6 +1,6 @@
 import type { ContentId, GameFamily, ResourceId } from "../../contracts/content.ts";
 import { createMountPlanId } from "../../contracts/content.ts";
-import type { ImageLevel, Palette, RendererImage } from "../../contracts/render.ts";
+import type { ImageLevel, Palette, RenderState, RendererImage } from "../../contracts/render.ts";
 import type { Vec2, Vec3 } from "../../contracts/math.ts";
 import type { ModelFrame, ModelTransform, Q3MeshModel } from "../../contracts/scene.ts";
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
@@ -14,6 +14,7 @@ import { floodSkin } from "../../render/scene/skin.ts";
 import { loadQ3Character, type Q3CharacterPart } from "../../content/q3/foundation/assets.ts";
 import { PlayerAnimation } from "../../movement/q3/constants.ts";
 import { composeModelTransform, modelWorldDirection, modelWorldPoint } from "../../render/scene/models/transform.ts";
+import { inspectShaderScript, stripShaderExtension, type ParsedShaderStage, type ShaderDefinition } from "../../materials/material.ts";
 import type { StartupCharacterPreview } from "./startup-selection.ts";
 
 export interface CharacterTurntableRequest extends StartupCharacterPreview {}
@@ -24,7 +25,12 @@ export interface CharacterTurntableView {
   picture(resource: ResourceId): ImagePicture | null;
 }
 
-interface TurntableTexture { readonly width: number; readonly height: number; readonly pixels: Uint8Array; }
+interface TurntableTexture {
+  readonly width: number;
+  readonly height: number;
+  readonly pixels: Uint8Array;
+  readonly alphaTest: RenderState["alphaTest"];
+}
 interface TurntableVertex {
   readonly position: Vec3;
   readonly normal: Vec3;
@@ -62,7 +68,7 @@ function missingTexture(): TurntableTexture {
   const width = 16, height = 16, pixels = new Uint8Array(width * height * 4);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++)
     pixels.set(((x + y) & 1) === 0 ? [72, 72, 78, 255] : [38, 38, 44, 255], (y * width + x) * 4);
-  return { width, height, pixels };
+  return { width, height, pixels, alphaTest: "none" };
 }
 
 function finishScene(vertices: TurntableVertex[], indices: number[], textures: TurntableTexture[], initialYaw = 0.85): CharacterTurntableScene {
@@ -101,15 +107,17 @@ async function loadPalette(mounts: MountedContent, family: "q1" | "q2"): Promise
   return { colors, source: opened.reference };
 }
 
-function decodeImage(bytes: Uint8Array, path: string, family: GameFamily): TurntableTexture {
+function decodeImage(bytes: Uint8Array, path: string, family: GameFamily,
+  alphaTest: RenderState["alphaTest"] = "none"): TurntableTexture {
   const suffix = path.slice(path.lastIndexOf(".")).toLowerCase();
   if (suffix === ".pcx") {
     const pcx = decodePcx(bytes, path);
     if (pcx.palette === null) throw new Error(`PCX has no palette: ${path}`);
     const pixels = new Uint8Array(pcx.width * pcx.height * 4);
     for (const [offset, index] of pcx.indices.entries())
-      pixels.set([pcx.palette[index * 3] ?? 0, pcx.palette[index * 3 + 1] ?? 0, pcx.palette[index * 3 + 2] ?? 0, index === 255 ? 0 : 255], offset * 4);
-    return { width: pcx.width, height: pcx.height, pixels };
+      pixels.set([pcx.palette[index * 3] ?? 0, pcx.palette[index * 3 + 1] ?? 0, pcx.palette[index * 3 + 2] ?? 0,
+        family !== "q3" && index === 255 ? 0 : 255], offset * 4);
+    return { width: pcx.width, height: pcx.height, pixels, alphaTest };
   }
   const image = suffix === ".tga" ? family === "q3" ? decodeQ3Tga(bytes, path) : decodeTga(bytes, path)
     : suffix === ".jpg" || suffix === ".jpeg" ? decodeJpeg(bytes, path)
@@ -118,19 +126,96 @@ function decodeImage(bytes: Uint8Array, path: string, family: GameFamily): Turnt
     : suffix === ".gif" ? decodeGif(bytes, path).frames[0].image
     : null;
   if (image === null) throw new Error(`Unsupported character texture format: ${path}`);
-  return { width: image.width, height: image.height, pixels: image.pixels };
+  if (family !== "q3" || alphaTest !== "none") return { width: image.width, height: image.height, pixels: image.pixels, alphaTest };
+  // Q3 implicit diffuse shaders do not alpha-test; diffuse alpha is ancillary.
+  const pixels = new Uint8Array(image.pixels);
+  for (let offset = 3; offset < pixels.length; offset += 4) pixels[offset] = 255;
+  return { width: image.width, height: image.height, pixels, alphaTest };
 }
 
-async function loadTexture(mounts: MountedContent, shader: string, family: GameFamily): Promise<TurntableTexture> {
+async function loadDirectTexture(mounts: MountedContent, shader: string, family: GameFamily,
+  alphaTest: RenderState["alphaTest"] = "none"): Promise<TurntableTexture> {
   const normalized = shader.replaceAll("\\", "/").replace(/^\/+/, "");
   if (normalized === "") return missingTexture();
-  const dot = normalized.lastIndexOf("."), slash = normalized.lastIndexOf("/");
-  const explicit = dot > slash;
-  const candidates = explicit ? [normalized] : [".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp", ".gif"].map(extension => `${normalized}${extension}`);
+  const variants = [normalized];
+  // Retail Tim team skins point at an older medium/ directory whose textures
+  // shipped beside the final model instead.
+  if (normalized.startsWith("models/players/medium/"))
+    variants.push(normalized.replace("models/players/medium/", "models/players/"));
+  const candidates = variants.flatMap(path => {
+    const explicit = path.lastIndexOf(".") > path.lastIndexOf("/");
+    if (!explicit) return [".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp", ".gif"].map(extension => `${path}${extension}`);
+    // Q3 image lookup substitutes supported extensions for shader map names.
+    const stem = path.slice(0, path.lastIndexOf("."));
+    return [path, ...[".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp", ".gif"]
+      .map(extension => `${stem}${extension}`).filter(candidate => candidate !== path)];
+  });
   const opened = await firstOpen(mounts, candidates);
   if (opened === null) return missingTexture();
-  try { return decodeImage(opened.bytes, opened.reference.requestedPath, family); }
+  try { return decodeImage(opened.bytes, opened.reference.requestedPath, family, alphaTest); }
   catch { return missingTexture(); }
+}
+
+function byteText(bytes: Uint8Array): string {
+  let text = "";
+  for (const byte of bytes) text += String.fromCharCode(byte);
+  return text;
+}
+
+function shaderKey(name: string): string {
+  return stripShaderExtension(name.replaceAll("\\", "/").replace(/^\/+/, "")).toLowerCase();
+}
+
+const q3ShaderCatalogs = new WeakMap<MountedContent, Promise<ReadonlyMap<string, ShaderDefinition>>>();
+async function q3Shaders(mounts: MountedContent): Promise<ReadonlyMap<string, ShaderDefinition>> {
+  const cached = q3ShaderCatalogs.get(mounts);
+  if (cached !== undefined) return cached;
+  const pending = (async (): Promise<ReadonlyMap<string, ShaderDefinition>> => {
+    const definitions = new Map<string, ShaderDefinition>();
+    const files = await mounts.listFiles("scripts", ".shader").catch(() => [] as readonly string[]);
+    for (const file of files) {
+      const opened = await mounts.open(`scripts/${file.replaceAll("\\", "/")}`);
+      if (opened === null) continue;
+      let entries: ReturnType<typeof inspectShaderScript>["entries"];
+      try { entries = inspectShaderScript(byteText(opened.bytes), opened.reference.requestedPath).entries; }
+      catch { continue; }
+      for (const entry of entries) {
+        const definition = entry.textResult.kind === "accepted" ? entry.textResult.definition : entry.textResult.partial;
+        const key = shaderKey(definition.name);
+        if (!definitions.has(key)) definitions.set(key, definition);
+      }
+    }
+    return definitions;
+  })();
+  q3ShaderCatalogs.set(mounts, pending);
+  return pending;
+}
+
+function stageImageName(stage: ParsedShaderStage): string | null {
+  if (stage.map.kind === "image") return stage.map.name;
+  if (stage.map.kind === "animation") return stage.map.frames[0] ?? null;
+  return null;
+}
+
+async function loadTexture(mounts: MountedContent, shader: string, family: GameFamily): Promise<TurntableTexture | null> {
+  if (family !== "q3") return loadDirectTexture(mounts, shader, family);
+  const normalized = shader.replaceAll("\\", "/").replace(/^\/+/, "");
+  if (normalized === "") return missingTexture();
+  const definition = (await q3Shaders(mounts)).get(shaderKey(normalized));
+  if (definition === undefined) return loadDirectTexture(mounts, normalized, family);
+  if (definition.surfaceParms.includes("nodraw")) return null;
+  const imageStages = definition.stages.flatMap(stage => {
+    const name = stageImageName(stage);
+    return name === null ? [] : [{ stage, name }];
+  });
+  const additive = (stage: ParsedShaderStage): boolean =>
+    stage.blend.destination === "one" && (stage.blend.source === "one" || stage.blend.source === "src-alpha");
+  const baseStages = imageStages.filter(({ stage }) => stage.tcGen.kind === "texture" && !additive(stage));
+  const chosen = baseStages.at(-1) ?? imageStages[0];
+  if (chosen !== undefined) return loadDirectTexture(mounts, chosen.name, family, chosen.stage.alphaFunc);
+  if (definition.stages.some(stage => stage.map.kind === "whiteimage"))
+    return { width: 1, height: 1, pixels: new Uint8Array([255, 255, 255, 255]), alphaTest: "none" };
+  return missingTexture();
 }
 
 function q1Frame(model: ReturnType<typeof parseMdl>): ModelFrame {
@@ -149,7 +234,7 @@ async function loadQ1Scene(mounts: MountedContent, request: CharacterTurntableRe
   const texture = expandIndexedImage(indexedRenderImage(
     [{ width: model.skinWidth, height: model.skinHeight, pixels: floodSkin(skin, model.skinWidth, model.skinHeight, palette) }],
     palette, { kind: "opaque" }, null, q1PlayerTranslation(request.topColor, request.bottomColor)));
-  return finishScene(geometry.vertices.map(vertex => ({ ...vertex, texture: 0 })), [...geometry.indices], [texture], -0.55);
+  return finishScene(geometry.vertices.map(vertex => ({ ...vertex, texture: 0 })), [...geometry.indices], [{ ...texture, alphaTest: "gt0" }], -0.55);
 }
 
 async function q2Skin(mounts: MountedContent, model: string, skin: string, modelSkins: readonly string[]): Promise<OpenedResource> {
@@ -183,7 +268,7 @@ async function loadQ2Scene(mounts: MountedContent, request: CharacterTurntableRe
   const texture = expandIndexedImage(indexedRenderImage(
     [{ width: pcx.width, height: pcx.height, pixels: floodSkin(pcx.indices, pcx.width, pcx.height, palette) }],
     palette, { kind: "index", index: 255 }));
-  return finishScene(geometry.vertices.map(vertex => ({ ...vertex, texture: 0 })), [...geometry.indices], [texture]);
+  return finishScene(geometry.vertices.map(vertex => ({ ...vertex, texture: 0 })), [...geometry.indices], [{ ...texture, alphaTest: "gt0" }]);
 }
 
 function animationFrame(model: Q3MeshModel, firstFrame: number | undefined): number {
@@ -194,20 +279,26 @@ function animationFrame(model: Q3MeshModel, firstFrame: number | undefined): num
 async function loadQ3Scene(mounts: MountedContent, request: CharacterTurntableRequest): Promise<CharacterTurntableScene> {
   const skin = request.skin || "default";
   const assets = await loadQ3Character(mounts, { model: request.model, skin, headModel: "", headSkin: skin, team: null, teamName: "" });
-  const textures: TurntableTexture[] = [], textureCache = new Map<string, number>();
-  const textureIndex = async (shader: string): Promise<number> => {
+  const textures: TurntableTexture[] = [], textureCache = new Map<string, number | null>();
+  const textureIndex = async (shader: string): Promise<number | null> => {
     const existing = textureCache.get(shader);
     if (existing !== undefined) return existing;
+    const loaded = await loadTexture(mounts, shader, "q3");
+    if (loaded === null) { textureCache.set(shader, null); return null; }
     const index = textures.length;
     textureCache.set(shader, index);
-    textures.push(await loadTexture(mounts, shader, "q3"));
+    textures.push(loaded);
     return index;
   };
   const vertices: TurntableVertex[] = [], indices: number[] = [];
   const appendPart = async (part: Q3CharacterPart, frame: number, transform: ModelTransform): Promise<void> => {
     for (const surface of part.model.surfaces) {
-      const shader = part.surfaces.find(candidate => candidate.name === surface.name)?.shader ?? surface.shaders[0] ?? "";
+      const shader = part.surfaces.find(candidate => candidate.name === surface.name)?.shader
+        ?? part.surfaces.find(candidate => candidate.name === `${surface.name}_t`)?.shader
+        ?? part.surfaces.find(candidate => candidate.name === surface.name.replace(/_t$/, ""))?.shader
+        ?? surface.shaders[0] ?? "";
       const texture = await textureIndex(shader);
+      if (texture === null) continue;
       const base = vertices.length;
       const frameVertices = at(surface.frames, frame, "Q3 surface frame");
       for (const [index, vertex] of frameVertices.entries()) vertices.push({
@@ -319,7 +410,9 @@ export function renderCharacterTurntable(scene: CharacterTurntableScene, yawRadi
       const u = (wa * a.u * a.q + wb * b.u * b.q + wc * c.u * c.q) / q;
       const v = (wa * a.v * a.q + wb * b.v * b.q + wc * c.v * c.q) / q;
       sampleTexture(texture, u, v, sample);
-      if (sample[3] < 24) continue;
+      if (texture.alphaTest === "gt0" && sample[3] <= 0) continue;
+      if (texture.alphaTest === "ge128" && sample[3] < 128) continue;
+      if (texture.alphaTest === "lt128" && sample[3] >= 128) continue;
       let nx = (wa * a.nx * a.q + wb * b.nx * b.q + wc * c.nx * c.q) / q;
       let ny = (wa * a.ny * a.q + wb * b.ny * b.q + wc * c.ny * c.q) / q;
       let nz = (wa * a.nz * a.q + wb * b.nz * b.q + wc * c.nz * c.q) / q;
