@@ -17,11 +17,12 @@ function fixture(dialect: "q3" | "q1-netquake" | "q2-classic" = "q3") {
   cvars.register("sensitivity", "3", 0); cvars.register("password", "SECRET-MUST-STAY-LOCAL", 0);
   const commands = new CommandBuffer({ dialect, context: source, cvars });
   commands.register("game_action", invocation => { effects.push(invocation.source); return undefined; }, { summary: "Perform the game action.", usage: "game_action", examples: ["game_action"] });
-  const requests: { input: LlmRequestInput; resolve: (answer: string) => void }[] = [];
-  const requester: LlmCommandRequester = { request: input => new Promise<string>(resolve => requests.push({ input, resolve })) };
+  const requests: { input: LlmRequestInput; resolve: (answer: string) => void }[] = [], primes: string[] = [];
+  const requester: LlmCommandRequester = { request: input => new Promise<string>(resolve => requests.push({ input, resolve })),
+    prime: async instructions => { primes.push(instructions); } };
   const remove = registerLlmCommands(commands, (text, context) => output.push({ text, source: context }), requester);
   const send = (text: string, context = source): void => { commands.append(text + "\n", context); commands.execute(); };
-  return { identity, source, second, output, effects, cvars, commands, requests, remove, send };
+  return { identity, source, second, output, effects, cvars, commands, requests, primes, remove, send };
 }
 async function settle(): Promise<void> { await Promise.resolve(); await Promise.resolve(); }
 
@@ -33,7 +34,17 @@ test("LLM asks route answers independently to the invoking seats and reject dupl
   expect(f.output.map(entry => [entry.text, entry.source])).toEqual([
     ["LLM request started. Use llm_cancel to cancel.\n", f.source], ["LLM request started. Use llm_cancel to cancel.\n", f.second], ["An LLM request is already running in this console.\n", f.source], ["second answer\n", f.second], ["first answer\n", f.source],
   ]);
-  expect(f.requests[0]?.input.prompt).toBe("first question"); expect(f.requests[0]?.input.instructions).toContain("Examples: game_action"); f.remove();
+  expect(f.requests[0]?.input.prompt).toBe("first question"); expect(f.requests[0]?.input.sessionInstructions).toContain("Examples: game_action"); f.remove();
+});
+
+test("registering LLM commands primes the process session with the live catalog", () => {
+  const f = fixture();
+  expect(f.primes).toHaveLength(1);
+  expect(f.primes[0]).toContain("This session stays open for the whole program run");
+  expect(f.primes[0]).toContain("command:game_action");
+  expect(f.primes[0]).toContain("cvar:password");
+  expect(f.primes[0]).not.toContain("SECRET-MUST-STAY-LOCAL");
+  f.remove();
 });
 
 test("LLM validates the entire batch before performing its first action", async () => {
@@ -45,8 +56,8 @@ test("LLM validates the entire batch before performing its first action", async 
 test("LLM ask requests plain text and grounds engine advice in the live registry", async () => {
   const f = fixture("q2-classic");
   f.send('llm_ask "How do I adjust view angle?"');
-  const instructions = f.requests[0]?.input.instructions ?? "";
-  expect(instructions).toContain("plain-text game console without Markdown rendering");
+  const instructions = f.requests[0]?.input.sessionInstructions ?? "";
+  expect(instructions).toContain("plain-text console");
   expect(instructions).toContain("Do not use Markdown code fences");
   expect(instructions).toContain("use only command and setting names from the registered catalog");
   expect(instructions).toContain("say it is not registered");
@@ -55,7 +66,9 @@ test("LLM ask requests plain text and grounds engine advice in the live registry
   f.requests[0]?.resolve("That setting is not registered."); await settle();
   f.cvars.register("view_angle", "90", 0);
   f.send('llm_ask "How do I adjust view angle?"');
-  expect(f.requests[1]?.input.instructions).toContain("cvar:view_angle");
+  expect(f.requests[1]?.input.sessionInstructions).toContain("cvar:view_angle");
+  expect(f.requests[1]?.input.instructions).toContain("view_angle:");
+  expect(f.requests[1]?.input.sessionInstructions).not.toContain("SECRET-MUST-STAY-LOCAL");
   expect(f.requests[1]?.input.instructions).not.toContain("SECRET-MUST-STAY-LOCAL");
   f.remove();
 });

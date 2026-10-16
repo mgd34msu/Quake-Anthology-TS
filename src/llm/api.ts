@@ -47,7 +47,8 @@ export async function requestOpenAiResponses(input: TransportRequest, apiKey: st
   const response = await fetchLlmResponse("https://api.openai.com/v1/responses", {
     method: "POST", headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json", accept: "text/event-stream" },
     body: JSON.stringify({ model: input.model, instructions: input.instructions, input: [{ role: "user", content: [{ type: "input_text", text: input.prompt }] }],
-      store: false, stream: true, ...(input.reasoningEffort === undefined ? {} : { reasoning: { effort: input.reasoningEffort } }) }),
+      store: false, stream: true, ...(input.sessionId === undefined ? {} : { prompt_cache_key: input.sessionId }),
+      ...(input.reasoningEffort === undefined ? {} : { reasoning: { effort: input.reasoningEffort } }) }),
   }, fetcher, input.signal);
   if (!response.ok) { cancelResponseBody(response); throw new LlmHttpError(response.status); }
   return readResponses(input, response, "OpenAI API", true);

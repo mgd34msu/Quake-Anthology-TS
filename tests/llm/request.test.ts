@@ -57,6 +57,42 @@ test("OpenAI API uses Responses and streams complete Unicode text", async () => 
   expect(deltas).toEqual(["café 🎮"]);
 });
 
+test("settings service primes one process session, reuses it across requests, and resets it on model change", async () => {
+  const bodies: string[] = [];
+  const { service } = await fixture({ request: { fetch: async (_url, init) => {
+    const body: unknown = init.body;
+    if (typeof body !== "string") throw new Error("Expected request body");
+    bodies.push(body);
+    const answer = body.includes("READY only") ? "READY" : body.includes('"text":"second"') ? "second answer" : "first answer";
+    return stream(data({ type: "response.output_text.delta", delta: answer }) + data({ type: "response.completed", response: { status: "completed" } }));
+  } } });
+  await service.saveApiKey("chatgpt-api", "api-secret");
+  await service.setModel("chatgpt-api", "test-model");
+  await service.selectProvider("chatgpt-api");
+
+  await service.prime("SESSION CATALOG");
+  await service.prime("SESSION CATALOG");
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0]).toContain("SESSION CATALOG");
+  expect(bodies[0]).toContain(`"prompt_cache_key":"${service.sessionId}"`);
+
+  expect(await service.request({ prompt: "first", instructions: "turn one", sessionInstructions: "SESSION CATALOG" })).toBe("first answer");
+  expect(await service.request({ prompt: "second", instructions: "turn two", sessionInstructions: "SESSION CATALOG" })).toBe("second answer");
+  expect(bodies).toHaveLength(3);
+  expect(bodies[1]).toContain("SESSION CATALOG");
+  expect(bodies[1]).toContain("turn one");
+  expect(bodies[2]).toContain("User: first");
+  expect(bodies[2]).toContain("Assistant: first answer");
+
+  const firstSession = service.sessionId;
+  await service.setModel("chatgpt-api", "other-model");
+  expect(service.sessionId).not.toBe(firstSession);
+  await service.request({ prompt: "fresh", instructions: "turn three", sessionInstructions: "SESSION CATALOG" });
+  expect(bodies).toHaveLength(5);
+  expect(bodies[4]).not.toContain("Assistant: first answer");
+  expect(bodies[4]).toContain(`"prompt_cache_key":"${service.sessionId}"`);
+});
+
 test("Other API posts to real local HTTP endpoint preserving configured v1 prefix", async () => {
   const endpoint = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     expect(new URL(request.url).pathname).toBe("/v1/chat/completions");

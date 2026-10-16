@@ -44,7 +44,7 @@ import type { ApplicationOptions } from "./options.ts";
 import type { SimulationPresentationAccess } from "./simulation/types.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
 import { registerDiscoveryCommands } from "../../console/discovery.ts";
-import { registerLlmCommands, type LlmCommandRequester } from "../../console/llm.ts";
+import { primeLlmConsoleSession, registerLlmCommands, type LlmCommandRequester } from "../../console/llm.ts";
 import { registerQ2ClientCommands } from "./q2-client-commands.ts";
 import { applicationAudioCommands } from "./audio/commands.ts";
 import type { ApplicationConsoleServer } from "./console.ts";
@@ -694,6 +694,8 @@ export class ApplicationInput {
       if (command.kind === "console") this.commands.append(command.text, command.source);
       else command.dispatch(command.text, command.source);
     }
+    // All world commands are registered now; refresh the same process session's primer if this game's catalog differs.
+    if (actions.llm !== undefined) void primeLlmConsoleSession(this.commands, actions.llm).catch(() => undefined);
   }
 
   private retireCommands(): void {

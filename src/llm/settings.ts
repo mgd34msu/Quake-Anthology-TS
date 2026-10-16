@@ -7,6 +7,7 @@ import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { renameSync } from "node:fs";
 import { resolve } from "node:path";
 import { checkAbort, loginSubscription, parseSubscription, record, refreshSubscription, type SubscriptionAuthOptions, type SubscriptionCredential } from "./auth.ts";
+import { LlmSession } from "./session.ts";
 
 export type LlmProvider = "chatgpt-subscription" | "chatgpt-api" | "other-api";
 export interface OtherService { readonly baseUrl: string; readonly model: string; readonly transport: "openai-chat-completions" }
@@ -88,6 +89,8 @@ export class LlmSettingsService {
     "chatgpt-subscription": { status: "idle", models: [] }, "chatgpt-api": { status: "idle", models: [] }, "other-api": { status: "idle", models: [] },
   };
   private readonly catalogGenerations = new Map<LlmProvider, number>();
+  /** Created with the service and reused for every game until `close()` at program exit. */
+  private readonly session = new LlmSession(input => this.requestDirect(input), () => this.sessionFingerprint());
 
   private constructor(options: LlmSettingsOptions) { this.baseDirectory = resolve(options.baseDirectory); this.auth = options.auth ?? {}; this.requestOptions = options.request ?? {}; }
   static async open(options: LlmSettingsOptions): Promise<LlmSettingsService> {
@@ -147,6 +150,7 @@ export class LlmSettingsService {
       const current = parsePreferences(await this.load("llm.json"));
       const next = { ...current, provider: provider(selected) };
       await this.write("llm.json", JSON.stringify(next) + "\n"); this.preferences = next;
+      if (current.provider !== next.provider) this.session.invalidate();
     });
   }
   private invalidateCatalog(selected: LlmProvider): void {
@@ -175,6 +179,7 @@ export class LlmSettingsService {
         await this.write("other.service", JSON.stringify(other) + "\n"); this.other = other;
       }
       await this.write("llm.json", JSON.stringify(next) + "\n"); this.preferences = next;
+      if (selected === next.provider) this.session.invalidate();
     });
   }
   setReasoningEffort(selected: LlmProvider, value: string | null): Promise<void> {
@@ -184,6 +189,7 @@ export class LlmSettingsService {
       if (effort !== null && !this.modelMetadata(selected, name)?.reasoningEfforts.includes(effort)) throw new LlmSettingsError("Choose a reasoning effort supported by the selected model.");
       const next = { ...current, reasoningEfforts: { ...current.reasoningEfforts, [selected]: effort } };
       await this.write("llm.json", JSON.stringify(next) + "\n"); this.preferences = next;
+      if (selected === next.provider && current.reasoningEfforts[selected] !== effort) this.session.invalidate();
     });
   }
   saveOtherService(value: OtherService): Promise<void> {
@@ -200,6 +206,7 @@ export class LlmSettingsService {
         const preferences = { ...current, reasoningEfforts: { ...current.reasoningEfforts, "other-api": effort } };
         await this.write("llm.json", JSON.stringify(preferences) + "\n"); this.preferences = preferences;
       }
+      if (this.preferences.provider === "other-api" && (connectionChanged || modelChanged)) this.session.invalidate();
     });
   }
   refreshModels(selected: LlmProvider = this.preferences.provider, caller?: AbortSignal): Promise<readonly LlmModel[]> {
@@ -261,6 +268,7 @@ export class LlmSettingsService {
         await this.write("chatgpt.key", JSON.stringify(next) + "\n"); this.chatgpt = next;
       }
       this.invalidateCatalog(selected);
+      if (selected === this.preferences.provider) this.session.invalidate();
     });
   }
   removeCredential(selected: LlmProvider): Promise<void> {
@@ -276,6 +284,7 @@ export class LlmSettingsService {
         await this.write("chatgpt.key", JSON.stringify(next) + "\n"); this.chatgpt = next;
       }
       this.invalidateCatalog(selected);
+      if (selected === this.preferences.provider) this.session.invalidate();
     });
   }
   private authenticate(run: (signal: AbortSignal) => Promise<SubscriptionCredential>): Promise<void> {
@@ -295,6 +304,7 @@ export class LlmSettingsService {
           const current = parseChatgpt(await this.load("chatgpt.key")), next = { ...current, subscription: credential };
           await this.write("chatgpt.key", JSON.stringify(next) + "\n", controller.signal); this.chatgpt = next;
           this.invalidateCatalog("chatgpt-subscription");
+          if (this.preferences.provider === "chatgpt-subscription") this.session.invalidate();
         });
         if (this.active?.controller === controller) this.authState = { status: "idle" };
       } catch (error) {
@@ -381,7 +391,27 @@ export class LlmSettingsService {
     this.requests.set(controller, promise);
     return promise;
   }
+  get sessionId(): string { return this.session.id; }
+
+  /** Open/warm the one process-lifetime session without printing or executing anything. */
+  prime(instructions: string): Promise<void> {
+    const snapshot = this.read(), selected = snapshot.providers[snapshot.provider];
+    if (this.closed || !selected.configured || selected.model.trim() === "") return Promise.resolve();
+    return this.session.prime(instructions);
+  }
+
   request(input: LlmRequestInput): Promise<string> {
+    if (input.sessionInstructions !== undefined || this.session.active) return this.session.request(input);
+    return this.requestDirect(input);
+  }
+
+  private sessionFingerprint(): string {
+    const snapshot = this.read(), selected = snapshot.providers[snapshot.provider];
+    return JSON.stringify([snapshot.provider, selected.model, snapshot.reasoningEffort, selected.configured,
+      snapshot.provider === "other-api" ? snapshot.providers["other-api"].baseUrl : ""]);
+  }
+
+  private requestDirect(input: LlmRequestInput): Promise<string> {
     return this.runRequest(async signal => {
       const preferences = parsePreferences(await this.load("llm.json"));
       if (input.prompt.trim() === "") throw new LlmSettingsError("Enter a question or command request.");
@@ -398,6 +428,7 @@ export class LlmSettingsService {
       // use the fastest reasoning level the model offers instead of its (slow) default.
       const effort = selectedEffort ?? fastestReasoningEffort(metadata);
       const request: TransportRequest = { prompt: input.prompt, instructions: input.instructions, model: selectedModel, signal, ...(effort === undefined ? {} : { reasoningEffort: effort }),
+        ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
         ...(input.onText === undefined ? {} : { onText: input.onText }) };
       if (selected === "chatgpt-subscription") {
         const credential = await this.freshSubscription(signal);
@@ -417,7 +448,7 @@ export class LlmSettingsService {
   }
   cancelSignIn(): void { this.active?.controller.abort(); this.authState = { status: "idle" }; }
   async close(): Promise<void> {
-    this.closed = true; this.cancelSignIn();
+    this.closed = true; this.session.close(); this.cancelSignIn();
     for (const controller of this.requests.keys()) controller.abort();
     this.refreshing?.controller.abort();
     await Promise.allSettled([...this.requests.values(), this.active?.promise, this.refreshing?.promise]);

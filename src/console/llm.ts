@@ -1,10 +1,18 @@
 import type { CommandContext } from "../contracts/common.ts";
 import type { CommandBuffer } from "../core/commands/index.ts";
 import type { LlmRequestInput } from "../llm/request.ts";
-import { llmConsoleCatalog, llmExecInstructions, validateLlmBatch } from "./llm-batch.ts";
+import { llmExecTurnInstructions, llmRelevantConsoleDocs, llmSessionInstructions, validateLlmBatch } from "./llm-batch.ts";
 
 export interface LlmCommandRequester {
   request(input: LlmRequestInput): Promise<string>;
+  prime?(instructions: string): Promise<void>;
+}
+
+/** Start the requester's process-lifetime session with this console's live catalog. */
+export function primeLlmConsoleSession(commands: CommandBuffer, requester: LlmCommandRequester | undefined, source: CommandContext = commands.context): Promise<void> {
+  if (requester?.prime === undefined) return Promise.resolve();
+  try { return requester.prime(llmSessionInstructions(commands, source)); }
+  catch { return Promise.resolve(); }
 }
 
 export function registerLlmCommands(commands: CommandBuffer, print: (text: string, source: CommandContext) => void, requester?: LlmCommandRequester): () => void {
@@ -48,13 +56,14 @@ export function registerLlmCommands(commands: CommandBuffer, print: (text: strin
       const current = (): boolean => !disposed && !controller.signal.aborted && pending.get(key) === controller;
       const run = async (): Promise<void> => {
         try {
-          const instructions = definition.name === "llm_exec" ? llmExecInstructions(commands, source, prompt)
-            : `Answer the user's question concisely, including general questions unrelated to the game. Your answer is displayed in a plain-text game console without Markdown rendering. Use short paragraphs and put command or code examples on their own lines. Do not use Markdown code fences, language headers, inline backticks, headings, or tables. Preserve meaningful code syntax and indentation.\nFor advice about this running engine, use only command and setting names from the registered catalog below. Follow their documented usage and allowed values. Do not assume that commands from another Quake engine exist here. If a requested setting or command is absent, say it is not registered; do not present a guessed name or a set command creating an unregistered variable as a working solution. If usage is undocumented, say so instead of inventing arguments. The catalog describes available commands, not current values or proof that an action is permitted. You have no console history, current settings, files, or game state. You only answer questions; do not claim to have executed commands.\n${llmConsoleCatalog(commands, source, prompt)}`;
+          const sessionInstructions = llmSessionInstructions(commands, source);
+          const instructions = definition.name === "llm_exec" ? llmExecTurnInstructions(commands, source, prompt)
+            : `This is an llm_ask request. Answer the user's question concisely, including general questions unrelated to the game. For advice about this running engine, use only command and setting names from the session catalog and the relevant documentation below. If a requested setting or command is absent, say it is not registered. You only answer questions; do not claim to have executed commands.\n${llmRelevantConsoleDocs(commands, source, prompt)}`;
           print("LLM request started. Use llm_cancel to cancel.\n", source);
           // Stream ask answers as they arrive; exec must stay buffered so the whole batch can be validated first.
           let streamed = false;
           const onText = definition.name === "llm_ask" ? (chunk: string) => { if (current() && chunk !== "") { streamed = true; print(chunk, source); } } : undefined;
-          const answer = await requester.request({ prompt, instructions, signal: controller.signal, ...(onText === undefined ? {} : { onText }) });
+          const answer = await requester.request({ prompt, instructions, sessionInstructions, signal: controller.signal, ...(onText === undefined ? {} : { onText }) });
           if (!current()) return;
           if (definition.name === "llm_ask") { print(streamed ? "\n" : `${answer}\n`, source); return; }
           const batch = validateLlmBatch(answer, commands, source);
@@ -72,6 +81,7 @@ export function registerLlmCommands(commands: CommandBuffer, print: (text: strin
       return undefined;
     }, definition)) registered.push(definition.name);
   }
+  if (requester !== undefined && registered.length !== 0) void primeLlmConsoleSession(commands, requester).catch(() => undefined);
   return () => {
     disposed = true;
     for (const controller of pending.values()) controller.abort();

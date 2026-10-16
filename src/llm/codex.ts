@@ -25,7 +25,7 @@ export function promptCacheKey(model: string): string {
 }
 
 export async function requestCodex(input: TransportRequest, credential: SubscriptionCredential, fetcher: LlmFetch): Promise<string> {
-  const id = subscriptionAccountId(credential.accessToken), session = crypto.randomUUID();
+  const id = subscriptionAccountId(credential.accessToken), session = input.sessionId ?? crypto.randomUUID();
   const model = input.model.replace(/^openai[:/]/, "");
   const response = await fetchLlmResponse("https://chatgpt.com/backend-api/codex/responses", {
     method: "POST", signal: input.signal,

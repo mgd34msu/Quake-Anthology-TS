@@ -39,6 +39,7 @@ import { MusicControls } from "../../audio/music.ts";
 import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { SeatConsole } from "../../console/session.ts";
 import { registerDiscoveryCommands } from "../../console/discovery.ts";
+import { primeLlmConsoleSession } from "../../console/llm.ts";
 import { drawConsole } from "../../console/draw.ts";
 import { consoleMetrics } from "../../console/metrics.ts";
 import { SeatTextPresentation } from "../../text/layout.ts";
@@ -771,9 +772,10 @@ export class StartupApplication {
     if (client === null || graphics === null || local === undefined) throw new Error("Frontend console has no retained seat");
     this.releaseMenuInput?.(); this.releaseMenuInput = null;
     const prepared = client.prepared, input = local.prepared.input;
+    const context: CommandContext = { session: local.seat.id.session, origin: { kind: "local-seat", seat: local.seat.id, client: local.client.id } };
     const candidate = new SeatConsole({ staged: true, seat: local.seat.id,
       get dialect() { return prepared.commands.dialect; },
-      context: { session: local.seat.id.session, origin: { kind: "local-seat", seat: local.seat.id, client: local.client.id } },
+      context,
       commands: prepared.commands, cvars: local.prepared.cvars, now: () => performance.now(), connected: () => false,
       clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); },
       focus: focus => {
@@ -797,6 +799,9 @@ export class StartupApplication {
       if (origin?.kind !== "local-seat" || origin.seat.equals(local.seat.id) && origin.client.equals(local.client.id)) console.print(text);
     });
     const releaseDiscovery = registerDiscoveryCommands(prepared.commands, text => console.print(text));
+    // Warm the one LLM session while the user is still choosing a game; the
+    // same settings service (and therefore session) is reused by every world.
+    if (this.host.llm !== undefined) void primeLlmConsoleSession(prepared.commands, this.host.llm, context).catch(() => undefined);
     this.releaseMenuInput = () => { releaseInput(); releaseOutput(); releaseDiscovery(); };
   }
 

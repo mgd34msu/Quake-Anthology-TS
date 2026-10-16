@@ -3,6 +3,10 @@ import { LlmSettingsError } from "./errors.ts";
 export interface LlmRequestInput {
   readonly prompt: string;
   readonly instructions: string;
+  /** Static context for the process-lifetime session; turn instructions stay in `instructions`. */
+  readonly sessionInstructions?: string;
+  /** Assigned by the session owner; transports may use it for provider-side session affinity. */
+  readonly sessionId?: string;
   readonly signal?: AbortSignal;
   readonly onText?: (text: string) => void;
 }
