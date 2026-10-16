@@ -10,7 +10,7 @@ import type { ArsenalIntent } from "../../../contracts/gameplay.ts";
 import type { ExecutableRecipe, GameFamily, ProviderTiming } from "../../../contracts/content.ts";
 import type { ActorId, ClientId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
-import type { ActorAnimationState, ArsenalState, MovementContinuation, MovementInput, MovementProfile, MovementResult, MovementServices, MovementState, Q1MovementInput, Q2MovementInput, Q2RereleaseMovementInput, Q3MovementInput } from "../../../contracts/movement.ts";
+import type { ActorAnimationState, ArsenalState, MovementContinuation, MovementInput, MovementProfile, MovementResult, MovementServices, MovementState, Q1MovementInput, Q2MovementInput, Q2RereleaseMovementInput, Q3MovementInput, Q3MovementResult, Q3MovementState } from "../../../contracts/movement.ts";
 import type { ActorCommand } from "../../../contracts/session.ts";
 import type { FrameContext } from "../../../contracts/time.ts";
 import type { SceneQueries, TraceHit } from "../../../contracts/scene.ts";
@@ -577,7 +577,14 @@ export class MovementPlayer {
       } else result = moved;
     } else if (provider.kind === "q3" && profile.kind === "q3" && state.kind === "q3" && command.kind === "q3") {
       const move: Q3MovementInput = { ...base, kind: "q3", profile, state, command };
-      result = provider.move(move, this.services);
+      const moved = provider.move(move, this.services);
+      if (moved.status === "active") {
+        this.accept(moved);
+        const afterTriggers = this.commit(moved.state, true, true);
+        result = afterTriggers.kind === "actor-removed" ? { kind: moved.kind, status: "actor-removed", actor: moved.actor, commandSequence: moved.commandSequence, effects: moved.effects }
+          : afterTriggers.state.kind === "q3" ? this.applyQ3Contacts(moved, afterTriggers.state)
+            : this.wrongFamily();
+      } else result = moved;
     } else throw new Error(`Command ${command.kind} does not match movement ${profile.kind}`);
     if (result.status === "active" && this.host.actors.isLive(this.actor.id)) {
       if (sourceMovement?.sourceJump !== true && this.host.quakeWorld === undefined && movementJumped(state, priorGround, command, result)) this.host.jump(this.actor, "jump");
@@ -587,6 +594,22 @@ export class MovementPlayer {
     if (this.host.actors.isLive(this.actor.id)) this.host.sourceClient?.afterMovement(this, frame, sourceCommand);
     this.lastSequence = input.sequence;
     return result;
+  }
+
+  // The Q3 provider records contacts instead of calling services.touch during the move;
+  // foreign worlds have no Q3 game loop to consume them, so dispatch like Q2 ClientThink does.
+  private applyQ3Contacts(moved: Extract<Q3MovementResult, { readonly status: "active" }>, state: Q3MovementState): MovementResult {
+    let current = state;
+    for (const contact of moved.contacts) {
+      if (contact.target.kind === "none") continue;
+      const continuation = this.host.touch({ self: this.actor, other: contact.target,
+        plane: contact.trace.sourcePlane,
+        surface: contact.trace.kind === "q3" ? { name: "", nativeFlags: contact.trace.surfaceFlags, nativeValue: 0 } : null }, current);
+      if (continuation.kind === "actor-removed") return { kind: moved.kind, status: "actor-removed", actor: moved.actor, commandSequence: moved.commandSequence, effects: moved.effects };
+      if (continuation.state.kind !== "q3") return this.wrongFamily();
+      current = continuation.state;
+    }
+    return current === state ? moved : { ...moved, state: current };
   }
 
   private accept(result: Extract<MovementResult, { readonly status: "active" }>): undefined {

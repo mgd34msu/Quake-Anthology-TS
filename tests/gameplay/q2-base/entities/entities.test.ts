@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { corpusFile, corpusHasFile } from "../../../support/corpus.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
 import type { DamageOutcome } from "../../../../src/contracts/gameplay.ts";
@@ -195,8 +196,8 @@ describe("Q2 base entity source behaviors", () => {
     scene.actors.close();
   });
 
-  test("retail base2 platform continues its accelerated move after a checked save into fresh actors", async () => {
-    const archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"), scene = fixture();
+  test.skipIf(!corpusHasFile("q2/baseq2/pak0.pak"))("retail base2 platform continues its accelerated move after a checked save into fresh actors", async () => {
+    const archive = await openArchive(corpusFile("q2/baseq2/pak0.pak")), scene = fixture();
     try {
       const entry = archive.findEntries("maps/base2.bsp")[0]; if (entry === undefined) throw new Error("Missing retail base2 map");
       const map = readQ2Bsp(await archive.readEntry(entry)), authored = parseQ2Entities(map.entities).find(entity => entity.classname === "func_plat");

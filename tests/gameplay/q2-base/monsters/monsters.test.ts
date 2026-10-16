@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { corpusFile, corpusHasFile } from "../../../support/corpus.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
 import type { Vec3 } from "../../../../src/contracts/math.ts";
@@ -77,8 +78,8 @@ function fixture() {
 }
 
 describe("original Q2 base monster source behavior", () => {
-  test("retail campaign monster classnames and every base definition use the shared controller", async () => {
-    const scene = fixture(), archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak");
+  test.skipIf(!corpusHasFile("q2/baseq2/pak0.pak"))("retail campaign monster classnames and every base definition use the shared controller", async () => {
+    const scene = fixture(), archive = await openArchive(corpusFile("q2/baseq2/pak0.pak"));
     try {
       const representatives = new Map<string, Q2SpawnFields>();
       const maps = archive.entries.filter(entry => entry.path.startsWith("maps/") && entry.path.endsWith(".bsp"));

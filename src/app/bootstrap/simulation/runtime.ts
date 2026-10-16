@@ -346,6 +346,10 @@ export class SharedSimulation implements Simulation {
   private readonly q3Commands = new Map<OwnedActor, ActorCommand>();
   private readonly deathAnimations = new Q3DeathAnimationSequence();
   private readonly sourceModels = new Map<ActorId, Extract<Q2PresentationEvent, { readonly kind: "model" }>>();
+  // Pre-tick body snapshot used to interpolate presentations between fixed source ticks.
+  private presentationSnapshot = new Map<ActorId, { readonly origin: Vec3; readonly angles: Vec3; readonly viewPath: string | null; readonly viewFrame: number }>();
+  private presentationTickMilliseconds: number | null = null;
+  private presentationAhead = true;
   private readonly viewModels = new Map<ActorId, { readonly path: string; readonly frame: number;
     readonly q2?: { readonly skin: number; readonly rate: number; readonly kickOrigin: Vec3; readonly kickAngles: Vec3 } }>();
   private readonly transitions = new EventRing<TransitionIntent>(1024);
@@ -4414,8 +4418,11 @@ export class SharedSimulation implements Simulation {
       const boundaries = [...deadlines].sort((a, b) => a - b).map(milliseconds => ({
         map: mapDeadlines.has(milliseconds), q2: weaponDeadlines.has(milliseconds), q3: q3Deadlines.has(milliseconds), milliseconds,
       }));
+      this.presentationTickMilliseconds = fixed;
+      this.presentationAhead = true;
       let commandsPending = true;
       for (const boundary of boundaries) {
+      if (mapRun) this.capturePresentationSnapshot();
       const previousQ3Time = this.selectedQ3Time;
       if (boundary.q3 && selectedQ3Clock !== null) { this.selectedQ3Time = boundary.milliseconds; this.selectedQ3Next = boundary.milliseconds + selectedQ3Clock.serverFrameMilliseconds; }
       this.selectedQ3Source?.synchronize();
@@ -5636,7 +5643,10 @@ export class SharedSimulation implements Simulation {
     }
     this.hostMilliseconds += input.elapsedMilliseconds; this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
     const frameMilliseconds = source.edition === "classic" ? 100 : source.game.services.options.frameMilliseconds;
+    this.presentationTickMilliseconds = frameMilliseconds;
+    this.presentationAhead = false;
     while (this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000 + frameMilliseconds) {
+      this.capturePresentationSnapshot();
       this.sourceFrame = this.clock.advance(source.edition === "classic" ? { kind: "seconds", value: frameMilliseconds / 1000 } : { kind: "milliseconds", value: frameMilliseconds });
       this.selectedMilliseconds += frameMilliseconds;
       this.advanceQ1Punch(); this.beginNativeEquipmentFrame(); this.beginQvmSelectedFrame();
@@ -5798,6 +5808,37 @@ export class SharedSimulation implements Simulation {
 
   drainPresentationEvents(): readonly SimulationPresentationEvent[] { return this.events.takePresentation(); }
 
+  private capturePresentationSnapshot(): void {
+    const snapshot = new Map<ActorId, { origin: Vec3; angles: Vec3; viewPath: string | null; viewFrame: number }>();
+    const capture = (actor: ActorId): void => {
+      const body = this.bodies.read(actor);
+      if (body === null) return;
+      const view = this.viewModels.get(actor);
+      snapshot.set(actor, { origin: body.origin, angles: body.angles, viewPath: view?.path ?? null, viewFrame: view?.frame ?? 0 });
+    };
+    for (const entry of this.actorExecutions.values()) if (entry.kind === "q1" || entry.kind === "q2") capture(entry.entity.actor.id);
+    for (const player of this.playerStates.values()) capture(player.actor.id);
+    this.presentationSnapshot = snapshot;
+  }
+  /** Fraction of the current source tick already elapsed at host render time. */
+  private presentationFraction(): { readonly fraction: number; readonly backLerp: number } {
+    const tick = this.presentationTickMilliseconds;
+    if (tick === null || tick <= 0 || this.presentationSnapshot.size === 0) return { fraction: 1, backLerp: 0 };
+    const end = this.timeSeconds * 1000;
+    const fraction = Math.min(1, Math.max(0, (this.sourceSchedulingMilliseconds - (this.presentationAhead ? end - tick : end)) / tick));
+    return { fraction, backLerp: 1 - fraction };
+  }
+  private interpolatedPose(actor: ActorId, origin: Vec3, angles: Vec3, fraction: number): { readonly origin: Vec3; readonly angles: Vec3; readonly previousOrigin: Vec3; readonly backLerp: number } {
+    const previous = this.presentationSnapshot.get(actor);
+    if (previous === undefined || fraction >= 1) return { origin, angles, previousOrigin: origin, backLerp: 0 };
+    const delta = { x: origin.x - previous.origin.x, y: origin.y - previous.origin.y, z: origin.z - previous.origin.z };
+    if (delta.x * delta.x + delta.y * delta.y + delta.z * delta.z > 512 * 512) return { origin, angles, previousOrigin: origin, backLerp: 0 };
+    const angle = (from: number, to: number): number => { let d = (to - from) % 360; if (d > 180) d -= 360; else if (d < -180) d += 360; return from + d * fraction; };
+    return { origin: { x: previous.origin.x + delta.x * fraction, y: previous.origin.y + delta.y * fraction, z: previous.origin.z + delta.z * fraction },
+      angles: { x: angle(previous.angles.x, angles.x), y: angle(previous.angles.y, angles.y), z: angle(previous.angles.z, angles.z) },
+      previousOrigin: previous.origin, backLerp: 1 - fraction };
+  }
+
   presentations(): readonly SimulationPresentation[] {
     const appearances = this.modOwner?.appearanceOverrides();
     let models = [...this.primaryPresentations(), ...(this.modOwner?.presentations() ?? []), ...(this.grapple?.source.kind === "q3-qvm" ? this.grapple.source.game.presentations(this.grapple.selection.source.content) : [])];
@@ -5815,15 +5856,20 @@ export class SharedSimulation implements Simulation {
   }
   private primaryPresentations(): readonly SimulationPresentation[] {
     const result: SimulationPresentation[] = [];
+    const { fraction, backLerp } = this.presentationFraction();
     if (this.source.kind === "q2-native") {
       const source = this.source, content = this.recipe.map.entities.content;
       for (const state of source.game.entityStates()) {
         const info = source.game.entityInfo(state.number);
         if (state.number === 0 || info.actor === null || !info.active || (info.serverFlags & 1) !== 0) continue;
         const appearance = source.game.modelAppearance(state.number);
+        const delta = { x: state.origin.x - state.oldOrigin.x, y: state.origin.y - state.oldOrigin.y, z: state.origin.z - state.oldOrigin.z };
+        const continuous = fraction < 1 && delta.x * delta.x + delta.y * delta.y + delta.z * delta.z <= 512 * 512;
         const model = { actor: info.actor, content, family: "q2", frame: state.frame, oldFrame: "oldFrame" in state ? state.oldFrame : state.frame,
+          ...(continuous ? { backLerp } : {}),
           skin: appearance.skin, skinPath: appearance.skinPath, effects: Number(state.effects), renderFlags: state.renderEffects,
-          origin: state.origin, previousOrigin: state.oldOrigin, angles: state.angles,
+          origin: continuous ? { x: state.oldOrigin.x + delta.x * fraction, y: state.oldOrigin.y + delta.y * fraction, z: state.oldOrigin.z + delta.z * fraction } : state.origin,
+          previousOrigin: state.oldOrigin, angles: state.angles,
           scale: "scale" in state && state.scale !== 0 ? state.scale : 1, alpha: "alpha" in state ? state.alpha !== 0 ? state.alpha : (state.renderEffects & 32) !== 0 ? 0.3 : 1 : 1, visible: true, viewWeapon: false } satisfies Omit<SimulationPresentation, "path">;
         if (appearance.path !== "") result.push({ ...model, path: appearance.path });
         for (const [index, path] of appearance.attachedModels.entries()) if (path !== "") result.push({ ...model, path, skin: 0, skinPath: null,
@@ -5847,20 +5893,27 @@ export class SharedSimulation implements Simulation {
       if (entry.kind === "q1") {
         const entity = entry.entity, alpha = entity.number("alpha"), scale = entity.number("scale");
         if (entity.model === this.recipe.map.geometry.requestedPath) continue;
+        const pose = this.interpolatedPose(entity.actor.id, body.origin, body.angles, fraction);
         result.push({ actor: entity.actor.id, content: entry.content, family: "q1", path: entity.model,
           frame: entity.frame, oldFrame: entity.frame, skin: entity.skin, effects: entity.effects, renderFlags: 0,
-          origin: body.origin, angles: body.angles, ...this.q1VisualFields(alpha, scale), visible: true, viewWeapon: false });
+          origin: pose.origin, previousOrigin: pose.previousOrigin, backLerp: pose.backLerp, angles: pose.angles, ...this.q1VisualFields(alpha, scale), visible: true, viewWeapon: false });
       } else {
         const entity = entry.entity, model = this.sourceModels.get(entity.actor.id);
         if (entity.classname === "worldspawn") continue;
         const frame = model?.frame ?? entity.frame, oldFrame = model?.oldFrame ?? entity.oldFrame;
-        result.push({ actor: entity.actor.id, content: entry.content, family: "q2", path: entity.model,
+        const beam = entry.services.options.edition === "rerelease" && (entity.renderFlags & 128) !== 0;
+        const pose = beam ? { origin: body.origin, angles: body.angles, previousOrigin: entity.pos2, backLerp: 0 }
+          : this.interpolatedPose(entity.actor.id, body.origin, body.angles, fraction);
+        const presentation = { actor: entity.actor.id, content: entry.content, family: "q2",
+          frame, oldFrame: oldFrame === -1 ? frame : oldFrame, backLerp: pose.backLerp, skin: model?.skin ?? entity.skin, effects: model?.effects ?? entity.effects,
+          renderFlags: model?.renderFlags ?? entity.renderFlags, alpha: model?.alpha ?? entity.alpha, origin: pose.origin, angles: pose.angles,
+          previousOrigin: pose.previousOrigin,
+          scale: model?.scale ?? 1, visible: entity.visible && (entity.serverFlags & 1) === 0, viewWeapon: false } satisfies Omit<SimulationPresentation, "path">;
+        if (entity.model !== "") result.push({ ...presentation, path: entity.model,
           ...(entity.flare === null ? {} : { flare: entity.flare }),
-          frame, oldFrame: oldFrame === -1 ? frame : oldFrame, skin: model?.skin ?? entity.skin, effects: model?.effects ?? entity.effects,
-          renderFlags: model?.renderFlags ?? entity.renderFlags, alpha: model?.alpha ?? entity.alpha, origin: body.origin, angles: body.angles,
-          previousOrigin: entry.services.options.edition === "rerelease" && (entity.renderFlags & 128) !== 0 ? entity.pos2 : body.origin,
-          ...(entry.services.options.edition === "rerelease" && (entity.renderFlags & 128) !== 0 ? { modelBeam: { segmentLength: entity.frame } } : {}),
-          scale: model?.scale ?? 1, visible: (entity.serverFlags & 1) === 0, viewWeapon: false });
+          ...(entry.services.options.edition === "rerelease" && (entity.renderFlags & 128) !== 0 ? { modelBeam: { segmentLength: entity.frame } } : {}) });
+        // Q2 modelindex2-4 draw with the same frame/skin as the primary model (e.g. the Jorg shell over its rider).
+        for (const path of model?.attachedModels ?? [entity.model2, entity.model3, entity.model4]) if (path !== "") result.push({ ...presentation, path });
       }
     }
     for (const player of this.playerStates.values()) {
@@ -5872,10 +5925,11 @@ export class SharedSimulation implements Simulation {
       const q1Player = this.source.kind === "q1" ? this.source.game.player(player.actor.id) : null;
       const colors = player.character === "q1" && this.source.kind === "q1" ? this.source.composition.clients.get(player.actor.id) : null;
       const visual = q1Player === null ? { alpha: 1, scale: 1 } : this.q1VisualFields(q1Player.alpha, q1Player.scale);
+      const pose = this.interpolatedPose(player.actor.id, body.origin, body.angles, fraction);
       result.push({ actor: player.actor.id, content: this.recipe.character.appearance.content, family: player.character,
         path: q2Entity?.model || this.q1Characters.get(player.actor)?.presentation.model || (player.character === "q1" ? "progs/player.mdl" : `players/${model}/tris.md2`), skinPath: player.character === "q2" && !q2Gibbed ? `players/${model}/grunt.pcx` : null,
-        frame: q2Entity?.frame ?? (player.animation.state.kind === "q1" || player.animation.state.kind === "q2" ? player.animation.state.frame : 0), oldFrame: q2Entity?.oldFrame ?? 0,
-        skin: q2Entity?.skin ?? 0, effects: q2Entity?.effects ?? 0, renderFlags: q2Entity?.renderFlags ?? 0, origin: body.origin, angles: body.angles, ...visual,
+        frame: q2Entity?.frame ?? (player.animation.state.kind === "q1" || player.animation.state.kind === "q2" ? player.animation.state.frame : 0), oldFrame: q2Entity?.oldFrame ?? 0, backLerp: pose.backLerp,
+        skin: q2Entity?.skin ?? 0, effects: q2Entity?.effects ?? 0, renderFlags: q2Entity?.renderFlags ?? 0, origin: pose.origin, previousOrigin: pose.previousOrigin, angles: pose.angles, ...visual,
         ...(colors === null ? {} : { playerColors: { top: colors.shirt, bottom: colors.pants } }), visible: true, viewWeapon: false });
     }
     for (const [actor, model] of this.detachedModels) { const body = this.bodies.read(actor.id); if (body !== null) result.push({ actor: actor.id, content: model.content, family: "q2", path: model.path,
@@ -5895,7 +5949,10 @@ export class SharedSimulation implements Simulation {
         ...selected.viewState(actor), timeMilliseconds: Math.trunc(this.selectedMilliseconds), weapon: arsenal.state.sourceWeapon,
         firing: ((player?.buttons ?? this.modClientCommands.get(actor)?.input.command.buttons ?? 0) & 1) !== 0 && (this.combat.read(actor)?.health ?? 0) > 0,
         horizontalSpeed: Math.hypot(body.velocity.x, body.velocity.y), bobCycle: player?.state.kind === "q3" ? player.state.bobCycle : this.source.kind === "q3-qvm" ? this.source.game.records.player(this.source.game.records.requireSlot(actor)).bobCycle : 0 } };
-      result.push({ actor, ...q3Weapon, ...(arsenal?.activeWeapon == null ? {} : { weaponItem: arsenal.activeWeapon }), content: this.weaponProvider.content, family: providerFamily(this.weaponProvider.provider), path: model.path, frame: model.frame, oldFrame: model.frame,
+      const viewSnapshot = this.presentationSnapshot.get(actor);
+      const viewInterpolated = viewSnapshot !== undefined && viewSnapshot.viewPath === model.path && fraction < 1;
+      result.push({ actor, ...q3Weapon, ...(arsenal?.activeWeapon == null ? {} : { weaponItem: arsenal.activeWeapon }), content: this.weaponProvider.content, family: providerFamily(this.weaponProvider.provider), path: model.path, frame: model.frame,
+        oldFrame: viewInterpolated ? viewSnapshot.viewFrame : model.frame, backLerp: viewInterpolated ? backLerp : 0,
         skin: q2?.skin ?? 0, effects: 0, renderFlags: providerFamily(this.weaponProvider.provider) === "q2" ? 1 | 4 | 16 : 0,
         origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), sourceView?.gunOffset ?? q2?.kickOrigin ?? zero), angles: add(view.angles, sourceView?.gunAngles ?? q2?.kickAngles ?? zero),
         scale: 1, visible: this.source.kind === "q3-qvm" || (this.source.kind === "q2-native"

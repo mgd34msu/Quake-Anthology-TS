@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { corpusFile, corpusHasFile } from "../../support/corpus.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { QwMovementInput, MovementServices } from "../../../src/contracts/movement.ts";
 import type { Bounds, Vec3 } from "../../../src/contracts/math.ts";
@@ -32,7 +32,7 @@ function command(code: number, text: string) {
   return result;
 }
 async function fixture() {
-  const archive = await openArchive(resolve(import.meta.dir, "../../../../qfiles/q2/baseq2/pak0.pak"));
+  const archive = await openArchive(corpusFile("q2/baseq2/pak0.pak"));
   try {
     const entry = archive.findEntries("maps/base1.bsp")[0]; if (entry === undefined) throw new Error("Missing base1");
     const world = decodeQ2Map(await archive.readEntry(entry)), scene = createSceneQueries(world);
@@ -67,7 +67,7 @@ async function fixture() {
   } finally { archive.close(); }
 }
 
-test("saved Q2 Space/Ctrl controls jump and crouch Q3 character bounds with QW movement on base1", async () => {
+test.skipIf(!corpusHasFile("q2/baseq2/pak0.pak"))("saved Q2 Space/Ctrl controls jump and crouch Q3 character bounds with QW movement on base1", async () => {
   const { input, services, provider } = await fixture(), shared = provider(false), native = provider(true);
   if (shared.kind !== "q1-quakeworld" || native.kind !== "q1-quakeworld") throw new Error("Wrong movement provider");
   let current = input;
@@ -77,8 +77,11 @@ test("saved Q2 Space/Ctrl controls jump and crouch Q3 character bounds with QW m
   }
   expect(current.state.ground.kind).toBe("world");
   const space = command(KeyCode.Space, "+moveup"), ctrl = command(KeyCode.Control, "+movedown");
-  expect(space.buttons).toBe(0); expect(space.upMove).toBeGreaterThan(0); expect(ctrl.upMove).toBeLessThan(0);
-  const jumped = shared.move({ ...current, command: space }, services), nativeUp = native.move({ ...current, command: space }, services);
+  // The builder maps saved +moveup bindings onto the jump button; strip it here so the
+  // shared provider's own upMove-to-jump translation is what is exercised below.
+  expect(space.buttons & 2).toBe(2); expect(space.upMove).toBeGreaterThan(0); expect(ctrl.upMove).toBeLessThan(0);
+  const rawSpace = { ...space, buttons: space.buttons & ~2 };
+  const jumped = shared.move({ ...current, command: rawSpace }, services), nativeUp = native.move({ ...current, command: rawSpace }, services);
   if (jumped.status !== "active" || nativeUp.status !== "active") throw new Error("Player removed");
   expect(jumped.state.velocity.z).toBeGreaterThan(0); expect(jumped.state.origin.z).toBeGreaterThan(current.state.origin.z);
   expect(nativeUp.state.origin.z).toBe(current.state.origin.z);

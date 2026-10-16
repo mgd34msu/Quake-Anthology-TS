@@ -23,6 +23,7 @@ export function dropQ3MovementTimers(state: { pmTime: number; pmFlags: number },
 const MASK_WATER = 32 | 16 | 8;
 const CONTENTS_BODY = 0x2000000;
 const SURF_SLICK = 2;
+const SURF_LADDER = 8;
 const SURF_NODAMAGE = 1;
 const SURF_METALSTEPS = 0x1000;
 const SURF_NOSTEPS = 0x2000;
@@ -46,6 +47,7 @@ class MoveStep implements SlideMoveContext {
   groundNormal: Vec3 | null = null;
   groundSurfaceFlags = 0;
   walking = false;
+  ladder = false;
   impactSpeed = 0;
   waterlevel = 0;
   watertype = 0;
@@ -204,6 +206,36 @@ class MoveStep implements SlideMoveContext {
     this.accelerate(normalize3(wish), Math.fround(Math.fround(length3(wish)) * scale), 1);
     if (this.groundNormal !== null) this.state.velocity = clipVelocity(this.state.velocity, this.groundNormal);
     stepSlideMove(this, true);
+  }
+  // Unified-engine extension: stock Q3 pmove has no ladder move, so ladder
+  // surfaces (Q3 SURF_LADDER shaders, Q2 CONTENTS_LADDER brushes) climb with
+  // Quake II's ladder model.
+  private checkLadder(): void {
+    this.ladder = false;
+    if (this.state.pmTime) return;
+    const flat = normalize3(vec3(this.forward.x, this.forward.y, 0));
+    const trace = this.test(this.state.origin, add3(this.state.origin, flat));
+    if (trace.fraction < 1 && trace.kind === "q3" && (trace.surfaceFlags & SURF_LADDER) !== 0) this.ladder = true;
+  }
+  private ladderMove(): void {
+    if (this.walking && this.checkJump()) { this.airMove(); return; }
+    this.friction();
+    const ps = this.state, cmd = this.cmd;
+    const wish = this.wishVelocity(this.commandScale());
+    let wishZ = wish.z;
+    if (Math.abs(ps.velocity.z) <= 200) {
+      if (ps.viewangles.x <= -15 && cmd.forwardmove > 0) wishZ = 200;
+      else if (ps.viewangles.x >= 15 && cmd.forwardmove > 0) wishZ = -200;
+      else if (cmd.upmove > 0) wishZ = 200;
+      else if (cmd.upmove < 0) wishZ = -200;
+    }
+    const wishVel = vec3(wish.x, wish.y, Math.fround(wishZ));
+    this.accelerate(normalize3(wishVel), Math.fround(length3(wishVel)), 10);
+    if (wishVel.z === 0) {
+      if (ps.velocity.z > 0) ps.velocity = vec3(ps.velocity.x, ps.velocity.y, Math.max(0, Math.fround(ps.velocity.z - Math.fround(ps.gravity * this.frameTime))));
+      else ps.velocity = vec3(ps.velocity.x, ps.velocity.y, Math.min(0, Math.fround(ps.velocity.z + Math.fround(ps.gravity * this.frameTime))));
+    }
+    stepSlideMove(this, false);
   }
   private grappleMove(): void {
     this.state.velocity = q3GrappleVelocity(this.state.origin, this.state.grapplePoint, this.forward);
@@ -445,6 +477,7 @@ class MoveStep implements SlideMoveContext {
     const previousWaterlevel = this.waterlevel;
     this.checkDuck();
     this.groundTrace();
+    this.checkLadder();
     if (ps.pmType === MoveType.PM_DEAD && this.walking) {
       const speed = Math.fround(Math.fround(length3(ps.velocity)) - 20);
       ps.velocity = speed <= 0 ? vec3(0, 0, 0) : scale3(normalize3(ps.velocity), speed);
@@ -457,6 +490,7 @@ class MoveStep implements SlideMoveContext {
     else if (ps.pmFlags & F.GRAPPLE_PULL) { this.grappleMove(); this.airMove(); }
     else if (ps.pmFlags & F.TIME_WATERJUMP) this.waterJumpMove();
     else if (this.waterlevel > 1) this.waterMove();
+    else if (this.ladder) this.ladderMove();
     else if (this.walking) this.walkMove();
     else this.airMove();
     this.options.animation({ kind: "gesture" });

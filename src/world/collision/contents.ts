@@ -95,9 +95,13 @@ export function adaptTraceResult(result: TraceResult, policy: TracePolicy): Trac
                 ? { name: '', flags: convertSurfaceFlags(result.surfaceFlags, 'q3', 'q2'), value: 0, material: '' }
                 : sky ? { name: 'sky', flags: 4, value: 0, material: '' }
                 : result.hit.kind !== 'none' ? { name: '', flags: 0, value: 0, material: '' } : null;
-            return { ...fields, kind: 'q2', contents, surface, sourcePlane, secondary: null };
+            // Q3 marks ladders with SURF_LADDER; Q2 movement checks CONTENTS_LADDER.
+            const ladder = result.kind === 'q3' && (result.surfaceFlags & 8) !== 0 ? 0x20000000 : 0;
+            return { ...fields, kind: 'q2', contents: contents | ladder, surface, sourcePlane, secondary: null };
         }
-        case 'q3': return { ...fields, kind: 'q3', contents, surfaceFlags: result.kind === 'q2' && result.surface !== null ? convertSurfaceFlags(result.surface.flags, 'q2', 'q3') : result.kind === 'q1' && (nativeContents === -6 || ((result.surfaceFlags ?? 0) & 4) !== 0) ? 4 | 16 : 0, sourcePlane };
+        case 'q3': return { ...fields, kind: 'q3', contents, surfaceFlags: (result.kind === 'q2' && result.surface !== null ? convertSurfaceFlags(result.surface.flags, 'q2', 'q3') : result.kind === 'q1' && (nativeContents === -6 || ((result.surfaceFlags ?? 0) & 4) !== 0) ? 4 | 16 : 0)
+            // Q2 marks ladders with CONTENTS_LADDER; Q3 movement checks SURF_LADDER.
+            | (result.kind === 'q2' && (result.contents & 0x20000000) !== 0 ? 8 : 0), sourcePlane };
     }
 }
 export function adaptPointContents(result: PointContentsResult, policy: TracePolicy): PointContentsResult {
