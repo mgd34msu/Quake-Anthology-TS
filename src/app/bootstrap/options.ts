@@ -36,6 +36,9 @@ export interface ApplicationOptions {
   readonly movementProduct?: string;
   readonly character: GameFamily;
   readonly characterModel: string;
+  readonly characterSkin?: string;
+  readonly characterTopColor?: number;
+  readonly characterBottomColor?: number;
   readonly renderer: "cpu" | "gl";
   readonly renderWorker?: boolean;
   readonly rendererSelection?: "default" | "explicit";

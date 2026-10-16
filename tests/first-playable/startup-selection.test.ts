@@ -533,3 +533,30 @@ test.skipIf(process.env["QTS_TEST_INSTALLED_WEAPON_BEHAVIORS"] !== "1" || !exist
   await model.prepareMaps();
   expect(model.options.mods).toEqual(selected);
 }, 60000);
+
+test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3") || !corpusHasFile("q2/baseq2/pak0.pak") || !corpusHasFile("q1/id1/pak0.pak"))("character appearance rows enumerate real skins and Q1 colors", async () => {
+  const command = parseApplicationCommand(["--content-root", corpus]);
+  if (command.kind !== "run" && command.kind !== "menu") throw new Error("Expected launch options");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const model = new StartupSelectionModel(catalog, command.options);
+  await model.prepareMaps();
+
+  model.select("character", "q3-baseq3");
+  const q3Skins = model.rows().find(row => row.id === "skin")?.choices.map(choice => choice.id) ?? [];
+  expect(q3Skins[0]).toBe("");
+  expect(q3Skins).toContain("blue");
+  model.select("skin", "blue");
+  expect(model.options.characterSkin).toBe("blue");
+
+  model.select("character", "q2-classic-baseq2");
+  const q2Skins = model.rows().find(row => row.id === "skin")?.choices.map(choice => choice.id) ?? [];
+  expect(q2Skins).toContain("grunt");
+  expect(q2Skins).not.toContain("weapon");
+  expect(model.options.characterSkin).toBeUndefined();
+
+  model.select("character", "q1-classic-id1");
+  expect(model.rows().some(row => row.id === "skin")).toBe(false);
+  model.select("topColor", "4");
+  model.select("bottomColor", "11");
+  expect(model.options).toMatchObject({ characterTopColor: 4, characterBottomColor: 11 });
+});

@@ -38,7 +38,7 @@ import type { ApplicationOptions } from "./options.ts";
 import type { Q1ProtocolIdentity } from "../../contracts/protocol.ts";
 import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 
-export type StartupSelectionField = "doppler" | "environment" | "product" | "mapProduct" | "map" | "movement" | "character" | "model" | "weapons" | "enemies" | "grapple" | "grappleStyle" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer";
+export type StartupSelectionField = "doppler" | "environment" | "product" | "mapProduct" | "map" | "movement" | "character" | "model" | "skin" | "topColor" | "bottomColor" | "weapons" | "enemies" | "grapple" | "grappleStyle" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer";
 export interface StartupSelectionChoice { readonly id: string; readonly label: string; readonly unavailable: string | null; }
 export interface StartupSelectionRow { readonly id: StartupSelectionField; readonly label: string; readonly value: string; readonly choices: readonly StartupSelectionChoice[]; }
 export interface MonsterRosterRow { readonly classname: string | null; readonly label: string; readonly value: string; readonly effectiveLabel: string; readonly choices: readonly StartupSelectionChoice[]; }
@@ -55,6 +55,7 @@ export interface StartupHosting {
   readonly q1Protocol: Q1ProtocolIdentity | null;
 }
 const choice = (id: string, label = id, unavailable: string | null = null): StartupSelectionChoice => ({ id, label, unavailable });
+const q1ColorNames = ["White", "Brown", "Slate", "Green", "Red", "Gold", "Pink", "Rust", "Purple", "Lavender", "Teal", "Yellow", "Orange", "Maroon"] as const;
 const monsterNames: Readonly<Record<string, string>> = { monster_army: "Grunt", monster_demon1: "Fiend", monster_wizard: "Scrag", monster_shalrath: "Vore", monster_tarbaby: "Spawn" };
 function monsterLabel(classname: string): string {
   return monsterNames[classname] ?? classname.replace("monster_", "").split("_").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
@@ -206,6 +207,7 @@ export class StartupSelectionModel {
     const rules = initial.rules ?? (product.expectation.family === "q2" && product.expectation.edition === "classic" && (campaign === "ctf" || campaign === "lmctf") ? campaign : "standard");
     this.values = { product: initial.product, mapProduct: initial.mapProduct ?? initial.product, map: initial.map,
       movement: playerProducts.movement, character: playerProducts.character, model: initial.characterModel,
+      skin: initial.characterSkin ?? "", topColor: String(initial.characterTopColor ?? 0), bottomColor: String(initial.characterBottomColor ?? 0),
       doppler: "source", environment: "audio-content", weapons: "native", enemies: "native", grapple: "native", grappleStyle: "native", grenades: "native", mode: initial.mode, rules,
       skill: String(initial.skill), seats: String(initial.seats), renderer: initial.renderer };
     this.selectedModels.set(this.values.character, initial.characterModel);
@@ -246,7 +248,11 @@ export class StartupSelectionModel {
         if (product.expectation.family === "q2" && product.looseRoot !== null) {
           const directory = join(product.looseRoot, "players"), models: string[] = [];
           if (existsSync(directory)) for (const entry of await readdir(directory, { withFileTypes: true })) {
-            if (entry.isDirectory() && existsSync(join(directory, entry.name, "tris.md2"))) models.push(`players/${entry.name}/tris.md2`);
+            if (entry.isDirectory() && existsSync(join(directory, entry.name, "tris.md2"))) {
+              models.push(`players/${entry.name}/tris.md2`);
+              for (const file of await readdir(join(directory, entry.name)))
+                if (file.toLowerCase().endsWith(".pcx")) models.push(`players/${entry.name}/${file.toLowerCase()}`);
+            }
           }
           this.looseModels.set(product.expectation.id, models);
         }
@@ -417,6 +423,25 @@ export class StartupSelectionModel {
         && (paths.has(`models/players/${name}/head.md3`) || paths.has(`models/players/heads/${name}/${name}.md3`)))) models.add(name);
     }
     return [...models].sort().map(name => choice(name));
+  }
+  private skins(): readonly StartupSelectionChoice[] {
+    const product = this.product("character"), family = product.expectation.family, model = this.values.model.toLowerCase();
+    if (family === "q1" || model === "") return [choice("", "Default")];
+    const skins = new Set<string>();
+    for (const path of this.files(product)) {
+      if (family === "q2") {
+        const match = /^players\/([^/]+)\/([^/]+)\.pcx$/.exec(path);
+        if (match?.[1] === model && match[2] !== undefined && !match[2].endsWith("_i") && match[2] !== "weapon") skins.add(match[2]);
+      } else {
+        const match = /^models\/players\/(?:characters\/)?([^/]+)\/lower_([^/]+)\.skin$/.exec(path);
+        if (match?.[1] === model && match[2] !== undefined) skins.add(match[2]);
+      }
+    }
+    skins.delete("default");
+    return [choice("", "Default"), ...[...skins].sort().map(name => choice(name))];
+  }
+  private colorChoices(): readonly StartupSelectionChoice[] {
+    return q1ColorNames.map((name, index) => choice(String(index), name));
   }
   private roster() {
     let roster = this.rosters.get(this.values.product);
@@ -596,6 +621,9 @@ export class StartupSelectionModel {
       row("map", "Starting map", this.maps()),
       row("movement", "Movement", movementChoices),
       row("character", "Character source", characterChoices), row("model", "Character model", this.models()),
+      ...(this.product("character").expectation.family === "q1"
+        ? [row("topColor", "Shirt color", this.colorChoices()), row("bottomColor", "Pants color", this.colorChoices())]
+        : [row("skin", "Skin", this.skins())]),
       row("weapons", "Weapons", [nativeWeapons, ...this.catalog.products.filter(product => supportsSelectedWeaponProduct(product.expectation)).map(productChoice)]),
       row("enemies", "Monsters", [nativeMonsters, choice("custom", this.values.enemies === "custom" ? `${sourceLabel} (custom)` : "Custom roster", current.expectation.family === "q3" ? "This map has no supported authored monster roster" : null), ...this.monsterSourceRow().choices.filter(source => source.id !== "native").map(source => ({ ...source, unavailable: current.expectation.family === "q3" ? "This map has no supported authored monster roster" : source.unavailable }))]),
       row("grapple", "Hook", [choice("disabled", "Off"), choice("slot", "Weapon slot", hookUnavailable), choice("offhand", "Offhand", hookUnavailable)], placement),
@@ -632,6 +660,9 @@ export class StartupSelectionModel {
         if (matchModeUnavailable({ ...product.expectation, mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer", rules }) !== null) this.values.rules = "standard";
     }
     if (field === "model") this.selectedModels.set(this.values.character, id);
+    if (field === "model" || field === "character") {
+      if (this.values.skin !== "" && !this.skins().some(choice => choice.id === this.values.skin)) this.values.skin = "";
+    }
     if (field === "character") {
       const family = this.product("character").expectation.family;
       const preferred = this.selectedModels.get(id) ?? (family === "q1" ? "player" : family === "q2" ? "male" : "sarge");
@@ -653,7 +684,9 @@ export class StartupSelectionModel {
     const protocol = initial.network.kind === "native-server" && this.hosting().q1Protocol !== null && q1Protocol !== undefined ? { q1Protocol } : {};
     const mods = this.selectedMods?.enabled() ?? [...this.initial.mods ?? [], ...this.initial.weaponBehavior === undefined ? [] : [this.initial.weaponBehavior]];
     return this.applySelectedServerProfile({ ...initial, mods, ...protocol, product: this.values.product, mapProduct: this.values.mapProduct, map: this.values.map, movement: this.product("movement").expectation.family, movementProduct: this.product("movement").expectation.id,
-      character: this.product("character").expectation.family, characterModel: this.values.model, mode, rules, skill,
+      character: this.product("character").expectation.family, characterModel: this.values.model,
+      ...(this.values.skin === "" ? {} : { characterSkin: this.values.skin }),
+      characterTopColor: Number(this.values.topColor), characterBottomColor: Number(this.values.bottomColor), mode, rules, skill,
       seats: Number(this.values.seats), renderer, ...this.display, ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}) });
   }
   summary(): readonly string[] {

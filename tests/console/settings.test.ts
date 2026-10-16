@@ -39,7 +39,7 @@ test("Quake II settings use client skin hand and FOV while automatic saves keep 
   for (const [name, value] of [["name", "Player"], ["skin", "female/athena"], ["hand", "0"], ["fov", "90"]])
     if (name !== undefined && value !== undefined) client.register(name, value, CvarFlag.UserInfo | CvarFlag.Archive);
   const settings = bindGameplaySettings({ cvars: server, client });
-  const skin = settings.find(setting => setting.label === "Player skin (model/skin)"), hand = settings.find(setting => setting.label === "Weapon hand"), fov = settings.find(setting => setting.label === "Field of view"), autosave = settings.find(setting => setting.label === "Automatic saves");
+  const skin = settings.find(setting => setting.label === "Player skin (model/skin)"), hand = settings.find(setting => setting.label === "Weapon hand"), fov = settings.find(setting => setting.label === "Field of view"), autosave = settings.find(setting => setting.label === "Autosave on level load");
   if (skin?.kind !== "text-entry" || hand?.kind !== "choice" || fov?.kind !== "slider" || autosave?.kind !== "toggle") throw new Error("Missing Q2 controls");
   const skinControl = settingControl(skin, { x: 0, y: 0, width: 200, height: 30 }, owner.seat(0));
   if (skinControl.kind !== "text-entry") throw new Error("Missing skin entry");
@@ -90,4 +90,32 @@ test("pickup switching menus share each seat's archived userinfo and reset the s
   const setting = bindGameplaySettings({ cvars: q3 }).find(value => value.label === "Switch to picked-up weapons");
   if (setting?.kind !== "toggle") throw new Error("Missing Q3 pickup preference");
   setting.write(false); expect(q3.variableValue("cg_autoswitch")).toBe(0); resetGameplaySettings({ cvars: q3 }); expect(setting.read()).toBe(true);
+});
+
+test("character appearance reaches userinfo cvars for every dialect", async () => {
+  const { registerPlayerUserinfo, playerUserinfo, applyCharacterAppearance } = await import("../../src/app/bootstrap/player-userinfo.ts");
+  const { initializeQ3ClientCvars } = await import("../../src/app/bootstrap/q3-client/userinfo.ts");
+  const owner = createIdentityOwner("appearance-settings"), context = { session: owner.session, origin: { kind: "local-console" } } satisfies ConstructorParameters<typeof CvarRegistry>[0]["context"];
+
+  const q1 = new CvarRegistry({ dialect: "q1-netquake", context });
+  registerPlayerUserinfo(q1, 0);
+  applyCharacterAppearance(q1, { character: "q1", characterModel: "player", characterTopColor: 4, characterBottomColor: 11 });
+  expect(playerUserinfo(q1)).toContain("\\topcolor\\4\\bottomcolor\\11");
+
+  const qw = new CvarRegistry({ dialect: "q1-quakeworld", context });
+  registerPlayerUserinfo(qw, 0);
+  applyCharacterAppearance(qw, { character: "q1", characterModel: "player", characterTopColor: 2, characterBottomColor: 9 });
+  expect(playerUserinfo(qw)).toContain("\\topcolor\\2");
+  expect(playerUserinfo(qw)).toContain("\\bottomcolor\\9");
+
+  const q2 = new CvarRegistry({ dialect: "q2-rerelease", context });
+  registerPlayerUserinfo(q2, 0, "female");
+  applyCharacterAppearance(q2, { character: "q2", characterModel: "female", characterSkin: "brianna" });
+  expect(playerUserinfo(q2)).toContain("\\skin\\female/brianna");
+
+  const q3 = new CvarRegistry({ dialect: "q3", context });
+  initializeQ3ClientCvars(q3, { name: "Player 1", model: "sarge" });
+  applyCharacterAppearance(q3, { character: "q3", characterModel: "sarge", characterSkin: "blue" });
+  expect(q3.variableString("model")).toBe("sarge/blue");
+  expect(q3.variableString("headmodel")).toBe("sarge/blue");
 });

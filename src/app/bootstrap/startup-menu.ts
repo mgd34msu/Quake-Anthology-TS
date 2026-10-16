@@ -428,28 +428,31 @@ export class StartupMenu {
   } {
     const all = new Map(this.safeRows().map(row => [row.id, row]));
     const dropdown = this.builderDropdown;
-    const panelX = dropdown === null ? -1 : ["product", "mapProduct", "map", "character", "model", "movement", "weapons"].includes(dropdown.field) ? 328 : 64;
+    const panelX = dropdown === null ? -1 : ["product", "mapProduct", "map", "character", "model", "skin", "topColor", "bottomColor", "movement", "weapons"].includes(dropdown.field) ? 328 : 64;
     const sections: readonly { readonly title: string; readonly x: number; readonly startY: number;
       readonly fields: readonly { readonly field: StartupSelectionField; readonly label: string; readonly picker: boolean }[] }[] = [
-      { title: "WORLD", x: 64, startY: 116, fields: [
+      { title: "WORLD", x: 64, startY: 110, fields: [
         { field: "product", label: "Game", picker: true },
         { field: "mapProduct", label: "Map set", picker: true },
         { field: "map", label: "Map", picker: true },
       ] },
-      { title: "PLAYER", x: 64, startY: 226, fields: [
+      { title: "PLAYER", x: 64, startY: 209, fields: [
         { field: "character", label: "Character", picker: true },
         { field: "model", label: "Model", picker: true },
+        { field: "skin", label: "Skin", picker: true },
+        { field: "topColor", label: "Shirt", picker: true },
+        { field: "bottomColor", label: "Pants", picker: true },
         { field: "movement", label: "Movement", picker: true },
         { field: "weapons", label: "Weapons", picker: true },
       ] },
-      { title: "MATCH", x: 328, startY: 116, fields: [
+      { title: "MATCH", x: 328, startY: 110, fields: [
         { field: "enemies", label: "Monsters", picker: true },
         { field: "seats", label: "Players", picker: false },
         { field: "mode", label: "Mode", picker: false },
         { field: "rules", label: "Rules", picker: true },
         { field: "skill", label: "Difficulty", picker: false },
       ] },
-      { title: "KIT", x: 328, startY: 282, fields: [
+      { title: "KIT", x: 328, startY: 259, fields: [
         { field: "grapple", label: "Hook", picker: false },
         { field: "grappleStyle", label: "Hook style", picker: true },
         { field: "grenades", label: "Grenades", picker: false },
@@ -466,7 +469,7 @@ export class StartupMenu {
       present.forEach((spec, index) => {
         const row = all.get(spec.field);
         if (row === undefined) return;
-        const rect = { x: section.x, y: section.startY + 20 + index * 28, width: 248, height: 26 };
+        const rect = { x: section.x, y: section.startY + 17 + index * 25, width: 248, height: 24 };
         const valueWidth = rect.width - this.measure(spec.label, menuText.field) - 34;
         const enabled = !this.busy && dropdown === null;
         if (spec.picker) {

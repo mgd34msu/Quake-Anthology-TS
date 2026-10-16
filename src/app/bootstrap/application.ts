@@ -25,7 +25,7 @@ import { writeSdlClipboard } from "../../platform/sdl.ts";
 import { createRereleaseNativeQ2ApplicationServerHost } from "./simulation/network-q2-rerelease-native.ts";
 import { q3InfoValue } from "../../network/q3/admission.ts";
 import { liveQ2Protocol } from "./options.ts";
-import { registerPlayerUserinfo, playerUserinfo } from "./player-userinfo.ts";
+import { registerPlayerUserinfo, playerUserinfo, applyCharacterAppearance } from "./player-userinfo.ts";
 import { ServerOperatorState, sourceServerAdministration, registerSourceAdministrationCvars, sourceAdministrationCommandNames, type ServerOperatorHost } from "./server-administration.ts";
 import type { NetworkAddress } from "../../network/common/endpoint.ts";
 import { q3ProductMapCommands } from "../../core/q3-product-policy.ts";
@@ -2225,6 +2225,7 @@ export class Application {
       if (selectedIdentity) for (const name of ["model", "headmodel", "team_model", "team_headmodel"])
         cvars.set(name, `${options.characterModel}/default`, true);
     }
+    applyCharacterAppearance(cvars, options);
     if (userinfo === null && options.teamArenaSkirmish !== undefined && selectedIdentity) {
       const setup = options.teamArenaSkirmish;
       if (seat.id.index === 0) simulation.q3Source()?.host.cvars.set("ui_drawTimer", String(cvars.variableValue("cg_drawTimer")), true);
