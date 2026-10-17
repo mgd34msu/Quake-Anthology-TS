@@ -1,4 +1,4 @@
-/* Native hull traversal adapted from Quake WinQuake/world.c and quake-1-re-ts.
+/* Native hull traversal adapted from Quake WinQuake/world.c and the reference port.
  * Copyright (C) 1996 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds, Plane, Vec3 } from "../../../contracts/math.ts";
 import type { NumericOperations, NumericProfile } from "../../../contracts/numeric.ts";

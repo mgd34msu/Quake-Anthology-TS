@@ -1,5 +1,5 @@
-/* SPR/SP2 adapted from quake-1-re-ts/ref_soft/model.ts,
- * quake-2-re-ts/ref_gl/gl_model.ts and original spritegn.h/qfiles.h.
+/* SPR/SP2 adapted from the reference port,
+ * the reference port and original spritegn.h/qfiles.h.
  * Copyright (C) 1996-2001 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds } from "../../contracts/math.ts";
 import type { Q1SpriteModel, Q2SpriteModel, SpriteFrame, TimedFrames } from "../../contracts/scene.ts";

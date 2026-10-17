@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createSharedBotWorld } from "../../../src/app/bootstrap/simulation/bot-world.ts";
@@ -9,7 +11,7 @@ import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { CvarRegistry } from "../../../src/core/cvars/index.ts";
 import { decodeCheckpointValue, encodeCheckpointValue } from "../../../src/persistence/value.ts";
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 test.skipIf(!existsSync(resolve(corpus, "q1/rerelease/id1/pak0.pak")))("shared bot observation restore preserves IDs, pool and strings without startup side effects", async () => {
   const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-id1", "--map", "dm4", "--mode", "deathmatch", "--dedicated"]);
   if (launch.kind !== "run") throw new Error("Missing launch recipe");

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Ported from quake-1-re-ts/src/lib/ttf.ts.
+// Ported from the reference port
 // Unhinted glyf/CFF outlines, CID subroutines, legacy kern and COLR v0/CPAL.
 // GPOS, COLR v1 paints, CFF arithmetic and seac composition are unsupported.
 import { BinaryError, BinaryReader } from "../core/binary/index.ts";

@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../../support/corpus.ts";
+
 import type { ActorId, OwnedActor } from "../../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../../src/contracts/identity.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../../../src/world/actors/index.ts";
@@ -30,7 +32,7 @@ interface SavedHeavy {
 }
 
 async function session(name: string, saved?: SavedHeavy) {
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q1/rerelease/mg3/pak0.pak");
+  const archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/mg3/pak0.pak`);
   const entry = archive.findEntries(`maps/${name}.bsp`)[0]; if (entry === undefined) throw new Error(`Missing retail ${name}`);
   const map = readQ1Bsp(await archive.readEntry(entry), { source: `maps/${name}.bsp` }); archive.close();
   const identity = createIdentityOwner("mg3-heavy"), actors = saved === undefined ? new SessionActorRegistry(identity) : SessionActorRegistry.restore(identity, saved.slots, saved.sources), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
@@ -89,7 +91,7 @@ async function session(name: string, saved?: SavedHeavy) {
 }
 
 test("MG3 retail heavy models cover all 401 source frame callbacks", async () => {
-  const current = await session("map2"), archive = await openArchive("/home/buzzkill/Projects/qfiles/q1/rerelease/mg3/pak0.pak");
+  const current = await session("map2"), archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/mg3/pak0.pak`);
   try {
     let frames = 0;
     for (const definition of current.monsters.definitions.values()) {

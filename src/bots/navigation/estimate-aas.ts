@@ -1,4 +1,4 @@
-/* AAS area/portal cost relaxation from id Software be_aas_route.c and quake-3-ts routing.ts.
+/* AAS area/portal cost relaxation from id Software be_aas_route.c and the reference port routing.ts.
  * Copyright (C) 1999-2005 Id Software, Inc. SPDX-License-Identifier: GPL-2.0-or-later */
 import type { Vec3 } from "../../contracts/math.ts";
 import type { AasAsset } from "./aas.ts";

@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { ActorId } from "../../../../src/contracts/identity.ts";
 import type { ActorSlotCheckpoint, SavedActorId } from "../../../../src/contracts/session.ts";
@@ -169,7 +171,7 @@ test("match readiness, delayed spawning, votes, ghost reclaim and admin map perm
 });
 
 test("installed original CTF map rows use the registered flags, team starts and banners", async () => {
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/ctf/pak0.pak");
+  const archive = await openArchive(`${testCorpusRoot()}/q2/ctf/pak0.pak`);
   try {
     const entry = archive.entries.find(entry => entry.path.toLowerCase() === "maps/q2ctf1.bsp"); if (entry === undefined) throw new Error("Installed CTF archive has no q2ctf1");
     const map = readQ2Bsp(await archive.readEntry(entry)), scene = fixture(), rows = parseQ2Entities(map.entities, "classic").filter(row => /^(item_flag_team[12]|info_player_team[12]|misc_ctf_(small_)?banner)$/.test(row.classname));

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Shadow receiver sampling ported from quake-2-re-ts/ref_gl/gl_shader.ts.
+// Shadow receiver sampling ported from the reference port
 // Cone PCF and 3x2 cube faces keep the donor atlas layout and depth biases.
 export function shadowFactorLines(receiver: "world" | "model"): string[] {
   return [

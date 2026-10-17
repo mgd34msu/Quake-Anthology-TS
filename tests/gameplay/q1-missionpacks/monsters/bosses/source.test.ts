@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../../support/corpus.ts";
+
 import type { ActorId, OwnedActor } from "../../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../../src/contracts/identity.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../../../src/world/actors/index.ts";
@@ -31,7 +33,7 @@ interface SavedBoss {
 
 async function session(pack: "hipnotic" | "rogue", edition: "classic" | "rerelease", saved?: SavedBoss) {
   const name = pack === "hipnotic" ? "hipend" : "r2m8";
-  const archive = await openArchive(`/home/buzzkill/Projects/qfiles/q1/${edition === "rerelease" ? "rerelease/" : ""}${pack}/pak0.pak`);
+  const archive = await openArchive(`${testCorpusRoot()}/q1/${edition === "rerelease" ? "rerelease/" : ""}${pack}/pak0.pak`);
   const entry = archive.findEntries(`maps/${name}.bsp`)[0]; if (entry === undefined) throw new Error(`Missing retail ${name}`);
   const map = readQ1Bsp(await archive.readEntry(entry), { source: `maps/${name}.bsp` }); archive.close();
   const identity = createIdentityOwner(`boss-${pack}-${edition}`), actors = saved === undefined ? new SessionActorRegistry(identity) : SessionActorRegistry.restore(identity, saved.slots, saved.sources), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);

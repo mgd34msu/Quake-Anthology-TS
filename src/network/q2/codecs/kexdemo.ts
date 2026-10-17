@@ -1,7 +1,7 @@
 import { readKexUsercmd, writeKexUsercmd } from "./kex-usercmd.ts";
 import { createKexWriter } from "./kex-write.ts";
 import { inflateSync } from "node:zlib";
-// Quake II / q2proto algorithms ported from quake-2-re-ts and original id Software sources. GPL-2.0-or-later.
+// Quake II / q2proto algorithms ported from the reference port and original id Software sources. GPL-2.0-or-later.
 import { SizeBuf, SZ_Init, MSG_BeginReading, MSG_ReadByte, MSG_ReadChar, MSG_ReadShort, MSG_ReadWord, MSG_ReadLong, MSG_ReadFloat, MSG_ReadString, MSG_ReadData, MSG_ReadDir } from "../message.ts";
 import { U_ORIGIN1, U_ORIGIN2, U_ORIGIN3, U_ANGLE1, U_ANGLE2, U_ANGLE3, U_FRAME8, U_EVENT, U_MODEL, U_RENDERFX8, U_EFFECTS8, U_SKIN8, U_FRAME16, U_RENDERFX16, U_EFFECTS16, U_MODEL2, U_MODEL3, U_MODEL4, U_OLDORIGIN, U_SKIN16, U_SOUND, U_SOLID, PS_M_TYPE, PS_M_ORIGIN, PS_M_VELOCITY, PS_M_TIME, PS_M_FLAGS, PS_M_GRAVITY, PS_M_DELTA_ANGLES, PS_VIEWOFFSET, PS_VIEWANGLES, PS_KICKANGLES, PS_BLEND, PS_FOV, PS_WEAPONINDEX, PS_WEAPONFRAME, PS_RDFLAGS, SvcOpsT, ComError, ERR_DROP, } from "../constants.ts";
 import { EntityStateT, PlayerStateT, ANGLE2SHORT } from "../state.ts";

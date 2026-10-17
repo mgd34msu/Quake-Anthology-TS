@@ -1,6 +1,6 @@
 # Source inventory reconciliation
 
-This checklist joins the concrete leads from the [Q1](../verification/integration-candidates/q1/report.md), [Q2](../verification/integration-candidates/q2/findings.md) and [Q3](../verification/integration-candidates/q3/report.md) declaration reports with the earlier [Q1](comparison-q1.md), [Q2](comparison-q2.md) and [Q3](comparison-q3.md) comparisons and their feature inventories: [180 Q1 requirements](../verification/features/q1.json), [193 Q2 requirements](../verification/features/q2.json), [104 Q3 requirements](../verification/features/q3.json).
+This checklist joins the concrete leads from the Q1, Q2 and Q3 declaration reports with the earlier [Q1](comparison-q1.md), [Q2](comparison-q2.md) and [Q3](comparison-q3.md) comparisons and their feature inventories: 180 Q1 requirements, 193 Q2 requirements, 104 Q3 requirements.
 
 The extraction uses unified commit `3dc9ca6ca404dc4522ab9e9669fff458805b0993` and each report's pinned donor commit. It preserves source, tests, tools, declarations, local variables, parameters and import bindings. Exact names, signatures, hashes and source-line overlaps identify review candidates; they do not prove equivalent behavior. All unmatched and ambiguous records remain in the raw artifacts. This is a bounded caller review, not an exhaustive semantic audit, and the extraction itself does not change the 477 requirement IDs or verdicts. Later finite verdict reviews are recorded below.
 

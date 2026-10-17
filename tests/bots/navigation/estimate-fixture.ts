@@ -1,4 +1,4 @@
-// AAS fixture layout from quake-3-ts/tests/routing.test.ts. SPDX-License-Identifier: GPL-2.0-or-later
+// AAS fixture layout from the reference implementation.test.ts. SPDX-License-Identifier: GPL-2.0-or-later
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
 import type { Vec3 } from "../../../src/contracts/math.ts";
 import { parseAas } from "../../../src/bots/navigation/aas.ts";

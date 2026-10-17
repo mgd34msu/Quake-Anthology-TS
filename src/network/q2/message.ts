@@ -1,5 +1,5 @@
 import { readElement } from './state.ts';
-// Quake II / q2proto algorithms ported from quake-2-re-ts and original id Software sources. GPL-2.0-or-later.
+// Quake II / q2proto algorithms ported from the reference port and original id Software sources. GPL-2.0-or-later.
 import { ComError } from "./constants.ts";
 import { ERR_FATAL, ERR_DROP, CM_ANGLE1, CM_ANGLE2, CM_ANGLE3, CM_FORWARD, CM_SIDE, CM_UP, CM_BUTTONS, CM_IMPULSE } from "./constants.ts";
 import { U_ORIGIN1, U_ORIGIN2, U_ORIGIN3, U_ANGLE1, U_ANGLE2, U_ANGLE3, U_SKIN8, U_SKIN16, U_FRAME8, U_FRAME16, U_EFFECTS8, U_EFFECTS16, U_RENDERFX8, U_RENDERFX16, U_SOLID, U_EVENT, U_MODEL, U_MODEL2, U_MODEL3, U_MODEL4, U_SOUND, U_OLDORIGIN, U_NUMBER16, U_MOREBITS1, U_MOREBITS2, U_MOREBITS3, } from "./constants.ts";

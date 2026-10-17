@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { corpusFile } from "../../support/corpus.ts";
+
 import { QvmCgameImport } from "../../../src/compat/qvm/abi.ts";
 import { qvmClientRenderSyscall } from "../../../src/compat/qvm/client-render-syscalls.ts";
 import { QvmMemory } from "../../../src/compat/qvm/memory.ts";
@@ -19,7 +21,6 @@ import { openArchive } from "../../../src/content/archive/index.ts";
 import { decodeQ3World } from "../../../src/formats/q3-map/index.ts";
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
 import { CommonParseCursor, CommonParseState } from "../../../src/core/common-parse.ts";
-import { resolve } from "node:path";
 
 async function fixture(world?: Q3ResourceWorld, load: () => Promise<void> = async () => {},
   fogSelections: ConstructorParameters<typeof Q3SceneRecorder>[0]["fogSelections"] = () => []) {
@@ -85,7 +86,7 @@ test("guest handles register the same resource objects and submit through the sh
 });
 
 test("QVM world traps iterate retail entity bytes and query the loaded collision PVS", async () => {
-  const archive = await openArchive(resolve(import.meta.dir, "../../../../qfiles/q3a/baseq3/pak0.pk3"));
+  const archive = await openArchive(corpusFile("q3a/baseq3/pak0.pk3"));
   try {
     const entry = archive.findEntries("maps/q3dm1.bsp")[0];
     if (entry === undefined) throw new Error("Missing retail map");

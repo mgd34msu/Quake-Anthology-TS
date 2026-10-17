@@ -1,10 +1,12 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 const retail = test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")));
 
 async function open(mode: "singleplayer" | "deathmatch"): Promise<Application> {

@@ -1,4 +1,4 @@
-// Adapted from quake-1-re-ts and id Software Quake. GPL-2.0-or-later.
+// Adapted from the reference port and id Software Quake. GPL-2.0-or-later.
 import { type Vec3, vec3 } from "./wire-types.ts";
 import { DEFAULT_SOUND_PACKET_VOLUME, DEFAULT_SOUND_PACKET_ATTENUATION, ENTALPHA_DEFAULT, ENTSCALE_DEFAULT, } from "./constants.ts";
 export { DEFAULT_SOUND_PACKET_VOLUME, DEFAULT_SOUND_PACKET_ATTENUATION };

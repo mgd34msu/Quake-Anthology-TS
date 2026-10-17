@@ -1,12 +1,14 @@
 import { expect, test } from "bun:test";
+import { corpusFile, testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import type { ArchiveHandle } from "../../../src/content/archive/index.ts";
 import { createMd5Model, interpolateSurface, lerpTag, loadMd3Lods, md3AtLod, parseMd3, parseMd5Anim, parseMd5Mesh, parsePlayerAnimationConfig, parseSkin, q1ReplacementSkinSelection, sampleMd5Pose, skinMd5Mesh, toSceneMd3 } from "../../../src/formats/q3-model/index.ts";
 
-const q3Archive = "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3";
-const q2Archive = "/home/buzzkill/q2rets/rerelease/baseq2/pak0.pak";
-const q1Archive = "/home/buzzkill/Projects/qfiles/q1/rerelease/id1/pak0.pak";
+const q3Archive = `${testCorpusRoot()}/q3a/baseq3/pak0.pk3`;
+const q2Archive = corpusFile("q2/rerelease/baseq2/pak0.pak");
+const q1Archive = `${testCorpusRoot()}/q1/rerelease/id1/pak0.pak`;
 
 async function read(archive: ArchiveHandle, path: string): Promise<Uint8Array> {
   const entry = archive.findEntries(path)[0];
@@ -58,7 +60,7 @@ test.skipIf(!existsSync(q2Archive))("retail Q2 flag scale_positions and scalar v
     if (mesh === undefined) throw new Error("Retail mesh missing");
     const vertices = skinMd5Mesh(mesh, sampleMd5Pose(model, 173));
     expect(vertices).toHaveLength(158);
-    // Direct quake-2-re-ts calcSkelVert output; binary32 weight storage differs by a few ULPs.
+    // Direct the reference implementation calcSkelVert output; binary32 weight storage differs by a few ULPs.
     expect(vertices[0]?.position.x).toBeCloseTo(-0.6274441480636597, 4);
     expect(vertices[0]?.position.y).toBeCloseTo(13.115943908691406, 4);
     expect(vertices[0]?.position.z).toBeCloseTo(46.33980178833008, 4);

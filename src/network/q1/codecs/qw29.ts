@@ -1,4 +1,4 @@
-// Adapted from quake-1-re-ts and id Software Quake. GPL-2.0-or-later.
+// Adapted from the reference port and id Software Quake. GPL-2.0-or-later.
 import { AXES } from "../wire-types.ts";
 import type { MessageReader } from "../message.ts";
 import { MSG_WriteByte, MSG_WriteCoordFlags, MSG_WriteAngleFlags, MSG_WriteLong, MSG_WriteShort, type SizeBuf, } from "../message.ts";

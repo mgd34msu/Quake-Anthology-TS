@@ -48,7 +48,7 @@ export function q1AliasShadowDirection(yaw: number): Vec3 {
   return { x: f(x * inverse), y: f(y * inverse), z: inverse };
 }
 
-/** quake-2-re-ts gl_mesh.ts enhancement: remove only each occluded light's share. */
+/** the reference port gl_mesh.ts enhancement: remove only each occluded light's share. */
 export function aliasShadowLightFractions(origin: Vec3, shade: Vec3, lights: readonly Q2FragmentLight[], modulate = 1, monochrome = false): readonly Q2ModelShadowLight[] {
   const result: Q2ModelShadowLight[] = [];
   const share = (contribution: number, channel: number): number => channel > 0 && contribution > 0 ? Math.min(1, contribution / channel) : 0;

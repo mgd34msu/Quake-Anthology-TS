@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { corpusFile } from "../../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { BotAssetFiles } from "../../../../src/bots/behavior/assets.ts";
@@ -10,8 +12,8 @@ import { loadQuake1Knowledge } from "../../../../src/bots/behavior/rerelease/dat
 import { BOT_WEAPON_BINDINGS, Bot_LoadKnowledge } from "../../../../src/bots/behavior/rerelease/data/knowledge-q2.ts";
 import { readBotSourceText } from "../../../../src/bots/behavior/rerelease/data/source-files.ts";
 
-const q1Path = new URL("../../../../../qfiles/q1/rerelease/id1/pak0.pak", import.meta.url).pathname;
-const q2Path = new URL("../../../../../qfiles/q2/rerelease/baseq2/pak0.pak", import.meta.url).pathname;
+const q1Path = corpusFile("q1/rerelease/id1/pak0.pak");
+const q2Path = corpusFile("q2/rerelease/baseq2/pak0.pak");
 
 async function sourceFiles(path: string): Promise<BotAssetFiles> {
   const archive = await openArchive(path), files = new BotAssetFiles();

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { corpusFile } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { decodeQ3World } from "../../../src/formats/q3-map/index.ts";
@@ -13,7 +14,7 @@ import { writeQvmTrace } from "../../../src/compat/qvm/trace-record.ts";
 import type { TemporaryTraceQuery } from "../../../src/world/collision/q3/model.ts";
 import type { Vec3 } from "../../../src/contracts/math.ts";
 
-const path = resolve(import.meta.dir, "../../../../qfiles/q3a/baseq3/pak0.pk3");
+const path = corpusFile("q3a/baseq3/pak0.pk3");
 test.skipIf(!existsSync(path))("QVM collision traps use the mounted retail collision owner and source trace ABI", async () => {
   const archive = await openArchive(path);
   try {

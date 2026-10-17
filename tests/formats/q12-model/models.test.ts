@@ -1,12 +1,14 @@
 import { expect, test } from "bun:test";
+import { corpusFile } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import type { ModelFrame, Q1AliasFrame, Q1AliasModel, Q2AliasModel } from "../../../src/contracts/scene.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { BinaryError, BinaryWriter } from "../../../src/core/binary/index.ts";
 import { buildMd2Geometry, buildMdlGeometry, decodeAliasNormal, decodeMd2Commands, interpolateAliasFrames, parseMd2, parseMdl, parseSp2, parseSpr, sampleTimedFrame } from "../../../src/formats/q12-model/index.ts";
 
-const q1Pak = new URL("../../../../qfiles/q1/id1/PAK0.PAK", import.meta.url).pathname;
-const q2Pak = new URL("../../../../qfiles/q2/baseq2/pak0.pak", import.meta.url).pathname;
+const q1Pak = corpusFile("q1/id1/PAK0.PAK");
+const q2Pak = corpusFile("q2/baseq2/pak0.pak");
 
 async function asset(pak: string, path: string): Promise<Uint8Array> {
   const archive = await openArchive(pak);

@@ -1,4 +1,4 @@
-/* Native QW client continuation follows quake-1-re-ts qw/client/cl_pred.ts. */
+/* Native QW client continuation follows the reference port qw/client/cl_pred.ts. */
 import type { Q1MovementProfile, QwMovementProfile } from "../../../../contracts/movement.ts";
 import type { QwPlayerState, QwUserCommand } from "../../../../contracts/protocol.ts";
 import type { QwMoveVariables } from "../../../../network/q1/quakeworld.ts";

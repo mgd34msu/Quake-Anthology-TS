@@ -1,4 +1,6 @@
 import { CommandBuffer } from "../../../src/core/commands/index.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
 import { expect, spyOn, test } from "bun:test";
@@ -58,7 +60,7 @@ test("Q3 rounds retain shared services and retire actors and listeners", async (
 for (const mixed of [false, true]) test(`Q3 restart eligibility preserves ${mixed ? "foreign arsenal" : "native"} selection`, async () => {
  const launch = parseApplicationCommand(["--game", mixed ? "q3-baseq3" : "q3-missionpack", "--map", mixed ? "q3dm1" : "mpteam1", "--movement", "q3", "--character", "q3", "--dedicated", "--mode", "deathmatch"]);
  if (launch.kind !== "run") throw new Error("Missing launch");
- const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
+ const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
  const preset = applicationPreset(catalog, launch.options), choice = presetChoice(preset.id);
  const recipe = await resolveLaunch({ catalog, preset, choice: mixed ? { ...choice, weapons: { kind: "selected", value: [{ provider: "q1:official", content: catalog.require("q1-classic-id1").id }] } } : choice });
  const content = await loadApplicationContent(launch.options, recipe);

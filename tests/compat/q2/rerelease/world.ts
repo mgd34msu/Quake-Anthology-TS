@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../../src/contracts/identity.ts";
+import { corpusFile } from "../../../support/corpus.ts";
+
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { NumericProfile } from "../../../../src/contracts/numeric.ts";
 import type { DamageDecision, DamageOutcome } from "../../../../src/contracts/gameplay.ts";
@@ -15,7 +17,7 @@ import type { RereleaseQ2GuestHost, RereleaseQ2HostOptions } from "../../../../s
 function unavailable(): never { throw new Error("The native map fixture has no foreign actors or combat transport"); }
 const numeric: NumericProfile = { id: "q2-rerelease:source-f32", arithmetic: { kind: "binary32", round: "each-operation" }, scalarStorage: "binary32", floatToInt: "checked-c-truncation", integerOverflow: "wrap32" };
 export async function nativeWorld(modelName: (index: number) => string | undefined) {
-  const archive = await openArchive(new URL("../../../../../qfiles/q2/rerelease/baseq2/pak0.pak", import.meta.url).pathname);
+  const archive = await openArchive(corpusFile("q2/rerelease/baseq2/pak0.pak"));
   const world = await (async () => {
     try { const entry = archive.findEntries("maps/base1.bsp")[0]; if (entry === undefined) throw new Error("Missing rerelease base1.bsp"); return decodeQ2Map(await archive.readEntry(entry), entry.path); }
     finally { archive.close(); }

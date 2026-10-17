@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { corpusFile } from "../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { decodeQ1Save, encodeQ1Save } from "../../src/persistence/q1.ts";
@@ -21,7 +23,7 @@ test.skipIf(!existsSync(q1Save))("reads and rewrites the actual WinQuake referen
   expect(decodeQ1Save(encodeQ1Save(save))).toEqual(save);
   const kex = { ...save, format: { version: 6, gameDirectories: "id1;mg1" } } satisfies Parameters<typeof encodeQ1Save>[0];
   expect(decodeQ1Save(encodeQ1Save(kex))).toEqual(kex);
-  const archive = await openArchive(join(import.meta.dir, "../../../qfiles/q1/id1/PAK0.PAK"));
+  const archive = await openArchive(corpusFile("q1/id1/PAK0.PAK"));
   try {
     const entry = archive.findEntries("progs.dat").at(-1); if (entry === undefined) throw new Error("no source progs.dat");
     const program = loadQcProgram(await archive.readEntry(entry));

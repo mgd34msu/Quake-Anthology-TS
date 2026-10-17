@@ -1,4 +1,8 @@
 import { expect, test } from "bun:test";
+import { homedir } from "node:os";
+
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import type { ActorId, ClientId } from "../../../src/contracts/identity.ts";
 import type { FrameContext } from "../../../src/contracts/time.ts";
 import type { ModActorField, ModCallbackDeclaration, ModCallbackInput, ModRuntimeValue, ModSourceCall } from "../../../src/contracts/mod-callbacks.ts";
@@ -20,7 +24,7 @@ import { QcModClientBindings } from "../../../src/compat/qc/mod-clients.ts";
 import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
 import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 
-const copper = "/home/buzzkill/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat";
+const copper = `${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`;
 const selfGlobal = [{ name: "self", value: { kind: "input", name: "self" } }] satisfies ModSourceCall["globals"];
 const inputs = (actor: ActorId) => new Map<ModCallbackInput, ModRuntimeValue>([["self", { kind: "actor", value: actor }]]);
 function clients() {
@@ -37,7 +41,7 @@ function clients() {
 }
 
 test.skipIf(!await Bun.file(copper).exists())("original Copper client callbacks reserve edicts and retain private state and targeted stuffcmd through save", async () => {
-  const options = parseApplicationCommand(["--content-root", "/home/buzzkill/Projects/qfiles", "--game", "q2-classic-baseq2", "--map", "base1"]);
+  const options = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--game", "q2-classic-baseq2", "--map", "base1"]);
   if (options.kind !== "run") throw new Error("Missing destination");
   const content = await loadApplicationContent(options.options), program = loadQcProgram(await Bun.file(copper).bytes());
   const resources = await prepareQuakeCResources(program, await content.forContent("q1:classic:id1:installed")), occupied = new Set<number>(), actorFields: ModActorField[] = [];
@@ -143,7 +147,7 @@ test("QC client frame thinks precede calls and retirement stops the old actor's 
   binding.close(); expect(binding.frame(1, frame)).toBe(false);
 });
 
-const quakeworld = "/home/buzzkill/Projects/qfiles/q1/qw/qwprogs.dat";
+const quakeworld = `${testCorpusRoot()}/q1/qw/qwprogs.dat`;
 test.skipIf(!await Bun.file(quakeworld).exists())("original QuakeWorld clients, media and shotgun aim use destination identities and collision", async () => {
   const program = loadQcProgram(await Bun.file(quakeworld).bytes()); expect(program.api.kind).toBe("q1-quakeworld");
   const occupied = new Set<number>(), actorFields: ModActorField[] = [];
@@ -155,7 +159,7 @@ test.skipIf(!await Bun.file(quakeworld).exists())("original QuakeWorld clients, 
   }
   const declaration: ModCallbackDeclaration = { version: 1, runtime: "quakec", program: { path: "qwprogs.dat", digest: program.digest }, actorFields, callbacks: [],
     clients: { maximum: 2, admit: [], userinfo: [], disconnect: [] } };
-  const options = parseApplicationCommand(["--content-root", "/home/buzzkill/Projects/qfiles", "--game", "q2-classic-baseq2", "--map", "base1"]);
+  const options = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--game", "q2-classic-baseq2", "--map", "base1"]);
   if (options.kind !== "run") throw new Error("Missing destination");
   const content = await loadApplicationContent(options.options), resources = await prepareQuakeCResources(program, await content.forContent("q1:classic:id1:installed")), ids = createIdentityOwner("qc-qw-clients"), actors = new SessionActorRegistry(ids), callbacks = new ActorCallbackTable(actors);
   const world = actors.allocate("q2:map", "q2:world"), first = actors.allocate("q2:game", "q2:player"), second = actors.allocate("q2:game", "q2:player");

@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
@@ -16,7 +18,7 @@ import { registerQ1Base } from "../../../../src/content/q1/base/index.ts";
 import { registerQ1MissionPack } from "../../../../src/content/q1/missionpacks/index.ts";
 import type { Q1MissionPack } from "../../../../src/content/q1/missionpacks/index.ts";
 
-const root = "/home/buzzkill/Projects/qfiles/q1/rerelease";
+const root = `${testCorpusRoot()}/q1/rerelease`;
 async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "rerelease", deathmatch = 0, teamplay = 0, mapName = pack === "hipnotic" ? "hip1m1" : "r2m8", atWorldSpawn?: (game: Q1Foundation) => undefined) {
   const archive = await openArchive(`${root}/${pack}/pak0.pak`);
   const entry = archive.findEntries(`maps/${mapName}.bsp`)[0]; if (entry === undefined) throw new Error("Retail start.bsp missing");

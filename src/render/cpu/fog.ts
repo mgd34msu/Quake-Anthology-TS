@@ -1,4 +1,4 @@
-/* True-color depth fog adapted from quake-1-re-ts/ref_soft/r_fog.ts.
+/* True-color depth fog adapted from the reference port
  * Copyright (C) 2002-2009 John Fitzgibbons and others;
  * Copyright (C) 2010-2014 QuakeSpasm developers. GPL-2.0-or-later. */
 import type { Mat4 } from "../../contracts/math.ts";
@@ -38,7 +38,7 @@ export function applyQ1DepthFog(frame: Framebuffer, viewport: Rect, projection: 
   }
 }
 
-/** Q2 rerelease fog follows quake-2-re-ts/ref_gl/gl_fog.ts GL_DrawFogPass.
+/** Q2 rerelease fog follows the reference port GL_DrawFogPass.
  * Global and height passes blend separately after the finished scene; sky is flat.
  * The donor fog depth is windowDepth * eyeW, including for translucent pixels
  * whose depth remains that of the opaque geometry behind them. */

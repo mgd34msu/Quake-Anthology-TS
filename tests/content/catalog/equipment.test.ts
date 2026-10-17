@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import type { ContentId, EquipmentSelection, GrappleSelection, ProviderReference } from "../../../src/contracts/content.ts";
 import { discoverInstalledContent, disabledEquipment, EQUIPMENT_PROVIDERS, nativeEquipment, presetChoice, resolveLaunch, selectLaunch } from "../../../src/content/catalog/index.ts";
 import { grappleStyles } from "../../../src/content/catalog/equipment.ts";
@@ -10,7 +12,7 @@ import { applicationPreset, loadApplicationContent } from "../../../src/app/boot
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { parseMdl } from "../../../src/formats/q12-model/mdl.ts";
 
-const installed = discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
+const installed = discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
 function preset(catalog: InstalledCatalog, product: string, map: string): LaunchPreset {
   const content = catalog.require(product).id, family = catalog.require(product).expectation.family;
   const provider: ProviderReference = { provider: `${family}:official`, content };

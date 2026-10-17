@@ -1,4 +1,6 @@
 import { SharedPickupAdmission } from "../../../../src/world/gameplay/pickups.ts";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import { expansionSourceSupply } from "../../../../src/content/composition/expansion-source-supply.ts";
 import { Q1_Q2_SUPPLY_PROFILE } from "../../../../src/content/composition/q1-q2-supply.ts";
 import { q2BaseWeaponInventory } from "../../../../src/content/q2/foundation/items.ts";
@@ -126,7 +128,7 @@ test("MG3 coop lava suit respawns after 2.5 seconds and clears its fired target"
 });
 
 test("retail MG3 upgrade identity, capacity refill, repeated pickup and saved continuation", async () => {
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q1/rerelease/mg3/pak0.pak");
+  const archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/mg3/pak0.pak`);
   const state = session();
   try {
     const entry = archive.findEntries("maps/map1.bsp")[0]; if (entry === undefined) throw new Error("Missing retail MG3 map1");
@@ -263,7 +265,7 @@ test("MG3 Bloody Nightmare travel preserves hammer, Bloody SSG and armor with so
 
 
 test("retail MG3 bosses register source controllers and restore their live callbacks", async () => {
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q1/rerelease/mg3/pak0.pak"), state = session();
+  const archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/mg3/pak0.pak`), state = session();
   try {
     state.spawn("worldspawn");
     for (const [mapName, classname, health] of [["boss2", "monster_oldone_new", 12000], ["map1", "monster_ghost", 10], ["boss", "monster_orb", 300]] satisfies [string, string, number][]) {

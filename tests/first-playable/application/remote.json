@@ -1,0 +1,3615 @@
+{
+  "completed": true,
+  "wallMilliseconds": 10137.207123,
+  "samples": [
+    {
+      "kind": "poll",
+      "wall": 154949.147738,
+      "actual": 154949.310795
+    },
+    {
+      "kind": "poll",
+      "wall": 154979.141732,
+      "actual": 154979.191786
+    },
+    {
+      "kind": "poll",
+      "wall": 155023.683293,
+      "actual": 155023.704573
+    },
+    {
+      "kind": "poll",
+      "wall": 155074.75358,
+      "actual": 155074.786983
+    },
+    {
+      "kind": "authority-state",
+      "wall": 155270.538554,
+      "sourceMilliseconds": 100,
+      "position": {
+        "x": 212,
+        "y": 2360,
+        "z": 60.99319839477539
+      },
+      "health": 125,
+      "pmType": 0,
+      "commandTime": 100
+    },
+    {
+      "kind": "poll",
+      "wall": 155324.77692,
+      "actual": 155324.824589
+    },
+    {
+      "kind": "authority-state",
+      "wall": 158900.747648,
+      "sourceMilliseconds": 350,
+      "position": {
+        "x": 212,
+        "y": 2360,
+        "z": 60.99319839477539
+      },
+      "health": 125,
+      "pmType": 0,
+      "commandTime": 100
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 158992.921782,
+      "nextSnapshotTime": 4050
+    },
+    {
+      "kind": "poll",
+      "wall": 159003.569815,
+      "actual": 159003.58836
+    },
+    {
+      "kind": "submit",
+      "wall": 159003.569815,
+      "actual": 159006.627024,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 4093,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 4000,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 159003.569815,
+      "actual": 159006.761086
+    },
+    {
+      "kind": "authority-state",
+      "wall": 159222.033867,
+      "sourceMilliseconds": 4000,
+      "position": {
+        "x": 212,
+        "y": 2360,
+        "z": 60.99319839477539
+      },
+      "health": 125,
+      "pmType": 0,
+      "commandTime": 100,
+      "lastAcceptedWire": 0,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 159270.435737,
+      "nextSnapshotTime": 4700
+    },
+    {
+      "kind": "poll",
+      "wall": 159281.326828,
+      "actual": 159281.353197
+    },
+    {
+      "kind": "submit",
+      "wall": 159281.326828,
+      "actual": 159283.049848,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 4370,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 4277,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 159281.326828,
+      "actual": 159283.111975
+    },
+    {
+      "kind": "authority-state",
+      "wall": 159311.298209,
+      "sourceMilliseconds": 4650,
+      "position": {
+        "x": 212,
+        "y": 2360,
+        "z": 56.125
+      },
+      "health": 125,
+      "pmType": 0,
+      "commandTime": 4000,
+      "lastAcceptedWire": 4000,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 159346.517839,
+      "nextSnapshotTime": 4900
+    },
+    {
+      "kind": "poll",
+      "wall": 159356.396096,
+      "actual": 159356.41445
+    },
+    {
+      "kind": "submit",
+      "wall": 159356.396096,
+      "actual": 159357.543784,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 4445,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 4538,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 159356.396096,
+      "actual": 159357.586705
+    },
+    {
+      "kind": "authority-state",
+      "wall": 159381.394766,
+      "sourceMilliseconds": 4850,
+      "position": {
+        "x": 212,
+        "y": 2360,
+        "z": 56.125
+      },
+      "health": 125,
+      "pmType": 0,
+      "commandTime": 4277,
+      "lastAcceptedWire": 4277,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 159417.322939,
+      "nextSnapshotTime": 5000
+    },
+    {
+      "kind": "poll",
+      "wall": 159427.282828,
+      "actual": 159427.300752
+    },
+    {
+      "kind": "submit",
+      "wall": 159427.282828,
+      "actual": 159428.127056,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 4515,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 4764,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 159427.282828,
+      "actual": 159428.158334
+    },
+    {
+      "kind": "authority-state",
+      "wall": 159446.745718,
+      "sourceMilliseconds": 4950,
+      "position": {
+        "x": 212,
+        "y": 2360,
+        "z": 56.125
+      },
+      "health": 125,
+      "pmType": 0,
+      "commandTime": 4538,
+      "lastAcceptedWire": 4538,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 159481.388404,
+      "nextSnapshotTime": 5150
+    },
+    {
+      "kind": "poll",
+      "wall": 159492.290766,
+      "actual": 159492.357982
+    },
+    {
+      "kind": "submit",
+      "wall": 159492.290766,
+      "actual": 159495.188595,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 4657,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 86,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 4999,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 86,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 159492.290766,
+      "actual": 159495.378051
+    },
+    {
+      "kind": "authority-state",
+      "wall": 159518.153661,
+      "sourceMilliseconds": 5100,
+      "position": {
+        "x": 212,
+        "y": 2360,
+        "z": 56.125
+      },
+      "health": 125,
+      "pmType": 0,
+      "commandTime": 4764,
+      "lastAcceptedWire": 4764,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 159553.992596,
+      "nextSnapshotTime": 5300
+    },
+    {
+      "kind": "poll",
+      "wall": 159576.136137,
+      "actual": 159576.156375
+    },
+    {
+      "kind": "submit",
+      "wall": 159576.136137,
+      "actual": 159577.031962,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 4801,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 5193,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 159576.136137,
+      "actual": 159577.059724
+    },
+    {
+      "kind": "authority-state",
+      "wall": 159604.517178,
+      "sourceMilliseconds": 5250,
+      "position": {
+        "x": 212,
+        "y": 2313.939697265625,
+        "z": 56.125
+      },
+      "health": 124,
+      "pmType": 0,
+      "commandTime": 4999,
+      "lastAcceptedWire": 4999,
+      "lastAcceptedForward": 86
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 159637.929119,
+      "nextSnapshotTime": 5450
+    },
+    {
+      "kind": "poll",
+      "wall": 159652.830411,
+      "actual": 159652.894822
+    },
+    {
+      "kind": "submit",
+      "wall": 159652.830411,
+      "actual": 159654.992426,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 4977,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 112,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 5369,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 112,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 159652.830411,
+      "actual": 159655.033594
+    },
+    {
+      "kind": "authority-state",
+      "wall": 159677.202342,
+      "sourceMilliseconds": 5400,
+      "position": {
+        "x": 212,
+        "y": 2251.859375,
+        "z": 56.125
+      },
+      "health": 124,
+      "pmType": 0,
+      "commandTime": 5193,
+      "lastAcceptedWire": 5193,
+      "lastAcceptedForward": 127
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 159714.991615,
+      "nextSnapshotTime": 5600
+    },
+    {
+      "kind": "poll",
+      "wall": 159725.979447,
+      "actual": 159725.996319
+    },
+    {
+      "kind": "submit",
+      "wall": 159725.979447,
+      "actual": 159727.032398,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 5123,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 124,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 5515,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 124,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 159725.979447,
+      "actual": 159727.07608
+    },
+    {
+      "kind": "authority-state",
+      "wall": 159747.544731,
+      "sourceMilliseconds": 5550,
+      "position": {
+        "x": 212,
+        "y": 2202.19140625,
+        "z": 51.27619934082031
+      },
+      "health": 124,
+      "pmType": 0,
+      "commandTime": 5369,
+      "lastAcceptedWire": 5369,
+      "lastAcceptedForward": 112
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 159789.138909,
+      "nextSnapshotTime": 5750
+    },
+    {
+      "kind": "poll",
+      "wall": 159798.715758,
+      "actual": 159798.734103
+    },
+    {
+      "kind": "submit",
+      "wall": 159798.715758,
+      "actual": 159799.594541,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 5251,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 5643,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 159798.715758,
+      "actual": 159799.626581
+    },
+    {
+      "kind": "authority-state",
+      "wall": 159817.773617,
+      "sourceMilliseconds": 5700,
+      "position": {
+        "x": 212,
+        "y": 2157.22314453125,
+        "z": 29.882999420166016
+      },
+      "health": 124,
+      "pmType": 0,
+      "commandTime": 5515,
+      "lastAcceptedWire": 5515,
+      "lastAcceptedForward": 124
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 159861.328972,
+      "nextSnapshotTime": 5900
+    },
+    {
+      "kind": "poll",
+      "wall": 159872.788532,
+      "actual": 159872.817697
+    },
+    {
+      "kind": "submit",
+      "wall": 159872.788532,
+      "actual": 159873.770679,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 5413,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 115,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 5805,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 115,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 159872.788532,
+      "actual": 159873.816756
+    },
+    {
+      "kind": "authority-state",
+      "wall": 159927.970552,
+      "sourceMilliseconds": 5850,
+      "position": {
+        "x": 212,
+        "y": 2116.262939453125,
+        "z": 24.125
+      },
+      "health": 124,
+      "pmType": 0,
+      "commandTime": 5643,
+      "lastAcceptedWire": 5643,
+      "lastAcceptedForward": 127
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 159963.642123,
+      "nextSnapshotTime": 6100
+    },
+    {
+      "kind": "poll",
+      "wall": 159975.497687,
+      "actual": 159975.514388
+    },
+    {
+      "kind": "submit",
+      "wall": 159975.497687,
+      "actual": 159976.475836,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 5619,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 125,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 6011,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 125,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 159975.497687,
+      "actual": 159976.514259
+    },
+    {
+      "kind": "authority-state",
+      "wall": 159997.737729,
+      "sourceMilliseconds": 6050,
+      "position": {
+        "x": 212,
+        "y": 2069.321044921875,
+        "z": 24.125
+      },
+      "health": 124,
+      "pmType": 0,
+      "commandTime": 5805,
+      "lastAcceptedWire": 5805,
+      "lastAcceptedForward": 115
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 160031.671632,
+      "nextSnapshotTime": 6250
+    },
+    {
+      "kind": "poll",
+      "wall": 160043.737061,
+      "actual": 160043.756969
+    },
+    {
+      "kind": "submit",
+      "wall": 160043.737061,
+      "actual": 160044.763381,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 5735,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 6127,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160043.737061,
+      "actual": 160044.816671
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160065.35844,
+      "sourceMilliseconds": 6200,
+      "position": {
+        "x": 212,
+        "y": 2004.4393310546875,
+        "z": 24.125
+      },
+      "health": 123,
+      "pmType": 0,
+      "commandTime": 6011,
+      "lastAcceptedWire": 6011,
+      "lastAcceptedForward": 125
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 160101.159995,
+      "nextSnapshotTime": 6400
+    },
+    {
+      "kind": "poll",
+      "wall": 160112.438414,
+      "actual": 160112.456278
+    },
+    {
+      "kind": "submit",
+      "wall": 160112.438414,
+      "actual": 160113.206318,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 5891,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 110,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 6283,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 110,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160112.438414,
+      "actual": 160113.24459
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160133.698624,
+      "sourceMilliseconds": 6350,
+      "position": {
+        "x": 212,
+        "y": 1967.3193359375,
+        "z": 24.125
+      },
+      "health": 123,
+      "pmType": 0,
+      "commandTime": 6127,
+      "lastAcceptedWire": 6127,
+      "lastAcceptedForward": 127
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 160172.471286,
+      "nextSnapshotTime": 6500
+    },
+    {
+      "kind": "poll",
+      "wall": 160182.39605,
+      "actual": 160182.415256
+    },
+    {
+      "kind": "submit",
+      "wall": 160182.39605,
+      "actual": 160183.221542,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 6015,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 6407,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160182.39605,
+      "actual": 160183.263391
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160203.586148,
+      "sourceMilliseconds": 6450,
+      "position": {
+        "x": 212,
+        "y": 1924.0814208984375,
+        "z": 24.125
+      },
+      "health": 123,
+      "pmType": 0,
+      "commandTime": 6283,
+      "lastAcceptedWire": 6283,
+      "lastAcceptedForward": 110
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 160242.414404,
+      "nextSnapshotTime": 6650
+    },
+    {
+      "kind": "poll",
+      "wall": 160250.568929,
+      "actual": 160250.597993
+    },
+    {
+      "kind": "submit",
+      "wall": 160250.568929,
+      "actual": 160251.460195,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 6167,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 113,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 6559,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 113,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160250.568929,
+      "actual": 160251.507374
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160272.751674,
+      "sourceMilliseconds": 6600,
+      "position": {
+        "x": 212,
+        "y": 1884.4013671875,
+        "z": 24.125
+      },
+      "health": 123,
+      "pmType": 0,
+      "commandTime": 6407,
+      "lastAcceptedWire": 6407,
+      "lastAcceptedForward": 127
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 160311.259007,
+      "nextSnapshotTime": 6800
+    },
+    {
+      "kind": "poll",
+      "wall": 160320.717934,
+      "actual": 160320.746147
+    },
+    {
+      "kind": "submit",
+      "wall": 160320.717934,
+      "actual": 160321.849362,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 6305,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 6697,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160320.717934,
+      "actual": 160321.895969
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160341.243763,
+      "sourceMilliseconds": 6750,
+      "position": {
+        "x": 212,
+        "y": 1841.1234130859375,
+        "z": 24.125
+      },
+      "health": 123,
+      "pmType": 0,
+      "commandTime": 6559,
+      "lastAcceptedWire": 6559,
+      "lastAcceptedForward": 113
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 160380.198948,
+      "nextSnapshotTime": 6950
+    },
+    {
+      "kind": "poll",
+      "wall": 160391.158237,
+      "actual": 160391.17571
+    },
+    {
+      "kind": "submit",
+      "wall": 160391.158237,
+      "actual": 160393.285918,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 6427,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 6819,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160391.158237,
+      "actual": 160393.470776
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160411.556516,
+      "sourceMilliseconds": 6900,
+      "position": {
+        "x": 212,
+        "y": 1796.96337890625,
+        "z": 24.125
+      },
+      "health": 123,
+      "pmType": 0,
+      "commandTime": 6697,
+      "lastAcceptedWire": 6697,
+      "lastAcceptedForward": 127
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 160448.755539,
+      "nextSnapshotTime": 7050
+    },
+    {
+      "kind": "poll",
+      "wall": 160457.748941,
+      "actual": 160457.766424
+    },
+    {
+      "kind": "submit",
+      "wall": 160457.748941,
+      "actual": 160459.303575,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 6579,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 110,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 6971,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 110,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160457.748941,
+      "actual": 160459.465509
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160478.252248,
+      "sourceMilliseconds": 7000,
+      "position": {
+        "x": 224.26971435546875,
+        "y": 1790.718505859375,
+        "z": 24.125
+      },
+      "health": 123,
+      "pmType": 0,
+      "commandTime": 6819,
+      "lastAcceptedWire": 6819,
+      "lastAcceptedForward": 127
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 160516.858066,
+      "nextSnapshotTime": 7200
+    },
+    {
+      "kind": "poll",
+      "wall": 160526.264074,
+      "actual": 160526.281587
+    },
+    {
+      "kind": "submit",
+      "wall": 160526.264074,
+      "actual": 160527.017741,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 6715,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 126,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7107,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 126,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160526.264074,
+      "actual": 160527.079958
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160541.222142,
+      "sourceMilliseconds": 7150,
+      "position": {
+        "x": 243.86859130859375,
+        "y": 1784.1766357421875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 6971,
+      "lastAcceptedWire": 6971,
+      "lastAcceptedForward": 110
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 160574.90349,
+      "nextSnapshotTime": 7300
+    },
+    {
+      "kind": "poll",
+      "wall": 160584.886984,
+      "actual": 160584.905379
+    },
+    {
+      "kind": "submit",
+      "wall": 160584.886984,
+      "actual": 160585.673714,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 6815,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7207,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": 127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160584.886984,
+      "actual": 160585.747112
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160601.294168,
+      "sourceMilliseconds": 7250,
+      "position": {
+        "x": 259.319580078125,
+        "y": 1764.3680419921875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7107,
+      "lastAcceptedWire": 7107,
+      "lastAcceptedForward": 126
+    },
+    {
+      "kind": "poll",
+      "wall": 160634.050957,
+      "actual": 160634.066987
+    },
+    {
+      "kind": "submit",
+      "wall": 160634.050957,
+      "actual": 160634.487268,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 6927,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 34,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7319,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 34,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160634.050957,
+      "actual": 160634.537502
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160650.251312,
+      "sourceMilliseconds": 7250,
+      "position": {
+        "x": 264.0484313964844,
+        "y": 1743.1357421875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7207,
+      "lastAcceptedWire": 7207,
+      "lastAcceptedForward": 127
+    },
+    {
+      "kind": "poll",
+      "wall": 160690.50567,
+      "actual": 160690.522242
+    },
+    {
+      "kind": "submit",
+      "wall": 160690.50567,
+      "actual": 160691.066365,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 7039,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7431,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160690.50567,
+      "actual": 160691.134523
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160704.729929,
+      "sourceMilliseconds": 7250,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7319,
+      "lastAcceptedWire": 7319,
+      "lastAcceptedForward": 34
+    },
+    {
+      "kind": "poll",
+      "wall": 160735.97205,
+      "actual": 160735.986918
+    },
+    {
+      "kind": "submit",
+      "wall": 160735.97205,
+      "actual": 160736.492539,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 7129,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7521,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160735.97205,
+      "actual": 160736.549967
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160752.666474,
+      "sourceMilliseconds": 7250,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7431,
+      "lastAcceptedWire": 7431,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "poll",
+      "wall": 160785.062274,
+      "actual": 160785.077553
+    },
+    {
+      "kind": "submit",
+      "wall": 160785.062274,
+      "actual": 160785.519163,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 7227,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7619,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160785.062274,
+      "actual": 160785.588874
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160801.482422,
+      "sourceMilliseconds": 7250,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 7521,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "poll",
+      "wall": 160833.742838,
+      "actual": 160833.757886
+    },
+    {
+      "kind": "submit",
+      "wall": 160833.742838,
+      "actual": 160834.172817,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 7323,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7715,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160833.742838,
+      "actual": 160834.229784
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160850.038222,
+      "sourceMilliseconds": 7250,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 7619,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "poll",
+      "wall": 160878.964998,
+      "actual": 160878.980027
+    },
+    {
+      "kind": "submit",
+      "wall": 160878.964998,
+      "actual": 160879.458326,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 7413,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7805,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160878.964998,
+      "actual": 160879.544007
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160898.020402,
+      "sourceMilliseconds": 7250,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 7715,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "poll",
+      "wall": 160943.095025,
+      "actual": 160943.11373
+    },
+    {
+      "kind": "submit",
+      "wall": 160943.095025,
+      "actual": 160943.653585,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 7541,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7933,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160943.095025,
+      "actual": 160943.746039
+    },
+    {
+      "kind": "authority-state",
+      "wall": 160962.252881,
+      "sourceMilliseconds": 7250,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 7805,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "poll",
+      "wall": 160993.566497,
+      "actual": 160993.582377
+    },
+    {
+      "kind": "submit",
+      "wall": 160993.566497,
+      "actual": 160994.060345,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 7641,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 8033,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 160993.566497,
+      "actual": 160994.126229
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161011.953844,
+      "sourceMilliseconds": 7250,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 7933,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "poll",
+      "wall": 161046.651072,
+      "actual": 161046.66586
+    },
+    {
+      "kind": "submit",
+      "wall": 161046.651072,
+      "actual": 161047.084417,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 7747,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 8139,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161046.651072,
+      "actual": 161047.150221
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161062.881414,
+      "sourceMilliseconds": 7250,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8033,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "poll",
+      "wall": 161091.556156,
+      "actual": 161091.571014
+    },
+    {
+      "kind": "submit",
+      "wall": 161091.556156,
+      "actual": 161092.047871,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 7835,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 8227,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161091.556156,
+      "actual": 161092.155864
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161109.662525,
+      "sourceMilliseconds": 7250,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8139,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "frozen-server",
+      "sourceSeconds": 7.25,
+      "deadline": 7300,
+      "polls": 20,
+      "retainedClientScale": 2
+    },
+    {
+      "kind": "poll",
+      "wall": 161139.172609,
+      "actual": 161139.18876
+    },
+    {
+      "kind": "submit",
+      "wall": 161139.172609,
+      "actual": 161139.682698,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 7929,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 8321,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161139.172609,
+      "actual": 161139.762569
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161157.368316,
+      "sourceMilliseconds": 7250,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8227,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161198.91763,
+      "nextSnapshotTime": 7400
+    },
+    {
+      "kind": "poll",
+      "wall": 161211.847124,
+      "actual": 161211.864266
+    },
+    {
+      "kind": "submit",
+      "wall": 161211.847124,
+      "actual": 161212.71711,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8053,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7350,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161211.847124,
+      "actual": 161212.816847
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161228.824019,
+      "sourceMilliseconds": 7350,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161263.031616,
+      "nextSnapshotTime": 7450
+    },
+    {
+      "kind": "poll",
+      "wall": 161274.832869,
+      "actual": 161274.855161
+    },
+    {
+      "kind": "submit",
+      "wall": 161274.832869,
+      "actual": 161275.581566,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8199,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7496,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 0,
+        "weapon": 2,
+        "forwardmove": 0,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161274.832869,
+      "actual": 161275.626291
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161289.703873,
+      "sourceMilliseconds": 7400,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161323.972726,
+      "nextSnapshotTime": 7500
+    },
+    {
+      "kind": "poll",
+      "wall": 161332.475846,
+      "actual": 161332.493079
+    },
+    {
+      "kind": "submit",
+      "wall": 161332.475846,
+      "actual": 161333.192083,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8256,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -97,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7553,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -97,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161332.475846,
+      "actual": 161333.25436
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161347.73436,
+      "sourceMilliseconds": 7450,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161378.510895,
+      "nextSnapshotTime": 7550
+    },
+    {
+      "kind": "poll",
+      "wall": 161379.779771,
+      "actual": 161379.804949
+    },
+    {
+      "kind": "submit",
+      "wall": 161379.779771,
+      "actual": 161380.364852,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8303,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -125,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7553,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -125,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161379.779771,
+      "actual": 161380.41169
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161394.145256,
+      "sourceMilliseconds": 7500,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161426.275396,
+      "nextSnapshotTime": 7600
+    },
+    {
+      "kind": "poll",
+      "wall": 161435.172417,
+      "actual": 161435.189519
+    },
+    {
+      "kind": "submit",
+      "wall": 161435.172417,
+      "actual": 161435.969476,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8358,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7601,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161435.172417,
+      "actual": 161436.049376
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161449.872932,
+      "sourceMilliseconds": 7550,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161480.851347,
+      "nextSnapshotTime": 7650
+    },
+    {
+      "kind": "poll",
+      "wall": 161482.125182,
+      "actual": 161482.139439
+    },
+    {
+      "kind": "submit",
+      "wall": 161482.125182,
+      "actual": 161482.739457,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8405,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -126,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7646,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -126,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161482.125182,
+      "actual": 161482.764685
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161499.243513,
+      "sourceMilliseconds": 7600,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161534.565175,
+      "nextSnapshotTime": 7700
+    },
+    {
+      "kind": "poll",
+      "wall": 161543.179805,
+      "actual": 161543.196617
+    },
+    {
+      "kind": "submit",
+      "wall": 161543.179805,
+      "actual": 161543.93208,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8465,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7704,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161543.179805,
+      "actual": 161543.959091
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161556.986148,
+      "sourceMilliseconds": 7650,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161585.05958,
+      "nextSnapshotTime": 7750
+    },
+    {
+      "kind": "poll",
+      "wall": 161586.395723,
+      "actual": 161586.410491
+    },
+    {
+      "kind": "submit",
+      "wall": 161586.395723,
+      "actual": 161587.017592,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8508,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -126,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7745,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -126,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161586.395723,
+      "actual": 161587.046216
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161601.631424,
+      "sourceMilliseconds": 7700,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161637.266976,
+      "nextSnapshotTime": 7800
+    },
+    {
+      "kind": "poll",
+      "wall": 161646.039423,
+      "actual": 161646.056415
+    },
+    {
+      "kind": "submit",
+      "wall": 161646.039423,
+      "actual": 161646.944285,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8567,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7802,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161646.039423,
+      "actual": 161646.980062
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161661.965993,
+      "sourceMilliseconds": 7750,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161695.571338,
+      "nextSnapshotTime": 7850
+    },
+    {
+      "kind": "poll",
+      "wall": 161703.959792,
+      "actual": 161703.978377
+    },
+    {
+      "kind": "submit",
+      "wall": 161703.959792,
+      "actual": 161704.718409,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8624,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -126,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7857,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -126,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161703.959792,
+      "actual": 161704.747744
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161718.985418,
+      "sourceMilliseconds": 7800,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161751.97787,
+      "nextSnapshotTime": 7950
+    },
+    {
+      "kind": "poll",
+      "wall": 161760.402052,
+      "actual": 161760.421789
+    },
+    {
+      "kind": "submit",
+      "wall": 161760.402052,
+      "actual": 161761.363821,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8680,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7911,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161760.402052,
+      "actual": 161761.402744
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161784.949884,
+      "sourceMilliseconds": 7900,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161814.884757,
+      "nextSnapshotTime": 8000
+    },
+    {
+      "kind": "poll",
+      "wall": 161816.171567,
+      "actual": 161816.187266
+    },
+    {
+      "kind": "submit",
+      "wall": 161816.171567,
+      "actual": 161817.012328,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8735,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -126,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 7964,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -126,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161816.171567,
+      "actual": 161817.059657
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161830.18565,
+      "sourceMilliseconds": 7950,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161862.096539,
+      "nextSnapshotTime": 8050
+    },
+    {
+      "kind": "poll",
+      "wall": 161871.077257,
+      "actual": 161871.10018
+    },
+    {
+      "kind": "submit",
+      "wall": 161871.077257,
+      "actual": 161872.167317,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8789,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 8016,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161871.077257,
+      "actual": 161872.204957
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161892.441492,
+      "sourceMilliseconds": 8000,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161922.583414,
+      "nextSnapshotTime": 8100
+    },
+    {
+      "kind": "poll",
+      "wall": 161923.911412,
+      "actual": 161923.925618
+    },
+    {
+      "kind": "submit",
+      "wall": 161923.911412,
+      "actual": 161924.606419,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8842,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -125,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 8067,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -125,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161923.911412,
+      "actual": 161924.636265
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161939.819417,
+      "sourceMilliseconds": 8050,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 161971.443887,
+      "nextSnapshotTime": 8150
+    },
+    {
+      "kind": "poll",
+      "wall": 161979.722745,
+      "actual": 161979.737733
+    },
+    {
+      "kind": "submit",
+      "wall": 161979.722745,
+      "actual": 161980.492583,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8897,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 8120,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 161979.722745,
+      "actual": 161980.518181
+    },
+    {
+      "kind": "authority-state",
+      "wall": 161996.087038,
+      "sourceMilliseconds": 8100,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 162026.225053,
+      "nextSnapshotTime": 8200
+    },
+    {
+      "kind": "poll",
+      "wall": 162027.544133,
+      "actual": 162027.560434
+    },
+    {
+      "kind": "submit",
+      "wall": 162027.544133,
+      "actual": 162028.319842,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 8944,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -126,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 8165,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -126,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 162027.544133,
+      "actual": 162028.355719
+    },
+    {
+      "kind": "authority-state",
+      "wall": 162045.196649,
+      "sourceMilliseconds": 8150,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 162077.156038,
+      "nextSnapshotTime": 8250
+    },
+    {
+      "kind": "poll",
+      "wall": 162087.833567,
+      "actual": 162087.854457
+    },
+    {
+      "kind": "submit",
+      "wall": 162087.833567,
+      "actual": 162088.645695,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 9004,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 8223,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 162087.833567,
+      "actual": 162088.681111
+    },
+    {
+      "kind": "authority-state",
+      "wall": 162104.412875,
+      "sourceMilliseconds": 8200,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 162141.240489,
+      "nextSnapshotTime": 8300
+    },
+    {
+      "kind": "poll",
+      "wall": 162149.475405,
+      "actual": 162149.490664
+    },
+    {
+      "kind": "submit",
+      "wall": 162149.475405,
+      "actual": 162150.209676,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 9065,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -126,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 8282,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -126,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 162149.475405,
+      "actual": 162150.239712
+    },
+    {
+      "kind": "authority-state",
+      "wall": 162164.217828,
+      "sourceMilliseconds": 8250,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 162194.488352,
+      "nextSnapshotTime": 8350
+    },
+    {
+      "kind": "poll",
+      "wall": 162195.825937,
+      "actual": 162195.841487
+    },
+    {
+      "kind": "submit",
+      "wall": 162195.825937,
+      "actual": 162196.441715,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 9111,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -126,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 8326,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -126,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 162195.825937,
+      "actual": 162196.47059
+    },
+    {
+      "kind": "authority-state",
+      "wall": 162212.46139,
+      "sourceMilliseconds": 8300,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 1743.1268310546875,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 7450,
+      "lastAcceptedWire": 8321,
+      "lastAcceptedForward": 0
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 162247.4521,
+      "nextSnapshotTime": 8400
+    },
+    {
+      "kind": "poll",
+      "wall": 162257.393415,
+      "actual": 162257.413373
+    },
+    {
+      "kind": "submit",
+      "wall": 162257.393415,
+      "actual": 162258.14603,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 9164,
+          "angleWords": [
+            0,
+            57344,
+            0
+          ],
+          "forwardMove": -127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "kind": "actual-wire-command",
+      "command": {
+        "serverTime": 8377,
+        "angles": [
+          0,
+          57344,
+          0
+        ],
+        "buttons": 2048,
+        "weapon": 2,
+        "forwardmove": -127,
+        "rightmove": 0,
+        "upmove": 0
+      }
+    },
+    {
+      "kind": "poll",
+      "wall": 162257.393415,
+      "actual": 162258.173342
+    },
+    {
+      "kind": "authority-state",
+      "wall": 162273.413932,
+      "sourceMilliseconds": 8350,
+      "position": {
+        "x": 264.1408386230469,
+        "y": 2014.11572265625,
+        "z": 24.125
+      },
+      "health": 122,
+      "pmType": 0,
+      "commandTime": 8326,
+      "lastAcceptedWire": 8326,
+      "lastAcceptedForward": -126
+    },
+    {
+      "kind": "recovery",
+      "frozenHighwater": 8227,
+      "accepted": 8326,
+      "acceptedForward": -126,
+      "wallMilliseconds": 983.9398299999884,
+      "recoveryExchanges": 18,
+      "moved": true
+    },
+    {
+      "kind": "server-snapshot",
+      "wall": 162330.879366,
+      "nextSnapshotTime": 8400
+    }
+  ],
+  "prints": [
+    "execing default.cfg\n",
+    "execing q3config.cfg\n",
+    "couldn't exec autoexec.cfg\n",
+    "------- BotLib Initialization -------\n",
+    "loaded weapons.c",
+    "loaded items.c\n",
+    "loaded syn.c",
+    "loaded rnd.c",
+    "loaded match.c",
+    "loaded rchat.c",
+    "found 18 level items\n",
+    "Listening for Q3 peers on 127.0.0.1:48450.\n",
+    "Loaded maps/q3dm1.bsp with q3:movement and q3:model/sarge.\n",
+    "execing default.cfg\n",
+    "execing q3config.cfg\n",
+    "couldn't exec autoexec.cfg\n",
+    "Connecting to Quake III server 127.0.0.1:48450.\n",
+    "12 items registered\n",
+    "32 bots parsed\n",
+    "35 arenas parsed\n",
+    "client send  239 : s=1 ack=0\n",
+    "server send 1239 : s=1 ack=1\n",
+    "Loaded remote world maps/q3dm1.bsp.\n",
+    "\n------- Input Initialization -------\n",
+    "Joystick is not active.\n",
+    "------------------------------------\n",
+    "client send  621 : s=2 ack=1\n",
+    "server send  611 : s=2 ack=2\n",
+    "client send   14 : s=3 ack=2\n",
+    "client send   21 : s=4 ack=2\n",
+    "server send  406 : s=3 ack=4\n",
+    "client send  299 : s=5 ack=3\n",
+    "client send  300 : s=6 ack=3\n",
+    "server send   17 : s=4 ack=6\n",
+    "client send   21 : s=7 ack=4\n",
+    "client send   21 : s=8 ack=4\n",
+    "server send   18 : s=5 ack=8\n",
+    "client send   22 : s=9 ack=5\n",
+    "client send   21 : s=10 ack=5\n",
+    "server send   18 : s=6 ack=10\n",
+    "client send   21 : s=11 ack=6\n",
+    "client send   24 : s=12 ack=6\n",
+    "server send   32 : s=7 ack=12\n",
+    "client send   25 : s=13 ack=7\n",
+    "client send   25 : s=14 ack=7\n",
+    "server send   29 : s=8 ack=14\n",
+    "client send   25 : s=15 ack=8\n",
+    "client send   24 : s=16 ack=8\n",
+    "server send   57 : s=9 ack=16\n",
+    "client send   25 : s=17 ack=9\n",
+    "client send   25 : s=18 ack=9\n",
+    "server send   42 : s=10 ack=18\n",
+    "client send   24 : s=19 ack=10\n",
+    "client send   25 : s=20 ack=10\n",
+    "server send   43 : s=11 ack=20\n",
+    "client send   25 : s=21 ack=11\n",
+    "client send   24 : s=22 ack=11\n",
+    "server send   36 : s=12 ack=22\n",
+    "client send   23 : s=23 ack=12\n",
+    "client send   25 : s=24 ack=12\n",
+    "server send   55 : s=13 ack=24\n",
+    "client send   25 : s=25 ack=13\n",
+    "client send   24 : s=26 ack=13\n",
+    "server send   26 : s=14 ack=26\n",
+    "client send   25 : s=27 ack=14\n",
+    "client send   25 : s=28 ack=14\n",
+    "server send   26 : s=15 ack=28\n",
+    "client send   25 : s=29 ack=15\n",
+    "client send   25 : s=30 ack=15\n",
+    "server send   32 : s=16 ack=30\n",
+    "client send   25 : s=31 ack=16\n",
+    "client send   25 : s=32 ack=16\n",
+    "server send   27 : s=17 ack=32\n",
+    "client send   25 : s=33 ack=17\n",
+    "client send   26 : s=34 ack=17\n",
+    "server send   29 : s=18 ack=34\n",
+    "client send   26 : s=35 ack=18\n",
+    "client send   24 : s=36 ack=18\n",
+    "server send   31 : s=19 ack=36\n",
+    "client send   25 : s=37 ack=19\n",
+    "client send   25 : s=38 ack=19\n",
+    "server send   35 : s=20 ack=38\n",
+    "client send   25 : s=39 ack=20\n",
+    "client send   24 : s=40 ack=20\n",
+    "server send   33 : s=21 ack=40\n",
+    "client send   24 : s=41 ack=21\n",
+    "client send   26 : s=42 ack=21\n",
+    "client send   26 : s=43 ack=21\n",
+    "client send   23 : s=44 ack=21\n",
+    "client send   23 : s=45 ack=21\n",
+    "client send   21 : s=46 ack=21\n",
+    "client send   21 : s=47 ack=21\n",
+    "client send   21 : s=48 ack=21\n",
+    "client send   21 : s=49 ack=21\n",
+    "client send   21 : s=50 ack=21\n",
+    "client send   21 : s=51 ack=21\n",
+    "client send   22 : s=52 ack=21\n",
+    "client send   22 : s=53 ack=21\n",
+    "client send   22 : s=54 ack=21\n",
+    "client send   22 : s=55 ack=21\n",
+    "client send   22 : s=56 ack=21\n",
+    "client send   22 : s=57 ack=21\n",
+    "client send   22 : s=58 ack=21\n",
+    "client send   22 : s=59 ack=21\n",
+    "client send   21 : s=60 ack=21\n",
+    "client send   21 : s=61 ack=21\n",
+    "client send   21 : s=62 ack=21\n",
+    "client send   21 : s=63 ack=21\n",
+    "client send   21 : s=64 ack=21\n",
+    "server send  789 : s=22 ack=64\n",
+    "client send   21 : s=65 ack=22\n",
+    "client send   22 : s=66 ack=22\n",
+    "server send   14 : s=23 ack=66\n",
+    "client send   22 : s=67 ack=23\n",
+    "client send   21 : s=68 ack=23\n",
+    "server send   14 : s=24 ack=68\n",
+    "client send   21 : s=69 ack=24\n",
+    "client send   25 : s=70 ack=24\n",
+    "server send   14 : s=25 ack=70\n",
+    "client send   25 : s=71 ack=25\n",
+    "client send   25 : s=72 ack=25\n",
+    "server send   14 : s=26 ack=72\n",
+    "client send   25 : s=73 ack=26\n",
+    "client send   24 : s=74 ack=26\n",
+    "server send   14 : s=27 ack=74\n",
+    "client send   24 : s=75 ack=27\n",
+    "client send   25 : s=76 ack=27\n",
+    "server send   14 : s=28 ack=76\n",
+    "client send   25 : s=77 ack=28\n",
+    "client send   26 : s=78 ack=28\n",
+    "server send   14 : s=29 ack=78\n",
+    "client send   25 : s=79 ack=29\n",
+    "client send   24 : s=80 ack=29\n",
+    "server send   14 : s=30 ack=80\n",
+    "client send   25 : s=81 ack=30\n",
+    "client send   26 : s=82 ack=30\n",
+    "server send   14 : s=31 ack=82\n",
+    "client send   25 : s=83 ack=31\n",
+    "client send   25 : s=84 ack=31\n",
+    "server send   14 : s=32 ack=84\n",
+    "client send   25 : s=85 ack=32\n",
+    "client send   25 : s=86 ack=32\n",
+    "server send   14 : s=33 ack=86\n",
+    "client send   25 : s=87 ack=33\n",
+    "client send   26 : s=88 ack=33\n",
+    "server send   14 : s=34 ack=88\n",
+    "client send   26 : s=89 ack=34\n",
+    "client send   25 : s=90 ack=34\n",
+    "server send   14 : s=35 ack=90\n",
+    "client send   25 : s=91 ack=35\n",
+    "client send   24 : s=92 ack=35\n",
+    "server send   14 : s=36 ack=92\n",
+    "client send   24 : s=93 ack=36\n",
+    "client send   25 : s=94 ack=36\n",
+    "server send   14 : s=37 ack=94\n",
+    "client send   25 : s=95 ack=37\n",
+    "client send   26 : s=96 ack=37\n",
+    "server send   13 : s=38 ack=96\n",
+    "client send   25 : s=97 ack=38\n",
+    "client send   24 : s=98 ack=38\n",
+    "server send   14 : s=39 ack=98\n",
+    "client send   25 : s=99 ack=39\n",
+    "client send   25 : s=100 ack=39\n",
+    "server send   14 : s=40 ack=100\n",
+    "client send   25 : s=101 ack=40\n",
+    "client send   24 : s=102 ack=40\n",
+    "server send   31 : s=41 ack=102\n",
+    "client send   24 : s=103 ack=41\n",
+    "client send   25 : s=104 ack=41\n",
+    "client send   38 : s=105 ack=41\n",
+    "client send   26 : s=106 ack=41\n",
+    "client send   26 : s=107 ack=41\n",
+    "server send  122 : s=42 ack=102\n"
+  ]
+}

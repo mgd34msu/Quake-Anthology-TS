@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { openArchive } from '../../../src/content/archive/index.ts';
 import { existsSync } from 'node:fs';
 import { Q2WireCodec, PlayerStateT, encodeQ2ServerEvent, encodeQ2Frame } from '../../../src/network/q2/index.ts';
@@ -88,7 +90,7 @@ test('truncated headers, payloads and invalid codec bytes reject rather than rep
     }
 });
 
-const recording = '/home/buzzkill/Projects/qfiles/q2/ctf/demos/2014-01-07-2001-lfctf1.dm2';
+const recording = `${testCorpusRoot()}/q2/ctf/demos/2014-01-07-2001-lfctf1.dm2`;
 (existsSync(recording) ? test : test.skip)('installed protocol34 recording prepares bare precache and advances through its actual EOF', async () => {
     const frameTimes: number[] = [];
     const bytes = await Bun.file(recording).bytes(); let maps = 0, frames = 0, last = -1, bare = 0;
@@ -155,7 +157,7 @@ test('receiver source overrides host readMode for both network and demo', async 
     expect(recorded.phase).toBe('active'); recorded.close();
 });
 
-const retailPak = '/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak';
+const retailPak = `${testCorpusRoot()}/q2/baseq2/pak0.pak`;
 test.skipIf(!existsSync(retailPak))('bundled protocol26 demo reaches world preparation and every recorded frame before EOF', async () => {
     const archive = await openArchive(retailPak);
     try {

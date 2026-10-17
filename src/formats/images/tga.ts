@@ -1,4 +1,4 @@
-/* Adapted from quake-1-re-ts/src/lib/tga.ts and Q3 tr_image.c LoadTGA.
+/* Adapted from the reference port and Q3 tr_image.c LoadTGA.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import { BinaryError, BinaryReader, BinaryWriter } from "../../core/binary/index.ts";
 import type { ImageLevel } from "../../contracts/render.ts";

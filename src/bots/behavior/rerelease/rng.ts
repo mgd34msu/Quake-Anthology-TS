@@ -1,8 +1,7 @@
-// Lifted from quake-1-re-ts src/lib/bot_brain/rng.ts at commit f57aadb (U20), the
-// game-agnostic bot brain. Verbatim apart from this line, the import paths
-// that changed with the directory, and the three parameterizations listed
-// in src/server/bots/nav_adapter.ts's header (NAV2-specific graph
-// construction, run/walk speeds, weapon-selection command).
+// Ported from the reference game-agnostic bot brain. Verbatim apart from this
+// line, the import paths that changed with the directory, and three
+// parameterizations (NAV2-specific graph construction, run/walk speeds,
+// weapon-selection command).
 // The brain never calls Math.random: every decision that rolls a die takes
 // its numbers from a `BotRandomT` the caller injects, so a fixed seed
 // replays a bot's whole match exactly. src/bots seeds one generator per bot

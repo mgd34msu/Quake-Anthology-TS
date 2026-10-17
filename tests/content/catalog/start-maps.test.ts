@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,7 +10,7 @@ import { parseAuthoredStarts } from "../../../src/content/catalog/start-maps.ts"
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { StartupSelectionModel } from "../../../src/app/bootstrap/startup-selection.ts";
 
-const corpusRoot = resolve(import.meta.dir, "../../../../qfiles");
+const corpusRoot = testCorpusRoot();
 const installed = existsSync(resolve(corpusRoot, "q2/rerelease/baseq2/pak0.pak"));
 const encode = (value: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(value));
 

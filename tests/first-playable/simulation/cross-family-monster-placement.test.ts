@@ -1,4 +1,6 @@
 import type { TraceQuery, TraceResult } from "../../../src/contracts/scene.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { nearbyMonsterPlacement } from "../../../src/app/bootstrap/simulation/monster-placement.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
@@ -71,7 +73,7 @@ for (const authoredMovement of locomotions) for (const selectedMovement of locom
   });
 }
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 test.skipIf(!existsSync(resolve(corpus, "q1/rerelease/id1/pak0.pak")))("retail e1m1 dog slots spawn visible rerelease parasites with source AI", async () => {
   const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--map", "e1m1", "--dedicated", "--mode", "singleplayer"]);
   if (command.kind !== "run") throw new Error("Expected Q1 launch");

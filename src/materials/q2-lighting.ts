@@ -1,4 +1,4 @@
-/* q2repro calc_dynamic_lights, ported through quake-2-re-ts gl_shader.ts.
+/* q2repro calc_dynamic_lights, ported through the reference port gl_shader.ts.
  * Copyright (C) Id Software and contributors. GPL-2.0-or-later. */
 import type { Vec3 } from "../contracts/math.ts";
 import { vec3 } from "../core/math.ts";

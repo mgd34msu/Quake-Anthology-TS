@@ -1,4 +1,6 @@
 import { SceneMaterialRegistrations } from "../../../src/render/scene/material-registrations.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { prepareMaterialBatches } from "../../../src/materials/evaluate.ts";
 import { compiledDrawGroup, sequenceDrawGroup, finishSceneOperations, sceneModelBatches, createSourceSceneOrder, sourceDrawGroup } from "../../../src/render/scene/submissions.ts";
 import { expect, test } from "bun:test";
@@ -191,7 +193,7 @@ ordering/flash { cull none
   } finally { scene.close(); images.close(); }
 });
 
-const root = process.env["QFILES_ROOT"] ?? "/home/buzzkill/Projects/qfiles";
+const root = process.env["QFILES_ROOT"] ?? `${testCorpusRoot()}`;
 const cases: readonly { readonly family: "q1" | "q2" | "q3"; readonly archive: string; readonly map: string }[] = [
   { family: "q1", archive: "q1/id1/PAK0.PAK", map: "maps/start.bsp" },
   { family: "q2", archive: "q2/baseq2/pak0.pak", map: "maps/base1.bsp" },

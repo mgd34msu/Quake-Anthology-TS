@@ -1,5 +1,5 @@
 import { samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
-// Quakespasm/quake-1-re-ts Fog_Update, Fog_ParseWorldspawn and Fog_GetColor.
+// Quakespasm/the reference port Fog_Update, Fog_ParseWorldspawn and Fog_GetColor.
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentId } from '../../contracts/content.ts';
 import type { ActorId } from '../../contracts/identity.ts';

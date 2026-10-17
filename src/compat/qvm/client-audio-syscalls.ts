@@ -1,4 +1,4 @@
-/* Q3 cl_cgame.c/cl_ui.c sound traps, adapted from quake-3-ts. GPL-2.0-or-later. */
+/* Q3 cl_cgame.c/cl_ui.c sound traps, adapted from the reference port. GPL-2.0-or-later. */
 import { CommonError } from '../../core/common-error.ts';
 import type { Axis, Vec3 } from '../../contracts/math.ts';
 import type { Q3ClientSound } from '../../content/q3/presentation/client.ts';

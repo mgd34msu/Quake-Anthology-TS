@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
+import { corpusFile } from "../../support/corpus.ts";
+
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import type { GuestAddress, ModuleIdentity } from "../../../src/contracts/execution.ts";
 import { createGuestProcessorState, SparseGuestMemory } from "../../../src/guest/core/index.ts";
@@ -184,7 +185,7 @@ test("decoded x87 instructions use the shared numeric state", () => {
   expect(run.state.x87.tagWord).toBe(0xffff);
 });
 
-const retailPath = resolve(import.meta.dir, "../../../../qfiles/q2/lmctf/gamex86.dll");
+const retailPath = corpusFile("q2/lmctf/gamex86.dll");
 test.skipIf(!existsSync(retailPath))("actual LMCTF GetGameAPI executes from the PE image and returns its export table", async () => {
   const bytes = await readFile(retailPath), hash = createHash("sha256").update(bytes).digest("hex");
   expect(hash).toBe("31cbb29f90429706986dbd855d0a3a2529b7fbd4340694901af5c5052cbdcbe6");

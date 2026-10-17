@@ -1,4 +1,6 @@
 import { clipVelocity, slideMove } from "../../../src/movement/q3/slide-move.ts";
+import { corpusFile } from "../../support/corpus.ts";
+
 import type { SlideMoveContext } from "../../../src/movement/q3/slide-move.ts";
 import type { Vec3 } from "../../../src/contracts/math.ts";
 import type { TraceResult } from "../../../src/contracts/scene.ts";
@@ -45,7 +47,7 @@ test("command history preserves the source 64-slot replay window", () => {
   expect(history.read(65)?.serverTimeMilliseconds).toBe(520);
 });
 
-const archivePath = resolve(process.env["Q3_DATA_PATH"] ?? resolve(import.meta.dir, "../../../../qfiles/q3a"), "baseq3/pak0.pk3");
+const archivePath = resolve(process.env["Q3_DATA_PATH"] ?? corpusFile("q3a"), "baseq3/pak0.pk3");
 test.skipIf(!existsSync(archivePath))("retail q3dm1 movement uses shared collision, source weapons and character stages", async () => {
   const archive = await openArchive(archivePath, "pk3");
   try {

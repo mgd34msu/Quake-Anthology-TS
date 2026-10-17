@@ -1,4 +1,4 @@
-/* Adapted from quake-1-re-ts miptex reading and FTE external mip textures.
+/* Adapted from the reference port miptex reading and FTE external mip textures.
  * GPL-2.0-or-later. */
 import type { Q1MipTexture } from "../../contracts/scene.ts";
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";

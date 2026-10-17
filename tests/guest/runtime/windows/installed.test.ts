@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { createContentDigest } from "../../../../src/contracts/content.ts";
 import type { ModuleIdentity, GuestCallContext, GuestAddress } from "../../../../src/contracts/execution.ts";
@@ -13,7 +14,7 @@ import { mapPeImage, parsePe } from "../../../../src/guest/pe/index.ts";
 import { UnsupportedWindowsImport, WindowsGuestRuntime } from "../../../../src/guest/runtime/windows/index.ts";
 
 for (const relativePath of ["ctf/gamex86.dll", "lmctf/gamex86.dll", "rerelease/baseq2/game_x64.dll"]) {
-  const path = join(homedir(), "Projects/qfiles/q2", relativePath);
+  const path = join(testCorpusRoot(), relativePath);
   test.skipIf(!existsSync(path))(`actual ${relativePath} performs Windows DLL attach and detach through guest instructions`, async () => {
     const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
     const digest = createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"));

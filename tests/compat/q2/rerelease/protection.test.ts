@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
+import { corpusFile } from "../../../support/corpus.ts";
+
 import { nativeFixture } from "./native.test.ts";
 import { guestPointer, RereleaseSourceClient, retailRereleaseClientProfile } from "../../../../src/compat/q2/rerelease/index.ts";
 
-const available = await Bun.file(new URL("../../../../../qfiles/q2/rerelease/baseq2/game_x64.dll", import.meta.url)).exists();
+const available = await Bun.file(new URL(corpusFile("q2/rerelease/baseq2/game_x64.dll"), "file:///")).exists();
 
 test.skipIf(!available)("retail protection deadline follows native give/use and remains absolute across a frame", async () => {
   let commands: readonly string[] = [];

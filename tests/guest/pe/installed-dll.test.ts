@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import type { ModuleIdentity } from "../../../src/contracts/execution.ts";
@@ -20,7 +21,7 @@ const cases: readonly {
     width: 8, preferred: 0x180000000n, gameApiRva: 0x6bcd0n, relocationRva: 0x13b4c8n, originalPointer: 0x180047620n },
 ];
 for (const entry of cases) {
-  const path = join(homedir(), "Projects/qfiles/q2", entry.relativePath);
+  const path = join(testCorpusRoot(), entry.relativePath);
   test.skipIf(!existsSync(path))(`installed ${entry.relativePath} maps exports and relocations without executing native code`, async () => {
     const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
     expect(new Bun.CryptoHasher("sha256").update(bytes).digest("hex")).toBe(entry.sha256);

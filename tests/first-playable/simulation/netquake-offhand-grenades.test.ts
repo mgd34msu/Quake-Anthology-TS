@@ -1,4 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
@@ -10,7 +12,7 @@ import type { ProviderId } from "../../../src/contracts/identity.ts";
 import { Q2Ballistics } from "../../../src/content/q2/foundation/weapons/ballistics.ts";
 import type { Q2Entity, Q2GameServices } from "../../../src/content/q2/foundation/host.ts";
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 const arsenals: readonly { readonly name: string; readonly catalog: string; readonly provider: ProviderId }[] = [
   { name: "native Q1", catalog: "q1-classic-id1", provider: "q1:official" },
   { name: "selected Q2", catalog: "q2-classic-baseq2", provider: "q2:official" },

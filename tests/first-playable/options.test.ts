@@ -58,7 +58,7 @@ test("display gamma is shared, neutral by default, and range checked", () => {
 
 
 test("startup menu precedes implicit defaults while explicit launches remain direct", () => {
-  for (const argv of [[], ["--renderer", "cpu", "--gamma", "1.3"], ["--content-root", "/tmp/qfiles", "--hidden"]])
+  for (const argv of [[], ["--renderer", "cpu", "--gamma", "1.3"], ["--content-root", "/tmp/games", "--hidden"]])
     expect(parseApplicationCommand(argv).kind).toBe("menu");
   for (const argv of [["--game", "q1-rerelease-id1"], ["--map", "dm4"], ["--frames", "1"], ["--dedicated"], ["--connect-q2", "localhost"]])
     expect(parseApplicationCommand(argv).kind).toBe("run");

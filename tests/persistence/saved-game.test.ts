@@ -1,6 +1,7 @@
 import { parseSaveRequest, parseLoadRequest, saveCommandDocumentation } from "../../src/app/bootstrap/save-requests.ts";
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import { expect, test } from "bun:test";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { decodeSavedGame } from "../../src/persistence/saved-game.ts";
 import { encodeQ1Save, type Q1SaveData } from "../../src/persistence/q1.ts";
@@ -22,7 +23,7 @@ test("malformed shared headers do not fall back to native formats", () => {
 });
 
 test("actual installed Quake source saves identify format and preserve extensions", async () => {
-  const path = join(process.env["QUAKE_DATA_PATH"] ?? join(homedir(), "Projects/qfiles"), "q1/id1/autosave/start.sav");
+  const path = join(testCorpusRoot(), "q1/id1/autosave/start.sav");
   if (!await Bun.file(path).exists()) throw new Error("Missing installed Quake save fixture");
   const first = decodeSavedGame(await Bun.file(path).bytes());
   if (first.kind !== "q1-source") throw new Error("Expected source save");
@@ -34,7 +35,7 @@ test("actual installed Quake source saves identify format and preserve extension
 test("explicit native save content selection wins over a directory label", async () => {
   const { discoverInstalledContent } = await import("../../src/content/catalog/index.ts");
   const { selectQ1SaveProduct } = await import("../../src/persistence/q1-selection.ts");
-  const catalog = await discoverInstalledContent({ corpusRoot: process.env["QUAKE_DATA_PATH"] ?? join(homedir(), "Projects/qfiles") });
+  const catalog = await discoverInstalledContent({ corpusRoot: testCorpusRoot() });
   const product = selectQ1SaveProduct(catalog, save(5), "q1-rerelease-id1/manual.sav", "q1-classic-id1");
   expect(product.expectation.id).toBe("q1-classic-id1");
   expect(() => selectQ1SaveProduct(catalog, save(5), "manual.sav", "q2-classic-baseq2")).toThrow("match");

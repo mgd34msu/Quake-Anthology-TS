@@ -1,7 +1,7 @@
 import { movementBounds } from "../body-shape.ts";
 import { sweepQ2Body } from "./swept.ts";
 /* Quake II movement, id Software / ZeniMax. GPL-2.0-or-later.
- * Ported from quake-2-re-ts and checked against the original pmove sources. */
+ * Ported from the reference port and checked against the original pmove sources. */
 import type { NumericOperations } from "../../contracts/numeric.ts";
 import { characterHeight } from "./dimensions.ts";
 import { createMovementMath } from "./math.ts";

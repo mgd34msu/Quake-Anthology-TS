@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
@@ -142,7 +144,7 @@ describe("QVM execution", () => {
 const retailPacks = ["baseq3/pak8.pk3", "missionpack/pak0.pk3"];
 for (const pack of retailPacks) {
   test(`real QVM bytecode from ${pack}`, async () => {
-    const archive = await openArchive(`/home/buzzkill/Projects/qfiles/q3a/${pack}`);
+    const archive = await openArchive(`${testCorpusRoot()}/q3a/${pack}`);
     try {
       const roles: readonly QvmRole[] = ["qagame", "cgame", "ui"];
       for (const role of roles) {

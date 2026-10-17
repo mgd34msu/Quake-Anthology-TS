@@ -1,6 +1,7 @@
 import { SceneMaterialRegistrations } from "../../../../src/render/scene/material-registrations.ts";
+import { testCorpusRoot, corpusFile } from "../../../support/corpus.ts";
+
 import { sceneModelBatches, finishSceneOperations, createSourceSceneOrder } from "../../../../src/render/scene/submissions.ts";
-import { resolve } from "node:path";
 import { weaponViewCamera } from "../../../../src/app/bootstrap/weapon-view.ts";
 import { createMd5Model, parseMd5Anim, parseMd5Mesh, q1ReplacementSkinSelection } from "../../../../src/formats/q3-model/index.ts";
 import { existsSync } from "node:fs";
@@ -52,7 +53,7 @@ function entity(model: DecodedModel, resource: ResolvedResourceReference, family
 }
 
 test("retail Q1 MDL and SPR prepare transformed geometry and real embedded skins", async () => {
-  const mdl = await asset("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK", "progs/player.mdl", "q1");
+  const mdl = await asset(`${testCorpusRoot()}/q1/id1/PAK0.PAK`, "progs/player.mdl", "q1");
   const prepared = prepareSceneEntity(entity(parseMdl(mdl.bytes), mdl.resource, "q1"), { camera, timeSeconds: 0.25 });
   expect(prepared.surfaces[0]?.geometry.indices.length).toBe(408 * 3);
   const surface = prepared.surfaces[0];
@@ -65,14 +66,14 @@ test("retail Q1 MDL and SPR prepare transformed geometry and real embedded skins
   const local = surface.localGeometry.vertices[0], world = surface.geometry.vertices[0];
   if (local === undefined || world === undefined) throw new Error("Missing geometry");
   expect(world.position.x).toBeCloseTo(local.position.x + 20);
-  const spr = await asset("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK", "progs/s_explod.spr", "q1");
+  const spr = await asset(`${testCorpusRoot()}/q1/id1/PAK0.PAK`, "progs/s_explod.spr", "q1");
   const sprite = prepareSceneEntity(entity(parseSpr(spr.bytes), spr.resource, "q1"), { camera, timeSeconds: 0.25 });
   expect(sprite.surfaces[0]?.geometry.vertices).toHaveLength(4);
   expect(sprite.surfaces[0]?.alphaTest).toBe("gt0");
 });
 
 test("retail Q2 shell geometry retains old-origin interpolation and shell color", async () => {
-  const mdl = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "models/monsters/soldier/tris.md2", "q2");
+  const mdl = await asset(`${testCorpusRoot()}/q2/baseq2/pak0.pak`, "models/monsters/soldier/tris.md2", "q2");
   const source = entity(parseMd2(mdl.bytes), mdl.resource, "q2");
   const normal = prepareSceneEntity(source, { camera, timeSeconds: 1 });
   expect(normal.surfaces[0]?.cull).toBe("front");
@@ -87,7 +88,7 @@ test("retail Q2 shell geometry retains old-origin interpolation and shell color"
 });
 
 test("retail Q3 lower model interpolates actual torso tag and applies custom skin", async () => {
-  const mdl = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "models/players/sarge/lower.md3", "q3");
+  const mdl = await asset(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`, "models/players/sarge/lower.md3", "q3");
   const source = entity(toSceneMd3(parseMd3(mdl.bytes)), mdl.resource, "q3");
   const child = { ...source, attachments: [], transform: { ...source.transform, origin: { x: 0, y: 0, z: 0 } } };
   const prepared = prepareSceneEntity({ ...source, attachments: [{ tag: "tag_torso", entity: child }, { tag: "invented", entity: child }] },
@@ -133,13 +134,13 @@ test("Q3 particle pool submits registered animation geometry and retires expired
 });
 
 test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lighting", async () => {
-  const q2 = await openArchive("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak");
-  const q3 = await openArchive("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3");
+  const q2 = await openArchive(`${testCorpusRoot()}/q2/baseq2/pak0.pak`);
+  const q3 = await openArchive(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`);
   const identity = createIdentityOwner("model-render-cache"), registrations = new SceneMaterialRegistrations();
   const images = new SceneImageRegistry({ identity: Symbol("models"), session: identity.session, generation: 0 });
   let world: WorldScene | null = null;
   try {
-    const paletteAsset = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "pics/colormap.pcx", "q2");
+    const paletteAsset = await asset(`${testCorpusRoot()}/q2/baseq2/pak0.pak`, "pics/colormap.pcx", "q2");
     const colors = decodePcx(paletteAsset.bytes).palette;
     if (colors === null) throw new Error("Missing Q2 palette");
     const palette = { colors, source: paletteAsset.resource };
@@ -149,7 +150,7 @@ test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lig
     } });
     const textures2 = new SceneTextureLoader(images, reader(q2), palette), shaders2 = new SceneShaderRegistry(textures2, registrations.provider("q2:classic:retail:test"));
     const textures3 = new SceneTextureLoader(images, reader(q3)), shaders3 = new SceneShaderRegistry(textures3, registrations.provider("q3:classic:retail:test"));
-    const mapAsset = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "maps/base1.bsp", "q2");
+    const mapAsset = await asset(`${testCorpusRoot()}/q2/baseq2/pak0.pak`, "maps/base1.bsp", "q2");
     const map = decodeQ2Map(mapAsset.bytes);
     world = await WorldScene.load(map, shaders2);
     const start = parseEntities(map.entities).find(item => item.get("classname") === "info_player_start");
@@ -157,8 +158,8 @@ test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lig
     const origin = { x: coordinates[0] ?? 0, y: coordinates[1] ?? 0, z: (coordinates[2] ?? 0) + 24 };
     const view: SceneCamera = { ...camera, origin: { ...origin, x: origin.x - 100 }, projection: perspectiveProjection(90, 74, 4096) };
     const input = { camera: view, time: { kind: "seconds", value: 0 }, target: { kind: "seat", seat: identity.seat(0) } } satisfies Parameters<SceneModelRenderer["prepare"]>[1];
-    const q2Asset = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "models/monsters/soldier/tris.md2", "q2");
-    const q3Asset = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "models/players/sarge/lower.md3", "q3");
+    const q2Asset = await asset(`${testCorpusRoot()}/q2/baseq2/pak0.pak`, "models/monsters/soldier/tris.md2", "q2");
+    const q3Asset = await asset(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`, "models/players/sarge/lower.md3", "q3");
     const q2Entity = entity(parseMd2(q2Asset.bytes), q2Asset.resource, "q2");
     const q3Entity = entity(toSceneMd3(parseMd3(q3Asset.bytes)), q3Asset.resource, "q3");
     const body2 = { ...q2Entity, transform: { ...q2Entity.transform, origin }, previousOrigin: origin, lightingOrigin: origin };
@@ -176,7 +177,7 @@ test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lig
       && batch.texture.image.source.name.startsWith("models/monsters/soldier/"))).toBe(true);
     expect(batches3.some(batch => batch.texture.kind === "bind-image" && batch.texture.image.source.kind === "generated"
       && batch.texture.image.source.name.startsWith("models/players/sarge/"))).toBe(true);
-    const rocketAsset = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "models/weapons2/rocketl/rocketl.md3", "q3");
+    const rocketAsset = await asset(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`, "models/weapons2/rocketl/rocketl.md3", "q3");
     const rocket = entity(toSceneMd3(parseMd3(rocketAsset.bytes)), rocketAsset.resource, "q3");
     const respawnOrigin = { x: 674.6016845703125, y: 2103.394287109375, z: 25.288625717163086 };
     const respawningRocket = { ...rocket, transform: { origin: respawnOrigin,
@@ -233,8 +234,8 @@ ordering/model-mark { polygonOffset cull none { map $whiteimage blendFunc GL_ZER
     } finally { world.fogSelections = originalFogs; }
     expect(cache2.lighting.sample(origin, input).floor).not.toBeNull();
     expect(batches3.flatMap(batch => batch.vertices).some(vertex => vertex.color.x > 0)).toBe(true);
-    const q1Asset = await asset("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK", "progs/v_shot.mdl", "q1");
-    const q1Palette = await asset("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK", "gfx/palette.lmp", "q1");
+    const q1Asset = await asset(`${testCorpusRoot()}/q1/id1/PAK0.PAK`, "progs/v_shot.mdl", "q1");
+    const q1Palette = await asset(`${testCorpusRoot()}/q1/id1/PAK0.PAK`, "gfx/palette.lmp", "q1");
     const palette1 = { colors: q1Palette.bytes, source: q1Palette.resource };
     const textures1 = new SceneTextureLoader(images, { read: async () => null }, palette1);
     const cache1 = new SceneModelRenderer({ family: "q1", textures: textures1, shaders: new SceneShaderRegistry(textures1, registrations.provider("q1:classic:retail:test")), palette: palette1 }, world);
@@ -287,7 +288,7 @@ ordering/model-mark { polygonOffset cull none { map $whiteimage blendFunc GL_ZER
       if (lit === undefined) throw new Error("Missing modulated Q1 gun");
       expect(lit.color.x / lit.color.z).toBeCloseTo(64 / 61.5, 2);
     } finally { modulatedWorld.close(); }
-    const q3Map = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "maps/q3dm1.bsp", "q3");
+    const q3Map = await asset(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`, "maps/q3dm1.bsp", "q3");
     const world3 = await WorldScene.load(decodeQ3World(q3Map.bytes), shaders3);
     try {
       const cache13 = new SceneModelRenderer({ family: "q1", textures: textures1, shaders: new SceneShaderRegistry(textures1, registrations.provider("q1:classic:retail:test")), palette: palette1 }, world3);
@@ -314,7 +315,7 @@ ordering/model-mark { polygonOffset cull none { map $whiteimage blendFunc GL_ZER
   } finally { world?.close(); images.close(); q2.close(); q3.close(); }
 }, 60000);
 
-const rereleaseBeamArchive = new URL("../../../../../qfiles/q2/rerelease/baseq2/pak0.pak", import.meta.url).pathname;
+const rereleaseBeamArchive = corpusFile("q2/rerelease/baseq2/pak0.pak");
 test.skipIf(!existsSync(rereleaseBeamArchive))("rerelease modeled parasite beam centers segments and stretches the final model with its real skin", async () => {
   const file = rereleaseBeamArchive;
   const source = await asset(file, "models/monsters/parasite/segment/tris.md2", "q2");
@@ -345,7 +346,7 @@ test.skipIf(!existsSync(rereleaseBeamArchive))("rerelease modeled parasite beam 
   expect(custom.attachments.map(segment => segment.entity.transform.scale.x)).toEqual([1, 0.5]);
 });
 
-const rereleaseGunArchive = resolve(import.meta.dir, "../../../../../qfiles/q1/rerelease/id1/pak0.pak");
+const rereleaseGunArchive = corpusFile("q1/rerelease/id1/pak0.pak");
 test.skipIf(!existsSync(rereleaseGunArchive))("Q1 replacement MD5 gun retains source FRONT winding; ordinary MD5 retains BACK", async () => {
   const mesh = await asset(rereleaseGunArchive, "progs/v_shot2.md5mesh", "q1");
   const animation = await asset(rereleaseGunArchive, "progs/v_shot2.md5anim", "q1");
@@ -395,7 +396,7 @@ test("native alias bounds reject geometry before lighting while retaining replac
   expect(culled.attachments[0]?.cull).not.toBe("out"); expect(childLights).toBeGreaterThan(0);
   const shadow = prepareSceneEntity(source, { ...context, noCull: true, purpose: "shadow" });
   expect(shadow.surfaces.length).toBeGreaterThan(0); expect(parentLights).toBe(0);
-  const native = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "models/monsters/soldier/tris.md2", "q2");
+  const native = await asset(`${testCorpusRoot()}/q2/baseq2/pak0.pak`, "models/monsters/soldier/tris.md2", "q2");
   const q2 = entity(parseMd2(native.bytes), native.resource, "q2");
   const hidden = prepareSceneEntity(q2, context);
   expect(hidden.cull).toBe("out"); expect(hidden.surfaces).toHaveLength(0);
@@ -462,7 +463,7 @@ test("MD5 frame-local skinning reuses a pose without retaining animated monster 
 
 
 test("shadow preparation skips vertex color evaluation and preserves silhouette inputs", async () => {
-  const native = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "models/monsters/soldier/tris.md2", "q2");
+  const native = await asset(`${testCorpusRoot()}/q2/baseq2/pak0.pak`, "models/monsters/soldier/tris.md2", "q2");
   const source = { ...entity(parseMd2(native.bytes), native.resource, "q2"), flags: { kind: "q2", bits: 512 } } satisfies SceneEntity;
   let calls = 0;
   const context = { camera, timeSeconds: 0.3, lightVertex: () => { calls++; return { x: 0.2, y: 0.4, z: 0.6 }; } };
@@ -477,7 +478,7 @@ test("shadow preparation skips vertex color evaluation and preserves silhouette 
 });
 
 test("MD3 early rejection retains attachments and leaves survivor geometry unchanged", async () => {
-  const mdl = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "models/players/sarge/lower.md3", "q3");
+  const mdl = await asset(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`, "models/players/sarge/lower.md3", "q3");
   const source = entity(toSceneMd3(parseMd3(mdl.bytes)), mdl.resource, "q3");
   const child: SceneEntity = { ...source, transform: { ...source.transform, origin: { x: 4000, y: 0, z: 0 } } };
   const parent: SceneEntity = { ...source, transform: { ...source.transform, origin: { x: -2000, y: 0, z: 0 } }, attachments: [{ tag: "tag_torso", entity: child }] };
@@ -497,7 +498,7 @@ test("MD3 envelopes contain rounded extrapolated positions under mirrored shear"
   const { md3WorldEnvelope } = await import("../../../../src/render/scene/models/md3-bounds.ts");
   const { interpolateMd3Frames } = await import("../../../../src/formats/q3-model/md3.ts");
   const { modelWorldPoint } = await import("../../../../src/render/scene/models/transform.ts");
-  const mdl = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "models/players/sarge/lower.md3", "q3");
+  const mdl = await asset(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`, "models/players/sarge/lower.md3", "q3");
   const model = toSceneMd3(parseMd3(mdl.bytes));
   const transform = { origin: { x: 100000, y: -30000, z: 0.015625 }, axis: [{ x: 1, y: 0.25, z: -0.5 }, { x: -0.75, y: 1, z: 0.125 }, { x: 0.25, y: -0.5, z: 1 }] satisfies SceneCamera["axis"], scale: { x: -3, y: 0.125, z: 4 } };
   for (const backLerp of [-3, -0, 0.1, 0.5, 1, 4, 100000]) {

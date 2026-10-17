@@ -1,4 +1,4 @@
-/* Adapted from Q1 model.c, Q2 gl_model.c and quake-3-ts assets/md3.ts.
+/* Adapted from Q1 model.c, Q2 gl_model.c and the reference port assets/md3.ts.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import type { PackedAliasVertex, TimedFrames } from "../../contracts/scene.ts";

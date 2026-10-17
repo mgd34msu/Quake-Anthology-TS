@@ -394,7 +394,7 @@ export class NetQuakeDecoder {
         return { kind: 'client-data', weaponAlpha: tail.weaponalpha, data: { viewHeight, idealPitch, punchAngles: { x: punch[0] ?? 0, y: punch[1] ?? 0, z: punch[2] ?? 0 }, velocity: { x: velocity[0] ?? 0, y: velocity[1] ?? 0, z: velocity[2] ?? 0 }, items, onGround: (bits & P.SU_ONGROUND) !== 0, inWater: (bits & P.SU_INWATER) !== 0, weaponFrame: weaponFrame | (tail.weaponframeHigh << 8), armor: armor | (tail.armorHigh << 8), weaponModel: weaponModel | (tail.weaponHigh << 8), health, ammo: ammo | (tail.ammoHigh << 8), shells: shells | (tail.shellsHigh << 8), nails: nails | (tail.nailsHigh << 8), rockets: rockets | (tail.rocketsHigh << 8), cells: cells | (tail.cellsHigh << 8), activeWeapon: this.standardQuake ? weapon : 1 << weapon } };
     }
     private readPrivate(r: MessageReader, op: number): NetQuakeMessage {
-        if (this.rereleaseMessages !== 'quake-1-re-ts-private')
+        if (this.rereleaseMessages !== 'q1-rerelease-private')
             throw new PacketError(`Unknown or unverified retail service ${op}`, r.offset - 1);
         switch (op) {
             case 38: return { kind: 'botchat', text: r.String() };
@@ -553,7 +553,7 @@ export function writeNetQuakeMessage(sb: SizeBuf, profile: Q1ProtocolIdentity, m
         for (const n of [v.x, v.y, v.z])
             codec.writeCoord(sb, n, flags);
     }, text = (op: number, value: string): void => { MSG_WriteByte(sb, op); MSG_WriteString(sb, value); }, privateMessage = (): void => {
-        if (rereleaseMessages !== 'quake-1-re-ts-private')
+        if (rereleaseMessages !== 'q1-rerelease-private')
             throw new Error('Message requires identified donor-private rerelease layout');
     };
     switch (m.kind) {

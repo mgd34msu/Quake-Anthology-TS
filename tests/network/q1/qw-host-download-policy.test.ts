@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
+import { corpusFile } from "../../support/corpus.ts";
+
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import {tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { Application } from '../../../src/app/bootstrap/application.ts';
 import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
@@ -23,7 +25,7 @@ nativeTest('dedicated QW user mod advertises its directory and enforces every do
   const bytes = Uint8Array.from({ length: 1800 }, (_, index) => index % 251);
   try {
     await mkdir(mod, { recursive: true });
-    await copyFile(join(homedir(), 'Projects/qfiles/q1/qw/qwprogs.dat'), join(mod, 'qwprogs.dat'));
+    await copyFile(corpusFile("q1/qw/qwprogs.dat"), join(mod, 'qwprogs.dat'));
     for (const entry of cases) {
       await mkdir(dirname(join(mod, entry.path)), { recursive: true });
       await writeFile(join(mod, entry.path), bytes);

@@ -1,4 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { ApplicationBots, type ApplicationBotClient } from "../../../src/app/bootstrap/simulation/bots.ts";
@@ -11,7 +13,7 @@ import { EngineSession } from "../../../src/world/session/session.ts";
 import { MAX_RELIABLE_COMMANDS } from "../../../src/network/q3/reliable.ts";
 
 test("six Team Arena slots retain bot resources and reconnect once after round settling", async () => {
-  const launch = parseApplicationCommand(["--content-root", "/home/buzzkill/Projects/qfiles", "--game", "q3-missionpack", "--map", "mpteam1", "--movement", "q3", "--character", "q3", "--dedicated", "--mode", "deathmatch"]);
+  const launch = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--game", "q3-missionpack", "--map", "mpteam1", "--movement", "q3", "--character", "q3", "--dedicated", "--mode", "deathmatch"]);
   if (launch.kind !== "run") throw new Error("Missing Team Arena fixture launch");
   const content = await loadApplicationContent(launch.options), identity = createIdentityOwner("bot-round-restart");
   const session = new EngineSession(identity, { kind: "headless" });

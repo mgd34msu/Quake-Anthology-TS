@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
@@ -26,7 +28,7 @@ import { pickupHoldable } from "../../../../src/content/q3/base/game/item-pickup
 import { decodeCheckpointValue, encodeCheckpointValue } from "../../../../src/persistence/value.ts";
 import { savedActorId } from "../../../../src/persistence/save-image.ts";
 
-const archivePath = resolve(process.env["QUAKE_DATA_PATH"] ?? resolve(import.meta.dir, "../../../../../qfiles"), "q1/rerelease/id1/pak0.pak");
+const archivePath = resolve(testCorpusRoot(), "q1/rerelease/id1/pak0.pak");
 const zero = { x: 0, y: 0, z: 0 };
 async function map() {
   const archive = await openArchive(archivePath);

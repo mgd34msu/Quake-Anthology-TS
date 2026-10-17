@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../../support/corpus.ts";
+
 import { createIdentityOwner } from "../../../../../src/contracts/identity.ts";
 import type { OwnedActor } from "../../../../../src/contracts/identity.ts";
 import type { Vec3 } from "../../../../../src/contracts/math.ts";
@@ -77,7 +79,7 @@ function fixture(edition: Q2Edition = "classic", map: Q2DecodedMap | null = null
 }
 
 test("actual Rogue maps construct their authored hint chains and named callbacks", async () => {
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/rogue/pak0.pak");
+  const archive = await openArchive(`${testCorpusRoot()}/q2/rogue/pak0.pak`);
   let maps = 0, nodes = 0;
   try {
     for (const entry of archive.entries.filter(entry => entry.path.startsWith("maps/") && entry.path.endsWith(".bsp"))) {
@@ -128,7 +130,7 @@ test("forks and circular hint chains are diagnosed and disconnected", () => {
 });
 
 test("rhangar2 hint pursuit uses retail BSP visibility and leaves rerelease nav pursuit alone", async () => {
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/rogue/pak0.pak");
+  const archive = await openArchive(`${testCorpusRoot()}/q2/rogue/pak0.pak`);
   try {
     const entry = archive.findEntries("maps/rhangar2.bsp")[0]; if (entry === undefined) throw new Error("Missing Rogue rhangar2.bsp");
     const map = toQ2WorldGeometry(readQ2Bsp(await archive.readEntry(entry))), scene = fixture("rerelease", map);

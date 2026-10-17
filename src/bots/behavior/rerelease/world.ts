@@ -1,4 +1,4 @@
-// Observations and commands from the common quake-1-re-ts/quake-2-re-ts
+// Observations and commands from the common the reference port
 // rerelease brain. The selected game supplies observations of its admitted
 // actor; SharedBotPopulation passes the resulting command to that actor's
 // existing movement provider. This interface owns no game entities.

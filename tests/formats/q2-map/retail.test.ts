@@ -1,10 +1,12 @@
 import { expect, test } from "bun:test";
+import { corpusFile } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { decodeQ2Map, decompressQ2Visibility, lookupQ2Lightgrid, readQ2Bsp } from "../../../src/formats/q2-map/index.ts";
 
-const root = process.env["Q2_DATA_PATH"] ?? resolve(import.meta.dir, "../../../../qfiles/q2");
+const root = process.env["Q2_DATA_PATH"] ?? corpusFile("q2");
 const fixtures = [
   { archive: "baseq2/pak0.pak", member: "maps/base1.bsp", format: "ibsp38", faces: 7905, leaves: 5238, extendedLighting: false },
   { archive: "rerelease/baseq2/pak0.pak", member: "maps/base1.bsp", format: "ibsp38", faces: 16787, leaves: 10336, extendedLighting: true },

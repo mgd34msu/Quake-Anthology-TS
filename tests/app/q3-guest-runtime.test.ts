@@ -1,4 +1,6 @@
 import { CvarFlag } from '../../src/core/cvars/index.ts';
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import { expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -22,7 +24,7 @@ import { Q3QvmServerGame } from '../../src/app/bootstrap/simulation/q3/guest-run
 import type { Q3GuestOutput, Q3GuestRuntimeOptions } from '../../src/app/bootstrap/simulation/q3/guest-runtime.ts';
 import { Q3ServerState } from '../../src/app/bootstrap/simulation/q3/server-state.ts';
 
-const archivePath = resolve(process.env['QUAKE_DATA_PATH'] ?? resolve(import.meta.dir, '../../../qfiles'), 'q3a/baseq3/pak0.pk3');
+const archivePath = resolve(testCorpusRoot(), 'q3a/baseq3/pak0.pk3');
 type Operation = readonly [QvmOpcode, number?];
 function trap(code: QvmGameImport, args: readonly number[], output?: number): Operation[] {
   const operations: Operation[] = output === undefined ? [] : [[QvmOpcode.OP_CONST, output]];

@@ -1,4 +1,4 @@
-/* CPU texture storage adapted from quake-3-ts rasterizer.ts and tr_image.c.
+/* CPU texture storage adapted from the reference port rasterizer.ts and tr_image.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Vec4 } from "../../contracts/math.ts";
 import type { DepthImageLevel, ImageLevel, ImageResourceOperation, RenderImage, RendererImage,

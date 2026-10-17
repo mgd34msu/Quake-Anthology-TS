@@ -12,7 +12,7 @@ This report is a source snapshot at `98074c6e7bfc690e10981923393a523474a11823`, 
 
 ## What the numbers cover
 
-The [requirement ledger](completion-status.json) contains **477 unique IDs: 288 Done and 189 Open**. Its source cutoff is `7964fc31bfa186e538994eea3ed71cb6b8d035f6`; carried verdicts originate at `39ea4c0cab9910c6b78d5f8d18d3bc36494dd519`. Later accepted changes below do not automatically close requirements. The rows vary greatly in scope, so these counts are not an overall engine completion percentage.
+The requirement ledger contains **477 unique IDs: 288 Done and 189 Open**. Its source cutoff is `7964fc31bfa186e538994eea3ed71cb6b8d035f6`; carried verdicts originate at `39ea4c0cab9910c6b78d5f8d18d3bc36494dd519`. Later accepted changes below do not automatically close requirements. The rows vary greatly in scope, so these counts are not an overall engine completion percentage.
 
 | Family | Done | Open | Total | Integrated | Shared replacement | Extended common |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -31,9 +31,9 @@ The counts and category tables were recomputed from actual JSON rows, with dupli
 
 | Family | Feature deep dive and original inventory | Later source declaration/signature comparison |
 | --- | --- | --- |
-| Q1 | [Comparison](comparison-q1.md), [180 original features](../verification/features/q1.json); donor checkout `../quake-1-re-ts` | [Full report](../verification/integration-candidates/q1/report.md); pinned donor `6bc6a8bf29b66981e3b6ce7251ebbc6413120270`; 568 donor files, 84,022 declarations, including the 14,540-function census subset |
-| Q2 | [Comparison](comparison-q2.md), [193 original features](../verification/features/q2.json); donor checkout `../quake-2-re-ts` | [Full findings](../verification/integration-candidates/q2/findings.md); pinned donor `0d73750cbe5683c7411934d0a5d4eb5acd4da676`; independent enumeration retained 1,181 TS/TSX files, including 860 production files and 321 tests |
-| Q3 | [Comparison](comparison-q3.md), [104 original features](../verification/features/q3.json); donor checkout `../quake-3-ts` | [Full report](../verification/integration-candidates/q3/report.md); pinned donor `8453c49824eb7a5ed5aee452f74e19336965d1f8`; 1,135 donor files, 209,188 declarations, including the 45,634-function census subset |
+| Q1 | [Comparison](comparison-q1.md), 180 original features; donor checkout `../the Q1 reference port` | Full report; pinned donor `6bc6a8bf29b66981e3b6ce7251ebbc6413120270`; 568 donor files, 84,022 declarations, including the 14,540-function census subset |
+| Q2 | [Comparison](comparison-q2.md), 193 original features; donor checkout `../the Q2 reference port` | Full findings; pinned donor `0d73750cbe5683c7411934d0a5d4eb5acd4da676`; independent enumeration retained 1,181 TS/TSX files, including 860 production files and 321 tests |
+| Q3 | [Comparison](comparison-q3.md), 104 original features; donor checkout `../the Q3 reference port` | Full report; pinned donor `8453c49824eb7a5ed5aee452f74e19336965d1f8`; 1,135 donor files, 209,188 declarations, including the 45,634-function census subset |
 
 The mechanical pass uses unified source `3dc9ca6ca404dc4522ab9e9669fff458805b0993`, with 1,687 files and 203,489 declarations. It preserves callable signatures, types, classes, variables, parameters, imports, hashes, unmatched records, and ambiguous candidate groups. A matching name or signature is a review lead; it does not prove equivalent behavior. An unanchored declaration is not automatically a missing feature.
 

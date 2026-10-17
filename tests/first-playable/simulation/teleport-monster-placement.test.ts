@@ -1,7 +1,9 @@
 import { test, expect } from 'bun:test';
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { Application } from '../../../src/app/bootstrap/application.ts';
 import { discoverInstalledContent, presetChoice, resolveLaunch } from '../../../src/content/catalog/index.ts';
@@ -13,7 +15,7 @@ import { simulationProviderCheckpoint } from '../../../src/app/bootstrap/simulat
 import { readSelectedMonstersCheckpoint } from '../../../src/app/bootstrap/simulation/monster-checkpoint.ts';
 import { decodeCheckpointValue, SaveReader } from '../../../src/persistence/value.ts';
 import { providerTiming } from '../../../src/app/bootstrap/simulation/players.ts';
-const corpus = resolve(import.meta.dir, '../../../../qfiles');
+const corpus = testCorpusRoot();
 for (const edition of ['classic', 'rerelease'])
     test.skipIf(!existsSync(join(corpus, 'q1/rerelease/id1/pak0.pak')) || !existsSync(join(corpus, edition === 'classic' ? 'q2/baseq2/pak0.pak' : 'q2/rerelease/baseq2/pak0.pak')))(`Q1 rerelease transition preserves staged Q2 ${edition} monsters across save then authored teleport activation`, async () => {
         const temp = await mkdtemp(join(tmpdir(), 'teleport-stage-'));

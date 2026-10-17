@@ -1,4 +1,6 @@
 import { q3WeaponDelay } from "../../../src/movement/q3/weapon.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { Powerup } from "../../../src/movement/q3/constants.ts";
 import type { WeaponBehaviorProjectilePort } from "../../../src/contracts/weapon-behavior.ts";
 import { launchHipnoticLaser } from "../../../src/content/q1/missionpacks/hipnotic-weapons.ts";
@@ -33,7 +35,7 @@ import { missionPackCharacterPose } from "../../../src/content/q1/missionpacks/i
 import { missionPackObituary } from "../../../src/content/q1/missionpacks/obituaries.ts";
 import type { Q1ObituaryActor } from "../../../src/content/q1/base/rules.ts";
 
-const archivePath = "/home/buzzkill/Projects/qfiles/q1/rerelease/id1/pak0.pak";
+const archivePath = `${testCorpusRoot()}/q1/rerelease/id1/pak0.pak`;
 async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "rerelease", deathmatch = 0, teamplay = 0, weaponBehavior?: WeaponBehaviorProjectilePort) {
   const archive = await openArchive(archivePath);
   const entry = archive.findEntries("maps/start.bsp")[0]; if (entry === undefined) throw new Error("Retail start.bsp missing");

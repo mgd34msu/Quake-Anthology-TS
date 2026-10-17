@@ -1,4 +1,3 @@
-// Adapted from quake-1-re-ts src/lib/blockparse.ts at commit f57aadb (U20).
 // Q2 rerelease extends field values with brace-delimited bounds vectors.
 // Shared brace-block tokenizer for the 2021 re-release's bots/*.txt family
 // and wwheel.txt. Not a ported C file -- these are id's own bot/UI data

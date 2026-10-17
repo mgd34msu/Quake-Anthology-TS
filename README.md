@@ -22,7 +22,7 @@ own game data in the layout below, then run from this repository:
 
 ```sh
 bun install --frozen-lockfile
-bun run start --content-root /path/to/qfiles
+bun run start --content-root /path/to/games
 ```
 
 Starting without launch selections opens the menu. Without `--content-root`, the
@@ -41,7 +41,7 @@ bun run build
 The build prints its output directory. Run from that directory:
 
 ```sh
-./quake-typescript --content-root /path/to/qfiles --menu --renderer gl
+./quake-typescript --content-root /path/to/games --menu --renderer gl
 ```
 
 The executable includes Bun but still needs native libraries and game data.
@@ -55,7 +55,7 @@ game's original archives and companion files together. Keep classic
 and rerelease data separate, including files with identical names.
 
 ```text
-qfiles/
+games/
   q1/id1/                         # classic Quake
   q1/rerelease/id1/                # Quake rerelease
   q2/baseq2/                       # classic Quake II

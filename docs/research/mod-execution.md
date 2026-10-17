@@ -1,6 +1,6 @@
 # Mod execution contracts
 
-Read-only investigation of `/home/buzzkill/Projects/quake-1-re-ts`, `quake-2-re-ts`, `quake-3-ts`, and `qfiles`. No tests or game binaries were executed. This artifact records planning evidence, not a compatibility certification.
+Read-only investigation of the Q1, Q2, and Q3 reference ports and the local game library. No tests or game binaries were executed. This artifact records planning evidence, not a compatibility certification.
 
 The unified engine should retain distinct family-specific game interfaces and include TypeScript binary execution as a separate compatibility subsystem. Existing code establishes QuakeC/QVM interpretation and typed game ports. The inspected execution paths do not provide a PE/ELF game loader or x86 CPU interpreter.
 
@@ -15,30 +15,30 @@ The unified engine should retain distinct family-specific game interfaces and in
 
 Q1's profile contract explicitly specifies CRCs, layouts, numbered/named builtins, allocation, timing, and spawn filtering. Its loader rejects unknown versions and CRCs. Additional dialects require additional contracts, not relaxed checks. Q1 bytecode can write protocol bytes directly, so execution compatibility does not make those messages meaningful to another game's client.
 
-- [Q1 profile contract](/home/buzzkill/Projects/quake-1-re-ts/src/progs/profiles/profile.ts:37)
-- [Q1 loader validation](/home/buzzkill/Projects/quake-1-re-ts/src/progs/pr_edict_core.ts:1135)
-- [Q1 profile tests](/home/buzzkill/Projects/quake-1-re-ts/test/progs_profiles.test.ts:238)
-- [Q1 message builtins](/home/buzzkill/Projects/quake-1-re-ts/src/progs/pr_cmds.ts:1336)
-- [Q1 rerelease builtins](/home/buzzkill/Projects/quake-1-re-ts/src/progs/ext/qex.ts:1)
-- [Q1 entity saves](/home/buzzkill/Projects/quake-1-re-ts/src/progs/pr_edict_core.ts:616)
+- Q1 profile contract
+- Q1 loader validation
+- Q1 profile tests
+- Q1 message builtins
+- Q1 rerelease builtins
+- Q1 entity saves
 
 Q2's TS interfaces deliberately reshape native structures. TS arrays replace the native edicts pointer/stride pair. Binary execution must restore guest memory layouts and pointer arithmetic. Static module selection already separates source game families. Rerelease game/cgame exports own movement and prediction; their host cannot substitute unrelated movement and assume agreement.
 
-- [Q2 classic imports and edicts](/home/buzzkill/Projects/quake-2-re-ts/src/game/game.ts:31)
-- [Q2 static module selection](/home/buzzkill/Projects/quake-2-re-ts/src/server/bindings/legacy.ts:36)
-- [Q2 rerelease exports](/home/buzzkill/Projects/quake-2-re-ts/src/kexapi/game.ts:2042)
-- [Q2 rerelease save bridge](/home/buzzkill/Projects/quake-2-re-ts/src/server/bindings/kex.ts:1185)
-- [Q2 prediction tests](/home/buzzkill/Projects/quake-2-re-ts/test/cl_pred_kex.test.ts:84)
+- Q2 classic imports and edicts
+- Q2 static module selection
+- Q2 rerelease exports
+- Q2 rerelease save bridge
+- Q2 prediction tests
 
 The official Q2 rerelease documentation describes new interfaces and layouts, 40 Hz simulation, exported prediction movement, and original expansion-map spawnflag conflicts. Its combined DLL is not automatic compatibility with every original expansion map. [Official source and API documentation](https://github.com/id-Software/quake2-rerelease-dll).
 
 Q3's adapter borrows shared entities through guest pointers and strides while copying player snapshots. Tests cover relocation, pointer arithmetic, snapshot copying, and isolated ping writes. Retail replacements use hashes; the code distinguishes 2000 Team Arena artifacts from its 1.32b source baseline.
 
-- [Q3 module acquisition](/home/buzzkill/Projects/quake-3-ts/src/engine/client-modules.ts:45)
-- [Q3 shared data](/home/buzzkill/Projects/quake-3-ts/src/vm/game-data.ts:20)
-- [Q3 data tests](/home/buzzkill/Projects/quake-3-ts/tests/qvm-game-data.test.ts:5)
-- [Q3 QVM parser](/home/buzzkill/Projects/quake-3-ts/src/assets/qvm.ts:172)
-- [Q3 game calls](/home/buzzkill/Projects/quake-3-ts/src/engine/qvm-game.ts:21)
+- Q3 module acquisition
+- Q3 shared data
+- Q3 data tests
+- Q3 QVM parser
+- Q3 game calls
 - [Q3 upstream game interface](https://github.com/id-Software/Quake-III-Arena/blob/master/code/game/g_public.h)
 - [Q2 upstream classic interface](https://github.com/id-Software/Quake-2/blob/master/game/game.h)
 
@@ -90,13 +90,13 @@ Each supported module/profile needs an artifact identity, required builtin/sysca
 These commands only read supplied artifacts. `objdump` and `readelf` inspect files; they do not load or execute game modules.
 
 ```bash
-rg --files /home/buzzkill/Projects/qfiles -g '*.dll' -g '*.so' -g '*.pk3'
-file /home/buzzkill/Projects/qfiles/q2/lmctf/gamex86.dll
-file /home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/game_x64.dll
-objdump -p /home/buzzkill/Projects/qfiles/q2/lmctf/gamex86.dll
-objdump -p /home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/game_x64.dll
-objdump -d /home/buzzkill/Projects/qfiles/q2/lmctf/gamex86.dll
-objdump -d /home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/game_x64.dll
+rg --files /path/to/games -g '*.dll' -g '*.so' -g '*.pk3'
+file /path/to/games/q2/lmctf/gamex86.dll
+file /path/to/games/q2/rerelease/baseq2/game_x64.dll
+objdump -p /path/to/games/q2/lmctf/gamex86.dll
+objdump -p /path/to/games/q2/rerelease/baseq2/game_x64.dll
+objdump -d /path/to/games/q2/lmctf/gamex86.dll
+objdump -d /path/to/games/q2/rerelease/baseq2/game_x64.dll
 ```
 
 The following reproduces all discovered Q2 game-DLL formats/imports/exports and Quake Live archive formats/dependencies without extracting retail files to disk. Linux anonymous memory files are closed after inspection.
@@ -109,7 +109,7 @@ import re
 import subprocess
 import zipfile
 
-for path in sorted(Path('/home/buzzkill/Projects/qfiles/q2').rglob('game*.dll')):
+for path in sorted(Path('/path/to/games/q2').rglob('game*.dll')):
     print('\nFILE', path)
     print(subprocess.check_output(['file', str(path)], text=True).strip())
     output = subprocess.check_output(['objdump', '-p', str(path)], text=True)
@@ -130,7 +130,7 @@ for path in sorted(Path('/home/buzzkill/Projects/qfiles/q2').rglob('game*.dll'))
         print('IMPORTS', library, len(symbols), ', '.join(symbols))
     print('TOTAL IMPORTS', sum(map(len, imports.values())))
 
-archive = zipfile.ZipFile('/home/buzzkill/Projects/qfiles/quakelive/baseq3/bin.pk3')
+archive = zipfile.ZipFile('/path/to/games/quakelive/baseq3/bin.pk3')
 print('\nQL ARCHIVE', archive.namelist())
 for name in archive.namelist():
     data = archive.read(name)

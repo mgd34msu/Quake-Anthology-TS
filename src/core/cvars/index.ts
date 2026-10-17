@@ -1,5 +1,5 @@
 import { SaveReader } from "../../persistence/value.ts";
-/* Instance-owned registries adapted from quake-3-ts/src/core/cvar.ts;
+/* Instance-owned registries adapted from the reference port;
  * family behavior follows Quake/QW cvar.c and Quake II qcommon/cvar.c.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { CommandContext, CommandDialect, CvarInfoTarget } from "../../contracts/common.ts";

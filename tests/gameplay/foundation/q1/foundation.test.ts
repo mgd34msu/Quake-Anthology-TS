@@ -1,9 +1,10 @@
 import { encodeCheckpointValue } from "../../../../src/persistence/value.ts";
+import { corpusFile } from "../../../support/corpus.ts";
+
 import { SharedPhysics } from "../../../../src/app/bootstrap/simulation/physics.ts";
 import { createNativeQ1PusherServices } from "../../../../src/app/bootstrap/simulation/native-q1-pusher.ts";
 import { actorCollision, actorMotion, actorFlags } from "../../../../src/app/bootstrap/simulation/actor-execution.ts";
 import { expect, test } from "bun:test";
-import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
@@ -24,7 +25,7 @@ import { Q1_Q2_SUPPLY_PROFILE } from "../../../../src/content/composition/q1-q2-
 import { previewQ1Supply } from "../../../../src/content/q1/foundation/pickups.ts";
 import { ZERO, vadd } from "../../../../src/content/q1/foundation/types.ts";
 
-const path = resolve(import.meta.dir, "../../../../../qfiles/q1/rerelease/id1/pak0.pak");
+const path = corpusFile("q1/rerelease/id1/pak0.pak");
 test.skipIf(!existsSync(path))("authored soldier gib death launches a persistent head before its gib pieces", async () => {
   const { runtime, due } = gameFor(await loadMap());
   due(1);

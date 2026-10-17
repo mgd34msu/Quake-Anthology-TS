@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ProviderReference } from "../../../src/contracts/content.ts";
@@ -14,7 +16,7 @@ import { readSelectedMonstersCheckpoint } from "../../../src/app/bootstrap/simul
 import { encodeSaveImage, decodeSaveImage } from "../../../src/persistence/index.ts";
 import { decodeCheckpointValue, SaveReader } from "../../../src/persistence/value.ts";
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 const weapons: readonly { readonly family: "q1" | "q3"; readonly provider: ProviderId; readonly weapon: ItemId; readonly ammo: ItemId; readonly catalog: string }[] = [
   { family: "q1", provider: "q1:official", weapon: "q1:weapon/shotgun", ammo: "q1:ammo/shells", catalog: "q1-classic-id1" },
   { family: "q3", provider: "q3:official", weapon: "q3:weapon/machinegun", ammo: "q3:ammo/machinegun", catalog: "q3-baseq3" },

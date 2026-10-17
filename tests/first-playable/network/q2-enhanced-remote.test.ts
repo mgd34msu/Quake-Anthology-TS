@@ -23,12 +23,12 @@ test('Q2 remote profile is explicit and leaves protocol 34 as the default', () =
     expect(() => parseApplicationCommand([...launch, '--connect-q2', '127.0.0.1', '--q2-protocol', '36:1016'])).toThrow('--q2-protocol');
 });
 
-test('normal remote application joins the donor R1Q2 server over localhost UDP', async () => {
+test.skipIf(process.env['QUAKE_Q2_DONOR_ROOT'] === undefined)('normal remote application joins the reference R1Q2 server over localhost UDP', async () => {
     const root = await mkdtemp(join(tmpdir(), 'quake-r1q2-remote-'));
     const reservation = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
     const port = reservation.address.port;
     reservation.close();
-    const donorRoot = resolve(process.env['QUAKE_Q2_DONOR_ROOT'] ?? resolve('..', 'quake-2-re-ts'));
+    const donorRoot = resolve(process.env['QUAKE_Q2_DONOR_ROOT'] ?? '');
     const corpusRoot = process.env['QUAKE_Q2_CORPUS_ROOT'];
     const parsed = parseApplicationCommand([...launch, '--connect-q2', `127.0.0.1:${port}`, '--q2-protocol', '35',
         ...(corpusRoot === undefined ? [] : ['--content-root', corpusRoot]),

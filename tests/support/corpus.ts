@@ -1,19 +1,14 @@
 import { existsSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 /**
- * Locate installed game content for tests. Mirrors product discovery anchors:
- * a root qualifies when it contains a Quake game directory (Steam layout
- * "Quake"/"Quake 2"/"Quake 3 Arena" or assembled "q1"/"q2"/"q3a").
- * Override with QTS_TEST_CORPUS.
+ * Installed game content for tests, from QTS_TEST_CORPUS. The root may use the
+ * Steam layout ("Quake"/"Quake 2"/"Quake 3 Arena") or the assembled layout
+ * ("q1"/"q2"/"q3a"). Without the variable, returns "" and content-dependent
+ * tests skip or report the missing files; nothing is guessed from local disks.
  */
 export function testCorpusRoot(): string {
-  const candidates = [process.env["QTS_TEST_CORPUS"], resolve(import.meta.dir, "../../../qfiles"), resolve(homedir(), "qfiles")]
-    .filter((candidate): candidate is string => typeof candidate === "string" && candidate.length > 0);
-  for (const candidate of candidates)
-    if (["Quake", "Quake 2", "Quake 3 Arena", "q1", "q2", "q3a"].some(directory => existsSync(join(candidate, directory)))) return candidate;
-  return candidates[0] ?? resolve(homedir(), "qfiles");
+  return process.env["QTS_TEST_CORPUS"] ?? process.env["QUAKE_DATA_PATH"] ?? process.env["QFILES_ROOT"] ?? "";
 }
 
 const steamHeads: Readonly<Record<string, string>> = { q1: "Quake", q2: "Quake 2", q3a: "Quake 3 Arena" };

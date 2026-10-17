@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { corpusFile } from "../../support/corpus.ts";
+
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
 import { QcEntityMemory, QcMachine, classicQcEntityLayout, createQcBuiltins, createQcSourceSlotStorage, loadQcProgram, qcLinkBounds } from "../../../src/compat/qc/index.ts";
@@ -10,7 +12,7 @@ import { createSceneQueries } from "../../../src/world/collision/index.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
 
 test("retail rerelease finale_5 polls the shared attack acknowledgement through its named builtin", async () => {
-  const archive = await openArchive(new URL("../../../../qfiles/q1/rerelease/id1/pak0.pak", import.meta.url).pathname);
+  const archive = await openArchive(corpusFile("q1/rerelease/id1/pak0.pak"));
   const actors = new SessionActorRegistry(createIdentityOwner("qc-finale"));
   try {
     const progs = archive.findEntries("progs.dat").at(-1), map = archive.findEntries("maps/end.bsp").at(-1);

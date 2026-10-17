@@ -1,4 +1,6 @@
 import { monsterPowerArmor } from "../../../../src/content/q2/missionpacks/monsters/power-armor.ts";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import { decodeQ2MonstersCheckpoint, encodeQ2MonstersCheckpoint } from "../../../../src/persistence/q2-monsters.ts";
 import { findRereleaseSpawnPoint, checkRereleaseGroundSpawnPoint } from "../../../../src/content/q2/rerelease/monsters/spawn-placement.ts";
 import { Q2MissionPackMonsterState } from "../../../../src/content/q2/missionpacks/monsters/state.ts";
@@ -103,7 +105,7 @@ describe("rerelease species on the shared Q2 controller", () => {
     expect(() => parseQ2Entities('{ "classname" "func_button" // no closing brace', "rerelease")).toThrow("EOF without closing brace");
   });
   test("admits real retail rerelease monster records and source registrations", async () => {
-    const scene = fixture(), archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/pak0.pak");
+    const scene = fixture(), archive = await openArchive(`${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`);
     try {
       const wanted = new Set(["monster_berserk", "monster_arachnid", "monster_guardian", "monster_guncmdr", "monster_gunner", "monster_shambler", "monster_tank", "monster_tank_commander", "monster_gladiator", "monster_gladb", "monster_supertank", "monster_boss5", "monster_flipper", "monster_floater", "monster_hover", "monster_flyer", "monster_chick", "monster_mutant", "monster_boss2", "monster_jorg", "monster_makron", "misc_insane"]), representatives = new Map<string, Q2SpawnFields>();
       for (const classname of ["monster_brain", "monster_chick_heat", "monster_parasite"]) wanted.add(classname);

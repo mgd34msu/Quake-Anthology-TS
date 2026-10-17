@@ -1,4 +1,4 @@
-// Quake II / q2proto algorithms ported from quake-2-re-ts and original id Software sources. GPL-2.0-or-later.
+// Quake II / q2proto algorithms ported from the reference port and original id Software sources. GPL-2.0-or-later.
 import * as zlib from "node:zlib";
 import { SVC_ZPACKET, ERR_DROP, ComError, SvcOpsT } from "../constants.ts";
 import { type SizeBuf, MSG_ReadWord, MSG_ReadData, checkMessageRead } from "../message.ts";

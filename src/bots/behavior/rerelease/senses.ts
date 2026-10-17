@@ -1,8 +1,7 @@
-// Lifted from quake-1-re-ts src/lib/bot_brain/senses.ts at commit f57aadb (U20), the
-// game-agnostic bot brain. Verbatim apart from this line, the import paths
-// that changed with the directory, and the three parameterizations listed
-// in src/server/bots/nav_adapter.ts's header (NAV2-specific graph
-// construction, run/walk speeds, weapon-selection command).
+// Ported from the reference game-agnostic bot brain. Verbatim apart from this
+// line, the import paths that changed with the directory, and three
+// parameterizations (NAV2-specific graph construction, run/walk speeds,
+// weapon-selection command).
 // The senses model: settings_PC.txt's `senses.*` and `weapons.*` blocks.
 //
 // A bot does not know about an enemy the instant it becomes visible. Each

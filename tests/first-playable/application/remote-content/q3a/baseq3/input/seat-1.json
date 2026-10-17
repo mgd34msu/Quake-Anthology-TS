@@ -1,0 +1,540 @@
+{
+  "version": 1,
+  "bindings": [
+    {
+      "input": {
+        "kind": "key",
+        "code": 45
+      },
+      "target": {
+        "kind": "command",
+        "text": "sizedown"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 95
+      },
+      "target": {
+        "kind": "command",
+        "text": "sizedown"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 61
+      },
+      "target": {
+        "kind": "command",
+        "text": "sizeup"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 43
+      },
+      "target": {
+        "kind": "command",
+        "text": "sizeup"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 91
+      },
+      "target": {
+        "kind": "command",
+        "text": "weapprev"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 93
+      },
+      "target": {
+        "kind": "command",
+        "text": "weapnext"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 47
+      },
+      "target": {
+        "kind": "command",
+        "text": "weapnext"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 92
+      },
+      "target": {
+        "kind": "command",
+        "text": "+mlook"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 13
+      },
+      "target": {
+        "kind": "command",
+        "text": "+button2"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 184
+      },
+      "target": {
+        "kind": "command",
+        "text": "weapprev"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 183
+      },
+      "target": {
+        "kind": "command",
+        "text": "weapnext"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 137
+      },
+      "target": {
+        "kind": "command",
+        "text": "+movedown"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 136
+      },
+      "target": {
+        "kind": "command",
+        "text": "+strafe"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 138
+      },
+      "target": {
+        "kind": "command",
+        "text": "+speed"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 140
+      },
+      "target": {
+        "kind": "command",
+        "text": "+lookdown"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 141
+      },
+      "target": {
+        "kind": "command",
+        "text": "+lookup"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 144
+      },
+      "target": {
+        "kind": "command",
+        "text": "centerview"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 99
+      },
+      "target": {
+        "kind": "command",
+        "text": "+movedown"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 32
+      },
+      "target": {
+        "kind": "command",
+        "text": "+moveup"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 132
+      },
+      "target": {
+        "kind": "command",
+        "text": "+forward"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 133
+      },
+      "target": {
+        "kind": "command",
+        "text": "+back"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 134
+      },
+      "target": {
+        "kind": "command",
+        "text": "+left"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 135
+      },
+      "target": {
+        "kind": "command",
+        "text": "+right"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 119
+      },
+      "target": {
+        "kind": "command",
+        "text": "+forward"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 97
+      },
+      "target": {
+        "kind": "command",
+        "text": "+moveleft"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 115
+      },
+      "target": {
+        "kind": "command",
+        "text": "+back"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 100
+      },
+      "target": {
+        "kind": "command",
+        "text": "+moveright"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 131
+      },
+      "target": {
+        "kind": "command",
+        "text": "pause"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 27
+      },
+      "target": {
+        "kind": "command",
+        "text": "togglemenu"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 126
+      },
+      "target": {
+        "kind": "command",
+        "text": "toggleconsole"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 96
+      },
+      "target": {
+        "kind": "command",
+        "text": "toggleconsole"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 9
+      },
+      "target": {
+        "kind": "command",
+        "text": "+scores"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 145
+      },
+      "target": {
+        "kind": "command",
+        "text": "vote yes"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 146
+      },
+      "target": {
+        "kind": "command",
+        "text": "vote no"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 147
+      },
+      "target": {
+        "kind": "command",
+        "text": "ui_teamorders"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 155
+      },
+      "target": {
+        "kind": "command",
+        "text": "screenshot"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 116
+      },
+      "target": {
+        "kind": "command",
+        "text": "messagemode"
+      }
+    },
+    {
+      "input": {
+        "kind": "mouse-button",
+        "button": 2
+      },
+      "target": {
+        "kind": "command",
+        "text": "+zoom"
+      }
+    },
+    {
+      "input": {
+        "kind": "mouse-button",
+        "button": 1
+      },
+      "target": {
+        "kind": "command",
+        "text": "+attack"
+      }
+    },
+    {
+      "input": {
+        "kind": "mouse-button",
+        "button": 3
+      },
+      "target": {
+        "kind": "command",
+        "text": "+strafe"
+      }
+    },
+    {
+      "input": {
+        "kind": "key",
+        "code": 113
+      },
+      "target": {
+        "kind": "command",
+        "text": "+weaponwheel"
+      }
+    },
+    {
+      "input": {
+        "kind": "controller-axis",
+        "device": 0,
+        "axis": "right-trigger",
+        "direction": "positive"
+      },
+      "target": {
+        "kind": "command",
+        "text": "+attack"
+      }
+    },
+    {
+      "input": {
+        "kind": "controller-button",
+        "device": 0,
+        "button": 0
+      },
+      "target": {
+        "kind": "command",
+        "text": "+moveup"
+      }
+    },
+    {
+      "input": {
+        "kind": "controller-button",
+        "device": 0,
+        "button": 1
+      },
+      "target": {
+        "kind": "command",
+        "text": "+movedown"
+      }
+    },
+    {
+      "input": {
+        "kind": "controller-button",
+        "device": 0,
+        "button": 2
+      },
+      "target": {
+        "kind": "command",
+        "text": "+use"
+      }
+    },
+    {
+      "input": {
+        "kind": "controller-button",
+        "device": 0,
+        "button": 9
+      },
+      "target": {
+        "kind": "command",
+        "text": "weapprev"
+      }
+    },
+    {
+      "input": {
+        "kind": "controller-button",
+        "device": 0,
+        "button": 10
+      },
+      "target": {
+        "kind": "command",
+        "text": "weapnext"
+      }
+    },
+    {
+      "input": {
+        "kind": "controller-button",
+        "device": 0,
+        "button": 4
+      },
+      "target": {
+        "kind": "command",
+        "text": "+scores"
+      }
+    }
+  ],
+  "alwaysRun": true,
+  "gamepad": {
+    "move": {
+      "kind": "radial",
+      "deadzone": 0.175,
+      "outerThreshold": 0.02,
+      "exponent": 2
+    },
+    "look": {
+      "kind": "radial",
+      "deadzone": 0.175,
+      "outerThreshold": 0.02,
+      "exponent": 2
+    },
+    "swapSticks": false,
+    "yawDegreesPerSecond": 240,
+    "pitchDegreesPerSecond": 130,
+    "invertPitch": false,
+    "forwardSensitivity": 1,
+    "sideSensitivity": 1,
+    "triggerThreshold": 0.2,
+    "gyro": {
+      "enabled": false,
+      "yawSensitivity": 1,
+      "pitchSensitivity": 1,
+      "yawAxis": "y"
+    }
+  },
+  "mouse": {
+    "sensitivity": 3,
+    "acceleration": 0,
+    "filter": false,
+    "yaw": 0.02199999988079071,
+    "pitch": 0.02199999988079071,
+    "invertPitch": false,
+    "side": 0.800000011920929,
+    "forward": 1,
+    "freeLook": true,
+    "lookSpring": false,
+    "lookStrafe": false
+  },
+  "history": [],
+  "rumble": true,
+  "rumbleStrength": 1,
+  "controller": {
+    "kind": "automatic"
+  }
+}

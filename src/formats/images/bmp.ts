@@ -1,4 +1,4 @@
-/* Adapted from quake-2-re-ts/src/qcommon/bmp.ts. GPL-2.0-or-later. */
+/* Adapted from the reference port GPL-2.0-or-later. */
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 import type { ImageLevel } from "../../contracts/render.ts";
 

@@ -1,4 +1,6 @@
 import { ModClientOutputs } from "../../../src/world/session/mod-client-outputs.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { expect, test } from "bun:test";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { loadQcProgram } from "../../../src/compat/qc/program.ts";
@@ -17,7 +19,7 @@ import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import type { UserCommand } from "../../../src/contracts/protocol.ts";
 import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
 
-const path = "/home/buzzkill/Projects/qfiles/q1/rerelease/hipnotic/pak0.pak", zero = { x: 0, y: 0, z: 0 };
+const path = `${testCorpusRoot()}/q1/rerelease/hipnotic/pak0.pak`, zero = { x: 0, y: 0, z: 0 };
 test.skipIf(!await Bun.file(path).exists())("original Hipnotic player calls own jump decisions and retained held-fire frames", async () => {
   const archive = await openArchive(path);
   const entry = archive.findEntries("progs.dat").at(-1); if (entry === undefined) throw new Error("Missing original source");

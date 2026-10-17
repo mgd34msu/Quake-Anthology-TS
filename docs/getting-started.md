@@ -24,7 +24,7 @@ From the repository:
 
 ```sh
 bun install --frozen-lockfile
-bun run start --content-root /path/to/qfiles
+bun run start --content-root /path/to/games
 ```
 
 Without launch selections, startup opens the menu. Use `--menu` to request the
@@ -37,7 +37,7 @@ searches only the Steam locations. Games are recognized by their `id1`,
 List products discovered under the installed content root or inspect launch options:
 
 ```sh
-bun run start --content-root /path/to/qfiles --list-content
+bun run start --content-root /path/to/games --list-content
 bun run start --help
 ```
 
@@ -60,7 +60,7 @@ location, source identity, and checksums.
 Run from the printed directory:
 
 ```sh
-./quake-typescript --content-root /path/to/qfiles --menu --renderer gl --gamma 1.3
+./quake-typescript --content-root /path/to/games --menu --renderer gl --gamma 1.3
 ```
 
 Use `--renderer cpu` for software rendering. Gamma defaults to `1`; higher

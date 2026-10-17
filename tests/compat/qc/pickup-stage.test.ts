@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { openArchive } from '../../../src/content/archive/index.ts';
 import { loadQcProgram, QcEntityMemory, QcMachine, classicQcEntityLayout, createQcBuiltins, createQcSourceSlotStorage } from '../../../src/compat/qc/index.ts';
 import type { QcBuiltin, QcHostBuiltinName } from '../../../src/compat/qc/index.ts';
@@ -14,9 +16,9 @@ import { SourceRandom } from '../../../src/app/bootstrap/simulation/random.ts';
 import { qcPickupStages } from '../../../src/content/q1/quakec/pickup-stage.ts';
 
 for (const kind of ['netquake','quakeworld'] satisfies readonly ('netquake'|'quakeworld')[]) test(`original ${kind} weapon regions retain selected ownership, leave policy, targets and cancellation`, async () => {
- const archive=await openArchive('/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK');
+ const archive=await openArchive(`${testCorpusRoot()}/q1/id1/PAK0.PAK`);
  try {
-  const entry=archive.findEntries('progs.dat').at(-1);if(entry===undefined)throw Error('Missing id1');const program=loadQcProgram(kind==='quakeworld'?await Bun.file('/home/buzzkill/Projects/qfiles/q1/qw/qwprogs.dat').bytes():await archive.readEntry(entry));
+  const entry=archive.findEntries('progs.dat').at(-1);if(entry===undefined)throw Error('Missing id1');const program=loadQcProgram(kind==='quakeworld'?await Bun.file(`${testCorpusRoot()}/q1/qw/qwprogs.dat`).bytes():await archive.readEntry(entry));
   const entities=new QcEntityMemory(classicQcEntityLayout(program),4,3), actors=new SessionActorRegistry(createIdentityOwner('original weapon pickup'));
   try {
    const slots=new SourceActorSlots(actors,{provider:'q1:world',capacity:4,lifetime:quakeEdictLifetime(1),storage:createQcSourceSlotStorage({program,entities},{freeOffsetBytes:0,freeTimeOffsetBytes:kind==='quakeworld'?100:92}),now:()=>({kind:'seconds',value:vm.globals.float(vm.globalOffset('time'))}),unlink:()=>undefined,exhausted:()=>{throw Error('No source slot');}});
@@ -74,7 +76,7 @@ for (const kind of ['netquake','quakeworld'] satisfies readonly ('netquake'|'qua
 });
 
 test('declared original item callers retain player gates, refusal, feedback, targets and respawn', async () => {
- const archive=await openArchive('/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK');
+ const archive=await openArchive(`${testCorpusRoot()}/q1/id1/PAK0.PAK`);
  try {
   const entry=archive.findEntries('progs.dat').at(-1);if(entry===undefined)throw Error('Missing id1');const program=loadQcProgram(await archive.readEntry(entry));
   const {readQuakeCCompatibility}=await import('../../../src/compat/qc/compatibility.ts');

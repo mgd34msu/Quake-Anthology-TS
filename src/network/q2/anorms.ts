@@ -1,4 +1,4 @@
-// Quake II / q2proto algorithms ported from quake-2-re-ts and original id Software sources. GPL-2.0-or-later.
+// Quake II / q2proto algorithms ported from the reference port and original id Software sources. GPL-2.0-or-later.
 import { vec3, type Vec3 } from "./state.ts";
 export const NUMVERTEXNORMALS = 162;
 export const bytedirs: Vec3[] = [

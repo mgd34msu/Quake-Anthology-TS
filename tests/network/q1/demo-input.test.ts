@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { writeNetQuakeMessage } from '../../../src/network/q1/netquake.ts';
 import { SizeBuf } from '../../../src/network/q1/message.ts';
 import { Q1RemotePresentation } from '../../../src/app/bootstrap/network/remote-q1.ts';
@@ -125,7 +127,7 @@ test('QWD timedemo consumes timestamp groups rather than draining the file',asyn
  const input=new QuakeWorldDemoInput(new QuakeWorldDemoReader(bytes),remote);
  try{expect(await input.advance({frame:0,elapsedSeconds:0,timedemo:true})).toEqual({phase:'loading',recordedSeconds:4,recordsRead:2});expect(await input.advance({frame:1,elapsedSeconds:0,timedemo:true})).toEqual({phase:'ended',reason:'eof',recordedSeconds:5,recordsRead:1});}finally{input.close();session.close();await content.close();}
 });
-const retail='/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK';
+const retail=`${testCorpusRoot()}/q1/id1/PAK0.PAK`;
 test.skipIf(!existsSync(retail))('retail demo1 traverses actual records through NQ presentation to recorded disconnect',async()=>{
  const archive=await openArchive(retail),entry=archive.findEntries('demo1.dem')[0];if(entry===undefined)throw Error('Missing demo1');
  const {content,session,options}=fixture();let remote:Q1RemotePresentation;

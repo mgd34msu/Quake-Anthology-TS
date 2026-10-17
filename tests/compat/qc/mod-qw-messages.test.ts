@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import type { ModHostServices } from "../../../src/world/session/mods.ts";
 import type { ModClientEvent } from "../../../src/world/session/mod-clients.ts";
@@ -14,7 +16,7 @@ import { QcModMessages } from "../../../src/compat/qc/mod-messages.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../src/persistence/value.ts";
 import { receivesQuakeWorldMessage } from "../../../src/compat/qc/message-routing.ts";
 
-const programPath = "/home/buzzkill/Projects/qfiles/q1/qw/qwprogs.dat";
+const programPath = `${testCorpusRoot()}/q1/qw/qwprogs.dat`;
 test.skipIf(!await Bun.file(programPath).exists())("QW component signon and buffered owner survive save without replaying other clients or following reused edicts", async () => {
   const program = loadQcProgram(await Bun.file(programPath).bytes()), ids = createIdentityOwner("qw-component-messages"), actors = new SessionActorRegistry(ids);
   const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });

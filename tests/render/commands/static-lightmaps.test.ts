@@ -1,4 +1,6 @@
 import { SceneMaterialRegistrations } from "../../../src/render/scene/material-registrations.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -18,7 +20,7 @@ import { CpuRenderTarget } from "../../../src/render/cpu/commands.ts";
 import type { Q1LightmapEncoding } from "../../../src/materials/lighting.ts";
 import type { WorldViewInput } from "../../../src/render/scene/world.ts";
 
-const root = process.env["QFILES_ROOT"] ?? "/home/buzzkill/Projects/qfiles";
+const root = process.env["QFILES_ROOT"] ?? `${testCorpusRoot()}`;
 const cases: readonly { readonly family: "q1" | "q2"; readonly archive: string; readonly map: string; readonly encoding?: Q1LightmapEncoding }[] = [
   { family: "q1", archive: "q1/id1/PAK0.PAK", map: "maps/start.bsp" },
   { family: "q2", archive: "q2/baseq2/pak0.pak", map: "maps/base1.bsp" },

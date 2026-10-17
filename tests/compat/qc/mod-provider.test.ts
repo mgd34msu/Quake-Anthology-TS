@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { homedir } from "node:os";
+
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ModCallbackDeclaration, ModQcItems } from "../../../src/contracts/mod-callbacks.ts";
@@ -8,7 +10,7 @@ import { SessionMods } from "../../../src/world/session/mods.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
 import { GameplayAuthority, SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
 
-const path = "/home/buzzkill/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat";
+const path = `${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`;
 test.skipIf(!await Bun.file(path).exists())("QC source items share capacity fields while count and capacity aliases remain invalid", async () => {
   const { loadQcProgram } = await import("../../../src/compat/qc/program.ts");
   const { validateQcItems } = await import("../../../src/compat/qc/mod-items.ts");

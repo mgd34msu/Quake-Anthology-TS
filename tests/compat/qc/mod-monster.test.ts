@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { homedir } from "node:os";
+
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { DamageOutcome } from "../../../src/contracts/gameplay.ts";
 import type { ModActorField, ModCallbackDeclaration, ModCallbackInput, ModRuntimeValue } from "../../../src/contracts/mod-callbacks.ts";
@@ -15,7 +17,7 @@ import { QcModProvider } from "../../../src/compat/qc/mod-provider.ts";
 import { loadQcProgram } from "../../../src/compat/qc/program.ts";
 import { parseEntities } from "../../../src/core/common-parse.ts";
 
-const path = "/home/buzzkill/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat";
+const path = `${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`;
 test.skipIf(!await Bun.file(path).exists())("original Copper monster spawns, acquires a canonical Q2 client and runs source AI", async () => {
   const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1"]);
   if (command.kind !== "run") throw new Error("Missing Q2 destination");

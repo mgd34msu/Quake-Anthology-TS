@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { corpusFile } from "../../support/corpus.ts";
+
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,7 +21,7 @@ import { ApplicationMusic } from '../../../src/app/bootstrap/audio/music.ts';
 
 test('cgame and UI sound traps use shared bank handles, mixer and music through guest memory', async () => {
   const root = await mkdtemp(join(tmpdir(), 'qvm-audio-'));
-  const archive = await openArchive(join(import.meta.dir, '../../../../qfiles/q3a/baseq3/pak0.pk3'));
+  const archive = await openArchive(corpusFile("q3a/baseq3/pak0.pk3"));
   const path = 'sound/player/sarge/jump1.wav', entry = archive.entries.find(entry => entry.path === path);
   if (entry === undefined) throw new Error('Missing real Q3 jump sound');
   try {

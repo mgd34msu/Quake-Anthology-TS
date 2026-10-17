@@ -1,4 +1,6 @@
 import { existsSync } from "node:fs";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
 import { decodePalette } from "../../../src/formats/images/index.ts";
@@ -101,7 +103,7 @@ test("new registrations and image refresh retain the effective source with new d
   }finally{sourceTextures.close();destinationTextures.close();f.close();}
 });
 
-const q1pak=`${process.env["QFILES_ROOT"]??"/home/buzzkill/Projects/qfiles"}/q1/id1/PAK0.PAK`;
+const q1pak=`${process.env["QFILES_ROOT"]??`${testCorpusRoot()}`}/q1/id1/PAK0.PAK`;
 test.skipIf(!existsSync(q1pak))("foreign remaps preserve real Q1 embedded textures and per-face lightmaps, including late worlds",async()=>{
   const archive=await openArchive(q1pak), f=await fixture();
   const read=async(name:string)=>{const entry=archive.findEntries(name,"ascii-insensitive")[0];if(entry===undefined)throw new Error(`Missing original ${name}`);return archive.readEntry(entry);};
@@ -156,7 +158,7 @@ test("an already retired source cannot cancel the current pending remap",async()
 });
 
 test("already loaded retail MD3 shader handles follow the effective remap without reloading the model",async()=>{
-  const path=`${process.env["QFILES_ROOT"]??"/home/buzzkill/Projects/qfiles"}/q3a/baseq3/pak0.pk3`, archive=await openArchive(path),f=await fixture();
+  const path=`${process.env["QFILES_ROOT"]??`${testCorpusRoot()}`}/q3a/baseq3/pak0.pk3`, archive=await openArchive(path),f=await fixture();
   try{
     const name="models/players/sarge/lower.md3",entry=archive.findEntries(name)[0];if(entry===undefined)throw new Error("Missing original Sarge model");
     const bytes=await archive.readEntry(entry), digest=createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"));

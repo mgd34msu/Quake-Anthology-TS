@@ -1,10 +1,12 @@
 import { expect, test } from "bun:test";
+import { corpusFile } from "../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { openArchive } from "../../src/content/archive/index.ts";
 import { buildFontAtlas, parseFont, rasterizeColorGlyph, rasterizeContours, rasterizeGlyph } from "../../src/text/truetype.ts";
 import type { ParsedFontT } from "../../src/text/truetype.ts";
 
-const pakPath = new URL("../../../qfiles/q1/rerelease/QuakeEX.kpf", import.meta.url).pathname;
+const pakPath = corpusFile("q1/rerelease/QuakeEX.kpf");
 
 async function realFont(name: string): Promise<ParsedFontT> {
     const archive = await openArchive(pakPath);

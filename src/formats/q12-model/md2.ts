@@ -1,4 +1,4 @@
-/* MD2 v8 adapted from quake-2-re-ts/ref_gl/gl_model.ts and Q2
+/* MD2 v8 adapted from the reference port and Q2
  * qcommon/qfiles.h. Copyright (C) 1997-2001 Id Software, Inc.
  * SPDX-License-Identifier: GPL-2.0-or-later */
 import type { Vec2 } from "../../contracts/math.ts";

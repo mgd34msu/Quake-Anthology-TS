@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
@@ -17,7 +19,7 @@ import { registerMissionPackMonsters } from "../../../../src/content/q1/missionp
 import { gremlinSteal } from "../../../../src/content/q1/missionpacks/monsters/gremlin-weapons.ts";
 import type { Q1MissionPack } from "../../../../src/content/q1/missionpacks/index.ts";
 
-const assetRoot = "/home/buzzkill/Projects/qfiles/q1";
+const assetRoot = `${testCorpusRoot()}/q1`;
 async function session(pack: Q1MissionPack, name: string, edition: "classic" | "rerelease" = "rerelease") {
   const archive = await openArchive(`${assetRoot}/${edition === "rerelease" ? "rerelease/" : ""}${pack}/pak0.pak`);
   const entry = archive.findEntries(`maps/${name}.bsp`)[0]; if (entry === undefined) throw new Error("Retail start.bsp missing");

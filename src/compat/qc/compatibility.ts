@@ -17,6 +17,12 @@ export interface QuakeCCompatibility {
   readonly pickupCallers: readonly QcPickupCallerDeclaration[];
 }
 
+/** Earlier documents spelled the private dialect with an internal project name; accept and canonicalize it. */
+function readMessageDialect(field: SaveReader): RereleaseMessages {
+  const value = field.choice('known-retail', 'q1-rerelease-private', 'quake-1-re-ts-private');
+  return value === 'quake-1-re-ts-private' ? 'q1-rerelease-private' : value;
+}
+
 /** Original source interfaces are bound to the bytes of the selected program. */
 export function readQuakeCCompatibility(bytes: Uint8Array | null, artifactDigest: string): QuakeCCompatibility {
   if (bytes === null) return { messageDialect: 'known-retail', pickupCallers: [] };
@@ -24,6 +30,6 @@ export function readQuakeCCompatibility(bytes: Uint8Array | null, artifactDigest
   const reader = new SaveReader(value, 'quakec-compatibility.json');
   reader.field('version').literal(1);
   reader.field('artifactDigest').literal(artifactDigest);
-  return { ...(reader.field("teams").value === undefined ? {} : { teams: readSourceTeamAliases(reader.field("teams")) }), ...(reader.field("combat").value === undefined ? {} : { combat: readQcCombat(reader.field("combat")) }), ...(reader.field("weaponStage").value === undefined ? {} : { weaponStage: readQcPrimaryWeaponStage(reader.field("weaponStage")) }), messageDialect: reader.field('messageDialect').value === undefined ? 'known-retail' : reader.field('messageDialect').choice('known-retail', 'quake-1-re-ts-private'),
+  return { ...(reader.field("teams").value === undefined ? {} : { teams: readSourceTeamAliases(reader.field("teams")) }), ...(reader.field("combat").value === undefined ? {} : { combat: readQcCombat(reader.field("combat")) }), ...(reader.field("weaponStage").value === undefined ? {} : { weaponStage: readQcPrimaryWeaponStage(reader.field("weaponStage")) }), messageDialect: reader.field('messageDialect').value === undefined ? 'known-retail' : readMessageDialect(reader.field('messageDialect')),
     pickupCallers: reader.field('pickupCallers').value === undefined ? [] : reader.field('pickupCallers').list(readQcPickupCaller) };
 }

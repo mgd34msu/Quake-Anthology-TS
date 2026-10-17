@@ -1,4 +1,4 @@
-// Adapted from quake-1-re-ts and id Software Quake. GPL-2.0-or-later.
+// Adapted from the reference port and id Software Quake. GPL-2.0-or-later.
 import type { SizeBuf } from "../message.ts";
 import type { Vec3 } from "../wire-types.ts";
 import { vec3 } from "../wire-types.ts";

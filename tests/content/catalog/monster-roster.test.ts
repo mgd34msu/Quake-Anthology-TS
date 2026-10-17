@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import type { MonsterSelectionTarget, ProviderReference } from "../../../src/contracts/content.ts";
 import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../../../src/content/catalog/monsters.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
@@ -91,7 +93,7 @@ test("all Quake II monster sources replace Quake dogs with parasites while prese
 });
 
 test("installed Quake dog rosters retain their source behavior and resources across Q2 campaign travel", async () => {
-  const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
+  const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
   const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1"]);
   if (parsed.kind !== "run") throw new Error("Expected launch command");
   const preset = applicationPreset(catalog, parsed.options);
@@ -119,7 +121,7 @@ test("installed Quake dog rosters retain their source behavior and resources acr
 }, 60000);
 
 test("actual Q2 base1 and Q1 e1m1 recipes resolve automatic campaign rosters without per-class setup", async () => {
-  const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
+  const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
   for (const [game, map, family, source] of [["q2-rerelease-baseq2", "base1", "q2", q1], ["q1-rerelease-id1", "e1m1", "q1", q2]] satisfies readonly (readonly [string, string, "q1" | "q2", ProviderReference])[]) {
     const parsed = parseApplicationCommand(["--game", game, "--map", map]);
     if (parsed.kind !== "run") throw new Error("Expected launch command");

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -12,7 +13,7 @@ import { registerQ1ClientCommands } from "../../../src/app/bootstrap/q1-client-c
 import type { CommandContext } from "../../../src/contracts/common.ts";
 
 test("native Q1 console god and impulse 9 affect actual damage and selected inventory", async () => {
-  const corpus = resolve(import.meta.dir, "../../../../qfiles");
+  const corpus = testCorpusRoot();
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
   for (const mixed of [false, true]) {
     const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--map", "e1m1", "--movement", mixed ? "q3" : "q1",

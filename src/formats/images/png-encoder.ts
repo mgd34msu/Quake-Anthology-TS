@@ -1,4 +1,4 @@
-// Adapted from quake-3-ts/src/core/png.ts. GPL-2.0-or-later.
+// Adapted from the reference port GPL-2.0-or-later.
 import { deflateSync } from "node:zlib";
 
 function crc32(bytes: Uint8Array): number {

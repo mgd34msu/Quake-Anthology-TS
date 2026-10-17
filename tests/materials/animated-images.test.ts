@@ -1,4 +1,6 @@
 import { SceneMaterialRegistrations } from "../../src/render/scene/material-registrations.ts";
+import { corpusFile } from "../support/corpus.ts";
+
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
@@ -87,7 +89,7 @@ test("pending GIF reads cannot register after loader or registry close", async (
   }
 });
 
-const root = new URL("../../../qfiles/q3a/lrctf", import.meta.url).pathname;
+const root = corpusFile("q3a/lrctf");
 for (const asset of ["media/lrctf_logo-small_animated.gif", "help/images/flaming_logo.gif"])
 for (const family of ["q1", "q2", "q3"] satisfies readonly ("q1" | "q2" | "q3")[])
 for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[])

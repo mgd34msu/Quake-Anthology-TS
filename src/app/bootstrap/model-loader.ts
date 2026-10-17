@@ -1,4 +1,4 @@
-/* Q1 replacement selection follows quake-1-re-ts ref_gl/gl_md5.ts and
+/* Q1 replacement selection follows the reference port ref_gl/gl_md5.ts and
  * ref_soft/r_md5.ts. GPL-2.0-or-later. */
 import type { GameFamily, ResolvedResourceReference } from "../../contracts/content.ts";
 import type { DecodedModel, Md5Model, ModelReplacement, Q1AliasModel, Q2AliasModel } from "../../contracts/scene.ts";

@@ -1,7 +1,9 @@
 import { expect, spyOn, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { StartupApplication } from "../../../src/app/bootstrap/startup.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.ts";
@@ -12,7 +14,7 @@ import { encodePng } from "../../../src/formats/images/png-encoder.ts";
 import { infoValueForKey } from "../../../src/core/info-string.ts";
 
 const enabled = process.env["QUAKE_ARENA_PUBLIC_TEST"] === "1";
-const corpus = process.env["QUAKE_CONTENT_ROOT"] ?? resolve(import.meta.dir, "../../../../qfiles");
+const corpus = process.env["QUAKE_CONTENT_ROOT"] ?? testCorpusRoot();
 
 test.skipIf(!enabled)("public Q3 training selection launches skill four Crash and accepts live controls", async () => {
   const directory = await mkdtemp(join(tmpdir(), "q3-arena-public-"));

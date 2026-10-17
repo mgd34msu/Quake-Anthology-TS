@@ -1,4 +1,6 @@
 import { SharedOriginalPickupAdmission } from "../../../../src/world/gameplay/original-pickups.ts";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import type { RegularArmorState } from "../../../../src/contracts/gameplay.ts";
 import type { OriginalPickupOffer } from "../../../../src/contracts/original-pickups.ts";
 import { describe, expect, test } from "bun:test";
@@ -219,7 +221,7 @@ describe("Q2 permanent gameplay foundation", () => {
     expect(dropped.owner).toBe(actor.id); expect(saved()?.callbacks.touch).toBe("Touch_Item");
   });
   test("selected Q3 supply consumes retail base1 weapons and preserves Q2 refusal, drops and respawn", async () => {
-    const archive = await openArchive(`${import.meta.dir}/../../../../../qfiles/q2/baseq2/pak0.pak`);
+    const archive = await openArchive(`${testCorpusRoot()}/q2/baseq2/pak0.pak`);
     try {
       const entry = archive.findEntries("maps/base1.bsp")[0];
       if (entry === undefined) throw new Error("Missing base1");
@@ -501,8 +503,8 @@ describe("Q2 permanent gameplay foundation", () => {
   });
 
   test("real classic and rerelease base1 preserve authored spawn fields and edition inhibition", async () => {
-    const classicArchive = await openArchive(`${import.meta.dir}/../../../../../qfiles/q2/baseq2/pak0.pak`);
-    const rereleaseArchive = await openArchive(`${import.meta.dir}/../../../../../qfiles/q2/rerelease/baseq2/pak0.pak`);
+    const classicArchive = await openArchive(`${testCorpusRoot()}/q2/baseq2/pak0.pak`);
+    const rereleaseArchive = await openArchive(`${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`);
     try {
       const classicEntry = classicArchive.findEntries("maps/base1.bsp")[0], rereleaseEntry = rereleaseArchive.findEntries("maps/base1.bsp")[0];
       if (classicEntry === undefined || rereleaseEntry === undefined) throw new Error("Missing supplied base1 fixture");

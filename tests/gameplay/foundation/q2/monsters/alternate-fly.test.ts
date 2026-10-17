@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { NumericProfile } from "../../../../../src/contracts/numeric.ts";
@@ -11,7 +13,7 @@ import { createAlternateFlyState } from "../../../../../src/content/q2/foundatio
 import { steerQ2AlternateFly } from "../../../../../src/content/q2/foundation/monsters/alternate-fly.ts";
 import type { Q2AlternateFlyServices, Q2AlternateFlySteeringState } from "../../../../../src/content/q2/foundation/monsters/alternate-fly.ts";
 
-const archivePath = resolve(process.env["QUAKE_DATA_PATH"] ?? resolve(import.meta.dir, "../../../../../../qfiles"), "q2/rerelease/baseq2/pak0.pak");
+const archivePath = resolve(testCorpusRoot(), "q2/rerelease/baseq2/pak0.pak");
 test.skipIf(!existsSync(archivePath))("rerelease flipper steering in retail base3 water accelerates, recovers and resumes", async () => {
   const archive = await openArchive(archivePath);
   try {

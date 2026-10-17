@@ -1,4 +1,4 @@
-/* Adapted from quake-1-re-ts/common/bspfile.ts and Ironwail gl_model.c.
+/* Adapted from the reference port and Ironwail gl_model.c.
  * Copyright (C) 1996-2026 their respective authors. GPL-2.0-or-later. */
 import type { Bounds, Vec3, Vec4 } from "../../contracts/math.ts";
 import type {

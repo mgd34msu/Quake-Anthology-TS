@@ -1,4 +1,4 @@
-// Instance-owned adaptation of quake-2-re-ts/client/snd_reverb_dsp.ts.
+// Instance-owned adaptation of the reference port
 // Freeverb delay tunings are public domain; this DSP is not OpenAL EAX output parity.
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { EfxReverbParamsT } from "./reverb-presets.ts";

@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +24,7 @@ function catalog(root: string): InstalledCatalog {
   return new InstalledCatalog(root, products, [], 0);
 }
 async function retailId(): Promise<Uint8Array> {
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "pk3");
+  const archive = await openArchive(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`, "pk3");
   try {
     const entry = archive.findEntries("productid.txt")[0]; if (entry === undefined) throw new Error("Missing retail product identification");
     return await archive.readEntry(entry);

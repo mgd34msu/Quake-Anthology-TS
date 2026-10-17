@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { Q1Map } from "../../../src/formats/q1-map/index.ts";
@@ -26,7 +28,7 @@ interface Saved {
   readonly combat: readonly CombatCheckpoint[];
 }
 async function geometry(): Promise<Q1Map> {
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q1/rerelease/id1/pak0.pak");
+  const archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/id1/pak0.pak`);
   try {
     const entry = archive.findEntries("maps/e1m1.bsp")[0]; if (entry === undefined) throw new Error("Missing e1m1 geometry");
     return readQ1Bsp(await archive.readEntry(entry), { source: "maps/e1m1.bsp" });

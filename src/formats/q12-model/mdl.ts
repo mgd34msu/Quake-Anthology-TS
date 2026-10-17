@@ -1,4 +1,4 @@
-/* MDL v6 adapted from quake-1-re-ts/ref_soft/model.ts and Quake's
+/* MDL v6 adapted from the reference port and Quake's
  * WinQuake/modelgen.h, model.c. Copyright (C) 1996-1997 Id Software, Inc.
  * SPDX-License-Identifier: GPL-2.0-or-later */
 import type { Vec3 } from "../../contracts/math.ts";

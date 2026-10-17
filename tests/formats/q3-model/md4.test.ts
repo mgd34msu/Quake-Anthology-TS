@@ -1,4 +1,4 @@
-/* Synthetic fixture adapted from quake-3-ts MD4 model tests. GPL-2.0-or-later. */
+/* Synthetic fixture adapted from the reference implementation MD4 model tests. GPL-2.0-or-later. */
 import { test, expect } from "bun:test";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
 import { parseMd4, skinMd4Surface } from "../../../src/formats/q3-model/index.ts";

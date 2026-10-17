@@ -1,4 +1,6 @@
 import { dirname } from "node:path";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import { openMountPlan } from "../../../../src/content/mounts/index.ts";
 import { createMountIdentity } from "../../../../src/contracts/content.ts";
 import { ClassicGuestSource, prepareClassicGuest } from "../../../../src/app/bootstrap/simulation/classic-guest-source.ts";
@@ -55,7 +57,7 @@ function services() {
   };
   return { hostServices, prints, configuration, resources };
 }
-const retailPath = "/home/buzzkill/Projects/qfiles/q2/ctf/gamex86.dll";
+const retailPath = `${testCorpusRoot()}/q2/ctf/gamex86.dll`;
 test.skipIf(!existsSync(retailPath))("actual CTF DLL runs attach, Init, SpawnEntities, RunFrame, source save IO and Shutdown", async () => {
   const bytes = await readFile(retailPath), hash = createHash("sha256").update(bytes).digest("hex");
   const module: ModuleIdentity = { id: "fixture:classic-ctf", artifactPath: retailPath, revision: hash, digest: createContentDigest(hash) };

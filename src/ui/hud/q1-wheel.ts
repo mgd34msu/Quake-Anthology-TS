@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Rerelease wwheel.txt grammar follows quake-1-re-ts/src/lib/wwheel.ts and retail files.
+// Rerelease wwheel.txt grammar follows the reference port and retail files.
 import type { ResourceId } from "../../contracts/content.ts";
 import { Tokenizer } from "../../core/common-parse.ts";
 import type { WheelItem } from "./wheel.ts";

@@ -1,4 +1,6 @@
 import { sweepBody } from "../../../src/movement/swept-body.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { MovementMath } from "../../../src/movement/q1/common.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
@@ -26,7 +28,7 @@ const arsenal: ArsenalState = { provider: "q3:weapons", activeWeapon: null,
 const animation: ActorAnimationState = { provider: "q3:character", state: { kind: "q3", legs: 22, torso: 11, legsTimerMilliseconds: 0, torsoTimerMilliseconds: 0 } };
 const parameters: Q1MovementParameters = { gravity: 800, stopSpeed: 100, maxSpeed: 320, spectatorMaxSpeed: 500,
   accelerate: 10, airAccelerate: 0.7, waterAccelerate: 10, friction: 4, waterFriction: 4, entityGravity: 1 };
-const root = process.env["QUAKE_DATA_PATH"] ?? resolve(import.meta.dir, "../../../../qfiles");
+const root = testCorpusRoot();
 const fixtures: readonly { readonly path: string; readonly map: string; read(bytes: Uint8Array): DecodedWorld }[] = [
   { path: "q1/rerelease/id1/pak0.pak", map: "maps/start.bsp", read: readQ1Bsp },
   { path: "q2/baseq2/pak0.pak", map: "maps/base1.bsp", read: decodeQ2Map },

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { openArchive } from "../../src/content/archive/index.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
@@ -15,7 +17,7 @@ import { decodeWad, decodeWadImage } from "../../src/formats/images/wad.ts";
 import { buildGammaTable, decodeQ1Colormap, expandIndexedImage, indexedRenderImage, q1PlayerTranslation } from "../../src/formats/images/palette.ts";
 import { generateMipChain, resampleImage } from "../../src/formats/images/mip.ts";
 
-const qfiles = new URL("../../../qfiles/", import.meta.url).pathname;
+const qfiles = `${testCorpusRoot()}/`;
 
 async function member(path: string, name: string): Promise<Uint8Array> {
   const archive = await openArchive(path);
@@ -58,7 +60,7 @@ describe("image codecs", () => {
   test("palette translation, fence alpha, fullbright masks and gamma stay separate", () => {
     const palette: Palette = { colors: Uint8Array.from({ length: 768 }, (_, index) => index % 256), source: {
       id: "resource:palette", requestedPath: "gfx/palette.lmp", digest: `sha256:${"0".repeat(64)}`, byteLength: 768,
-      provenance: { kind: "loose", memberPath: "gfx/palette.lmp", mount: { kind: "loose", rootPath: "/qfiles", identity: { id: "mount:q1:test", content: "q1:classic:id1:test", generation: 0 } } },
+      provenance: { kind: "loose", memberPath: "gfx/palette.lmp", mount: { kind: "loose", rootPath: "/games", identity: { id: "mount:q1:test", content: "q1:classic:id1:test", generation: 0 } } },
       resolution: { kind: "default-order", plan: "mount-plan:q1:test", rank: 0 },
     } };
     const source = new Uint8Array([16, 224, 255]);
@@ -87,7 +89,7 @@ describe("image codecs", () => {
     expect(gif.frames[0].transparentIndex).toBe(0);
     expect(gif.frames[0].image.pixels[3]).toBe(0);
     expect(gif.frames[0].indices).toEqual(new Uint8Array([0]));
-    // Pillow-generated donor fixture from quake-2-re-ts/test/gif.test.ts.
+    // Pillow-generated donor fixture from the reference implementation.test.ts.
     const animated = decodeGif(new Uint8Array([71, 73, 70, 56, 57, 97, 2, 0, 2, 0, 129, 0, 0, 10, 20, 30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 33, 255, 11, 78, 69, 84, 83, 67, 65, 80, 69, 50, 46, 48, 3, 1, 0, 0, 0, 33, 249, 4, 0, 10, 0, 0, 0, 44, 0, 0, 0, 0, 2, 0, 2, 0, 0, 8, 6, 0, 1, 8, 4, 16, 16, 0, 33, 249, 4, 1, 10, 0, 1, 0, 44, 0, 0, 0, 0, 2, 0, 2, 0, 129, 40, 50, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 6, 0, 1, 8, 4, 16, 16, 0, 33, 249, 4, 1, 10, 0, 1, 0, 44, 0, 0, 0, 0, 2, 0, 2, 0, 129, 70, 80, 90, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 6, 0, 1, 8, 4, 16, 16, 0, 59]));
     expect(animated.frames.map(frame => Array.from(frame.image.pixels.subarray(0, 4)))).toEqual([[10, 20, 30, 255], [40, 50, 60, 255], [70, 80, 90, 255]]);
     expect(animated.frames.map(frame => frame.delayCentiseconds)).toEqual([10, 10, 10]);

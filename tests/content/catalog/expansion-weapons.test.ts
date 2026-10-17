@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -9,7 +11,7 @@ import { Q3_Q2_SUPPLY_PROFILE } from "../../../src/content/composition/q3-q2-sup
 import { xatrixWeaponDefinitions, rogueWeaponDefinitions } from "../../../src/content/q2/missionpacks/weapons/definitions.ts";
 
 test("expansion menu arsenals resolve retail resources and distinct same-family source roles", async () => {
-  const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
+  const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
   const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--dedicated"]);
   if (command.kind !== "run") throw new Error("Missing launch");
   const menu = new StartupSelectionModel(catalog, command.options);
@@ -50,7 +52,7 @@ test("every MG3 selected creature resolves its source precaches from the retail 
   const { q1AddonMonsterSources } = await import("../../../src/content/monsters/expansions.ts");
   const source = q1AddonMonsterSources.find(source => source.program === "mg3");
   if (source === undefined) throw new Error("Missing MG3 roster");
-  const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
+  const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
   const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--dedicated"]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const preset = applicationPreset(catalog, parsed.options), reference = { provider: source.provider, content: catalog.require("q1-rerelease-mg3").id };

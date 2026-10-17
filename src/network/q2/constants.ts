@@ -1,4 +1,4 @@
-// Quake II / q2proto algorithms ported from quake-2-re-ts and original id Software sources. GPL-2.0-or-later.
+// Quake II / q2proto algorithms ported from the reference port and original id Software sources. GPL-2.0-or-later.
 export const PROTOCOL_VERSION = 34;
 export const PROTOCOL_VERSION_RERELEASE = 1038;
 export const PROTOCOL_VERSION_RERELEASE_CLASSIC = 4038;

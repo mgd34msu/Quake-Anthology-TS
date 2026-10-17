@@ -1,4 +1,6 @@
 import { q3WeaponDelay } from "../../../src/movement/q3/weapon.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { Powerup } from "../../../src/movement/q3/constants.ts";
 import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
 import { expansionSourceSupply } from "../../../src/content/composition/expansion-source-supply.ts";
@@ -150,7 +152,7 @@ describe("mission-pack source weapons", () => {
     const classes = new Set(["rotating_light", "func_object_repair", "misc_viper_missile", "misc_amb4", "misc_nuke", "misc_crashviper", "misc_transport", "target_mal_laser", "info_teleport_destination", "trigger_teleport", "trigger_disguise", "target_steam", "target_anger", "target_killplayers", "target_blacklight", "target_orb", "misc_nuke_core", "func_plat2", "func_door_secret2", "func_force_wall"]);
     const seen = new Map<string, number>(), diagnostics: string[] = [];
     for (const pack of ["xatrix", "rogue"] satisfies readonly Q2MissionPack[]) {
-      const archive = await openArchive(`/home/buzzkill/Projects/qfiles/q2/${pack}/pak0.pak`);
+      const archive = await openArchive(`${testCorpusRoot()}/q2/${pack}/pak0.pak`);
       try {
         for (const entry of archive.entries) {
           if (!entry.path.endsWith(".bsp")) continue;

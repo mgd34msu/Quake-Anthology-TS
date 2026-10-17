@@ -1,4 +1,4 @@
-// Adapted from quake-1-re-ts and id Software Quake. GPL-2.0-or-later.
+// Adapted from the reference port and id Software Quake. GPL-2.0-or-later.
 export class WireVector {
     private x = 0;
     private y = 0;

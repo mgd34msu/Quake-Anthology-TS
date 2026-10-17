@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { corpusFile } from "../../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { createContentId, createMountId, createMountIdentity, createMountPlanId } from "../../../../src/contracts/content.ts";
 import type { ArchiveMount } from "../../../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
@@ -29,7 +30,7 @@ import { Q3PresentationAudio, Q3PresentationSoundBank } from "../../../../src/co
 import { DEFAULT_RAIL_SETTINGS } from "../../../../src/render/scene/particles/primitives.ts";
 import { qvmAnglesToAxis } from "../../../../src/core/math.ts";
 
-const archivePath = resolve(import.meta.dir, "../../../../../qfiles/q3a/baseq3/pak0.pk3");
+const archivePath = corpusFile("q3a/baseq3/pak0.pk3");
 
 describe("Q3 cgame presentation", () => {
   test("snapshot copies retain mission fields and own transport storage", () => {

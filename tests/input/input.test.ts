@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { CommandContext, CommandDialect } from "../../src/contracts/common.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
@@ -331,7 +333,7 @@ describe("seat input", () => {
   });
 });
 
-const retail = "/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/pak0.pak";
+const retail = `${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`;
 test.skipIf(!await Bun.file(retail).exists())("reads actual rerelease tactile assets", async () => {
   const archive = await openArchive(retail);
   try {

@@ -1,4 +1,4 @@
-/* Q2 map conversion adapted from quake-2-re-ts qcommon/cmodel.ts, ref_gl/gl_model.ts
+/* Q2 map conversion adapted from the reference port qcommon/cmodel.ts, ref_gl/gl_model.ts
  * and q2repro/src/common/bsp.c. GPL-2.0-or-later. */
 import type { BspFace, DecoupledLightmap, Q2Leaf, Q2TextureInfo, Q2WorldGeometry } from "../../contracts/scene.ts";
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";

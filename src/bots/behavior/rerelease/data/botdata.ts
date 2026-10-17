@@ -1,4 +1,4 @@
-// Adapted from quake-1-re-ts and quake-2-re-ts botdata readers.
+// Adapted from the reference port and the reference port botdata readers.
 // Schemas follow the installed Q1 2021 and Q2 2023 rerelease bots/*.txt files.
 // KEX's reader is closed; this parses documented source data, not recovered engine code.
 // Every record retains its original ordered fields, including unknown/repeated fields.

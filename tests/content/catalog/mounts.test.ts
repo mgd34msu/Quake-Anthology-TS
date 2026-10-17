@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -39,8 +41,8 @@ test("music traversal accepts source archive directory records and nested loose 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3"))("installed Q3 archive retains the explicit music directory that playlist traversal must skip", async () => {
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3");
+test.skipIf(!existsSync(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`))("installed Q3 archive retains the explicit music directory that playlist traversal must skip", async () => {
+  const archive = await openArchive(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`);
   try {
     expect(archive.entries.some(entry => entry.path === "music/")).toBe(true);
     expect(archive.entries.some(entry => entry.path.startsWith("music/") && entry.path.endsWith(".wav"))).toBe(true);
@@ -80,7 +82,7 @@ test("Q3 product restrictions distinguish forced, missing and corrupted product 
   await expect(resolveQ3MountRestriction({ kind: "retail" }, false, async () => new Uint8Array([1]))).rejects.toThrow("Invalid product identification");
 });
 
-const retailPak = "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3";
+const retailPak = `${testCorpusRoot()}/q3a/baseq3/pak0.pk3`;
 test.skipIf(!existsSync(retailPak))("Q3 retail product identification preserves unrestricted mounts", async () => {
   const archive = await openArchive(retailPak, "pk3");
   try {
@@ -133,7 +135,7 @@ test("reads selected archive, preserves pure order, and detects replacement loos
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-const corpusRoot = resolve(import.meta.dir, "../../../../qfiles");
+const corpusRoot = testCorpusRoot();
 
 function musicWav(sample: number): Uint8Array {
   const bytes = new Uint8Array(48), view = new DataView(bytes.buffer);

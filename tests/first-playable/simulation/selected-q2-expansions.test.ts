@@ -1,6 +1,7 @@
 import type { ProviderReference } from "../../../src/contracts/content.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { expect, test } from "bun:test";
-import { resolve } from "node:path";
 import { Q2Monsters } from "../../../src/content/q2/foundation/monsters/index.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
@@ -28,7 +29,7 @@ const cases = [
   { edition: "rerelease", program: "mg2", classname: "monster_guncmdr", packs: 2, game: "q2-classic-baseq2", map: "base1" },
 ];
 for (const fixture of cases) test(`selected ${fixture.program} ${fixture.classname} executes and restores on ${fixture.game}/${fixture.map}`, async () => {
-  const corpus = resolve(import.meta.dir, "../../../../qfiles");
+  const corpus = testCorpusRoot();
   const command = parseApplicationCommand(["--content-root", corpus, "--game", fixture.game, "--map", fixture.map, "--dedicated", "--mode", "singleplayer"]);
   if (command.kind !== "run") throw new Error("Expected launch");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });

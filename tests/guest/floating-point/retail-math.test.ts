@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
+import { corpusFile } from "../../support/corpus.ts";
+
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import type { GuestAddress, ModuleIdentity } from "../../../src/contracts/execution.ts";
 import { createGuestProcessorState, SparseGuestMemory } from "../../../src/guest/core/index.ts";
@@ -8,7 +10,7 @@ import { I386Cpu } from "../../../src/guest/x86/index.ts";
 import { encodeBinary } from "../../../src/guest/floating-point/binary.ts";
 import { readX87Register } from "../../../src/guest/floating-point/index.ts";
 
-const path = new URL("../../../../qfiles/q2/lmctf/gamex86.dll", import.meta.url);
+const path = new URL(corpusFile("q2/lmctf/gamex86.dll"), "file:///");
 function address(memory: SparseGuestMemory, value: bigint): GuestAddress {
   const result = memory.pointer(value);
   if (result === null) throw new Error("The instruction fixture uses nonzero addresses");

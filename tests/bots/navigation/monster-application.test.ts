@@ -1,4 +1,6 @@
 import type { EnemySelection, MonsterDefinitionReference, MonsterSelectionTarget } from "../../../src/contracts/content.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { preservesAuthoredQ1Placement } from "../../../src/app/bootstrap/simulation/monster-placement.ts";
 import { parseQ1Entities } from "../../../src/formats/q1-map/index.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
@@ -10,7 +12,7 @@ import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { ordinaryAddonMonster } from "../../../src/content/q1/addons/monsters/ordinary/index.ts";
@@ -22,7 +24,7 @@ function routeState(bytes: Uint8Array) {
   return new SaveReader(decodeCheckpointValue(bytes)).list(reader =>
     Object.fromEntries(["goal", "cursor", "map", "nodes", "edges", "points", "seconds", "generation"].map(key => [key, reader.field(key).value])));
 }
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 test.skipIf(!existsSync(join(corpus, "q1/rerelease/mg3/pak0.pak")))("retail MG3 application installs monster navigation before think and restores an active path", async () => {
   const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-mg3", "--map", "dm1", "--dedicated", "--mode", "singleplayer"]);
   if (launch.kind !== "run") throw new Error("Expected MG3 application options");

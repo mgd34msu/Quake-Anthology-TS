@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,7 +16,7 @@ import type { UserCommand } from "../../../src/content/q3/base/shared/player-sta
 import { navigationFromAsset } from "../../../src/bots/navigation/graph.ts";
 import { TravelFlags } from "../../../src/bots/behavior/q3/navigation-types.ts";
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 const retail = test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")));
 for (const initiallyRaised of [false, true]) retail(`authored Q2 lift ${initiallyRaised ? "waits for a raised platform" : "keeps BSP identity"} through shared Q3 route execution`, async () => {
   const userRoot = await mkdtemp(resolve(tmpdir(), "bot-moving-geometry-"));

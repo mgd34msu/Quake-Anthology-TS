@@ -1,4 +1,8 @@
 import { expect, test } from "bun:test";
+import { homedir } from "node:os";
+
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import type { ModActorField, ModCallbackDeclaration, ModSourceCall } from "../../../src/contracts/mod-callbacks.ts";
 import type { ModClientApplication, ModClientEvent, ModClientServices } from "../../../src/world/session/mod-clients.ts";
 import type { UserCommand } from "../../../src/contracts/protocol.ts";
@@ -14,7 +18,7 @@ import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { SourceRandom } from "../../../src/app/bootstrap/simulation/random.ts";
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
 
-const copper = "/home/buzzkill/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat";
+const copper = `${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`;
 const zero = { x: 0, y: 0, z: 0 };
 const globals = [
   { name: "self", value: { kind: "input", name: "self" } },
@@ -23,7 +27,7 @@ const globals = [
 ] satisfies ModSourceCall["globals"];
 
 test.skipIf(!await Bun.file(copper).exists())("original Copper applied callbacks use effective input and retain private continuation in a Q2 world", async () => {
-  const options = parseApplicationCommand(["--content-root", "/home/buzzkill/Projects/qfiles", "--game", "q2-classic-baseq2", "--map", "base1"]);
+  const options = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--game", "q2-classic-baseq2", "--map", "base1"]);
   if (options.kind !== "run") throw new Error("Missing destination");
   const content = await loadApplicationContent(options.options), scene = createSceneQueries(content.world);
   const program = loadQcProgram(await Bun.file(copper).bytes());

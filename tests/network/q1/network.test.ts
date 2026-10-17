@@ -1,4 +1,6 @@
 import { test, expect } from 'bun:test';
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from 'node:fs';
 import { openArchive } from '../../../src/content/archive/index.ts';
 import { LoopbackHub } from '../../../src/network/common/loopback.ts';
@@ -143,7 +145,7 @@ test('QuakeWorld channel and x86 QWD command record', () => {
         throw new Error('Missing demo command');
     expect(parsed.command).toEqual(command);
 });
-const pak = '/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK';
+const pak = `${testCorpusRoot()}/q1/id1/PAK0.PAK`;
 (existsSync(pak) ? test : test.skip)('retail PAK demo1 decodes through the complete NetQuake stream', async () => {
     const archive = await openArchive(pak);
     try {

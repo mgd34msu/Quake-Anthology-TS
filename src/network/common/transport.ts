@@ -1,4 +1,4 @@
-// Bun transport adapted from quake-3-ts/src/platform/network.ts. GPL-2.0-or-later.
+// Bun transport adapted from the reference port GPL-2.0-or-later.
 import type { udp } from "bun";
 import { BoundedQueue } from "../../foundation/bounded-queue.ts";
 import { addressHost, ipAddress, portNumber } from "./endpoint.ts";

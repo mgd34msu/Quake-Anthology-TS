@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { corpusFile } from "../../support/corpus.ts";
+
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
 import { QcEntityMemory, QcMachine, QcStrings, QuakeCExecutor, applyQcEntityPairs, classicQcEntityLayout, createQcActorBindings, createQcBuiltins, createQcSourceSlotStorage, describeQcHost, loadQcProgram, qcLinkBounds, saveQcEntityPairs } from "../../../src/compat/qc/index.ts";
@@ -10,7 +12,7 @@ import { GameplayAuthority } from "../../../src/world/gameplay/authority.ts";
 import type { SourceDamageObserver, SourceDamageResult } from "../../../src/world/gameplay/authority.ts";
 import type { ArmorState, DamageOutcome, DamageRequest } from "../../../src/contracts/gameplay.ts";
 
-const corpus = new URL("../../../../qfiles/q1/", import.meta.url).pathname;
+const corpus = `${corpusFile("q1")}/`;
 async function readProgram(path: string): Promise<QcProgram> {
   const archive = await openArchive(corpus + path);
   try {

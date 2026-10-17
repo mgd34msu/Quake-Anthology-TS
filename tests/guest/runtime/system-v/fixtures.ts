@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import { resolve } from "node:path";
+import { corpusFile } from "../../../support/corpus.ts";
+
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { createContentDigest } from "../../../../src/contracts/content.ts";
 import type { ModuleIdentity } from "../../../../src/contracts/execution.ts";
 import { inspectElf } from "../../../../src/guest/elf/index.ts";
 
-export const archivePath = resolve(import.meta.dir, "../../../../../qfiles/quakelive/baseq3/bin.pk3");
+export const archivePath = corpusFile("quakelive/baseq3/bin.pk3");
 export async function quakeLiveFixture(name: "qagamei386.so" | "qagamex64.so") {
   const archive = await openArchive(archivePath);
   try {

@@ -1,4 +1,6 @@
 import { createQ1BotKnowledge } from "../../../src/app/bootstrap/simulation/bot-q1-knowledge.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
@@ -35,7 +37,7 @@ import { WeaponState, Powerup, statSchema } from "../../../src/content/q3/base/s
 import { BotActionFlag } from "../../../src/bots/behavior/library/actions.ts";
 import { BotMoveFlag } from "../../../src/bots/behavior/q3/movement-state.ts";
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 
 test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("native bots continue disk checkpoint after disposing the original session without admission replay", async () => {
   const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3", "--mode", "deathmatch", "--dedicated"]);

@@ -1,0 +1,1129 @@
+{
+  "completed": true,
+  "frames": 50,
+  "wallMilliseconds": 7903.220602000016,
+  "samples": [
+    {
+      "wallNow": 149130.88716,
+      "source": 21,
+      "wall": 21.61614900000859,
+      "elapsed": 21,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 21,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 149335.815928,
+      "source": 200,
+      "wall": 221.11380500000087,
+      "elapsed": 221,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 221,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 149507.900524,
+      "source": 172,
+      "wall": 172.04459000000497,
+      "elapsed": 393,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 393,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 149591.191783,
+      "source": 166,
+      "wall": 83.06224899998051,
+      "elapsed": 559,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 559,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 149658.122196,
+      "source": 104,
+      "wall": 52.905649000022095,
+      "elapsed": 663,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 663,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 149732.579273,
+      "source": 176,
+      "wall": 88.517737999995,
+      "elapsed": 839,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 839,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 48,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 149794.995016,
+      "source": 124,
+      "wall": 62.939798000006704,
+      "elapsed": 963,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 963,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 125,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 149859.10811,
+      "source": 126,
+      "wall": 63.871440999995684,
+      "elapsed": 1089,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 1089,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 149915.863759,
+      "source": 112,
+      "wall": 56.867800000007264,
+      "elapsed": 1201,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 1201,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 126,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 149972.02991,
+      "source": 112,
+      "wall": 56.157503999973414,
+      "elapsed": 1313,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 1313,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150025.585812,
+      "source": 106,
+      "wall": 53.478767000022344,
+      "elapsed": 1419,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 1419,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150079.928473,
+      "source": 108,
+      "wall": 54.52799000000232,
+      "elapsed": 1527,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 1527,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 126,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150132.375691,
+      "source": 104,
+      "wall": 52.3468779999821,
+      "elapsed": 1631,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 1631,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150197.227795,
+      "source": 128,
+      "wall": 64.89570700001786,
+      "elapsed": 1759,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 1759,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 126,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150256.521247,
+      "source": 96,
+      "wall": 48.33950199998799,
+      "elapsed": 1855,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 1855,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150316.358471,
+      "source": 140,
+      "wall": 70.81219299999066,
+      "elapsed": 1995,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 1995,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 107,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150381.663767,
+      "source": 130,
+      "wall": 65.2964600000123,
+      "elapsed": 2125,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2125,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150440.475092,
+      "source": 116,
+      "wall": 58.66828600000008,
+      "elapsed": 2241,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2241,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150493.904156,
+      "source": 106,
+      "wall": 53.52562500000931,
+      "elapsed": 2347,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2347,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 126,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150539.848765,
+      "source": 90,
+      "wall": 45.83825899998192,
+      "elapsed": 2437,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2437,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 127,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150590.723825,
+      "source": 102,
+      "wall": 51.03731499999412,
+      "elapsed": 2539,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2539,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 126,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 2048,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150653.529872,
+      "source": 124,
+      "wall": 62.09210500001791,
+      "elapsed": 2663,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2663,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 37,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150704.461649,
+      "source": 102,
+      "wall": 51.63439799999469,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150755.835568,
+      "source": 0,
+      "wall": 51.11915000001318,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150803.410703,
+      "source": 0,
+      "wall": 47.770742999971844,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            0,
+            0,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150850.276825,
+      "source": 0,
+      "wall": 46.84566300001461,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150899.406814,
+      "source": 0,
+      "wall": 49.09096599998884,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150946.586085,
+      "source": 0,
+      "wall": 47.16742800001521,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 150993.914155,
+      "source": 0,
+      "wall": 47.394906000001356,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151044.08959,
+      "source": 0,
+      "wall": 38.79812999998103,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151089.265063,
+      "source": 0,
+      "wall": 47.04568000001018,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151140.638611,
+      "source": 0,
+      "wall": 60.88334100000793,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151185.82302,
+      "source": 0,
+      "wall": 45.22377399998368,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151234.664887,
+      "source": 0,
+      "wall": 48.88099000000511,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151281.379374,
+      "source": 0,
+      "wall": 46.33860000001732,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151323.755673,
+      "source": 0,
+      "wall": 42.71779100000276,
+      "elapsed": 2765,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2765,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151389.33791,
+      "source": 65,
+      "wall": 65.16578399998252,
+      "elapsed": 2830,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2830,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151445.359749,
+      "source": 56,
+      "wall": 56.25157200000831,
+      "elapsed": 2886,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2886,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151501.275549,
+      "source": 55,
+      "wall": 55.27465400000801,
+      "elapsed": 2941,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2941,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151556.905221,
+      "source": 56,
+      "wall": 56.43363299997873,
+      "elapsed": 2997,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 2997,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151611.781095,
+      "source": 55,
+      "wall": 55.01796200001263,
+      "elapsed": 3052,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 3052,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151663.192695,
+      "source": 51,
+      "wall": 51.282176000007894,
+      "elapsed": 3103,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 3103,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151717.136807,
+      "source": 54,
+      "wall": 54.079796999983955,
+      "elapsed": 3157,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 3157,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151769.130441,
+      "source": 51,
+      "wall": 51.627785999997286,
+      "elapsed": 3208,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 3208,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151824.750344,
+      "source": 55,
+      "wall": 55.95015400002012,
+      "elapsed": 3263,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 3263,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151877.649361,
+      "source": 52,
+      "wall": 52.07439599998179,
+      "elapsed": 3315,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 3315,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151929.08726,
+      "source": 52,
+      "wall": 52.21064299999853,
+      "elapsed": 3367,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 3367,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 151981.630467,
+      "source": 52,
+      "wall": 52.63702399999602,
+      "elapsed": 3419,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 3419,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 152032.472175,
+      "source": 50,
+      "wall": 50.674393000022974,
+      "elapsed": 3469,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 3469,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    },
+    {
+      "wallNow": 152085.260664,
+      "source": 52,
+      "wall": 52.929303999990225,
+      "elapsed": 3521,
+      "commands": [
+        {
+          "kind": "q3",
+          "serverTimeMilliseconds": 3521,
+          "angleWords": [
+            24,
+            65476,
+            0
+          ],
+          "forwardMove": 0,
+          "rightMove": 0,
+          "upMove": 0,
+          "buttons": 0,
+          "weapon": 2
+        }
+      ]
+    }
+  ],
+  "prints": [
+    "execing default.cfg\n",
+    "execing q3config.cfg\n",
+    "couldn't exec autoexec.cfg\n",
+    "\n------- Input Initialization -------\n",
+    "Joystick is not active.\n",
+    "------------------------------------\n",
+    "------- BotLib Initialization -------\n",
+    "loaded weapons.c",
+    "loaded items.c\n",
+    "loaded syn.c",
+    "loaded rnd.c",
+    "loaded match.c",
+    "loaded rchat.c",
+    "found 18 level items\n",
+    "Loaded maps/q3dm1.bsp with q3:movement and q3:model/sarge.\n",
+    "12 items registered\n",
+    "32 bots parsed\n",
+    "35 arenas parsed\n",
+    "Player 1^7 connected\n",
+    "Player 1^7 entered the game\n"
+  ]
+}

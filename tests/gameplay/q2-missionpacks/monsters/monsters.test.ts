@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
 import type { Vec3 } from "../../../../src/contracts/math.ts";
@@ -93,7 +95,7 @@ describe("original missionpack monster source behavior", () => {
     for (const pack of ["xatrix", "rogue"] satisfies readonly Q2MonsterMissionPack[]) {
       const scene = fixture(pack), definitions = pack === "xatrix" ? q2XatrixMonsterDefinitions(scene.monsters, scene.bolts) : q2RogueMonsterDefinitions(scene.monsters, scene.bolts, scene.services, scene.module.source);
       const names = new Set(definitions.map(definition => definition.classname));
-      const archive = await openArchive(`/home/buzzkill/Projects/qfiles/q2/${pack}/pak0.pak`);
+      const archive = await openArchive(`${testCorpusRoot()}/q2/${pack}/pak0.pak`);
       try {
         const representatives = new Map<string, Q2SpawnFields>();
         for (const entry of archive.entries.filter(entry => entry.path.startsWith("maps/") && entry.path.endsWith(".bsp"))) {

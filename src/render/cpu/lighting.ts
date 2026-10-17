@@ -1,4 +1,4 @@
-/* Q2 fragment and shadow equations ported from quake-2-re-ts/ref_gl/gl_shader.ts.
+/* Q2 fragment and shadow equations ported from the reference port
  * Copyright (C) Id Software and contributors. GPL-2.0-or-later. */
 import type { Vec3, Vec4 } from "../../contracts/math.ts";
 import type { Q2ModelShadowLight, BatchLighting, DepthImageLevel, MultitextureVertex, Q2ShadowAtlas, Q2ShadowProjection } from "../../contracts/render.ts";

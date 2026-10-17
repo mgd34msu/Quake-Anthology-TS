@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { decompressQ1Pvs, findQ1Leaf, parseQ1Entities, q1EntityValue, q1FaceVertices, q1LeafPvs, q1TextureRgba, readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
@@ -34,7 +36,7 @@ test("preserves entity pairs and validates visibility runs", () => {
   expect(() => decompressQ1Pvs(new Uint8Array([0, 2]), 0, 8)).toThrow();
 });
 
-const qfiles = process.env["QFILES_ROOT"] ?? "/home/buzzkill/Projects/qfiles";
+const qfiles = testCorpusRoot();
 const cases: readonly { readonly pak: string; readonly map: string; readonly format: Q1BspFormat }[] = [
   { pak: "q1/id1/PAK0.PAK", map: "maps/start.bsp", format: "bsp29" },
   { pak: "q1/id1/PAK0.PAK", map: "maps/e1m1.bsp", format: "bsp29" },

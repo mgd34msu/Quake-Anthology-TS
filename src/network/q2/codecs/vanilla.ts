@@ -1,5 +1,5 @@
 import { readElement } from '../state.ts';
-// Quake II / q2proto algorithms ported from quake-2-re-ts and original id Software sources. GPL-2.0-or-later.
+// Quake II / q2proto algorithms ported from the reference port and original id Software sources. GPL-2.0-or-later.
 import type { SizeBuf } from "../message.ts";
 import { MSG_WriteByte, MSG_WriteChar, MSG_WriteShort, MSG_WriteLong, MSG_WriteString, MSG_WriteAngle16, MSG_WriteDeltaEntity, MSG_WriteDeltaUsercmd, MSG_ReadDeltaUsercmd, MSG_ReadByte, MSG_ReadShort, MSG_ReadLong, MSG_ReadString, MSG_ReadChar, MSG_ReadAngle, MSG_ReadAngle16, MSG_ReadCoord, MSG_ReadPos, MSG_ReadData, SZ_Write, } from "../message.ts";
 import { PROTOCOL_VERSION } from "../constants.ts";

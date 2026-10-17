@@ -1,5 +1,5 @@
-// NAV2 layout: quake-1-re-ts/src/lib/nav.ts (retail-derived v12-v18).
-// NAV3 layout: q2repro/src/server/nav.c, inc/server/nav.h; quake-2-re-ts/src/server/nav.ts.
+// NAV2 layout: the reference port (retail-derived v12-v18).
+// NAV3 layout: q2repro/src/server/nav.c, inc/server/nav.h; the reference port
 // Copyright (C) 2003-2006 Andrey Nazarov. SPDX-License-Identifier: GPL-2.0-or-later
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";

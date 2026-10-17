@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from 'node:fs';
 import type { Q2ProtocolIdentity } from '../../../src/contracts/protocol.ts';
 import { openArchive } from '../../../src/content/archive/index.ts';
@@ -46,14 +48,14 @@ test('unknown versions/revisions, absent headers and truncated data reject expli
     for (const bytes of [new Uint8Array([1]), new Uint8Array([5, 0, 0, 0, 12]), demo(header(classic).slice(0, 7)), demo(new Uint8Array([10, 0, 65]))]) expect(() => readQ2DemoHeader(bytes)).toThrow();
 });
 
-const pak = '/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak';
+const pak = `${testCorpusRoot()}/q2/baseq2/pak0.pak`;
 test.skipIf(!existsSync(pak))('installed retail26 header retains raw version and actual world metadata', async () => {
     const archive = await openArchive(pak); try { const entry = archive.findEntries('demos/demo1.dm2')[0]; if (entry === undefined) throw new Error('demo1 absent');
         const bytes = await archive.readEntry(entry), before = bytes.slice(), decoded = readQ2DemoHeader(bytes);
         expect(decoded.recordedVersion).toBe(26); expect(decoded.protocol).toEqual(classic); expect(decoded.data.gamedir).toBe(''); expect(decoded.data.levelname).toBe('Installation'); expect(bytes).toEqual(before);
     } finally { await archive.close(); }
 });
-const installed = '/home/buzzkill/Projects/qfiles/q2/ctf/demos/2014-01-07-2001-lfctf1.dm2';
+const installed = `${testCorpusRoot()}/q2/ctf/demos/2014-01-07-2001-lfctf1.dm2`;
 test.skipIf(!existsSync(installed))('installed CTF34 header selects recorded directory independent of current game', async () => {
     const decoded = readQ2DemoHeader(await Bun.file(installed).bytes()); expect(decoded.recordedVersion).toBe(34); expect(decoded.protocol).toEqual(classic); expect(decoded.data.gamedir).toBe('ctf');
 });

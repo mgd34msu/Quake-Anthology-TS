@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,7 +12,7 @@ import { discoverInstalledContent, expectedProducts, presetChoice, resolveLaunch
 import type { LaunchPreset } from "../../../src/content/catalog/index.ts";
 import { openMountPlan } from "../../../src/content/mounts/index.ts";
 
-const corpusRoot = resolve(import.meta.dir, "../../../../qfiles");
+const corpusRoot = testCorpusRoot();
 
 function preset(content: ContentId): LaunchPreset {
   const provider = (role: string): ProviderReference => ({ provider: `q1:${role}`, content });

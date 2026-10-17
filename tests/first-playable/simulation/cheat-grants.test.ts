@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -18,7 +19,7 @@ const cases: readonly { readonly game: string; readonly map: string; readonly fo
   { game: "q2-rerelease-baseq2", map: "base1", foreign: true },
 ];
 for (const scenario of cases) test(`${scenario.game} giveall updates the chosen arsenal and named grants`, async () => {
-  const corpus = resolve(import.meta.dir, "../../../../qfiles");
+  const corpus = testCorpusRoot();
   const launch = parseApplicationCommand(["--content-root", corpus, "--game", scenario.game, "--map", scenario.map, "--movement", "q1", "--character", "q1", "--dedicated", "--mode", "singleplayer"]);
   if (launch.kind !== "run") throw new Error("Missing grant launch");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false }), preset = applicationPreset(catalog, launch.options);

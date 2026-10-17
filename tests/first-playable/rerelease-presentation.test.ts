@@ -1,4 +1,6 @@
 import { SaveReader } from "../../src/persistence/value.ts";
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import { readQ1FoundationCheckpoint } from "../../src/persistence/q1-foundation.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
@@ -32,7 +34,7 @@ test("rerelease fog messages preserve wire colors, world heights and interrupted
   expect(fog.current(2.5).density).toBe(1); expect(fog.current(3).density).toBe(0.5); expect(fog.current(3.5).density).toBe(0);
 });
 
-test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/rerelease/Q2Game.kpf"))("source story and sky callbacks use retail localization and draw centered pixels for the selected seat", async () => {
+test.skipIf(!existsSync(`${testCorpusRoot()}/q2/rerelease/Q2Game.kpf`))("source story and sky callbacks use retail localization and draw centered pixels for the selected seat", async () => {
   const command = parseApplicationCommand(["--game", "q2-rerelease-baseq2", "--map", "base1", "--renderer", "cpu", "--mode", "coop"]);
   if (command.kind !== "run") throw new Error("Expected application launch");
   const content = await loadApplicationContent(command.options), identity = createIdentityOwner("rerelease-presentation");
@@ -139,7 +141,7 @@ test("Q2 world and external brush lighting use the required donor default across
   }
 }, 60_000);
 
-test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK"))("Q1 actor presentation preserves raw alpha and scale for real MDL, SPR and brush assets", async () => {
+test.skipIf(!existsSync(`${testCorpusRoot()}/q1/id1/PAK0.PAK`))("Q1 actor presentation preserves raw alpha and scale for real MDL, SPR and brush assets", async () => {
   const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m1", "--dedicated", "--mode", "singleplayer"]);
   if (command.kind !== "run") throw new Error("Expected Q1 presentation launch");
   const content = await loadApplicationContent(command.options), identity = createIdentityOwner("q1-actor-opacity");

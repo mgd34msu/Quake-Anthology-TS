@@ -1,4 +1,6 @@
 import { SharedOriginalPickupAdmission } from "../../../src/world/gameplay/original-pickups.ts";
+import { corpusFile } from "../../support/corpus.ts";
+
 import type { RegularArmorState } from "../../../src/contracts/gameplay.ts";
 import type { OriginalPickupOffer } from "../../../src/contracts/original-pickups.ts";
 import { expect, test } from "bun:test";
@@ -24,7 +26,7 @@ import { Weapon, PersistentIndex, statSchema } from "../../../src/content/q3/bas
 import { parseQ3Bsp, adaptQ3Bsp } from "../../../src/formats/q3-map/index.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 
-const archivePath = resolve(process.env["Q3_DATA_PATH"] ?? resolve(import.meta.dir, "../../../../qfiles/q3a"), "baseq3/pak0.pk3");
+const archivePath = resolve(process.env["Q3_DATA_PATH"] ?? corpusFile("q3a"), "baseq3/pak0.pk3");
 const clock: ClockProfile = { kind: "q3", serverFrameMilliseconds: 100, fixedMovementMilliseconds: null, maximumCommandMilliseconds: 200 };
 
 function sourceRecipe(byteLength: number): ExecutableRecipe {

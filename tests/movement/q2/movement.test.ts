@@ -1,4 +1,6 @@
 import { sweepQ2Body } from "../../../src/movement/q2/swept.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { createMovementMath } from "../../../src/movement/q2/math.ts";
 import { plane } from "../../../src/movement/q2/types.ts";
 import type { Vec3 as SourceVector } from "../../../src/movement/q2/types.ts";
@@ -40,7 +42,7 @@ function rerelease(origin: Vec3, n64Physics = false): Q2RereleaseMovementInput {
 }
 
 async function level() {
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak");
+  const archive = await openArchive(`${testCorpusRoot()}/q2/baseq2/pak0.pak`);
   try {
     const entry = archive.findEntries("maps/base1.bsp")[0];
     if (entry === undefined) throw new Error("Retail base1 missing");
@@ -54,11 +56,11 @@ async function level() {
     return { world, origin: { x, y, z } };
   } finally { archive.close(); }
 }
-const installed = await Bun.file("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak").exists();
+const installed = await Bun.file(`${testCorpusRoot()}/q2/baseq2/pak0.pak`).exists();
 
-const q1ClassicArchive = await Bun.file("/home/buzzkill/Projects/qfiles/q1/id1/pak0.pak").exists()
-  ? "/home/buzzkill/Projects/qfiles/q1/id1/pak0.pak" : "/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK";
-for (const path of [q1ClassicArchive, "/home/buzzkill/Projects/qfiles/q1/rerelease/id1/pak0.pak"]) {
+const q1ClassicArchive = await Bun.file(`${testCorpusRoot()}/q1/id1/pak0.pak`).exists()
+  ? `${testCorpusRoot()}/q1/id1/pak0.pak` : `${testCorpusRoot()}/q1/id1/PAK0.PAK`;
+for (const path of [q1ClassicArchive, `${testCorpusRoot()}/q1/rerelease/id1/pak0.pak`]) {
 test.skipIf(!await Bun.file(path).exists())(`both Q2 movement profiles stop on Q1 floors after directional input ends: ${path}`, async () => {
   const archive = await openArchive(path);
   try {
@@ -212,7 +214,7 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
   });
 });
 
-const q3ArchivePath = "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3";
+const q3ArchivePath = `${testCorpusRoot()}/q3a/baseq3/pak0.pk3`;
 test.skipIf(!await Bun.file(q3ArchivePath).exists())("Q2 rerelease movement uses Q3 retail geometry and a separately selected character body", async () => {
   const archive = await openArchive(q3ArchivePath);
   try {

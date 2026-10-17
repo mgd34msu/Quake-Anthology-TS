@@ -1,4 +1,4 @@
-// Quake II / q2proto algorithms ported from quake-2-re-ts and original id Software sources. GPL-2.0-or-later.
+// Quake II / q2proto algorithms ported from the reference port and original id Software sources. GPL-2.0-or-later.
 import type { SizeBuf } from "../message.ts";
 import type { EntityStateT, PlayerStateT, UsercmdT } from "../state.ts";
 import type { ClcBatchMoveFrameT } from "./clc_batch_move.ts";

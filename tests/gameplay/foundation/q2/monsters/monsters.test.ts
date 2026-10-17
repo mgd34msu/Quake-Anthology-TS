@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../../support/corpus.ts";
+
 import { createIdentityOwner } from "../../../../../src/contracts/identity.ts";
 import type { OwnedActor } from "../../../../../src/contracts/identity.ts";
 import type { Vec3 } from "../../../../../src/contracts/math.ts";
@@ -83,7 +85,7 @@ describe("source soldier and infantry behavior", () => {
   test("real base1 monster rows are claimed with source health and inhibition", async () => {
     for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) {
       const scene = fixture(edition);
-      const archive = await openArchive(`/home/buzzkill/Projects/qfiles/q2/${edition === "classic" ? "" : "rerelease/"}baseq2/pak0.pak`);
+      const archive = await openArchive(`${testCorpusRoot()}/q2/${edition === "classic" ? "" : "rerelease/"}baseq2/pak0.pak`);
       try {
         const entry = archive.findEntries("maps/base1.bsp")[0];
         if (entry === undefined) throw new Error("Missing supplied base1 BSP");

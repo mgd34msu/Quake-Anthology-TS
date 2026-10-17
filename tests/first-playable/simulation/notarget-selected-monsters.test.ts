@@ -1,4 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
@@ -9,7 +11,7 @@ import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ProviderReference } from "../../../src/contracts/content.ts";
 import { BaseMonster } from "../../../src/content/q1/base/monsters.ts";
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 for (const edition of ["classic", "rerelease"] satisfies readonly ("classic" | "rerelease")[]) {
   test.skipIf(!existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))(`Q2 notarget stops already alerted ${edition} Q1 monsters with Q3 character and QuakeWorld movement`, async () => {
     const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q1", "--character", "q3", "--dedicated", "--mode", "singleplayer"]);

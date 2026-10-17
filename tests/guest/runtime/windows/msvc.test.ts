@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
+import { corpusFile } from "../../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { createContentDigest } from "../../../../src/contracts/content.ts";
 import type { GuestAddress, GuestCallContext, GuestCallValue, ModuleIdentity } from "../../../../src/contracts/execution.ts";
 import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from "../../../../src/guest/core/index.ts";
@@ -11,7 +11,7 @@ import { X64Cpu } from "../../../../src/guest/x64/index.ts";
 import { mapPeImage } from "../../../../src/guest/pe/index.ts";
 import { WindowsGuestRuntime } from "../../../../src/guest/runtime/windows/index.ts";
 
-const path = join(homedir(), "Projects/qfiles/q2/rerelease/baseq2/game_x64.dll");
+const path = corpusFile("q2/rerelease/baseq2/game_x64.dll");
 const p = (value: GuestAddress | null): GuestCallValue => ({ kind: "pointer", value });
 test.skipIf(!existsSync(path))("retail MSVC stringstream grows, formats, seeks and destroys its raw guest buffer", async () => {
   const bytes = new Uint8Array(await Bun.file(path).arrayBuffer()), digest = createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"));

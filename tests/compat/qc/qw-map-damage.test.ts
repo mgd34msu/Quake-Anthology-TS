@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { readFileSync } from 'node:fs';
 import { loadQcProgram, QcEntityMemory, QcMachine, classicQcEntityLayout, createQcBuiltins, createQcSourceSlotStorage } from '../../../src/compat/qc/index.ts';
 import type { QcBuiltin, QcHostBuiltinName } from '../../../src/compat/qc/index.ts';
@@ -9,7 +11,7 @@ import type { Id1PhysicsCallback } from '../../../src/content/q1/quakec/id1-envi
 import { Id1Environment } from '../../../src/content/q1/quakec/id1-environment.ts';
 
 test('native QW teledeath executes both invulnerability reversals with exact victim provenance', () => {
-  const program = loadQcProgram(readFileSync('/home/buzzkill/Projects/qfiles/q1/qw/qwprogs.dat'));
+  const program = loadQcProgram(readFileSync(`${testCorpusRoot()}/q1/qw/qwprogs.dat`));
   const entities = new QcEntityMemory(classicQcEntityLayout(program), 8, 4);
   const actors = new SessionActorRegistry(createIdentityOwner('qw-map-damage'));
   const slots = new SourceActorSlots(actors, { provider: 'test:qc', capacity: 8, lifetime: quakeEdictLifetime(1),

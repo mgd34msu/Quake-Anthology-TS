@@ -197,6 +197,12 @@ export interface QuakeCSourceOptions {
 }
 
 /** One source state owner, borrowed by the session's existing actor traversal. */
+/** Earlier checkpoints spelled the private dialect with an internal project name; accept and canonicalize it. */
+function readCheckpointDialect(field: SaveReader): RereleaseMessages {
+  const value = field.choice("known-retail", "q1-rerelease-private", "quake-1-re-ts-private");
+  return value === "quake-1-re-ts-private" ? "q1-rerelease-private" : value;
+}
+
 export class QuakeCSource {
   readonly machine: QcMachine;
   private readonly actorState: QcActorState;
@@ -490,7 +496,7 @@ export class QuakeCSource {
     const reader = new SaveReader(value, "quakec.source"), restore = this.options.restore;
     if (restore === undefined) return reader.fail("missing restore clients");
     const dialect = reader.field("messageDialect");
-    if ((dialect.value === undefined ? "known-retail" : dialect.choice("known-retail", "quake-1-re-ts-private")) !== (this.prepared.messageDialect ?? "known-retail")) return dialect.fail("QuakeC message dialect changed");
+    if ((dialect.value === undefined ? "known-retail" : readCheckpointDialect(dialect)) !== (this.prepared.messageDialect ?? "known-retail")) return dialect.fail("QuakeC message dialect changed");
     const teams = reader.field("teams");
     if (!isDeepStrictEqual(teams.value ?? [], this.prepared.teams ?? [])) return teams.fail("QuakeC team declarations changed");
     const combat = reader.field("combat");

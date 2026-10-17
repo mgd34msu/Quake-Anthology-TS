@@ -1,4 +1,4 @@
-// Reverb preset data ported from quake-2-re-ts/src/client/snd_environments.ts.
+// Reverb preset data ported from the reference port
 // SPDX-License-Identifier: GPL-2.0-or-later
 export type EfxReverbParamsT = {
     density: number;

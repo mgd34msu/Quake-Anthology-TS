@@ -1,4 +1,6 @@
 import { statSchema, PersistentIndex } from "../../../src/content/q3/base/shared/definitions.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { teleportPlayer } from "../../../src/content/q3/base/game/misc.ts";
 import { SimulationBotServices } from "../../../src/app/bootstrap/simulation/bots.ts";
 import { expect, test } from "bun:test";
@@ -16,7 +18,7 @@ import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { BotInventory, BotModelIndex } from "../../../src/bots/behavior/q3/ai-definitions.ts";
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 const retail = test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")) || !existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")));
 
 retail("Q3 map bots pursue mapped Q2 supplies and fire the actual selected arsenal", async () => {

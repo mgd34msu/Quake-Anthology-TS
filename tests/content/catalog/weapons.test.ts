@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot, corpusFile } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,7 +14,7 @@ import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
 import { StartupSelectionModel } from "../../../src/app/bootstrap/startup-selection.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 
-const corpusRoot = join(import.meta.dir, "../../../../qfiles");
+const corpusRoot = testCorpusRoot();
 
 test.skipIf(!existsSync(corpusRoot))("foreign base Q1 weapons resolve their own classic and rerelease assets", async () => {
   const catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
@@ -96,8 +98,8 @@ test.skipIf(!existsSync(corpusRoot))("foreign base Q2 weapons resolve source res
   }
 }, 60000);
 
-test.skipIf(!existsSync(resolve(import.meta.dir, "../../../../qfiles/q2/rerelease/baseq2/pak0.pak")))("Q2 cross-edition arsenals resolve distinct role clocks and retain map pickup ownership", async () => {
-  const catalog = await discoverInstalledContent({ corpusRoot: resolve(import.meta.dir, "../../../../qfiles"), discoverMods: false });
+test.skipIf(!existsSync(corpusFile("q2/rerelease/baseq2/pak0.pak")))("Q2 cross-edition arsenals resolve distinct role clocks and retain map pickup ownership", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: testCorpusRoot(), discoverMods: false });
   for (const mapEdition of ["classic", "rerelease"]) {
     const edition = mapEdition === "classic" ? "rerelease" : "classic";
     const command = parseApplicationCommand(["--game", `q2-${mapEdition}-baseq2`, "--map", "base1"]);

@@ -1,4 +1,6 @@
 import { NativeInputBinding } from "../../../../src/compat/q2/native-input.ts";
+import { testCorpusRoot, corpusFile } from "../../../support/corpus.ts";
+
 import { ModClientApplications } from "../../../../src/world/session/mod-client-applications.ts";
 import { createNumericOperations } from "../../../../src/core/numeric.ts";
 import { X86AbiAdapter } from "../../../../src/guest/abi/adapter.ts";
@@ -40,12 +42,12 @@ import { SizeBuf, SZ_Init } from "../../../../src/network/q2/message.ts";
 import type { RereleaseUnicast, RereleaseMulticast } from "../../../../src/compat/q2/rerelease/messages.ts";
 import { cgameExportLayout, cgameImportLayout, clientLayout, cvarLayout, edictLayout, entityStateLayout, fieldOffset, gameExportLayout, gameImportLayout, gameImports, guestBool, guestPointer, playerStateLayout, pmoveLayout, pmoveStateLayout, privateClientLayout, privateEdictPrefixLayout, readRereleasePlayerState, RereleaseCgame, RereleaseSourceClient, retailRereleaseClientProfile, signature, traceLayout, usercmdLayout } from "../../../../src/compat/q2/rerelease/index.ts";
 
-const dll = new URL("../../../../../qfiles/q2/rerelease/baseq2/game_x64.dll", import.meta.url);
+const dll = new URL(corpusFile("q2/rerelease/baseq2/game_x64.dll"), "file:///");
 export const available = await Bun.file(dll).exists();
 const activeSources: RereleaseGuestSource[] = [];
 afterEach(() => { for (const source of activeSources.splice(0)) source.close(); });
 export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => void, nativeBindings = false, commandArguments: () => readonly string[] = () => [], foreignDamage?: RereleaseForeignDamageServices, debugShapes?: (event: RereleaseDebugShapesEvent) => void, debugDrawing?: "headless", declaredWorld = false) {
-  const catalog = await discoverInstalledContent({ corpusRoot: new URL("../../../../../qfiles", import.meta.url).pathname, discoverMods: false });
+  const catalog = await discoverInstalledContent({ corpusRoot: testCorpusRoot(), discoverMods: false });
   const product = catalog.require("q2-rerelease-baseq2");
   using mounts = await openMountPlan(await catalog.createMountPlan({ id: createMountPlanId("test", "native-rerelease"), assets: product.id, geometry: product.id }));
   const artifact = await mounts.resolve("game_x64.dll"); if (artifact === null) throw new Error("Missing mounted native DLL");

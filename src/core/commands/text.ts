@@ -1,5 +1,5 @@
 /* Command parsing from Quake common.c, Quake II q_shared.c/cmd.c and
- * Quake III cmd.c; adapted from quake-3-ts/src/core/text.ts.
+ * Quake III cmd.c; adapted from the reference port
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { CommandDialect } from "../../contracts/common.ts";
 

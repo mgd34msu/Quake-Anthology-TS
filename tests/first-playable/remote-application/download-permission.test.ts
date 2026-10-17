@@ -1,4 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -15,7 +17,7 @@ for (const mode of ["disabled", "http-off"] satisfies readonly ("disabled" | "ht
   const destination = join(clientUsers, "q2/baseq2/sound/permission-fixture.wav"), cfg = join(clientUsers, "q2/baseq2/settings/client.cfg");
   await mkdir(join(clientUsers, "q2/baseq2/settings"), { recursive: true });
   await Bun.write(cfg, `set allow_download ${mode === "disabled" ? 0 : 1}\nset cl_http_downloads ${mode === "http-off" ? 0 : 1}\n`);
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak");
+  const archive = await openArchive(`${testCorpusRoot()}/q2/baseq2/pak0.pak`);
   const entry = archive.findEntries("sound/berserk/attack.wav")[0]; if (entry === undefined) throw new Error("Missing fixture sound");
   const sound = await archive.readEntry(entry); archive.close();
   await mkdir(join(serverUsers, "q2/baseq2/sound"), { recursive: true });

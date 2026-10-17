@@ -1,5 +1,5 @@
-/* Quake Q_atof and Quake III Cvar_SetValue, adapted from quake-1-re-ts
- * common/common.ts and quake-3-ts core/cvar.ts. GPL-2.0-or-later. */
+/* Quake Q_atof and Quake III Cvar_SetValue, adapted from the reference port
+ * common/common.ts and the reference port core/cvar.ts. GPL-2.0-or-later. */
 import { float32ToBits } from "../numeric.ts";
 
 export function quakeAtof(text: string): number {

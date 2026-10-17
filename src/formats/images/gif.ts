@@ -1,4 +1,4 @@
-/* Adapted from quake-2-re-ts/src/qcommon/gif.ts. GPL-2.0-or-later.
+/* Adapted from the reference port GPL-2.0-or-later.
  * The rerelease port composites disposal 2 to transparency. Timing stays with callers. */
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 import type { ImageLevel } from "../../contracts/render.ts";

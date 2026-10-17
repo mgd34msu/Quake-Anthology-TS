@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { Application } from "../../../src/app/bootstrap/application.ts";
@@ -12,7 +14,7 @@ import { q1MonsterSources } from "../../../src/content/monsters/q1.ts";
 import { parseQ1Entities } from "../../../src/formats/q1-map/index.ts";
 import { decodeCheckpointValue, SaveReader } from "../../../src/persistence/value.ts";
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 test.skipIf(!existsSync(resolve(corpus, "q1/rerelease/id1/pak0.pak")))("retail rerelease e1m3 preserves the native authored flying overlap with exact geometry", async () => {
   const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-id1", "--map", "e1m3", "--dedicated", "--mode", "singleplayer"]);
   if (command.kind !== "run") throw new Error("Missing rerelease launch");

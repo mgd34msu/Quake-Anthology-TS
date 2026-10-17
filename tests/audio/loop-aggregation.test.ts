@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import { openArchive } from '../../src/content/archive/index.ts';
 import { decodeWav } from '../../src/audio/wav.ts';
 import { AudioMixer } from '../../src/audio/mixer.ts';
@@ -12,7 +14,7 @@ function mixer(sounds:readonly PcmSound[],family:'q1'|'q2'='q2'){
  result.setListener(1,origin,axis);return result;
 }
 test('retail identical Q2 loops cap combined per-ear gain before painting PCM',async()=>{
- const archive=await openArchive('/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak');
+ const archive=await openArchive(`${testCorpusRoot()}/q2/baseq2/pak0.pak`);
  try{const entry=archive.entries.find(e=>e.path==='sound/world/flyby1.wav');if(entry===undefined)throw Error('Missing retail WAV');const sound=decodeWav(await archive.readEntry(entry),entry.path);
  const one=mixer([sound]).mix(4096),two=mixer([sound,sound]).mix(4096);expect(one.some(sample=>sample!==0)).toBe(true);expect(two).toEqual(one);
  }finally{archive.close();}

@@ -1,4 +1,6 @@
 import { encodeCheckpointValue, decodeCheckpointValue } from "../../../src/persistence/value.ts";
+import { corpusFile } from "../../support/corpus.ts";
+
 import { expect, test } from 'bun:test';
 import { openArchive } from '../../../src/content/archive/index.ts';
 import { openMountPlan, digestFile } from '../../../src/content/mounts/index.ts';
@@ -13,7 +15,7 @@ import { SessionActorRegistry, SharedBodyTable, SourceActorSlots, quakeEdictLife
 import { createSceneQueries } from '../../../src/world/collision/index.ts';
 import { readQ1Bsp } from '../../../src/formats/q1-map/index.ts';
 
-const corpus=new URL('../../../../qfiles/q1/',import.meta.url).pathname;
+const corpus=corpusFile("q1/");
 test('actual QW QC prints, door sounds and multicast retain native destinations and source ownership',async()=>{
   const program=loadQcProgram(new Uint8Array(await Bun.file(corpus+'qw/qwprogs.dat').arrayBuffer()));
   expect(program.api.kind).toBe('q1-quakeworld');

@@ -15,7 +15,7 @@ remain unavailable. Preserve the original archive names and loose companion file
 Use this layout:
 
 ```text
-qfiles/
+games/
   quake-typescript                 # optional compiled executable
   q1/
     id1/                          # classic Quake: pak0.pak, pak1.pak

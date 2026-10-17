@@ -2,7 +2,7 @@ import { movementBounds } from "../body-shape.ts";
 import { sweepQ2Body } from "./swept.ts";
 /* Copyright (c) ZeniMax Media Inc.
  * Licensed under the GNU General Public License 2.0.
- * Ported through quake-2-re-ts and checked against rerelease/p_move.cpp. */
+ * Ported through the reference port and checked against rerelease/p_move.cpp. */
 import type { NumericOperations } from "../../contracts/numeric.ts";
 import type { Vec3 as SceneVector } from "../../contracts/math.ts";
 import { characterHeight } from "./dimensions.ts";

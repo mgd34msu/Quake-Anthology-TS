@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Ported from quake-1-re-ts/src/lib/kfont.ts.
+// Ported from the reference port
 export const KFONT_ASCII_MIN = 32;
 export const KFONT_ASCII_MAX = 126;
 const KFONT_NUM_CHARS = KFONT_ASCII_MAX - KFONT_ASCII_MIN + 1;

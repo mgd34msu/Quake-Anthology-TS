@@ -1,4 +1,6 @@
 import type { ActorCommand } from "../../../src/contracts/session.ts";
+import { testCorpusRoot, corpusFile } from "../../support/corpus.ts";
+
 import { nextActorGeneration } from '../../../src/world/actors/registry.ts';
 import { knownQvmArtifacts } from "../../../src/compat/qvm/artifacts.ts";
 import type { ModuleIdentity, Q3ApiIdentity } from "../../../src/contracts/execution.ts";
@@ -15,7 +17,7 @@ import { Q3SceneRecorder } from "../../../src/content/q3/presentation/scene.ts";
 import { UnifiedAudio } from "../../../src/audio/index.ts";
 import { expect, test, spyOn } from 'bun:test';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, copyFileSync, constants, writeFileSync, existsSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Q3ClientDownload } from '../../../src/network/q3/download.ts';
 import { Application } from '../../../src/app/bootstrap/application.ts';
@@ -46,7 +48,7 @@ function fixturePk3(path = 'wire-probe.cfg', repeats = 400): Uint8Array<ArrayBuf
 }
 
 test('protocol68 UDP admission moves the shared Application actor and publishes source snapshots', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'q3-native-package-')), base = join(root, 'q3a/baseq3'), original = join(homedir(), 'Projects/qfiles/q3a/baseq3');
+  const root = mkdtempSync(join(tmpdir(), 'q3-native-package-')), base = join(root, 'q3a/baseq3'), original = corpusFile("q3a/baseq3");
   mkdirSync(base, { recursive: true });
   for (const name of readdirSync(original)) if (name.endsWith('.pk3')) copyFileSync(join(original, name), join(base, name), constants.COPYFILE_FICLONE);
   const fixture = fixturePk3(); writeFileSync(join(base, 'wire-fixture.pk3'), fixture);
@@ -162,7 +164,7 @@ test('production protocol68 remote adapter joins actual baseq3 and submits nativ
   const { Q3ClientNetwork } = await import('../../../src/app/bootstrap/network/q3-client.ts');
   const { Q3RemotePresentation } = await import('../../../src/app/bootstrap/network/remote-q3.ts');
   const { EngineSession } = await import('../../../src/world/session/session.ts');
-  const parsed = parseApplicationCommand(['--content-root', join(homedir(), 'Projects/qfiles'), '--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--dedicated', '--mode', 'deathmatch', '--listen', '0', '--bind', '127.0.0.1']);
+  const parsed = parseApplicationCommand(['--content-root', testCorpusRoot(), '--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--dedicated', '--mode', 'deathmatch', '--listen', '0', '--bind', '127.0.0.1']);
   if (parsed.kind !== 'run') throw new Error('Missing application options');
   const app = await Application.open(parsed.options, { print: () => undefined });
   app.simulation.q3Source()?.host.cvars.set('sv_pure', '0', true);
@@ -223,7 +225,7 @@ test('production protocol68 shared remote frontend draws retail q3dm1 and travel
   const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
   const root = mkdtempSync(join(tmpdir(), 'q3-browser-wiring-'));
   const browser = await StartupServerBrowser.open(new ConfigStore(join(root, 'browser-settings')));
-  const common = ['--content-root', join(homedir(), 'Projects/qfiles'), '--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch'];
+  const common = ['--content-root', testCorpusRoot(), '--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch'];
   const selected = parseApplicationCommand([...common, '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
   if (selected.kind !== 'run') throw new Error('Missing server options');
   const prints: string[] = [], host = { saveDirectory: join(root, 'saves'), serverBrowser: browser, print: (text: string): undefined => { prints.push(text); return undefined; } };
@@ -363,7 +365,7 @@ test('production protocol68 shared remote frontend draws retail q3dm1 and travel
 test('native Q3 downloads a referenced user package before guest init and pure admission', async () => {
   const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
   const root = mkdtempSync(join(tmpdir(), 'q3-remote-download-')), corpus = join(root, 'server'), base = join(corpus, 'q3a/baseq3');
-  const original = join(homedir(), 'Projects/qfiles'), users = join(root, 'user-content');
+  const original = testCorpusRoot(), users = join(root, 'user-content');
   mkdirSync(base, { recursive: true });
   for (const name of readdirSync(join(original, 'q3a/baseq3'))) if (name.endsWith('.pk3')) copyFileSync(join(original, 'q3a/baseq3', name), join(base, name), constants.COPYFILE_FICLONE);
   const bytes = fixturePk3('wire-probe.dat'); writeFileSync(join(base, 'zzz-wire-fixture.pk3'), bytes);
@@ -438,7 +440,7 @@ test('native Q3 downloads a referenced user package before guest init and pure a
 test('native Q3 retries an interrupted second referenced package before guest initialization', async () => {
   const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
   const root = mkdtempSync(join(tmpdir(), 'q3-multiple-download-')), corpus = join(root, 'server'), base = join(corpus, 'q3a/baseq3');
-  const original = join(homedir(), 'Projects/qfiles'), users = join(root, 'user-content'), destination = join(users, 'q3a/baseq3');
+  const original = testCorpusRoot(), users = join(root, 'user-content'), destination = join(users, 'q3a/baseq3');
   mkdirSync(base, { recursive: true });
   for (const name of readdirSync(join(original, 'q3a/baseq3'))) if (name.endsWith('.pk3')) copyFileSync(join(original, 'q3a/baseq3', name), join(base, name), constants.COPYFILE_FICLONE);
   const packages = [
@@ -493,7 +495,7 @@ test('native Q3 retries an interrupted second referenced package before guest in
 test('unknown mounted LRCTF clients run the production baseQ3 ABI for thirty active seconds', async () => {
   const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
   const root = mkdtempSync(join(tmpdir(), 'q3-unknown-client-'));
-  const common = ['--content-root', join(homedir(), 'Projects/qfiles'), '--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch'];
+  const common = ['--content-root', testCorpusRoot(), '--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch'];
   const selected = parseApplicationCommand([...common, '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
   if (selected.kind !== 'run') throw new Error('Missing server options');
   const prints: string[] = [], modules: { role: 'ui' | 'cgame'; module: ModuleIdentity; api: Q3ApiIdentity }[] = [];

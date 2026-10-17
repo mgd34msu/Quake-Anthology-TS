@@ -1,4 +1,4 @@
-// Q3 botlib VM records, derived from id Software and quake-3-ts. GPL-2.0-or-later.
+// Q3 botlib VM records, derived from id Software and the reference port. GPL-2.0-or-later.
 import type { Vec3 } from "../../contracts/math.ts";
 import type { BotGoal } from "../../bots/behavior/library/goals.ts";
 import type { BotInitMove, BotMoveResult } from "../../bots/behavior/q3/movement-state.ts";

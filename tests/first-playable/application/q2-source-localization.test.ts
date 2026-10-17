@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { createMountIdentity, type ContentId, type ContentMount } from "../../../src/contracts/content.ts";
 import { digestFile, openMountPlan } from "../../../src/content/mounts/index.ts";
@@ -27,7 +29,7 @@ test("Q2 presentation keeps missing keys, argument text and source newlines with
 });
 
 test("Q2 base and expansion source messages use their mounted catalog and selected seat language", async () => {
-  const archivePath = "/home/buzzkill/Projects/qfiles/q2/rerelease/Q2Game.kpf";
+  const archivePath = `${testCorpusRoot()}/q2/rerelease/Q2Game.kpf`;
   const archiveDigest = await digestFile(archivePath);
   const sources: readonly ContentId[] = ["q2:rerelease:baseq2:retail", "q2:rerelease:xatrix:retail", "q2:rerelease:rogue:retail", "q2:rerelease:mg1:retail"];
   for (const source of sources) {

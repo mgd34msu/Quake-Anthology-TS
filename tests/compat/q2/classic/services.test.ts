@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -41,7 +43,7 @@ test("native CRT files preserve dispositions, cursor-independent IO and containe
     expect(open("outside/native-test", { read: true, write: true, creation: 2 })).toBeNull();
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
-const dll = "/home/buzzkill/Projects/qfiles/q2/ctf/gamex86.dll", pak = "/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak";
+const dll = `${testCorpusRoot()}/q2/ctf/gamex86.dll`, pak = `${testCorpusRoot()}/q2/baseq2/pak0.pak`;
 test.skipIf(!existsSync(dll) || !existsSync(pak))("actual DLL shares BSP collision, borrowed actors, player state, wire messages and disk lifetime", async () => {
   const archive = await openArchive(pak);
   const geometry = decodeQ2Map(await archive.readEntry(required(archive.findEntries("maps/base1.bsp")[0])), "base1");

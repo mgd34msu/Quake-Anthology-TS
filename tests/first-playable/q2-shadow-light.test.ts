@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { SceneCamera } from "../../src/contracts/render.ts";
@@ -11,7 +13,7 @@ import { createSceneQueries } from "../../src/world/collision/index.ts";
 import { anglesToAxis } from "../../src/core/math.ts";
 import { perspectiveProjection } from "../../src/render/scene/view.ts";
 
-test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/rerelease/Q2Game.kpf"))("retail Q2 shadow lights preserve source toggle, cone, fade and atlas metadata", async () => {
+test.skipIf(!existsSync(`${testCorpusRoot()}/q2/rerelease/Q2Game.kpf`))("retail Q2 shadow lights preserve source toggle, cone, fade and atlas metadata", async () => {
   const command = parseApplicationCommand(["--game", "q2-rerelease-baseq2", "--map", "base1", "--renderer", "cpu"]);
   if (command.kind !== "run") throw new Error("Expected application launch");
   const content = await loadApplicationContent(command.options), identity = createIdentityOwner("shadow-light-source");

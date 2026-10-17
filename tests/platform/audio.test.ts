@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
+import { corpusFile } from "../support/corpus.ts";
+
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { SdlAudioDevice, SdlAudioUnavailableError } from "../../src/platform/audio.ts";
@@ -7,7 +9,7 @@ import { VorbisDecoder } from "../../src/platform/vorbis.ts";
 import { UnifiedAudio } from "../../src/audio/engine.ts";
 
 const fixture = process.env["QUAKE_TEST_OGG"]
-  ?? new URL("../../../qfiles/q1/rerelease/id1/music/track02.ogg", import.meta.url).pathname;
+  ?? corpusFile("q1/rerelease/id1/music/track02.ogg");
 
 if (process.env["QUAKE_AUDIO_TEST_CHILD"] !== "1") {
   test("real SDL audio tests use an isolated dummy driver", async () => {

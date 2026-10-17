@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { decodeArchive, normalizeEntryPath, openArchive, openLooseEntry, readLooseEntry } from "../../../src/content/archive/index.ts";
 
 function duplicatePak(path = "Models\\duplicate.mdl"): Uint8Array {
@@ -73,7 +75,7 @@ test("loose reads stay within their root and reject changed retained bytes", asy
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 const q3Archive = join(corpus, "q3a/baseq3/pak0.pk3");
 
 test.skipIf(!existsSync(q3Archive))("parallel Sarge asset reads match sequential reads from one retained archive", async () => {

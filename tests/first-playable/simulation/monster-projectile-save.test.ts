@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { resolve, join } from "node:path";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
+import {join } from "node:path";
 import { existsSync } from "node:fs";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { monsterSources } from "../../../src/content/monsters/definitions.ts";
@@ -24,7 +26,7 @@ function continuation(simulation: ReturnType<typeof createSimulation>): string {
   return JSON.stringify({ source: selected(simulation), bodies: simulation.checkpoint().bodies }, (key: string, value: unknown) => key === "generation" ? 0 : value);
 }
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 test.skipIf(!existsSync(join(corpus, "q2/baseq2/pak0.pak")))("selected Q2 soldier blaster restores into a fresh runtime and hits its target with the saved owner", async () => {
   const command = parseApplicationCommand(["--content-root", corpus, "--game", "q2-classic-baseq2", "--map", "base1", "--dedicated", "--mode", "singleplayer"]);
   if (command.kind !== "run") throw new Error("Expected Q2 launch");

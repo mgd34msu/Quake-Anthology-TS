@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createIdentityOwner } from '../../src/contracts/identity.ts';
@@ -18,7 +20,7 @@ import { openArchive } from '../../src/content/archive/index.ts';
 import { decodeQ3World } from '../../src/formats/q3-map/index.ts';
 import { add3, sub3, radiusFromBounds } from '../../src/core/math.ts';
 
-const path = resolve(process.env['QUAKE_DATA_PATH'] ?? resolve(import.meta.dir, '../../../qfiles'), 'q3a/baseq3/pak0.pk3');
+const path = resolve(testCorpusRoot(), 'q3a/baseq3/pak0.pk3');
 
 test.skipIf(!existsSync(path))('guest records borrow located memory across shared links, owner changes, brush and capsule contacts', async () => {
   const archive = await openArchive(path);

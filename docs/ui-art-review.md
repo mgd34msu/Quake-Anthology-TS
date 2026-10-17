@@ -30,7 +30,7 @@ These checks establish usable raster files and source-slice metadata. Native SDL
 
 ## Generation provenance
 
-The generator saved originals under `/home/buzzkill/.codex/generated_images/01a08eef-7a22-7b30-8721-5ccbf7357644/`.
+The generator saved originals under the author's machine.
 
 | Selected asset | Original generated filename |
 | --- | --- |

@@ -1,4 +1,4 @@
-// Adapted from quake-1-re-ts and id Software Quake. GPL-2.0-or-later.
+// Adapted from the reference port and id Software Quake. GPL-2.0-or-later.
 export const PROTOCOL_VERSION = 15;
 export const U_MOREBITS = 1 << 0;
 export const U_ORIGIN1 = 1 << 1;

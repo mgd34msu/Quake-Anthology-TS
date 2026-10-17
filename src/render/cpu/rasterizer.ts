@@ -1,5 +1,5 @@
 import { createTextureResolver } from "../commands/dynamic-texture.ts";
-/* Quake III CPU backend adapted from quake-3-ts/src/render/cpu/rasterizer.ts.
+/* Quake III CPU backend adapted from the reference port
  * Fixed-function state follows id Software tr_backend.c and tr_shadows.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
  * Clipping and rasterization algorithms are from the TypeScript donor. */

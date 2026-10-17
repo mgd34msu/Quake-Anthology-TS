@@ -1,6 +1,6 @@
 # Quake III comparison and shared-engine decisions
 
-Audit date: 2026-09-12. Donor: `/home/buzzkill/Projects/quake-3-ts`. Unified engine: this repository. The [Q3 feature inventory](../verification/features/q3.json) records donor revision `8453c49824eb7a5ed5aee452f74e19336965d1f8` and 104 requirements. Its `sourceStatus` describes the donor; `targetStatus: required` is a requirement, not an acceptance result. The appendix preserves every Q3 ID without changing the larger feature inventory.
+Audit date: 2026-09-12. Donor: the Q3 reference port. Unified engine: this repository. The Q3 feature inventory records donor revision `8453c49824eb7a5ed5aee452f74e19336965d1f8` and 104 requirements. Its `sourceStatus` describes the donor; `targetStatus: required` is a requirement, not an acceptance result. The appendix preserves every Q3 ID without changing the larger feature inventory.
 
 The intended result is one engine with the strongest useful capabilities from every family. Q3 does not win an overlapping subsystem merely because it is newer. The existing common frame, actor identity, combat authority, scene, and device ownership are the foundation for composition. Several source algorithms still run separately behind those interfaces; sharing an API does not establish that their implementations have been consolidated.
 
@@ -23,7 +23,7 @@ This is a source audit with bounded execution evidence identified below. Referen
 
 ## Source, joins, evidence, and remaining work
 
-Paths in the donor column are relative to `/home/buzzkill/Projects/quake-3-ts`; paths in the other columns are relative to this repository. A checked item denotes only the bounded fact stated in that row. An unchecked item still needs the stated integration or acceptance work.
+Paths in the donor column are relative to the Q3 reference port; paths in the other columns are relative to this repository. A checked item denotes only the bounded fact stated in that row. An unchecked item still needs the stated integration or acceptance work.
 
 | Area | Donor implementation | Unified source and actual call path | Evidence and acceptance boundary |
 | --- | --- | --- | --- |

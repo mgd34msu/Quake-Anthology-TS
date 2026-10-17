@@ -112,7 +112,11 @@ function generate(root: string, species: string): void {
 }
 
 if (import.meta.main) {
-  const root = resolve(import.meta.dir, "../../../../../../qsrc/quake2-rerelease-dll/rerelease");
+  // Point QTS_Q2_RERELEASE_SOURCE at a checkout of the public Quake II
+  // rerelease DLL source (the directory holding the per-monster .cpp files).
+  const sourceRoot = process.env["QTS_Q2_RERELEASE_SOURCE"];
+  if (sourceRoot === undefined) throw new Error("Set QTS_Q2_RERELEASE_SOURCE to the Quake II rerelease DLL source directory");
+  const root = resolve(sourceRoot);
   for (const species of process.argv.slice(2)) generate(root, species);
   const flashes = [...constants(clean(readFileSync(resolve(root, "game.h"), "utf8")))].filter(([name]) => name.startsWith("MZ2_"));
   writeFileSync(resolve(import.meta.dir, "tables/flashes.ts"), `// Original rerelease/game.h muzzle-flash enum. ZeniMax Media, GPL-2.0.\nexport const rereleaseFlash = {\n${flashes.map(([name, value]) => `  ${name.slice(4)}: ${value},`).join("\n")}\n};\n`);

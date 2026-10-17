@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
+import { corpusFile } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import type { GuestAddress, ModuleIdentity } from "../../../src/contracts/execution.ts";
@@ -9,7 +10,7 @@ import { SparseGuestMemory } from "../../../src/guest/core/index.ts";
 import type { GuestImportResolver } from "../../../src/guest/core/index.ts";
 import { inspectElf, loadElf } from "../../../src/guest/elf/index.ts";
 
-const archivePath = resolve(import.meta.dir, "../../../../qfiles/quakelive/baseq3/bin.pk3");
+const archivePath = corpusFile("quakelive/baseq3/bin.pk3");
 // Independent readelf -h -l -d -r --dyn-syms -wf observations of these exact archive members.
 // Quake Live is external compatibility evidence, separate from official Quake III products.
 const witnesses = [

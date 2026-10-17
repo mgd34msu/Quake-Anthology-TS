@@ -1,4 +1,6 @@
 import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
+import { homedir } from "node:os";
+
 import { ModMatchState } from "../../../src/world/session/mod-match.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -17,7 +19,7 @@ import { QcModProvider } from "../../../src/compat/qc/mod-provider.ts";
 import { loadQcProgram } from "../../../src/compat/qc/program.ts";
 import { parseEntities } from "../../../src/core/common-parse.ts";
 
-const path = "/home/buzzkill/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat";
+const path = `${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`;
 test.skipIf(!await Bun.file(path).exists())("original Copper combat owns health and authored pain/death callbacks inside shared Q2 authority", async () => {
   const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1"]);
   if (command.kind !== "run") throw new Error("Missing Q2 destination");

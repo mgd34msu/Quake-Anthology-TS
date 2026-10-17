@@ -1,4 +1,4 @@
-/* Adapted from quake-3-ts/src/core/binary.ts. GPL-2.0-or-later. */
+/* Adapted from the reference port GPL-2.0-or-later. */
 
 export class BinaryError extends Error {
   constructor(

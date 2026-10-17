@@ -1,6 +1,6 @@
 import { readQ2ProEntityBits, readQ2ProEntity, writeQ2ProEntity, readQ2ProInt23, writeQ2ProInt23, readQ2ProVar64, writeQ2ProVar64, readQ2ProFog, writeQ2ProFog, q2proFogBits, q2proExtensions, q2proExtensionsV2, type Q2ProFeatures } from './q2pro-fields.ts';
 import { readElement } from '../state.ts';
-// Quake II / q2proto algorithms ported from quake-2-re-ts and original id Software sources. GPL-2.0-or-later.
+// Quake II / q2proto algorithms ported from the reference port and original id Software sources. GPL-2.0-or-later.
 import type { SizeBuf } from "../message.ts";
 import { MSG_WriteByte, MSG_WriteChar, MSG_WriteShort, MSG_WriteLong, MSG_WriteString, MSG_WriteAngle16, MSG_WriteDeltaUsercmd, MSG_ReadDeltaUsercmd, MSG_ReadByte, MSG_ReadShort, MSG_ReadWord, MSG_ReadLong, MSG_ReadString, MSG_ReadChar, MSG_ReadAngle16, MSG_ReadData, SZ_Write } from "../message.ts";
 import { PROTOCOL_VERSION_Q2PRO, PROTOCOL_VERSION_Q2PRO_CURRENT, U_REMOVE, U_NUMBER16, U_MOREBITS1, SvcOpsT, PS_M_TYPE, PS_M_ORIGIN, PS_M_VELOCITY, PS_M_TIME, PS_M_FLAGS, PS_M_GRAVITY, PS_M_DELTA_ANGLES, PS_VIEWOFFSET, PS_VIEWANGLES, PS_KICKANGLES, PS_BLEND, PS_FOV, PS_WEAPONINDEX, PS_WEAPONFRAME, PS_RDFLAGS, EPS_GUNOFFSET, EPS_GUNANGLES, EPS_M_VELOCITY2, EPS_M_ORIGIN2, EPS_VIEWANGLE2, EPS_STATS, CM_ANGLE1, CM_ANGLE2, CM_ANGLE3, CM_FORWARD, CM_SIDE, CM_UP, CM_BUTTONS, CM_IMPULSE } from "../constants.ts";

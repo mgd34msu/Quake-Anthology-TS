@@ -1,4 +1,6 @@
 import type { ProviderReference } from "../../../src/contracts/content.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -23,7 +25,7 @@ function selected(simulation: ReturnType<typeof createSimulation>, provider: str
 function continuation(simulation: ReturnType<typeof createSimulation>, provider: string): string {
   return JSON.stringify({ source: selected(simulation, provider), bodies: simulation.checkpoint().bodies }, (key: string, value: unknown) => key === "generation" ? 0 : value);
 }
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 for (const edition of ["classic", "rerelease"]) test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")) || !existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))(`retail train selected ${edition} flipper swims from its authored water placement, bites and restores`, async () => {
   const command = parseApplicationCommand(["--content-root", corpus, "--game", `q2-${edition}-baseq2`, "--map", "train", "--dedicated", "--mode", "singleplayer"]);
   if (command.kind !== "run") throw new Error("Expected Q2 launch");

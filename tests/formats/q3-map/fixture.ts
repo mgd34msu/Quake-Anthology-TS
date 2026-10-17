@@ -1,4 +1,4 @@
-/* Q3 BSP fixture adapted from quake-3-ts. GPL-2.0-or-later. */
+/* Q3 BSP fixture adapted from the reference implementation. GPL-2.0-or-later. */
 import { expect } from "bun:test";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
 

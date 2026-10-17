@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { corpusFile } from "../../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { createContentId, createMountId, createMountIdentity, createMountPlanId } from "../../../../src/contracts/content.ts";
 import type { ArchiveMount } from "../../../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
@@ -23,7 +24,7 @@ import { SharedInventoryTable } from "../../../../src/world/gameplay/inventory.t
 import { createQ3CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/policies.ts";
 
 const zero = { x: 0, y: 0, z: 0 };
-const archivePath = resolve(import.meta.dir, "../../../../../qfiles/q3a/baseq3/pak0.pk3");
+const archivePath = corpusFile("q3a/baseq3/pak0.pk3");
 
 describe("permanent Q3 character foundation", () => {
   test.skipIf(!existsSync(archivePath))("loads and animates real Sarge parts through MD3 tags", async () => {

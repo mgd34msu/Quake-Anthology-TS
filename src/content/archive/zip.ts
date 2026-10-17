@@ -1,5 +1,5 @@
-// Central/local header validation adapted from quake-3-ts/src/assets/pk3.ts.
-// STORE/DEFLATE extraction follows quake-1-re-ts/src/lib/zipfile.ts.
+// Central/local header validation adapted from the reference port
+// STORE/DEFLATE extraction follows the reference port
 // GPL-2.0-or-later.
 import { inflateRawSync } from "node:zlib";
 import type { ArchiveFormat } from "../../contracts/content.ts";

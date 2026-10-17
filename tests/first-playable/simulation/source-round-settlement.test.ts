@@ -1,4 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { SharedSimulation } from "../../../src/app/bootstrap/simulation/runtime.ts";
@@ -20,7 +22,7 @@ function accounting(simulation: SharedSimulation) {
 for (const fixture of [{ movement: "q3", character: "q3", residual: 0 }, { movement: "q3", character: "q3", residual: 25 },
   { movement: "q1", character: "q1", residual: 25 }] satisfies readonly { movement: GameFamily; character: GameFamily; residual: number }[]) {
   test(`${fixture.movement} round settles four shared frames at current time and preserves ${fixture.residual}ms residual`, async () => {
-    const launch = parseApplicationCommand(["--content-root", "/home/buzzkill/Projects/qfiles", "--game", "q3-baseq3", "--map", "q3dm1",
+    const launch = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--game", "q3-baseq3", "--map", "q3dm1",
       "--movement", fixture.movement, "--character", fixture.character, "--mode", "deathmatch", "--dedicated"]);
     if (launch.kind !== "run") throw new Error("Missing source settlement launch");
     const content = await loadApplicationContent(launch.options), identity = createIdentityOwner(`settlement-${fixture.movement}-${fixture.residual}`);

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
+import { corpusFile } from "../../support/corpus.ts";
+
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import type { GuestAddress, ModuleIdentity } from "../../../src/contracts/execution.ts";
 import { createGuestProcessorState, createManagedGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from "../../../src/guest/core/index.ts";
@@ -289,7 +291,7 @@ test("WAIT dispatches shared x87 state and preserves a pending exception at its 
   expect(pending.state.x87.statusWord).toBe(1);
 });
 
-const dllPath = new URL("../../../../qfiles/q2/rerelease/baseq2/game_x64.dll", import.meta.url);
+const dllPath = new URL(corpusFile("q2/rerelease/baseq2/game_x64.dll"), "file:///");
 test.skipIf(!await Bun.file(dllPath).exists())("actual rerelease DLL .text+0 executes its linked-list initializer", async () => {
   const bytes = new Uint8Array(await Bun.file(dllPath).arrayBuffer());
   expect(new Bun.CryptoHasher("sha256").update(bytes).digest("hex")).toBe("045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd");

@@ -1,4 +1,6 @@
 import { RawAudioStream } from "../../src/audio/streams.ts";
+import { testCorpusRoot, corpusFile } from "../support/corpus.ts";
+
 import { encodeCheckpointValue, decodeCheckpointValue } from "../../src/persistence/value.ts";
 import { SoftwareRenderer, CpuRenderTarget } from "../../src/render/cpu/index.ts";
 import { SceneImageRegistry } from "../../src/render/scene/resources.ts";
@@ -142,7 +144,7 @@ test("material uploads acknowledge execution and malformed OGV fails before nati
   expect(() => new CinematicPlayback(cinematicBytes("ogv", new Uint8Array([0]), "intro.ogv"), options)).toThrow("Invalid or truncated Ogg page");
 });
 
-const corpus = "/home/buzzkill/Projects/qfiles";
+const corpus = `${testCorpusRoot()}`;
 const cinPath = `${corpus}/q2/baseq2/video/idlog.cin`;
 test.skipIf(!existsSync(cinPath))("retail Q2 CIN and expansion movies decode real video and PCM", () => {
   for (const [name, width, height, channels] of [
@@ -259,7 +261,7 @@ test("dynamic movie textures resolve in draw order, resize once and retry a fail
   } finally { target.close(); }
 });
 
-for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.skipIf(process.env["SDL_VIDEODRIVER"] !== "offscreen" || !existsSync("../qfiles/q3a/missionpack/pak0.pk3"))(`shipped Team Arena videoMap executes through shared ${rendererKind} world materials`, async () => {
+for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.skipIf(process.env["SDL_VIDEODRIVER"] !== "offscreen" || !existsSync(corpusFile("q3a/missionpack/pak0.pk3")))(`shipped Team Arena videoMap executes through shared ${rendererKind} world materials`, async () => {
   const { ApplicationAssets } = await import("../../src/app/bootstrap/assets.ts");
   const { loadApplicationContent } = await import("../../src/app/bootstrap/content.ts");
   const { parseApplicationCommand } = await import("../../src/app/bootstrap/options.ts");
@@ -268,7 +270,7 @@ for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) te
   const { anglesToAxis, vectorToAngles } = await import("../../src/core/math.ts");
   const { perspectiveProjection } = await import("../../src/render/scene/view.ts");
   const { encodePng } = await import("../../src/formats/images/png.ts");
-  const parsed = parseApplicationCommand(["--content-root", "../qfiles", "--game", "q3-missionpack", "--map", "mpteam1", "--dedicated"]);
+  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-missionpack", "--map", "mpteam1", "--dedicated"]);
   if (parsed.kind !== "run") throw new Error("Missing Team Arena selection");
   const content = await loadApplicationContent(parsed.options);
   const identity = createIdentityOwner(`world-video-${rendererKind}`), owner = { identity: Symbol("world-video"), session: identity.session, generation: 0 };
@@ -355,7 +357,7 @@ for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) te
   } finally { assets.close(); renderer.close(); await content.close(); }
 }, 60000);
 
-test.skipIf(process.env["SDL_AUDIODRIVER"] !== "dummy" || !existsSync("../qfiles/q3a/missionpack/pak0.pk3"))("Q3 UI movies use shared execution-owned images and release reused handles", async () => {
+test.skipIf(process.env["SDL_AUDIODRIVER"] !== "dummy" || !existsSync(corpusFile("q3a/missionpack/pak0.pk3")))("Q3 UI movies use shared execution-owned images and release reused handles", async () => {
   const { ApplicationAssets } = await import("../../src/app/bootstrap/assets.ts");
   const { ApplicationQ3Assets } = await import("../../src/app/bootstrap/q3-client/assets.ts");
   const { ApplicationQ3Cinematics } = await import("../../src/app/bootstrap/q3-client/cinematics.ts");
@@ -363,7 +365,7 @@ test.skipIf(process.env["SDL_AUDIODRIVER"] !== "dummy" || !existsSync("../qfiles
   const { loadApplicationContent } = await import("../../src/app/bootstrap/content.ts");
   const { parseApplicationCommand } = await import("../../src/app/bootstrap/options.ts");
   const { Draw2D, TextCommandSink } = await import("../../src/text/draw2d.ts");
-  const parsed = parseApplicationCommand(["--content-root", "../qfiles", "--game", "q3-missionpack", "--map", "mpteam1", "--dedicated"]);
+  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-missionpack", "--map", "mpteam1", "--dedicated"]);
   if (parsed.kind !== "run") throw new Error("Missing Team Arena selection");
   const content = await loadApplicationContent(parsed.options);
   const identity = createIdentityOwner("ui-video"), owner = { identity: Symbol("ui-video"), session: identity.session, generation: 0 };

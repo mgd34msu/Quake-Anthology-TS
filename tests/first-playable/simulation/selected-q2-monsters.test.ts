@@ -1,4 +1,6 @@
 import type { ProviderReference } from "../../../src/contracts/content.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { Q2Monsters } from "../../../src/content/q2/foundation/monsters/index.ts";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -26,7 +28,7 @@ function continuation(simulation: ReturnType<typeof createSimulation>): string {
   return JSON.stringify(selected(simulation), (key: string, value: unknown) => key === "generation" ? 0 : value);
 }
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 
 test.skipIf(!existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("retail mine1 selected Q2 roster preserves authored actors and restores a source-triggered mutant jump", async () => {
   const command = parseApplicationCommand(["--content-root", corpus, "--game", "q2-classic-baseq2", "--map", "mine1", "--dedicated", "--mode", "singleplayer"]);

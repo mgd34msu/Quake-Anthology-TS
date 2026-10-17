@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { Q1Creatures } from "../../../src/content/q1/base/creatures.ts";
 import type { Q1EntityServices } from "../../../src/content/q1/foundation/entity-services.ts";
 import { q1MonsterSources } from "../../../src/content/monsters/q1.ts";
@@ -13,7 +15,7 @@ import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../
 import type { ProviderReference } from "../../../src/contracts/content.ts";
 import type { DamageRequest, DamageOutcome, ItemId } from "../../../src/contracts/gameplay.ts";
 import type { ProviderId } from "../../../src/contracts/identity.ts";
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")) || !existsSync(join(corpus, "q2/baseq2/pak0.pak")) || !existsSync(join(corpus, "q3a/baseq3/pak0.pk3")))("source shambler protection survives native and foreign projectile combat and fresh restore", async () => {
     const directory = await mkdtemp(join(tmpdir(), "shambler-source-"));
     try {

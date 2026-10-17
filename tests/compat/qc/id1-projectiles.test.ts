@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import type { ItemId } from '../../../src/contracts/gameplay.ts';
 import { openArchive } from '../../../src/content/archive/index.ts';
 import { loadQcProgram, QcEntityMemory, QcMachine, classicQcEntityLayout, createQcBuiltins, createQcSourceSlotStorage } from '../../../src/compat/qc/index.ts';
@@ -9,10 +11,10 @@ import { Id1ProjectileAttacks } from '../../../src/content/q1/quakec/id1-project
 import type { QcBuiltin, QcHostBuiltinName } from '../../../src/compat/qc/index.ts';
 
 for (const qw of [false, true]) test(`pinned ${qw ? 'QW' : 'NQ'} projectile attribution retains launch identity while native damage executes`, async () => {
-  const archive = await openArchive('/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK');
+  const archive = await openArchive(`${testCorpusRoot()}/q1/id1/PAK0.PAK`);
   try {
     const entry = archive.findEntries('progs.dat').at(-1); if (entry === undefined) throw new Error('No id1 program');
-    const program = loadQcProgram(qw ? new Uint8Array(await Bun.file('/home/buzzkill/Projects/qfiles/q1/qw/qwprogs.dat').arrayBuffer()) : await archive.readEntry(entry));
+    const program = loadQcProgram(qw ? new Uint8Array(await Bun.file(`${testCorpusRoot()}/q1/qw/qwprogs.dat`).arrayBuffer()) : await archive.readEntry(entry));
     const entities = new QcEntityMemory(classicQcEntityLayout(program), 8, 4), actors = new SessionActorRegistry(createIdentityOwner(`projectiles-${qw}`));
     const slots = new SourceActorSlots(actors, { provider: 'test:qc', capacity: 8, lifetime: quakeEdictLifetime(1),
       storage: createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: qw ? 100 : 92 }),

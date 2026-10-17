@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { homedir } from "node:os";
+
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import type { CommandContext } from "../../../src/contracts/common.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -12,7 +14,7 @@ import { GameplayAuthority, SharedInventoryTable } from "../../../src/world/game
 import { ModCommands } from "../../../src/world/session/mod-commands.ts";
 import { SessionMods } from "../../../src/world/session/mods.ts";
 
-const artifact = "/home/buzzkill/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat";
+const artifact = `${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`;
 test.skipIf(!await Bun.file(artifact).exists())("original Copper console functions and localcmd retain component cvars and source ownership", async () => {
   const program = await Bun.file(artifact).bytes(), digest = createContentDigest(new Bun.CryptoHasher("sha256").update(program).digest("hex"));
   const actors = new SessionActorRegistry(createIdentityOwner("copper-console")), callbacks = new ActorCallbackTable(actors);

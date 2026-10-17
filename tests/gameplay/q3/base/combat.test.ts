@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { corpusFile } from "../../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
@@ -21,7 +23,7 @@ import { EntityType, GameType, Powerup, Team, PersistentIndex, statSchema } from
 import { parseQ3Bsp, adaptQ3Bsp } from "../../../../src/formats/q3-map/index.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 
-const archivePath = resolve(process.env["Q3_DATA_PATH"] ?? resolve(import.meta.dir, "../../../../../qfiles/q3a"), "baseq3/pak0.pk3");
+const archivePath = resolve(process.env["Q3_DATA_PATH"] ?? corpusFile("q3a"), "baseq3/pak0.pk3");
 
 test.skipIf(!existsSync(archivePath))("Q3 combat and grenade expiry use shared authorities on retail map geometry", async () => {
   const archive = await openArchive(archivePath, "pk3");

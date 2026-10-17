@@ -1,6 +1,6 @@
 # Implementation completion status
 
-Source cutoff: `167bfbf19d06625ac2b350120647686e3e0170e9`. This finite update completes five requirements: controller assignments, dedicated stdin, browser favorites, mounted language reload and Q1 finale acknowledgement. The other 472 verdicts/methods carry unchanged from `e5e51456d04a911528da8b52af9a50b794738318`; only the remaining-work reason for `q2.admin.status-kick` changes among those records. The other 471 records are unchanged. This is not a new full audit. Uncommitted source changes are excluded. Counts describe requirement verdicts, not engine completion. The local qfiles executable was built from 1c8054451eecbf07d18d6eb967cd3687ab01179e; later source changes listed here are not included in that build.
+Source cutoff: `167bfbf19d06625ac2b350120647686e3e0170e9`. This finite update completes five requirements: controller assignments, dedicated stdin, browser favorites, mounted language reload and Q1 finale acknowledgement. The other 472 verdicts/methods carry unchanged from `e5e51456d04a911528da8b52af9a50b794738318`; only the remaining-work reason for `q2.admin.status-kick` changes among those records. The other 471 records are unchanged. This is not a new full audit. Uncommitted source changes are excluded. Counts describe requirement verdicts, not engine completion. The locally installed executable was built from 1c8054451eecbf07d18d6eb967cd3687ab01179e; later source changes listed here are not included in that build.
 
 | Game | Done | Not done | Total | Requirement share done |
 | --- | ---: | ---: | ---: | ---: |
@@ -954,7 +954,7 @@ Source cutoff: `167bfbf19d06625ac2b350120647686e3e0170e9`. This finite update co
 
 | Requirement | Verdict | Method | Reason and remaining work | Source paths |
 | --- | --- | --- | --- | --- |
-| `q3.source-applications.role-accounting` — Separate authoring and distribution application roles | not-done | missing-work | Comparison documentation enumerates authoring/runtime roles, but complete runtime-derived obligations from all listed tool/SDK/archive inputs have not been established; this row cannot be completed from file inventory alone. | [docs/comparison-q3.md](../docs/comparison-q3.md), [verification/features/q3.json](../verification/features/q3.json) |
+| `q3.source-applications.role-accounting` — Separate authoring and distribution application roles | not-done | missing-work | Comparison documentation enumerates authoring/runtime roles, but complete runtime-derived obligations from all listed tool/SDK/archive inputs have not been established; this row cannot be completed from file inventory alone. | [docs/comparison-q3.md](../docs/comparison-q3.md), verification/features/q3.json |
 
 ### world — 1 done / 1 total
 

@@ -1,4 +1,4 @@
-// Quake II / q2proto algorithms ported from quake-2-re-ts and original id Software sources. GPL-2.0-or-later.
+// Quake II / q2proto algorithms ported from the reference port and original id Software sources. GPL-2.0-or-later.
 export const SvcFogDataBitsT = {
     BIT_DENSITY: (1 << 0),
     BIT_R: (1 << 1),

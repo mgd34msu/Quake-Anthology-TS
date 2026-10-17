@@ -1,6 +1,6 @@
 import { EventRing } from "../../foundation/event-ring.ts";
 import type { ClientId } from "../../contracts/identity.ts";
-/* Shared command storage and dispatch adapted from quake-3-ts/core/commands.ts.
+/* Shared command storage and dispatch adapted from the reference port
  * Family rules follow Quake/QW cmd.c and Quake II qcommon/cmd.c.
  * Extended cvar commands follow q2repro src/common/cvar.c.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */

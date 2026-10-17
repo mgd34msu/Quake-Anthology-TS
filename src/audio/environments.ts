@@ -1,4 +1,4 @@
-// Selection adapted from q2repro al.c through quake-2-re-ts snd_environments.ts.
+// Selection adapted from q2repro al.c through the reference port snd_environments.ts.
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { Vec3 } from "../contracts/math.ts";
 import { REVERB_PRESET_NAMES, REVERB_PRESETS, REVERB_PRESET_PLAIN } from "./reverb-presets.ts";

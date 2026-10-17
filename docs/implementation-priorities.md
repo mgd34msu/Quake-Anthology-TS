@@ -1,6 +1,6 @@
 # Implementation priorities
 
-This is the ordered common-engine backlog with five bounded requirement completions at source cutoff `167bfbf19d06625ac2b350120647686e3e0170e9`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
+This is the ordered common-engine backlog with five bounded requirement completions at source cutoff `167bfbf19d06625ac2b350120647686e3e0170e9`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in completion-status.json. It is a planning map, not a new code audit or completion-percentage report.
 
 Usability is the highest product priority and applies to every group below. The numbered backlog retains its historical engineering order; it does not postpone fixing a broken user flow. Work on 1–2 as foundations; 3–6 can proceed in parallel with fixed contracts; 7–12 cover shared integration; 13–21 cover consumer completion; 22–24 cover remaining tools and services. Sustained play and requested release work follow the content joins. Bounded source review and actual behavior checks remain part of every change.
 

@@ -1,4 +1,6 @@
 import { blockChecksum } from '../../../src/core/md4.ts';
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { test, expect } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,7 +13,7 @@ import type { Q2ApplicationGameState } from '../../../src/app/bootstrap/network/
 
 test('Q2 cancellation drains the outstanding native block before retry and reports staged bytes', async () => {
   const root=await mkdtemp(join(tmpdir(),'q2-controls-'));
-  const content=await openRemoteContent({corpusRoot:'/home/buzzkill/Projects/qfiles',userContentRoot:root},remoteContentSelection('q2-classic-baseq2','baseq2'),()=>{});
+  const content=await openRemoteContent({corpusRoot:`${testCorpusRoot()}`,userContentRoot:root},remoteContentSelection('q2-classic-baseq2','baseq2'),()=>{});
   const map = await content.mounts.read('maps/base1.bsp');
   const commands:string[]=[];
   const receiver=new Q2DownloadReceiver(()=>content,text=>{commands.push(text);},()=>{});

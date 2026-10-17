@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { createIdentityOwner } from '../../../src/contracts/identity.ts';
 import type { ActorId } from '../../../src/contracts/identity.ts';
 import type { Q1Event } from '../../../src/content/q1/foundation/types.ts';
@@ -76,7 +78,7 @@ test('QC private prompts retain incremental per-client choices, restore, and cle
   expect(restored.prompt(second).kind).toBe('prompt');
  });
 
-const originalPak = '/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK';
+const originalPak = `${testCorpusRoot()}/q1/id1/PAK0.PAK`;
 test.skipIf(!await Bun.file(originalPak).exists())('original NQ entity writer captures camera generation through buffered flush and save', async () => {
   const { openArchive } = await import('../../../src/content/archive/index.ts');
   const { QcBroadcastMessages } = await import('../../../src/compat/qc/presentation-host.ts');
@@ -124,7 +126,7 @@ test('private QC message dialect requires matching artifact metadata and decodes
   const digest = 'sha256:' + 'a'.repeat(64), encode = (value:unknown) => new TextEncoder().encode(JSON.stringify(value));
   expect(readQuakeCCompatibility(null,digest).messageDialect).toBe('known-retail');
   const dialect = readQuakeCCompatibility(encode({version:1,artifactDigest:digest,messageDialect:'quake-1-re-ts-private'}),digest).messageDialect;
-  expect(dialect).toBe('quake-1-re-ts-private');
+  expect(dialect).toBe('q1-rerelease-private');
   expect(()=>readQuakeCCompatibility(encode({version:1,artifactDigest:'other',messageDialect:dialect}),digest)).toThrow();
   const protocol = new NetQuakeDecoder().protocol, bytes = new SizeBuf(1024);
   const messages: readonly NetQuakeMessage[] = [{kind:'prompt-begin',text:'Team',choices:1},{kind:'prompt-choice',text:'Red',impulse:101},{kind:'level-completed'},{kind:'back-to-lobby'},{kind:'prompt-clear'}];

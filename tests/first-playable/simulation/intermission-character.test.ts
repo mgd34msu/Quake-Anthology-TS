@@ -1,14 +1,14 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { resolve } from "node:path";
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { createSimulation } from "../../../src/app/bootstrap/simulation/index.ts";
 import { gameRootIn, steamCommonDirectories } from "../../../src/content/roots.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 
-const corpus = [resolve(homedir(), "qfiles"), resolve(homedir(), "Projects/qfiles"), ...steamCommonDirectories()]
+const corpus = [testCorpusRoot(), testCorpusRoot(), ...steamCommonDirectories()]
   .find(root => existsSync(root) && gameRootIn(root, "q1") !== null && gameRootIn(root, "q3") !== null);
 
 async function viewsDuring(game: string, map: string): Promise<{ play: boolean; intermission: boolean; cutscene: boolean }> {

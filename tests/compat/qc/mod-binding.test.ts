@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot, corpusFile } from "../../support/corpus.ts";
+
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { QcProgram, QcOpcode, loadQcProgram, QcEntityMemory, QcMachine, classicQcEntityLayout, createQcBuiltins, createQcSourceSlotStorage } from "../../../src/compat/qc/index.ts";
 import type { ModCallbackDeclaration, ModSourceCall } from "../../../src/contracts/mod-callbacks.ts";
@@ -13,7 +15,7 @@ import type { CombatState, DamageOutcome, DamageRequest } from "../../../src/con
 import { Id1DamageBinding } from "../../../src/content/q1/quakec/id1-damage.ts";
 import { deriveNativeProgramBinding, id1ProgramBinding } from "../../../src/content/q1/quakec/id1-program.ts";
 
-const corpus = new URL("../../../../qfiles/q1/", import.meta.url).pathname;
+const corpus = `${corpusFile("q1")}/`;
 async function readProgram(path: string): Promise<QcProgram> {
   const archive = await openArchive(corpus + path);
   try {
@@ -256,7 +258,7 @@ test("native arithmetic is observed without imposing an id1 subtraction template
 test("declared original Threewave QuakeWorld combat retains source stores and rejects unqualified admission", async () => {
   const { validateQcModCombat } = await import("../../../src/compat/qc/mod-combat.ts");
   const { readQuakeCCompatibility } = await import("../../../src/compat/qc/compatibility.ts");
-  const bytes = await Bun.file("/home/buzzkill/Projects/qfiles/q1/ctf/qwprogs.dat").bytes(), program = loadQcProgram(bytes);
+  const bytes = await Bun.file(`${testCorpusRoot()}/q1/ctf/qwprogs.dat`).bytes(), program = loadQcProgram(bytes);
   const raw = { version: 1, artifactDigest: program.digest, combat: { damage: { function: "T_Damage",
     arguments: [{ kind: "input", name: "self" }, { kind: "input", name: "inflictor" }, { kind: "input", name: "attacker" }, { kind: "input", name: "amount" }],
     globals: [{ name: "time", value: { kind: "input", name: "time" } }] } } };
@@ -277,7 +279,7 @@ test("declared original Threewave QuakeWorld combat retains source stores and re
     const outcome = observed.outcomes[0]; if (outcome?.kind !== "committed") throw new Error("Missing original damage outcome");
     expect(outcome.decision.reaction).toBe(variant === "death" ? "death" : "pain");
   }
-  expect(id1ProgramBinding(loadQcProgram(await Bun.file("/home/buzzkill/Projects/qfiles/q1/qw/qwprogs.dat").bytes())).attribution).toBe("pinned");
+  expect(id1ProgramBinding(loadQcProgram(await Bun.file(`${testCorpusRoot()}/q1/qw/qwprogs.dat`).bytes())).attribution).toBe("pinned");
 });
 
 
@@ -285,7 +287,7 @@ test("declared attacker scaling queries original rune and quad paths once while 
   const { validateQcModCombat } = await import("../../../src/compat/qc/mod-combat.ts");
   const { readQuakeCCompatibility } = await import("../../../src/compat/qc/compatibility.ts");
   const { qcDamageScale } = await import("../../../src/content/q1/quakec/damage-scale.ts");
-  const program = loadQcProgram(await Bun.file("/home/buzzkill/Projects/qfiles/q1/ctf/qwprogs.dat").bytes());
+  const program = loadQcProgram(await Bun.file(`${testCorpusRoot()}/q1/ctf/qwprogs.dat`).bytes());
   const declaration = readQuakeCCompatibility(new TextEncoder().encode(JSON.stringify({ version: 1, artifactDigest: program.digest,
     combat: { damage: { function: "T_Damage", arguments: [{ kind: "input", name: "self" }, { kind: "input", name: "inflictor" },
       { kind: "input", name: "attacker" }, { kind: "input", name: "amount" }], globals: [{ name: "time", value: { kind: "input", name: "time" } }] },

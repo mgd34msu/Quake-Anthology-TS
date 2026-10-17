@@ -1,7 +1,7 @@
 import type { MonsterSourceDefinition } from "./definitions.ts";
 import { q2MonsterSources } from "./q2.ts";
 
-// Source precaches: quake-2-re-ts src/{xatrix,rogue,kexgame}/m_*.ts. Shared callbacks use the same selected mount.
+// Source precaches for the expansion monster sources. Shared callbacks use the same selected mount.
 const sharedPrecaches: Readonly<Record<string, readonly string[]>> = {
   monster_medic: [
     "models/monsters/medic/tris.md2", "models/objects/gibs/bone/tris.md2", "models/objects/gibs/sm_meat/tris.md2",

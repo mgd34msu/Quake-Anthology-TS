@@ -1,5 +1,6 @@
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
-import { resolve } from "node:path";
+import { corpusFile } from "../../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { describe, expect, spyOn, test } from "bun:test";
 import { deepStrictEqual } from "node:assert";
@@ -196,7 +197,7 @@ describe("Quake hulls and derived solid cells", () => {
   });
 });
 
-const pakPath = resolve(import.meta.dir, "../../../../../qfiles/q1/id1/PAK0.PAK");
+const pakPath = corpusFile("q1/id1/PAK0.PAK");
 test.skipIf(!existsSync(pakPath))("real Quake start.bsp supports native and foreign-size floor traces", async () => {
   const archive = await openArchive(pakPath);
   try {

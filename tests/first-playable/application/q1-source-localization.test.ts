@@ -1,4 +1,6 @@
 import { ApplicationRereleasePresentation } from '../../../src/app/bootstrap/rerelease-presentation.ts';
+import { corpusFile } from "../../support/corpus.ts";
+
 import type { ProviderSceneAssets } from '../../../src/app/bootstrap/assets.ts';
 import { SceneImageRegistry } from '../../../src/render/scene/resources.ts';
 import { SceneTextureLoader } from '../../../src/render/scene/textures.ts';
@@ -10,7 +12,7 @@ import { backpackMessage } from '../../../src/content/q1/base/projectiles.ts';
 import { expect, test } from 'bun:test';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { createIdentityOwner } from '../../../src/contracts/identity.ts';
 import { createMountIdentity } from '../../../src/contracts/content.ts';
 import type { ContentId, ContentMount } from '../../../src/contracts/content.ts';
@@ -33,7 +35,7 @@ test('Q1 source catalog uses selected language, source mod tiers and format argu
   const root = await mkdtemp(join(tmpdir(), 'q1-source-localization-'));
   const catalog = new InstalledCatalog('', [product(source, 'q1-rerelease-id1'), product(classic, 'q1-classic-id1'), product(world, 'q2-classic-baseq2')], [], 0);
   const archive: ContentMount = { kind: 'archive', identity: createMountIdentity('mount:test:q1-loc', source, 0), format: 'pak',
-    archivePath: resolve('../qfiles/q1/rerelease/id1/pak0.pak'), archiveDigest: await digestFile(resolve('../qfiles/q1/rerelease/id1/pak0.pak')) };
+    archivePath: corpusFile("q1/rerelease/id1/pak0.pak"), archiveDigest: await digestFile(corpusFile("q1/rerelease/id1/pak0.pak")) };
   const mod: ContentMount = { kind: 'loose', identity: createMountIdentity('mount:test:q1-loc-mod', source, 0), rootPath: root };
   try {
     await mkdir(join(root, 'localization'));
@@ -126,7 +128,7 @@ test('classic source resolution needs no rerelease product and respects source-o
 test('provided classic start map message newlines decode at the entity-provider boundary', async () => {
   const { openArchive } = await import('../../../src/content/archive/index.ts');
   const { readQ1Bsp } = await import('../../../src/formats/q1-map/index.ts');
-  const archive = await openArchive(resolve('../qfiles/q1/id1/PAK0.PAK'));
+  const archive = await openArchive(corpusFile("q1/id1/PAK0.PAK"));
   try {
     const entry = archive.findEntries('maps/start.bsp')[0]; if (entry === undefined) throw new Error('Missing supplied start map');
     const map = readQ1Bsp(await archive.readEntry(entry), { source: 'maps/start.bsp' });

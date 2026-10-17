@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { q1ExpansionMonsterSources, q1AddonMonsterSources } from "../../../src/content/monsters/expansions.ts";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
@@ -27,7 +29,7 @@ const mg3Models: Readonly<Record<string, string>> = { monster_demodog: "dog_expl
 const addonModels: Readonly<Record<string, string>> = { monster_army: "soldier", monster_ogre: "ogre", monster_knight: "knight", monster_fish: "fish" };
 
 for (const source of [...q1ExpansionMonsterSources, ...q1AddonMonsterSources]) test(`${source.provider} actual selected expansion controllers preserve foreign authored actors and save continuation`, async () => {
-  const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
+  const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
   const addon = source.program === "dopa" || source.program === "mg1" || source.program === "mg3", expectedModels = source.program === "mg3" ? mg3Models : addon ? addonModels : models;
   for (const classname of Object.keys(source.creatures).filter(name => Object.hasOwn(expectedModels, name))) {
     const aquatic = classname === "monster_eel" || classname === "monster_fish";
@@ -78,7 +80,7 @@ for (const source of [...q1ExpansionMonsterSources, ...q1AddonMonsterSources]) t
 }, 120000);
 
 test("an explicit authored Armagon replacement reports its map-script obligation", async () => {
-  const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
+  const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
   const command = parseApplicationCommand(["--game", "q1-classic-hipnotic", "--map", "hipend", "--dedicated"]);
   if (command.kind !== "run") throw new Error("Expected launch command");
   const preset = applicationPreset(catalog, command.options), source: ProviderReference = { provider: "q1:monsters/rerelease/hipnotic", content: catalog.require("q1-rerelease-hipnotic").id };

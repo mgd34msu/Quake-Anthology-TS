@@ -1,4 +1,4 @@
-/* Shadow atlas preparation adapted from quake-2-re-ts gl_shadowmap.ts.
+/* Shadow atlas preparation adapted from the reference port gl_shadowmap.ts.
  * The TS donor adds depth maps for KEX shadow lights; native q2repro has no atlas.
  * Copyright (C) Id Software and contributors. GPL-2.0-or-later. */
 import type { Mat4, Vec3, Vec4 } from "../../contracts/math.ts";

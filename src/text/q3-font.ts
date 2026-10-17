@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Ported from quake-3-ts/src/render/font.ts.
+// Ported from the reference port
 import { BinaryError, BinaryReader } from "../core/binary/index.ts";
 import type { Vec4 } from "../contracts/math.ts";
 import { Draw2D } from "./draw2d.ts";

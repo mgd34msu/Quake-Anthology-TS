@@ -7,7 +7,7 @@ import { createQw29Codec } from './codecs/qw29.ts';
 import type { ProtocolCodec, QwProtocolCodec } from './codecs/codec.ts';
 import type { MessageReader } from './message.ts';
 export type QuakeWorldProfile = QwProtocolIdentity;
-export type RereleaseMessages = 'known-retail' | 'quake-1-re-ts-private';
+export type RereleaseMessages = 'known-retail' | 'q1-rerelease-private';
 export function netQuakeProfile(version: number, flags = 0): Q1ProtocolIdentity {
     switch (version) {
         case 15: return { kind: 'q1-netquake', version };

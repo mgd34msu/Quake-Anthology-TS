@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { Q1Map } from "../../../src/formats/q1-map/index.ts";
@@ -19,7 +21,7 @@ import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../.
 import { captureSharedBodies, restoreSharedBodyLinks } from "../../../src/persistence/world-state.ts";
 
 async function map(program: Q1SourceProgram, name: string): Promise<Q1Map> {
-  const archive = await openArchive(`/home/buzzkill/Projects/qfiles/q1/rerelease/${program}/pak0.pak`);
+  const archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/${program}/pak0.pak`);
   try { const path = `maps/${name}.bsp`, entry = archive.findEntries(path)[0]; if (entry === undefined) throw new Error(`Missing ${path}`); return readQ1Bsp(await archive.readEntry(entry), { source: path }); }
   finally { archive.close(); }
 }

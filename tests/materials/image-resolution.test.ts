@@ -1,4 +1,6 @@
 import { SceneMaterialRegistrations } from "../../src/render/scene/material-registrations.ts";
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import { sceneModelBatches } from "../../src/render/scene/submissions.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
@@ -299,7 +301,7 @@ test.skipIf(process.env["QUAKE_IMAGE_HUD"] !== "1")("actual weapon HUD keeps aut
   try {
     const pictures = join(users, "q2/baseq2/pics"); await mkdir(pictures, { recursive: true });
     await Bun.write(join(pictures, "w_blaster.bmp"), bmp(8, 4));
-    const parsed = parseApplicationCommand(["--content-root", "/home/buzzkill/Projects/qfiles", "--user-content-root", users,
+    const parsed = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--user-content-root", users,
       "--game", "q2-classic-baseq2", "--map", "base1", "--dedicated"]);
     if (parsed.kind !== "run") throw new Error("Missing installed HUD content options");
     const content = await loadApplicationContent(parsed.options);
@@ -398,7 +400,7 @@ test("semantic Q2 skin and sprite PCX retain global palette, flood fill, transpa
 });
 
 for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.skipIf(process.env["QUAKE_IMAGE_RENDER"] !== "1")(`actual MD2 custom skins use every shared image format through ${backend}`, async () => {
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak");
+  const archive = await openArchive(`${testCorpusRoot()}/q2/baseq2/pak0.pak`);
   const identity = createIdentityOwner(`image-model-${backend}`), owner = { identity: Symbol(backend), session: identity.session, generation: 0 };
   const images = new SceneImageRegistry(owner), renderer = await NativeRenderer.open({ renderer: backend, width: 320, height: 240, hidden: true, gamma: 1 }, owner);
   const loaders: SceneTextureLoader[] = [];

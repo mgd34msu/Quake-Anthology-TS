@@ -1,4 +1,6 @@
 import { expect, test, spyOn } from "bun:test";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import { existsSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { ClassicGuestWorld, classicGuestUserCommand, type ClassicGuestMap, type ClassicGuestRevisit } from "../../../../src/app/bootstrap/simulation/classic-guest-world.ts";
@@ -56,12 +58,12 @@ async function candidate(prepared: PreparedClassicGuest, geometry: Q2WorldGeomet
     : await action.from.travelLoading(action.map, services, async () => { await Bun.sleep(0); }, action.revisit);
   return { world, actors, physics, files, scene, cvars, portals };
 }
-const pak = "/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak";
-test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/xatrix/gamex86.dll") || !existsSync(pak))("classic external player velocity enters source Pmove and remains source owned", async () => {
+const pak = `${testCorpusRoot()}/q2/baseq2/pak0.pak`;
+test.skipIf(!existsSync(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`) || !existsSync(pak))("classic external player velocity enters source Pmove and remains source owned", async () => {
   const archive = await openArchive(pak);
   const geometry = decodeQ2Map(await archive.readEntry(required(archive.findEntries("maps/base1.bsp")[0])), "base1"); await archive.close();
   const identity = createMountIdentity("mount:test:native-movement", "q2:classic:xatrix:installed", 1);
-  using mounts = await openMountPlan({ id: "mount-plan:test:native-movement", mounts: [{ kind: "loose", identity, rootPath: "/home/buzzkill/Projects/qfiles/q2/xatrix" }], defaultOrder: [identity.id], prefixOrders: [] });
+  using mounts = await openMountPlan({ id: "mount-plan:test:native-movement", mounts: [{ kind: "loose", identity, rootPath: `${testCorpusRoot()}/q2/xatrix` }], defaultOrder: [identity.id], prefixOrders: [] });
   const artifact = required(await mounts.open("gamex86.dll"));
   const prepared = await prepareClassicGuest({ kind: "native", owner: { provider: "q2:classic-native", content: identity.content }, role: "server-game", api: { kind: "q2-classic-game", version: 3 }, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" }, artifact: artifact.reference }, mounts);
   const running = await candidate(prepared, geometry);
@@ -105,7 +107,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/xatrix/gamex86.dll") 
   } finally { running.world.close(); }
 });
 for (const fixture of [{ name: "ctf", deathmatch: true }, { name: "xatrix", deathmatch: false }]) {
-const dll = `/home/buzzkill/Projects/qfiles/q2/${fixture.name}/gamex86.dll`;
+const dll = `${testCorpusRoot()}/q2/${fixture.name}/gamex86.dll`;
 test.skipIf(!existsSync(dll) || !existsSync(pak))(`actual native world restores ${fixture.name} original callback files into fresh source actors`, async () => {
   const archive = await openArchive(pak), geometry = decodeQ2Map(await archive.readEntry(required(archive.findEntries("maps/base1.bsp")[0])), "base1"); await archive.close();
   const identity = createMountIdentity("mount:test:native-original", `q2:classic:${fixture.name}:installed`, 1);
@@ -174,11 +176,11 @@ test.skipIf(!existsSync(dll) || !existsSync(pak))(`actual native world restores 
 }
 
 
-test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/xatrix/gamex86.dll") || !existsSync(pak))("actual retained Xatrix gamemap keeps DLL globals and revisits level files without game reload", async () => {
+test.skipIf(!existsSync(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`) || !existsSync(pak))("actual retained Xatrix gamemap keeps DLL globals and revisits level files without game reload", async () => {
   const directory = mkdtempSync(join(tmpdir(), "q2-retained-travel-"));
   const archive = await openArchive(pak), geometry = decodeQ2Map(await archive.readEntry(required(archive.findEntries("maps/base1.bsp")[0])), "base1"); await archive.close();
   const identity = createMountIdentity("mount:test:native-travel", "q2:classic:xatrix:installed", 1);
-  const mounts = await openMountPlan({ id: "mount-plan:test:native-travel", mounts: [{ kind: "loose", identity, rootPath: "/home/buzzkill/Projects/qfiles/q2/xatrix" }], defaultOrder: [identity.id], prefixOrders: [] });
+  const mounts = await openMountPlan({ id: "mount-plan:test:native-travel", mounts: [{ kind: "loose", identity, rootPath: `${testCorpusRoot()}/q2/xatrix` }], defaultOrder: [identity.id], prefixOrders: [] });
   let current: Awaited<ReturnType<typeof candidate>> | null = null;
   try {
     const artifact = required(await mounts.open("gamex86.dll"));
@@ -232,10 +234,10 @@ import { xatrixCombatProfile } from "../../../../src/compat/q2/classic/combat-pr
 import { nativeCombatSignature } from "../../../../src/compat/q2/native-combat-call.ts";
 import { CLASSIC_Q2_ABI } from "../../../../src/compat/q2/classic/layout.ts";
 
-test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/xatrix/gamex86.dll") || !existsSync(pak))("actual Xatrix declared combat calls retain original armor stores and pain observation", async () => {
+test.skipIf(!existsSync(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`) || !existsSync(pak))("actual Xatrix declared combat calls retain original armor stores and pain observation", async () => {
   const archive = await openArchive(pak), geometry = decodeQ2Map(await archive.readEntry(required(archive.findEntries("maps/base1.bsp")[0])), "base1"); await archive.close();
   const identity = createMountIdentity("mount:test:native-damage", "q2:classic:xatrix:installed", 1);
-  using mounts = await openMountPlan({ id: "mount-plan:test:native-damage", mounts: [{ kind: "loose", identity, rootPath: "/home/buzzkill/Projects/qfiles/q2/xatrix" }], defaultOrder: [identity.id], prefixOrders: [] });
+  using mounts = await openMountPlan({ id: "mount-plan:test:native-damage", mounts: [{ kind: "loose", identity, rootPath: `${testCorpusRoot()}/q2/xatrix` }], defaultOrder: [identity.id], prefixOrders: [] });
   const artifact = required(await mounts.open("gamex86.dll"));
   const prepared = await prepareClassicGuest({ kind: "native", owner: { provider: "q2:classic-native", content: identity.content }, role: "server-game", api: { kind: "q2-classic-game", version: 3 }, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" }, artifact: artifact.reference }, mounts);
   const running = await candidate(prepared, geometry, undefined, undefined, false, { kind: "create" }, () => ({ sequence: 1,

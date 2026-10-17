@@ -1,4 +1,4 @@
-/* Q3 sv_game.c/cl_cgame.c/cl_ui.c common traps, adapted from quake-3-ts. GPL-2.0-or-later. */
+/* Q3 sv_game.c/cl_cgame.c/cl_ui.c common traps, adapted from the reference port. GPL-2.0-or-later. */
 import { CommonError } from "../../core/common-error.ts";
 import type { QvmCvarServices } from "./cvar-syscalls.ts";
 import { QvmCgameImport, QvmGameImport, QvmUiImport } from "./abi.ts";

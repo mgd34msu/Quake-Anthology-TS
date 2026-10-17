@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
+import { corpusFile } from "../support/corpus.ts";
+
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VorbisDecoder, VorbisError } from "../../src/platform/vorbis.ts";
 
 const fixture = process.env["QUAKE_TEST_OGG"]
-  ?? new URL("../../../qfiles/q1/rerelease/id1/music/track02.ogg", import.meta.url).pathname;
+  ?? corpusFile("q1/rerelease/id1/music/track02.ogg");
 const hasFixture = existsSync(fixture);
 if (process.env["QUAKE_TEST_OGG"] !== undefined && !hasFixture) throw new Error(`Missing QUAKE_TEST_OGG: ${fixture}`);
 

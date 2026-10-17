@@ -1,4 +1,6 @@
 import { finishSceneOperations, createSourceSceneOrder } from "../../src/render/scene/submissions.ts";
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import type { ApplicationEffectFrame } from "../../src/app/bootstrap/effects.ts";
 import { q2MonsterMuzzle } from "../../src/app/bootstrap/effects/q2-muzzle.ts";
 import { SourceParticles } from "../../src/app/bootstrap/effects/particles.ts";
@@ -87,7 +89,7 @@ for (const [map, path, count] of [["e1m2", "progs/flame.mdl", 24], ["e2m1", "*4"
   } finally { assets.close(); simulation.close(); await content.close(); }
 }, 30000);
 
-test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("retail effects from all three games draw through the shared CPU renderer and expire once for both seats", async () => {
+test.skipIf(!existsSync(`${testCorpusRoot()}/q2/baseq2/pak0.pak`))("retail effects from all three games draw through the shared CPU renderer and expire once for both seats", async () => {
   const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--renderer", "cpu"]);
   if (command.kind !== "run") throw new Error("Expected executable fixture");
   const content = await loadApplicationContent(command.options), identity = createIdentityOwner("effect-smoke");

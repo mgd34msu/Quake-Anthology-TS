@@ -1,4 +1,6 @@
 import { existsSync } from "node:fs";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { resolve } from "node:path";
 import { expect, test } from "bun:test";
 import type { EnemySelection, MonsterDefinitionReference, ProviderReference } from "../../../src/contracts/content.ts";
@@ -9,7 +11,7 @@ import { readRecipe } from "../../../src/persistence/recipe.ts";
 import { SaveReader } from "../../../src/persistence/value.ts";
 
 test("selected creature definitions resolve edition assets and clocks without replacing the map or arsenal", async () => {
-  const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
+  const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
   for (const edition of ["classic", "rerelease"]) {
     for (const family of ["q1", "q2"]) {
       const command = parseApplicationCommand(["--game", family === "q1" ? "q2-classic-baseq2" : "q1-classic-id1", "--map", family === "q1" ? "base1" : "e1m1"]);
@@ -34,7 +36,7 @@ test("selected creature definitions resolve edition assets and clocks without re
   }
 }, 60000);
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 
 test.skipIf(!existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("classic Q2 ordinary roster resolves its species, shared environment, projectile and skin resources", async () => {
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });

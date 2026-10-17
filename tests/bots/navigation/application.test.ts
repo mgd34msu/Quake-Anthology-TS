@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -9,7 +11,7 @@ import { createApplicationBotNavigation } from "../../../src/app/bootstrap/simul
 import { preloadNavigation } from "../../../src/bots/navigation/load.ts";
 import { playerCrouchedBounds } from "../../../src/app/bootstrap/simulation/player-movement.ts";
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 for (const movement of ["q3", "q1", "q2"]) test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak4.pk3")))(
   `mounted retail navigation predicts selected ${movement} movement without actor writes`, async () => {
     const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map", "q3dm1",

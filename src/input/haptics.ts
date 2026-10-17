@@ -1,4 +1,4 @@
-// BNVIB format and motor downmix ported from quake-2-re-ts qcommon/bnvib.ts
+// BNVIB format and motor downmix ported from the reference port qcommon/bnvib.ts
 // and platform/haptics.ts. Scheduling and device ownership are per seat.
 // GPL-2.0-or-later.
 import type { ContentId, ResourceRequest } from "../contracts/content.ts";

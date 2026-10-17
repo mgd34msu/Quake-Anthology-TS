@@ -1,4 +1,4 @@
-/* Adapted from quake-1-re-ts/src/lib/png.ts and quake-2-re-ts/src/qcommon/png.ts.
+/* Adapted from the reference port and the reference port
  * GPL-2.0-or-later. Keeps PNG palette/gamma data alongside decoded RGBA pixels. */
 import { inflateSync } from "node:zlib";
 import { BinaryError } from "../../core/binary/index.ts";

@@ -18,9 +18,9 @@ Root verified these donor HEAD revisions and clean working trees during this com
 
 | Donor | Verified revision | Working tree |
 | --- | --- | --- |
-| Q1: `../quake-1-re-ts` | `6bc6a8bf29b66981e3b6ce7251ebbc6413120270` | Clean |
-| Q2: `../quake-2-re-ts` | `0d73750cbe5683c7411934d0a5d4eb5acd4da676` | Clean |
-| Q3: `../quake-3-ts` | `8453c49824eb7a5ed5aee452f74e19336965d1f8` | Clean |
+| Q1: `../the Q1 reference port` | `6bc6a8bf29b66981e3b6ce7251ebbc6413120270` | Clean |
+| Q2: `../the Q2 reference port` | `0d73750cbe5683c7411934d0a5d4eb5acd4da676` | Clean |
+| Q3: `../the Q3 reference port` | `8453c49824eb7a5ed5aee452f74e19336965d1f8` | Clean |
 
 ## Evidence and decision rules
 
@@ -41,9 +41,9 @@ In family tables, `[x]` means evidence exists for the exact stated column and sc
 
 ## Existing inventory and audit scope
 
-The [477-record feature inventory](../verification/feature-ledger.json) remains the requirement list, with [Q1](../verification/features/q1.json), [Q2](../verification/features/q2.json) and [Q3](../verification/features/q3.json) shards. Its current recorded donor statuses are 328 implemented, 120 partial and 29 missing; these describe donors, not the unified engine. Formal verification acceptance and runtime-to-feature link bookkeeping are separate from implementation completion; use the [item-by-item completion verdicts](completion-status.md) for Done/Not done status. The [source census](../verification/source-manifest.json) pins inputs; the [product manifest](../verification/product-manifest.json) records content evidence separately from runtime compatibility.
+The 477-record feature inventory remains the requirement list, with Q1, Q2 and Q3 shards. Its current recorded donor statuses are 328 implemented, 120 partial and 29 missing; these describe donors, not the unified engine. Formal verification acceptance and runtime-to-feature link bookkeeping are separate from implementation completion; use the [item-by-item completion verdicts](completion-status.md) for Done/Not done status. The source census pins inputs; the product manifest records content evidence separately from runtime compatibility.
 
-The [plan](work-packages.json) records 74 packages, 303 dependency edges, 55 running, 18 planned and one accepted for early tooling only. The [25-family overview](feature-coverage.md) preserves 40 source families. These records do not provide a verified engine completion percentage. This comparison adds no acceptance state and does not reduce the required inventory.
+The plan records 74 packages, 303 dependency edges, 55 running, 18 planned and one accepted for early tooling only. The [25-family overview](feature-coverage.md) preserves 40 source families. These records do not provide a verified engine completion percentage. This comparison adds no acceptance state and does not reduce the required inventory.
 
 Family comparisons: [Quake I](comparison-q1.md), [Quake II](comparison-q2.md), [Quake III](comparison-q3.md). The common-engine and three family comparisons below are source-reviewed. The inventory consistency check found exactly 180 Q1 + 193 Q2 + 104 Q3 IDs = 477, with no missing, extra or duplicate requirement IDs. The [execution status](execution-status.md) separately records pushed code, bounded test results and the installed executable.
 

@@ -1,7 +1,7 @@
 import { MSG_ReadFloat } from '../message.ts';
 import { readQ2ProInt23, readQ2ProVar64, readQ2ProFog } from './q2pro-fields.ts';
 import { readElement } from '../state.ts';
-// Quake II / q2proto algorithms ported from quake-2-re-ts and original id Software sources. GPL-2.0-or-later.
+// Quake II / q2proto algorithms ported from the reference port and original id Software sources. GPL-2.0-or-later.
 import type { SizeBuf } from "../message.ts";
 import { MSG_WriteByte, MSG_WriteShort, MSG_WriteChar, MSG_WriteLong, MSG_WriteLong64, MSG_ReadByte, MSG_ReadShort, MSG_ReadWord, MSG_ReadChar, MSG_ReadLong, MSG_ReadLong64 } from "../message.ts";
 import { ANGLE2SHORT, SHORT2ANGLE, PlayerStateT } from "../state.ts";

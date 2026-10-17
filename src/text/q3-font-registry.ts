@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Ported from quake-3-ts/src/render/font-registry.ts.
+// Ported from the reference port
 import { SaveReader } from "../persistence/value.ts";
 import type { FontFileReader, RetainedFontFile } from "./draw2d.ts";
 import type { MaterialPicture } from "./draw2d.ts";

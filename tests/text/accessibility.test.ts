@@ -1,4 +1,6 @@
 import { SceneImageRegistry } from "../../src/render/scene/resources.ts";
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import { classicCharset, resolveTextGlyph, type TextFontSelection } from "../../src/text/atlas.ts";
 import { layoutText } from "../../src/text/layout.ts";
 import { expect, test } from "bun:test";
@@ -43,7 +45,7 @@ test("localized subtitle cues follow source seek/loop time and retire on skip", 
 });
 
 test("actual supplied French Q2 subtitles parse with original cue timing", async () => {
-  const file = Bun.file("/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/video/eou1__fr.srt");
+  const file = Bun.file(`${testCorpusRoot()}/q2/rerelease/baseq2/video/eou1__fr.srt`);
   if (!await file.exists()) return;
   const captions = new SeatMediaCaptions(owner.seat(1), async path => path === "video/eou1__fr.srt" ? new Uint8Array(await file.arrayBuffer()) : null);
   await captions.prepare("video/eou1_.ogv", "french");

@@ -1,4 +1,8 @@
 import { expect, test } from "bun:test";
+import { homedir } from "node:os";
+
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -20,8 +24,8 @@ import { id1ProgramBinding } from "../../../src/content/q1/quakec/id1-program.ts
 import { qcArmorStage } from "../../../src/content/q1/quakec/armor-stage.ts";
 import type { QcInlineBoundary } from "../../../src/compat/qc/machine.ts";
 
-const corpus = "/home/buzzkill/Projects/qfiles/q1/";
-const copper = "/home/buzzkill/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat";
+const corpus = `${testCorpusRoot()}/q1/`;
+const copper = `${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`;
 async function readProgram(path: string): Promise<QcProgram> {
   const archive = await openArchive(corpus + path);
   try {
@@ -425,7 +429,7 @@ test("primary Copper declaration preserves five-argument damage, borrowed armor 
   let app: import("../../../src/app/bootstrap/application.ts").Application | null = null;
   try {
     await mkdir(mod, { recursive: true });
-    await cp("/home/buzzkill/.local/share/quake-typescript/content/q1/rerelease/copper", mod, { recursive: true });
+    await cp(`${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper`, mod, { recursive: true });
     const program = loadQcProgram(await Bun.file(copper).bytes()), raw = { version: 1, artifactDigest: program.digest, combat: {
       damage: { function: "T_Damage", arguments: [{ kind: "input", name: "self" }, { kind: "input", name: "inflictor" },
         { kind: "input", name: "attacker" }, { kind: "input", name: "amount" }, { kind: "float", value: 0 }], globals: [{ name: "time", value: { kind: "input", name: "time" } }] },

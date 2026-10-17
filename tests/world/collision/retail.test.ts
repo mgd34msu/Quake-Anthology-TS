@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { NumericProfile } from '../../../src/contracts/numeric.ts';
@@ -19,7 +21,7 @@ import { generatePatchCollide, tracePatch } from '../../../src/world/collision/q
 
 const numeric: NumericProfile = { id: 'test:f32', arithmetic: { kind: 'binary32', round: 'each-operation' }, scalarStorage: 'binary32', floatToInt: 'checked-c-truncation', integerOverflow: 'wrap32' };
 const policies: readonly TracePolicy[] = [{ kind: 'q1', move: 'normal', hull: null }, { kind: 'q2', contentsMask: 0x02010003, leafContents: 'merged' }, { kind: 'q3', contentsMask: 0x02010001, curves: true, playerCurveClip: true }];
-const root = process.env['QUAKE_DATA_PATH'] ?? resolve(import.meta.dir, '../../../../qfiles');
+const root = testCorpusRoot();
 test('canonical cm_noAreas bypasses shared Q3 topology without changing portal history', () => {
  const decoded = decodeQ3World(q3Fixture()), leaf = decoded.leaves[0];
  if (leaf === undefined) throw new Error('Q3 fixture has no leaf');

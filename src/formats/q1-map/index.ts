@@ -1,4 +1,4 @@
-/* Quake BSP29/BSP2 reading adapted from quake-1-re-ts, Ironwail and FTE.
+/* Quake BSP29/BSP2 reading adapted from the reference port, Ironwail and FTE.
  * Copyright (C) 1996-2026 their respective authors. GPL-2.0-or-later. */
 import type { BspLighting } from "../../contracts/scene.ts";
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";

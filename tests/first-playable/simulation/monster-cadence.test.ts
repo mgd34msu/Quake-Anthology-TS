@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
-import { resolve, join } from "node:path";
+import {join } from "node:path";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -23,7 +25,7 @@ function stableActors(value: unknown): unknown {
     .map((key): [string, unknown] => { const entry: unknown = Reflect.get(value, key); return [key, stableActors(entry)]; }));
 }
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")) || !existsSync(join(corpus, "q2/rerelease/baseq2/pak0.pak")) || !existsSync(join(corpus, "q3a/baseq3/pak0.pk3")))("retail Q1 map preserves rerelease infantry cadence, restore continuity, and one Q3 grenade turn", async () => {
   const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--map", "e1m1", "--movement", "q2", "--dedicated", "--mode", "singleplayer"]);
   if (command.kind !== "run") throw new Error("Expected launch command");

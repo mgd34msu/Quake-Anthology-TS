@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { openArchive } from "../../src/content/archive/index.ts";
 import type { ArchiveHandle } from "../../src/content/archive/index.ts";
@@ -14,7 +16,7 @@ import { loadMenuTypography } from "../../src/app/bootstrap/menu-font.ts";
 import { discoverInstalledContent } from "../../src/content/catalog/index.ts";
 import { SceneImageRegistry } from "../../src/render/scene/resources.ts";
 
-const corpus = new URL("../../../qfiles/", import.meta.url).pathname;
+const corpus = testCorpusRoot();
 async function member(archive: ArchiveHandle, path: string): Promise<Uint8Array> {
   const entry = archive.findEntries(path)[0];
   if (entry === undefined) throw new Error(`Missing fixture ${path}`);

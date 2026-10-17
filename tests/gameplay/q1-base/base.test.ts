@@ -1,4 +1,6 @@
 import { Q3SelectedArsenal } from "../../../src/app/bootstrap/simulation/arsenal/q3.ts";
+import { corpusFile } from "../../support/corpus.ts";
+
 import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
 import { Q1_Q3_SUPPLY_PROFILE } from "../../../src/content/composition/q1-q3-supply.ts";
 import { test, expect } from "bun:test";
@@ -25,7 +27,9 @@ import type { Q1FoundationCheckpoint } from "../../../src/content/q1/foundation/
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../src/persistence/q1-foundation.ts";
 import { captureSharedBodies, restoreSharedBodyLinks } from "../../../src/persistence/world-state.ts";
 
-const archivePath = resolve(import.meta.dir, "../../../../qfiles/q1/rerelease/id1/pak0.pak");
+const archivePath = corpusFile("q1/rerelease/id1/pak0.pak");
+/** Directory of the original QuakeC monster sources (progs106 layout), when provided. */
+const qcSourceDir = process.env["QTS_Q1_QC_SOURCE"];
 async function readMap(name: string): Promise<Q1Map> {
   const archive = await openArchive(archivePath);
   try { const entry = archive.findEntries(`maps/${name}.bsp`)[0]; if (entry === undefined) throw new Error(`Missing ${name}`); return readQ1Bsp(await archive.readEntry(entry), { source: `maps/${name}.bsp` }); }
@@ -183,11 +187,11 @@ test.skipIf(!existsSync(archivePath))("source episode exit and classic versus re
 });
 
 
-test.skipIf(!existsSync(archivePath))("id1 monster precaches match native spawn declaration order and inhibition", async () => {
+test.skipIf(!existsSync(archivePath) || qcSourceDir === undefined)("id1 monster precaches match native spawn declaration order and inhibition", async () => {
   const map = await readMap("e1m1"), world = parseQ1Entities('{ "classname" "worldspawn" }');
   const baseline = createGame({ ...map, entityList: world }), models = [...baseline.game.precaches.models], sounds = [...baseline.game.precaches.sounds]; baseline.actors.close();
   for (const [classname, file] of [["monster_army", "soldier"], ["monster_dog", "dog"], ["monster_knight", "knight"], ["monster_enforcer", "enforcer"], ["monster_demon1", "demon"], ["monster_ogre", "ogre"], ["monster_ogre_marksman", "ogre"], ["monster_hell_knight", "hknight"], ["monster_shambler", "shambler"], ["monster_wizard", "wizard"], ["monster_shalrath", "shalrath"], ["monster_tarbaby", "tarbaby"], ["monster_fish", "fish"], ["monster_zombie", "zombie"], ["monster_boss", "boss"], ["monster_oldone", "oldone"]] satisfies [string, string][]) {
-    const source = readFileSync(`/home/buzzkill/Projects/qsrc/quake/progs106/${file}.qc`, "utf8"), spawn = source.search(/void\(\)\s+monster_\w+\s*=\s*\{/);
+    const source = readFileSync(resolve(qcSourceDir ?? '', `${file}.qc`), "utf8"), spawn = source.search(/void\(\)\s+monster_\w+\s*=\s*\{/);
     expect(spawn).toBeGreaterThanOrEqual(0);
     const declarations = [...source.slice(spawn).matchAll(/precache_(model|sound)2?\s*\(\s*"([^"]+)"\s*\)/g)];
     const expected = (kind: string, initial: readonly string[]): readonly string[] => [...new Set([...initial, ...declarations.flatMap(match => match[1] === kind && match[2] !== undefined ? [match[2]] : [])])];

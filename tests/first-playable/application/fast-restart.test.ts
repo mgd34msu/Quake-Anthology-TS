@@ -1,4 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -31,7 +33,7 @@ import { encodePng } from "../../../src/formats/images/png.ts";
 
 test("default mpteam1 six-client warmup and manual restart retain native owners and settle once per step", async () => {
   const root = await mkdtemp(join(tmpdir(), "quake-fast-restart-"));
-  const parsed = parseApplicationCommand(["--content-root", "/home/buzzkill/Projects/qfiles", "--renderer", "cpu", "--hidden",
+  const parsed = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--renderer", "cpu", "--hidden",
     "--width", "320", "--height", "240", "--user-content-root", root, "--listen", "0", "--bind", "127.0.0.1"]);
   if (parsed.kind !== "menu" && parsed.kind !== "run") throw new Error("Missing restart fixture options");
   expect(parsed.options.network.kind).toBe("native-server");
@@ -331,7 +333,7 @@ test("default mpteam1 six-client warmup and manual restart retain native owners 
 
 test("native Q3 initial and restored input uses accepted raw angles, including centerview", async () => {
   const root = await mkdtemp(join(tmpdir(), "quake-raw-angle-save-"));
-  const parsed = parseApplicationCommand(["--content-root", "/home/buzzkill/Projects/qfiles", "--renderer", "cpu", "--hidden",
+  const parsed = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--renderer", "cpu", "--hidden",
     "--width", "320", "--height", "240", "--user-content-root", root]);
   if (parsed.kind !== "menu" && parsed.kind !== "run") throw new Error("Missing angle fixture options");
   const catalog = await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, discoverMods: false });

@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { BotAssetFiles } from "../../../../src/bots/behavior/assets.ts";
@@ -16,8 +18,8 @@ import { readQ1Bsp } from "../../../../src/formats/q1-map/index.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
 import { navigationWorld, profile } from "../../navigation/prediction.ts";
 
-const q1 = "/home/buzzkill/Projects/qfiles/q1/rerelease/id1/pak0.pak";
-const q2 = "/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/pak0.pak";
+const q1 = `${testCorpusRoot()}/q1/rerelease/id1/pak0.pak`;
+const q2 = `${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`;
 const zero = { x: 0, y: 0, z: 0 };
 
 async function retailFiles(path: string): Promise<BotAssetFiles> {

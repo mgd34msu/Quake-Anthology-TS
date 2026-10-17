@@ -11,7 +11,7 @@ export function bindImageSettings(registry: SettingCvars): readonly SettingBindi
   const mask = bindCvarSetting(registry, { name: "r_texture_overrides", label: "Image types", category: "video", restart: null,
     kind: "text-entry", maximumLength: 12 }, null);
   if (mask.kind !== "text-entry") throw new Error("Image mask requires a numeric text binding");
-  // quake-2-re-ts ImagetypeT bits, explicitly mapped rather than UI choice ordinals.
+  // the reference port ImagetypeT bits, explicitly mapped rather than UI choice ordinals.
   const usages: readonly (readonly [string, string, number])[] = [
     ["skin", "Replace model skins", 1], ["sprite", "Replace sprites", 2], ["wall", "Replace wall textures", 4],
     ["picture", "Replace pictures", 8], ["sky", "Replace sky images", 16],

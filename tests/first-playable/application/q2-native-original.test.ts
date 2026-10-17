@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { link, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,9 +13,9 @@ test.skipIf(process.env["QUAKE_Q2_NATIVE_APP"] !== "1")("discovered Q2 add-on la
   const directory = await mkdtemp(join(tmpdir(), "native-q2-app-"));
   const addon = join(directory, "q2", "native-app-addon");
   await mkdir(addon, { recursive: true });
-  await link("/home/buzzkill/Projects/qfiles/q2/xatrix/gamex86.dll", join(addon, "gamex86.dll"));
-  await link("/home/buzzkill/Projects/qfiles/q2/xatrix/pak0.pak", join(addon, "pak0.pak"));
-  const command = parseApplicationCommand(["--content-root", "/home/buzzkill/Projects/qfiles", "--user-content-root", directory,
+  await link(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`, join(addon, "gamex86.dll"));
+  await link(`${testCorpusRoot()}/q2/xatrix/pak0.pak`, join(addon, "pak0.pak"));
+  const command = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--user-content-root", directory,
     "--game", "q2-classic-native-app-addon", "--map", "xswamp",
     "--movement", "q2", "--character", "q2", "--mode", "singleplayer", "--renderer", "gl", "--hidden", "--width", "320", "--height", "240", "--seats", "1"]);
   if (command.kind !== "run") throw new Error("Missing native Q2 launch options");

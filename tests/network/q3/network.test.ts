@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { LoopbackHub } from "../../../src/network/common/loopback.ts";
 import { Q3ClientAdmission, Q3ServerAdmission } from "../../../src/network/q3/admission.ts";
@@ -86,7 +88,7 @@ test("Q3 application IPX admission, gamestate, command delivery and lifetime pre
 });
 
 test("Q3 mixed-bit message matches the unchanged original msg.c fixture", () => {
-  // Retained source fixture from quake-3-ts/tests/message.test.ts.
+  // Retained source fixture from the reference implementation.test.ts.
   const original = "95a48fdad27853f0956a3e46200f3158fe02", writer = new MessageWriter();
   writer.writeBits(5, 3); writer.writeByte(0); writer.writeByte(255); writer.writeShort(-1234);
   writer.writeLong(0x12345678); writer.writeFloat(1.5); writer.writeString("quake%");
@@ -217,7 +219,7 @@ test("source pure verification retains signed checksums and rejects duplicate re
   expect(verifyQ3PureCommand(server, ["cp", "41"])).toEqual({ kind: "ignored", reason: "outdated" });
 });
 
-const retailPak = "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3";
+const retailPak = `${testCorpusRoot()}/q3a/baseq3/pak0.pk3`;
 test.skipIf(!await Bun.file(retailPak).exists())("retail Q3 pak0 source checksum and keyed pure checksum match donor", async () => {
   const archive = await openArchive(retailPak);
   try { expect(q3ArchiveChecksums(archive, 0x12345678)).toEqual({ checksum: 1566731103, pureChecksum: 3017657714 }); }

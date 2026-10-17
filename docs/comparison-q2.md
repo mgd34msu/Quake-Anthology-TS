@@ -1,6 +1,6 @@
 # Q2 donor and unified-engine comparison
 
-This audit covers all **193 Q2 feature IDs** in [verification/features/q2.json](../verification/features/q2.json), plus core scheduling, collision and native execution that cross family boundaries. It is a source-grounded checklist as of 2026-09-12, not a claim of exhaustive function-level equivalence or completed product acceptance. Every inventoried Q2 feature appears once in the final table. A feature not yet in that inventory is not thereby excluded from the target.
+This audit covers all **193 Q2 feature IDs** in verification/features/q2.json, plus core scheduling, collision and native execution that cross family boundaries. It is a source-grounded checklist as of 2026-09-12, not a claim of exhaustive function-level equivalence or completed product acceptance. Every inventoried Q2 feature appears once in the final table. A feature not yet in that inventory is not thereby excluded from the target.
 
 The brain source/fixture changes cited below were pushed in commit `8f5e9a3e70cd66ca86ce1f9718e2a6cd61827bbb` after isolated strict TypeScript and policy checks passed and root reported 8 focused tests/260 assertions passing. The installed executable remains at `e20b6d6`; source verification does not claim that newer code is installed.
 
@@ -12,17 +12,17 @@ Compatibility preserves movement, weapon/combat/monster/mode semantics, authored
 
 ## Inputs and evidence limits
 
-The source census already pins the following inputs in [source-manifest.json](../verification/source-manifest.json). These are the manifest's revisions, not a fresh Git/remote check. This audit did not run Git, rewrite the census, run global tests, open a desktop game or play audio. Linked source paths were checked on disk. Historical source-status prose is not promoted to current verification.
+The source census already pins the following inputs in source-manifest.json. These are the manifest's revisions, not a fresh Git/remote check. This audit did not run Git, rewrite the census, run global tests, open a desktop game or play audio. Linked source paths were checked on disk. Historical source-status prose is not promoted to current verification.
 
 | Input | Manifest revision | Role |
 | --- | --- | --- |
-| `../quake-2-re-ts` | `0d73750cbe5683c7411934d0a5d4eb5acd4da676` | TypeScript donor: classic programs, KEX adaptation, renderer, seats, client and protocols |
-| `../qsrc/quake-2` | `372afde46e7defc9dd2d719a1732b8ace1fa096e` | Original classic game/engine contracts |
-| `../qsrc/quake2-rerelease-dll` | `8dc1fc9794c01ece06881e703851b768fb3994de` | Official merged rerelease game/cgame contracts; game source is not the proprietary KEX renderer |
-| `../qsrc/q2repro` | `dafa004c6f0a3218f426dc661412ffdc1ed2a523` | Rerelease-compatible client/renderer, extensions and networking |
-| `../qsrc/lmctf60` | `c518031380d2b59a41667c164353033aaa309e90` | LMCTF original behavior |
+| `../the Q2 reference port` | `0d73750cbe5683c7411934d0a5d4eb5acd4da676` | TypeScript donor: classic programs, KEX adaptation, renderer, seats, client and protocols |
+| `quake-2` | `372afde46e7defc9dd2d719a1732b8ace1fa096e` | Original classic game/engine contracts |
+| `quake2-rerelease-dll` | `8dc1fc9794c01ece06881e703851b768fb3994de` | Official merged rerelease game/cgame contracts; game source is not the proprietary KEX renderer |
+| `q2repro` | `dafa004c6f0a3218f426dc661412ffdc1ed2a523` | Rerelease-compatible client/renderer, extensions and networking |
+| `lmctf60` | `c518031380d2b59a41667c164353033aaa309e90` | LMCTF original behavior |
 
-The Q2 TypeScript source-set hash in that census is `84d108c6a589ddac6404416ab15bb9ff8f3099727ce50812409ab3d0b86ed1f5` across 1,193 pinned files. Hashing proves identity, not behavior. The [feature ledger](../verification/feature-ledger.json) explicitly says implementation and acceptance are not established; this document does not turn its 193 requirements into 193 passing checks.
+The Q2 TypeScript source-set hash in that census is `84d108c6a589ddac6404416ab15bb9ff8f3099727ce50812409ab3d0b86ed1f5` across 1,193 pinned files. Hashing proves identity, not behavior. The feature ledger explicitly says implementation and acceptance are not established; this document does not turn its 193 requirements into 193 passing checks.
 
 Original contracts outrank donor omissions. The earlier [Q2 interoperability assessment](research/q2-interoperability.md) found missing classic-adaptation save fields, an empty flashlight action, missing achievement/story adaptation and a Q64 server/client configuration mismatch. Those are historical donor findings, not approved semantics and not proof that the corresponding unified defects still exist. Current joins and gaps are listed below.
 
@@ -463,205 +463,205 @@ Unified paths: [src/world/collision/index.ts](../src/world/collision/index.ts), 
 
 ## Feature-by-feature donor inventory
 
-All 193 source IDs are retained. The source link identifies the donor implementation (or original contract when the donor is incomplete); its additional original-source witnesses and exact ranges remain in [q2.json](../verification/features/q2.json). The group link names actual unified files and the comparison/union/policy decision above.
+All 193 source IDs are retained. The source link identifies the donor implementation (or original contract when the donor is incomplete); its additional original-source witnesses and exact ranges remain in q2.json. The group link names actual unified files and the comparison/union/policy decision above.
 
 Runtime status is **J**: an applicable source/module/application join is present, with the group's limits; **P**: partial join or codec/library only; **G**: concrete missing application path; **?**: no complete workflow traced. J is not a checkmark for behavioral parity. **B** references actual bounded evidence above; **T** means an existing test target is named in the group, not freshly run or full-feature certified; **—** means no feature-specific execution evidence claimed here. Source presence itself does not establish target completion.
 
 | Feature ID and requirement | Donor source | Unified comparison group | Runtime / evidence |
 | --- | --- | --- | --- |
-| `q2.content.campaign-catalog` — Discover the seven Q2 content families | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G01](#g01) | P / T |
-| `q2.content.native-starts` — Launch authored campaign starting maps | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G01](#g01) | P / T |
-| `q2.content.ruleset-mount-order` — Select gameplay independently from map edition | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G01](#g01) | J / T |
-| `q2.content.launch-lifecycle` — Switch campaigns and modes within one process | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G01](#g01) | P / T |
-| `q2.content.coop-launch` — Launch campaign coop and local players | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G01](#g01) | P / T |
-| `q2.content.discovered-addons` — Discover installed add-on directories | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G01](#g01) | P / T |
-| `q2.content.start-map-discovery` — Resolve mapdb, maplist, and BSP start maps | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G01](#g01) | P / T |
-| `q2.content.server-map-lists` — Choose maps and inspect mode eligibility | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G01](#g01) | P / T |
-| `q2.content.rotation-editor` — Edit and persist ordered map rotations | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G01](#g01) | P / T |
-| `q2.content.auxiliary-map-assets` — Use foreign map dependencies without overriding gameplay | [D:src/qcommon/files.ts](../../quake-2-re-ts/src/qcommon/files.ts) | [G01](#g01) | J / T |
-| `q2.content.same-name-remount` — Invalidate caches when map provenance changes | [D:src/qcommon/files.ts](../../quake-2-re-ts/src/qcommon/files.ts) | [G01](#g01) | J / T |
-| `q2.content.missing-dependencies` — Report missing campaign installations and required maps | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G01](#g01) | J / T |
-| `q2.game.provider-selection` — Select base, expansion, CTF, LMCTF, and KEX game providers | [D:src/server/bindings/legacy.ts](../../quake-2-re-ts/src/server/bindings/legacy.ts) | [G02](#g02) | J / B1–B5 |
-| `q2.game.native-entity-precedence` — Preserve native entities while supplying foreign mechanics | [D:src/game/g_spawn.ts](../../quake-2-re-ts/src/game/g_spawn.ts) | [G02](#g02) | J / B1/B4 |
-| `q2.weapon.blaster` — Fire the blaster | [D:src/game/p_weapon.ts](../../quake-2-re-ts/src/game/p_weapon.ts) | [G03](#g03) | J / T |
-| `q2.weapon.shotgun` — Fire the shotgun | [D:src/game/p_weapon.ts](../../quake-2-re-ts/src/game/p_weapon.ts) | [G03](#g03) | J / T |
-| `q2.weapon.super-shotgun` — Fire the super shotgun | [D:src/game/p_weapon.ts](../../quake-2-re-ts/src/game/p_weapon.ts) | [G03](#g03) | J / T |
-| `q2.weapon.machinegun` — Sustain machinegun fire | [D:src/game/p_weapon.ts](../../quake-2-re-ts/src/game/p_weapon.ts) | [G03](#g03) | J / T |
-| `q2.weapon.chaingun` — Spin and fire the chaingun | [D:src/game/p_weapon.ts](../../quake-2-re-ts/src/game/p_weapon.ts) | [G03](#g03) | J / T |
-| `q2.weapon.hand-grenade` — Cook and throw hand grenades | [D:src/game/p_weapon.ts](../../quake-2-re-ts/src/game/p_weapon.ts) | [G03](#g03) | J / T |
-| `q2.weapon.grenade-launcher` — Fire bouncing launcher grenades | [D:src/game/p_weapon.ts](../../quake-2-re-ts/src/game/p_weapon.ts) | [G03](#g03) | J / T |
-| `q2.weapon.rocket-launcher` — Fire rockets and apply splash knockback | [D:src/game/p_weapon.ts](../../quake-2-re-ts/src/game/p_weapon.ts) | [G03](#g03) | J / T |
-| `q2.weapon.hyperblaster` — Sustain hyperblaster fire | [D:src/game/p_weapon.ts](../../quake-2-re-ts/src/game/p_weapon.ts) | [G03](#g03) | J / T |
-| `q2.weapon.railgun` — Pierce targets with the railgun | [D:src/game/p_weapon.ts](../../quake-2-re-ts/src/game/p_weapon.ts) | [G03](#g03) | J / T |
-| `q2.weapon.bfg` — Charge and detonate the BFG | [D:src/game/p_weapon.ts](../../quake-2-re-ts/src/game/p_weapon.ts) | [G03](#g03) | J / T |
-| `q2.inventory.weapon-selection` — Select, cycle, drop, and recover weapons | [D:src/game/p_weapon.ts](../../quake-2-re-ts/src/game/p_weapon.ts) | [G04](#g04) | J / T |
-| `q2.inventory.ammo-capacity` — Pick up ammunition up to the current capacity | [D:src/game/g_items.ts](../../quake-2-re-ts/src/game/g_items.ts) | [G04](#g04) | J / T |
-| `q2.inventory.bandolier` — Increase capacities with the bandolier | [D:src/game/g_items.ts](../../quake-2-re-ts/src/game/g_items.ts) | [G04](#g04) | J / T |
-| `q2.inventory.ammo-pack` — Increase capacities with the ammo pack | [D:src/game/g_items.ts](../../quake-2-re-ts/src/game/g_items.ts) | [G04](#g04) | J / T |
-| `q2.inventory.health-megahealth` — Pick up health and decay megahealth | [D:src/game/g_items.ts](../../quake-2-re-ts/src/game/g_items.ts) | [G04](#g04) | J / T |
-| `q2.inventory.armor-salvage` — Salvage and replace armor | [D:src/game/g_items.ts](../../quake-2-re-ts/src/game/g_items.ts) | [G04](#g04) | J / T |
-| `q2.inventory.power-armor` — Toggle power armor and consume cells on protection | [D:src/game/g_items.ts](../../quake-2-re-ts/src/game/g_items.ts) | [G04](#g04) | J / B5 (monster screen only) |
-| `q2.powerup.quad` — Activate and extend quad damage | [D:src/game/g_items.ts](../../quake-2-re-ts/src/game/g_items.ts) | [G04](#g04) | J / T |
-| `q2.powerup.invulnerability` — Activate and expire invulnerability | [D:src/game/g_items.ts](../../quake-2-re-ts/src/game/g_items.ts) | [G04](#g04) | J / T |
-| `q2.powerup.breather-envirosuit` — Use breathing and environmental protection | [D:src/game/g_items.ts](../../quake-2-re-ts/src/game/g_items.ts) | [G04](#g04) | J / T |
-| `q2.powerup.silencer` — Consume silenced shots | [D:src/game/g_items.ts](../../quake-2-re-ts/src/game/g_items.ts) | [G04](#g04) | J / T |
-| `q2.combat.damage-armor-knockback` — Resolve damage, armor, friendly fire, and death once | [D:src/game/g_combat.ts](../../quake-2-re-ts/src/game/g_combat.ts) | [G05](#g05) | J / B5 |
-| `q2.monster.base-ai` — Run native monster sensing, attacks, pain, and death | [D:src/game/g_ai.ts](../../quake-2-re-ts/src/game/g_ai.ts) | [G06](#g06) | J / B1–B5 |
-| `q2.world.movers-triggers` — Use doors, platforms, trains, buttons, and trigger chains | [D:src/game/g_func.ts](../../quake-2-re-ts/src/game/g_func.ts) | [G07](#g07) | J / T |
-| `q2.world.flashlight` — Toggle the rerelease flashlight under every host profile | [D:src/game/g_items.ts](../../quake-2-re-ts/src/game/g_items.ts) | [G20](#g20) | G / — |
-| `q2.xatrix.ionripper` — Fire the Ion Ripper | [D:src/xatrix/p_weapon.ts](../../quake-2-re-ts/src/xatrix/p_weapon.ts) | [G08](#g08) | J / T |
-| `q2.xatrix.phalanx` — Fire the Phalanx particle cannon | [D:src/xatrix/p_weapon.ts](../../quake-2-re-ts/src/xatrix/p_weapon.ts) | [G08](#g08) | J / T |
-| `q2.xatrix.trap` — Throw traps and collect food cubes | [D:src/xatrix/p_weapon.ts](../../quake-2-re-ts/src/xatrix/p_weapon.ts) | [G08](#g08) | J / T |
-| `q2.xatrix.quadfire` — Activate quad fire | [D:src/xatrix/g_items.ts](../../quake-2-re-ts/src/xatrix/g_items.ts) | [G08](#g08) | J / T |
-| `q2.xatrix.monsters` — Fight Reckoning monsters and variants | [D:src/xatrix/g_spawn.ts](../../quake-2-re-ts/src/xatrix/g_spawn.ts) | [G08](#g08) | J / T |
-| `q2.rogue.chainfist` — Cut targets with the chainfist | [D:src/rogue/p_weapon.ts](../../quake-2-re-ts/src/rogue/p_weapon.ts) | [G09](#g09) | J / T |
-| `q2.rogue.etf-rifle` — Fire armor-piercing flechettes | [D:src/rogue/p_weapon.ts](../../quake-2-re-ts/src/rogue/p_weapon.ts) | [G09](#g09) | J / T |
-| `q2.rogue.proximity-mines` — Deploy proximity mines | [D:src/rogue/p_weapon.ts](../../quake-2-re-ts/src/rogue/p_weapon.ts) | [G09](#g09) | J / T |
-| `q2.rogue.heatbeam` — Maintain a heatbeam attack | [D:src/rogue/p_weapon.ts](../../quake-2-re-ts/src/rogue/p_weapon.ts) | [G09](#g09) | J / T |
-| `q2.rogue.disintegrator` — Acquire and track a disintegrator target | [D:src/rogue/p_weapon.ts](../../quake-2-re-ts/src/rogue/p_weapon.ts) | [G09](#g09) | J / T |
-| `q2.rogue.nuke` — Deploy the A-M Bomb | [D:src/rogue/g_items.ts](../../quake-2-re-ts/src/rogue/g_items.ts) | [G09](#g09) | J / T |
-| `q2.rogue.spheres` — Use defender, hunter, and vengeance spheres | [D:src/rogue/g_items.ts](../../quake-2-re-ts/src/rogue/g_items.ts) | [G09](#g09) | J / T |
-| `q2.rogue.doppleganger` — Spawn a doppleganger decoy | [D:src/rogue/g_items.ts](../../quake-2-re-ts/src/rogue/g_items.ts) | [G09](#g09) | J / T |
-| `q2.rogue.double-damage` — Activate double damage | [D:src/rogue/g_items.ts](../../quake-2-re-ts/src/rogue/g_items.ts) | [G09](#g09) | J / T |
-| `q2.rogue.infrared` — Activate infrared vision | [D:src/rogue/g_items.ts](../../quake-2-re-ts/src/rogue/g_items.ts) | [G09](#g09) | J / T |
-| `q2.rogue.monsters-hazards` — Fight Ground Zero monsters and authored hazards | [D:src/rogue/g_spawn.ts](../../quake-2-re-ts/src/rogue/g_spawn.ts) | [G09](#g09) | J / T |
-| `q2.rerelease.gun-commander` — Fight the gun commander | [D:src/kexgame/m_guncmdr.ts](../../quake-2-re-ts/src/kexgame/m_guncmdr.ts) | [G10](#g10) | J / T |
-| `q2.rerelease.shambler` — Fight the rerelease shambler | [D:src/kexgame/m_shambler.ts](../../quake-2-re-ts/src/kexgame/m_shambler.ts) | [G10](#g10) | J / T |
-| `q2.rerelease.guardian` — Complete the guardian encounter | [D:src/kexgame/m_guardian.ts](../../quake-2-re-ts/src/kexgame/m_guardian.ts) | [G10](#g10) | J / T |
-| `q2.rerelease.instanced-items` — Use coop item instancing | [D:src/kexgame/g_items.ts](../../quake-2-re-ts/src/kexgame/g_items.ts) | [G11](#g11) | P / T |
-| `q2.rerelease.squad-respawn-lives` — Use squad respawn and cooperative lives | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G11](#g11) | P / T |
-| `q2.rerelease.q64-movement` — Match Q2 64 server movement and prediction | [D:src/kexgame/p_client.ts](../../quake-2-re-ts/src/kexgame/p_client.ts) | [G12](#g12) | J / T |
-| `q2.mode.deathmatch-limits` — End a deathmatch on authored limits | [D:src/game/g_main.ts](../../quake-2-re-ts/src/game/g_main.ts) | [G13](#g13) | P / T |
-| `q2.mode.dm-options` — Apply classic deathmatch flags | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G13](#g13) | P / T |
-| `q2.mode.rerelease-options` — Apply rerelease deathmatch and weapon settings | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G13](#g13) | P / T |
-| `q2.mode.tag` — Play Rogue Tag | [D:src/kexgame/rogue/g_rogue_newdm.ts](../../quake-2-re-ts/src/kexgame/rogue/g_rogue_newdm.ts) | [G13](#g13) | P / T |
-| `q2.mode.deathball` — Play rerelease DeathBall | [D:src/kexgame/rogue/g_rogue_newdm.ts](../../quake-2-re-ts/src/kexgame/rogue/g_rogue_newdm.ts) | [G13](#g13) | P / T |
-| `q2.ctf.flag-objective` — Capture and return CTF flags | [D:src/ctf/g_ctf.ts](../../quake-2-re-ts/src/ctf/g_ctf.ts) | [G14](#g14) | J / T |
-| `q2.ctf.grapple` — Use the CTF grappling hook | [D:src/ctf/g_ctf.ts](../../quake-2-re-ts/src/ctf/g_ctf.ts) | [G14](#g14) | J / T |
-| `q2.ctf.techs` — Use and drop CTF tech powerups | [D:src/ctf/g_ctf.ts](../../quake-2-re-ts/src/ctf/g_ctf.ts) | [G14](#g14) | J / T |
-| `q2.ctf.team-lifecycle` — Join teams and spectate a CTF match | [D:src/ctf/g_ctf.ts](../../quake-2-re-ts/src/ctf/g_ctf.ts) | [G14](#g14) | J / T |
-| `q2.lmctf.flag-objective` — Complete Loki's Minions flag objectives | [D:src/lmctf/g_ctffunc.ts](../../quake-2-re-ts/src/lmctf/g_ctffunc.ts) | [G15](#g15) | J / T |
-| `q2.lmctf.damage-resistance-runes` — Apply damage and resistance runes | [D:src/lmctf/g_runes.ts](../../quake-2-re-ts/src/lmctf/g_runes.ts) | [G15](#g15) | J / T |
-| `q2.lmctf.haste-rune` — Accelerate weapons with the haste rune | [D:src/lmctf/g_runes.ts](../../quake-2-re-ts/src/lmctf/g_runes.ts) | [G15](#g15) | J / T |
-| `q2.lmctf.regeneration-vampire` — Apply regeneration and vampire runes | [D:src/lmctf/g_runes.ts](../../quake-2-re-ts/src/lmctf/g_runes.ts) | [G15](#g15) | J / T |
-| `q2.lmctf.offhand-hook` — Use the LMCTF offhand hook | [D:src/lmctf/g_ctffunc.ts](../../quake-2-re-ts/src/lmctf/g_ctffunc.ts) | [G15](#g15) | J / T |
-| `q2.lmctf.tournament` — Run an LMCTF tournament match | [D:src/lmctf/g_tourney.ts](../../quake-2-re-ts/src/lmctf/g_tourney.ts) | [G15](#g15) | J / T |
-| `q2.lmctf.voting` — Vote on map changes and referee selection | [D:src/lmctf/g_vote.ts](../../quake-2-re-ts/src/lmctf/g_vote.ts) | [G15](#g15) | J / T |
-| `q2.lmctf.server-profile` — Apply LMCTF-specific server options | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G15](#g15) | J / T |
-| `q2.seats.view-layouts` — Render one to four local player views | [D:src/client/cl_seats.ts](../../quake-2-re-ts/src/client/cl_seats.ts) | [G16](#g16) | J / T |
-| `q2.seats.real-player-lifecycle` — Create local seats as real game clients | [D:src/server/sv_seats.ts](../../quake-2-re-ts/src/server/sv_seats.ts) | [G16](#g16) | J / T |
-| `q2.seats.independent-commands` — Drive each local player independently | [D:src/client/cl_seats.ts](../../quake-2-re-ts/src/client/cl_seats.ts) | [G16](#g16) | J / T |
-| `q2.seats.private-messages` — Route private HUD and messages to the correct seat | [D:src/client/cl_seats.ts](../../quake-2-re-ts/src/client/cl_seats.ts) | [G16](#g16) | P / T |
-| `q2.seats.hotplug-focus` — Handle controller loss and shared menu focus | [D:src/client/cl_seats.ts](../../quake-2-re-ts/src/client/cl_seats.ts) | [G16](#g16) | P / T |
-| `q2.seats.remote-network` — Use multiple local players on a remote server | [D:src/client/cl_seats.ts](../../quake-2-re-ts/src/client/cl_seats.ts) | [G16](#g16) | P / T |
-| `q2.seats.mixed-local-remote` — Mix local seats and remote peers on a listen server | [D:src/server/sv_seats.ts](../../quake-2-re-ts/src/server/sv_seats.ts) | [G16](#g16) | P / T |
-| `q2.bots.add-remove-fill` — Manage bot population | [D:src/server/bots/bot_client.ts](../../quake-2-re-ts/src/server/bots/bot_client.ts) | [G17](#g17) | P / T |
-| `q2.bots.skills-personalities` — Select bot skills and characters | [D:src/server/bots/bot_client.ts](../../quake-2-re-ts/src/server/bots/bot_client.ts) | [G17](#g17) | P / T |
-| `q2.bots.combat-campaign-goals` — Execute bot combat and campaign decisions | [D:src/server/bots/bot_client.ts](../../quake-2-re-ts/src/server/bots/bot_client.ts) | [G17](#g17) | P / T |
-| `q2.bots.map-lifecycle` — Restore bot population after map changes | [D:src/server/bots/bot_client.ts](../../quake-2-re-ts/src/server/bots/bot_client.ts) | [G17](#g17) | P / T |
-| `q2.navigation.nav2-loading` — Load and validate NAV2 navigation data | [D:src/server/nav.ts](../../quake-2-re-ts/src/server/nav.ts) | [G18](#g18) | P / T |
-| `q2.navigation.path-capabilities` — Respect navigation traversal capabilities | [D:src/server/nav.ts](../../quake-2-re-ts/src/server/nav.ts) | [G18](#g18) | P / T |
-| `q2.navigation.dynamic-obstacles` — Update routes for doors, lifts, hazards, and moving floors | [D:src/server/nav.ts](../../quake-2-re-ts/src/server/nav.ts) | [G18](#g18) | P / T |
-| `q2.navigation.foreign-map-construction` — Construct navigation for maps without NAV2 | [D:src/server/nav.ts](../../quake-2-re-ts/src/server/nav.ts) | [G18](#g18) | P / T |
-| `q2.hud.profile-selection` — Select the correct classic or rerelease HUD | [D:src/client/cgame/host.ts](../../quake-2-re-ts/src/client/cgame/host.ts) | [G19](#g19) | P / T |
-| `q2.hud.inventory` — Open and use the inventory display | [D:src/client/cl_inv.ts](../../quake-2-re-ts/src/client/cl_inv.ts) | [G19](#g19) | P / T |
-| `q2.hud.weapon-wheel` — Select a weapon with the radial wheel | [D:src/client/cl_wheel.ts](../../quake-2-re-ts/src/client/cl_wheel.ts) | [G19](#g19) | P / T |
-| `q2.hud.powerup-wheel` — Use powerups through the radial wheel | [D:src/client/cl_wheel.ts](../../quake-2-re-ts/src/client/cl_wheel.ts) | [G19](#g19) | P / T |
-| `q2.hud.weapon-carousel` — Cycle weapons with the carousel | [D:src/client/cl_wheel.ts](../../quake-2-re-ts/src/client/cl_wheel.ts) | [G19](#g19) | P / T |
-| `q2.hud.score-help` — Display scoreboards and the help computer | [D:src/kexgame/p_hud.ts](../../quake-2-re-ts/src/kexgame/p_hud.ts) | [G19](#g19) | P / T |
-| `q2.hud.poi-stages` — Activate and advance objective markers | [D:src/client/cl_scrn.ts](../../quake-2-re-ts/src/client/cl_scrn.ts) | [G20](#g20) | P / — |
-| `q2.hud.compass-help-path` — Draw the compass route to the active objective | [D:src/kexgame/g_items.ts](../../quake-2-re-ts/src/kexgame/g_items.ts) | [G20](#g20) | G / — |
-| `q2.hud.boss-health-bars` — Display and clear authored boss health bars | [D:src/kexgame/p_hud.ts](../../quake-2-re-ts/src/kexgame/p_hud.ts) | [G20](#g20) | P / — |
-| `q2.hud.damage-feedback` — Display damage direction and pickup feedback | [D:src/client/cl_scrn.ts](../../quake-2-re-ts/src/client/cl_scrn.ts) | [G19](#g19) | P / T |
-| `q2.hud.centerprints-notifications` — Queue localized centerprints and notifications | [D:src/client/cl_scrn.ts](../../quake-2-re-ts/src/client/cl_scrn.ts) | [G19](#g19) | P / T |
-| `q2.hud.story` — Show and clear rerelease story text | [D:src/game/g_kextarg.ts](../../quake-2-re-ts/src/game/g_kextarg.ts) | [G19](#g19) | P / T |
-| `q2.accessibility.localization-formatting` — Resolve localized and formatted messages | [D:src/qcommon/loc.ts](../../quake-2-re-ts/src/qcommon/loc.ts) | [G21](#g21) | P / T |
-| `q2.accessibility.language-reload` — Reload mounted localization tables | [D:src/qcommon/loc.ts](../../quake-2-re-ts/src/qcommon/loc.ts) | [G21](#g21) | P / T |
-| `q2.accessibility.kfont-unicode` — Draw Unicode text with authored font metrics | [D:src/client/cgame/host.ts](../../quake-2-re-ts/src/client/cgame/host.ts) | [G21](#g21) | P / T |
-| `q2.accessibility.contrast-typeface` — Choose contrast backgrounds and alternate typefaces | [D:src/kexgame/cgame/cg_screen.ts](../../quake-2-re-ts/src/kexgame/cgame/cg_screen.ts) | [G21](#g21) | P / T |
-| `q2.accessibility.independent-scales` — Scale menus, HUD, and console independently | [D:src/client/cgame/host.ts](../../quake-2-re-ts/src/client/cgame/host.ts) | [G21](#g21) | P / T |
-| `q2.accessibility.color-and-captions` — Complete readable non-color-only and caption workflows | [D:src/kexgame/cgame/cg_screen.ts](../../quake-2-re-ts/src/kexgame/cgame/cg_screen.ts) | [G21](#g21) | P / T |
-| `q2.input.controller-assignment` — Persist controller-to-player assignments | [D:src/platform/gamepad_assign.ts](../../quake-2-re-ts/src/platform/gamepad_assign.ts) | [G22](#g22) | P / T |
-| `q2.input.per-player-tuning` — Tune controller axes independently | [D:src/platform/gamepad_assign.ts](../../quake-2-re-ts/src/platform/gamepad_assign.ts) | [G22](#g22) | P / T |
-| `q2.input.buttons-triggers` — Map controller buttons and analog triggers | [D:src/platform/gamepad_map.ts](../../quake-2-re-ts/src/platform/gamepad_map.ts) | [G22](#g22) | P / T |
-| `q2.input.axis-deadzone` — Apply analog deadzones and response | [D:src/platform/gamepad_map.ts](../../quake-2-re-ts/src/platform/gamepad_map.ts) | [G22](#g22) | P / T |
-| `q2.input.binds-keyboard-mouse` — Bind keyboard and mouse gameplay controls | [D:src/client/keys_impl.ts](../../quake-2-re-ts/src/client/keys_impl.ts) | [G22](#g22) | P / T |
-| `q2.input.haptic-envelopes` — Play sound-triggered tactile envelopes | [D:src/platform/haptics.ts](../../quake-2-re-ts/src/platform/haptics.ts) | [G22](#g22) | P / T |
-| `q2.input.per-seat-rumble` — Route haptics to the affected local player | [D:src/platform/haptics.ts](../../quake-2-re-ts/src/platform/haptics.ts) | [G22](#g22) | P / T |
-| `q2.input.gyro-device-behavior` — Complete required gyro and device controls | [D:src/platform/gamepad_assign.ts](../../quake-2-re-ts/src/platform/gamepad_assign.ts) | [G22](#g22) | ? / — |
-| `q2.audio.spatial-channels` — Spatialize positional sounds and channel replacement | [D:src/client/snd_dma.ts](../../quake-2-re-ts/src/client/snd_dma.ts) | [G23](#g23) | J / T |
-| `q2.audio.looping-world` — Maintain looping world and entity sounds | [D:src/client/snd_dma.ts](../../quake-2-re-ts/src/client/snd_dma.ts) | [G23](#g23) | J / T |
-| `q2.audio.wav-resampling` — Decode and resample authored WAV sounds | [D:src/client/snd_mem.ts](../../quake-2-re-ts/src/client/snd_mem.ts) | [G23](#g23) | J / T |
-| `q2.audio.raw-pcm` — Mix cinematic and streamed PCM | [D:src/client/snd_dma.ts](../../quake-2-re-ts/src/client/snd_dma.ts) | [G23](#g23) | J / T |
-| `q2.audio.environment-zones` — Select and interpolate reverb environments | [D:src/client/snd_environments.ts](../../quake-2-re-ts/src/client/snd_environments.ts) | [G24](#g24) | G / — |
-| `q2.audio.reverb-dsp` — Apply audible reverb processing | [D:src/client/snd_reverb_dsp.ts](../../quake-2-re-ts/src/client/snd_reverb_dsp.ts) | [G24](#g24) | G / — |
-| `q2.music.ogg-tracks` — Resolve and stream Ogg music tracks | [D:src/platform/cd_ogg.ts](../../quake-2-re-ts/src/platform/cd_ogg.ts) | [G25](#g25) | P / T |
-| `q2.music.pause-resume-gain` — Control music pause, resume, and continuous gain | [D:src/platform/cd_ogg.ts](../../quake-2-re-ts/src/platform/cd_ogg.ts) | [G25](#g25) | P / T |
-| `q2.music.menu-shuffle` — Control menu music and playlist shuffle | [D:src/client/cl_scrn.ts](../../quake-2-re-ts/src/client/cl_scrn.ts) | [G25](#g25) | P / T |
-| `q2.audio.multiple-listeners` — Apply the explicit local-player audio policy | [D:src/client/snd_dma.ts](../../quake-2-re-ts/src/client/snd_dma.ts) | [G23](#g23) | J / T |
-| `q2.media.cin-video` — Decode and present classic CIN frames | [D:src/client/cl_cin.ts](../../quake-2-re-ts/src/client/cl_cin.ts) | [G26](#g26) | P / T |
-| `q2.media.cin-soundtrack` — Synchronize the CIN soundtrack | [D:src/client/cl_cin.ts](../../quake-2-re-ts/src/client/cl_cin.ts) | [G26](#g26) | P / T |
-| `q2.media.static-pcx` — Present static PCX intermission images | [D:src/client/cl_cin.ts](../../quake-2-re-ts/src/client/cl_cin.ts) | [G26](#g26) | P / T |
-| `q2.media.pause-skip-transition` — Pause, skip, and finish cinematic transitions | [D:src/client/cl_cin.ts](../../quake-2-re-ts/src/client/cl_cin.ts) | [G26](#g26) | P / T |
-| `q2.media.rerelease-formats` — Play required rerelease and expansion media formats | [D:src/client/menu_content.ts](../../quake-2-re-ts/src/client/menu_content.ts) | [G26](#g26) | ? / — |
-| `q2.media.timed-subtitles` — Display timed cinematic subtitles and captions | [D:src/client/cl_cin.ts](../../quake-2-re-ts/src/client/cl_cin.ts) | [G26](#g26) | ? / — |
-| `q2.save.manual-slots` — Create and load manual save slots | [D:src/server/sv_ccmds.ts](../../quake-2-re-ts/src/server/sv_ccmds.ts) | [G27](#g27) | P / T (B1–B5 use encoded checkpoints) |
-| `q2.save.eligibility-paths` — Enforce save eligibility and contained slot paths | [D:src/server/sv_ccmds.ts](../../quake-2-re-ts/src/server/sv_ccmds.ts) | [G27](#g27) | P / T |
-| `q2.save.rerelease-json` — Persist rerelease game and level containers | [D:src/kexgame/g_save.ts](../../quake-2-re-ts/src/kexgame/g_save.ts) | [G27](#g27) | P / T |
-| `q2.save.callback-graph` — Restore entity callbacks and references | [D:src/game/g_save.ts](../../quake-2-re-ts/src/game/g_save.ts) | [G27](#g27) | P / B1–B5 |
-| `q2.save.inventory-capacities` — Restore expansion ammunition capacities | [D:src/game/g_save.ts](../../quake-2-re-ts/src/game/g_save.ts) | [G27](#g27) | P / B5 (cells only) |
-| `q2.save.poi-health-story` — Restore objective and presentation state | [D:src/game/g_save.ts](../../quake-2-re-ts/src/game/g_save.ts) | [G27](#g27) | P / T |
-| `q2.save.fog` — Restore entity and player fog state | [D:src/game/g_save.ts](../../quake-2-re-ts/src/game/g_save.ts) | [G27](#g27) | P / T |
-| `q2.save.brush-animation` — Restore brush-model animation state | [D:src/game/g_save.ts](../../quake-2-re-ts/src/game/g_save.ts) | [G27](#g27) | P / T |
-| `q2.campaign.unit-backtracking` — Restore revisited levels within a unit | [D:src/server/sv_ccmds.ts](../../quake-2-re-ts/src/server/sv_ccmds.ts) | [G28](#g28) | P / T |
-| `q2.campaign.landmark-arrival` — Preserve landmark-relative arrival | [D:src/kexgame/p_client.ts](../../quake-2-re-ts/src/kexgame/p_client.ts) | [G28](#g28) | P / T |
-| `q2.campaign.crosslevel-crossunit` — Persist authored crosslevel and crossunit flags | [D:src/kexgame/g_target.ts](../../quake-2-re-ts/src/kexgame/g_target.ts) | [G28](#g28) | P / T |
-| `q2.campaign.coop-keys` — Share or preserve cooperative key progression | [D:src/game/g_items.ts](../../quake-2-re-ts/src/game/g_items.ts) | [G28](#g28) | P / T |
-| `q2.campaign.hub-endings` — Complete hubs, objectives, secrets, and endings | [D:src/kexgame/p_hud.ts](../../quake-2-re-ts/src/kexgame/p_hud.ts) | [G28](#g28) | P / T |
-| `q2.save.autosave-transition` — Distinguish autosaves from transition snapshots | [D:src/server/sv_ccmds.ts](../../quake-2-re-ts/src/server/sv_ccmds.ts) | [G27](#g27) | P / T |
-| `q2.service.achievements` — Record authored achievement events durably | [D:src/game/g_kextarg.ts](../../quake-2-re-ts/src/game/g_kextarg.ts) | [G29](#g29) | G / — |
-| `q2.service.match-report-lobby` — Complete match reporting and lobby lifecycle | [D:src/kexgame/p_hud.ts](../../quake-2-re-ts/src/kexgame/p_hud.ts) | [G29](#g29) | P / — |
-| `q2.demo.client-recording` — Record and replay ordinary demos | [D:src/client/cl_main.ts](../../quake-2-re-ts/src/client/cl_main.ts) | [G30](#g30) | P / — |
-| `q2.demo.protocol-playback` — Play supported classic and rerelease demos | [D:src/client/cl_demo.ts](../../quake-2-re-ts/src/client/cl_demo.ts) | [G30](#g30) | P / — |
-| `q2.demo.server-recording` — Record server demos | [D:src/server/sv_ccmds.ts](../../quake-2-re-ts/src/server/sv_ccmds.ts) | [G30](#g30) | ? / — |
-| `q2.demo.mvd-recording` — Record multi-view demos | [D:src/server/sv_mvd.ts](../../quake-2-re-ts/src/server/sv_mvd.ts) | [G30](#g30) | P / — |
-| `q2.demo.gtv-streaming` — Authenticate and stream GTV spectators | [D:src/server/sv_mvd.ts](../../quake-2-re-ts/src/server/sv_mvd.ts) | [G30](#g30) | ? / — |
-| `q2.demo.view-controls-seats` — Control playback and recorded local viewpoints | [D:src/client/cl_demo.ts](../../quake-2-re-ts/src/client/cl_demo.ts) | [G30](#g30) | P / — |
-| `q2.network.admission-reconnect` — Connect, reconnect, and disconnect remote clients | [D:src/client/cl_main.ts](../../quake-2-re-ts/src/client/cl_main.ts) | [G31](#g31) | P / T |
-| `q2.network.classic-protocol` — Preserve stock protocol 34 behavior | [D:src/qcommon/protocol/vanilla.ts](../../quake-2-re-ts/src/qcommon/protocol/vanilla.ts) | [G31](#g31) | J / T |
-| `q2.network.extended-protocols` — Preserve supported R1Q2 and Q2PRO variants | [D:src/qcommon/protocol/r1q2.ts](../../quake-2-re-ts/src/qcommon/protocol/r1q2.ts) | [G31](#g31) | P / T |
-| `q2.network.rerelease-1038` — Preserve the rerelease-derived protocol | [D:src/qcommon/protocol/q2repro.ts](../../quake-2-re-ts/src/qcommon/protocol/q2repro.ts) | [G31](#g31) | P / T |
-| `q2.network.private-wide-classic` — Keep private wide-classic protocol 4038 distinct | [D:src/qcommon/protocol/q2repro.ts](../../quake-2-re-ts/src/qcommon/protocol/q2repro.ts) | [G31](#g31) | P / T |
-| `q2.network.prediction-reconciliation` — Match selected movement in client prediction | [D:src/client/cl_pred.ts](../../quake-2-re-ts/src/client/cl_pred.ts) | [G12](#g12) | J / T |
-| `q2.network.connectionless-rcon` — Process status, ping, challenges, and rcon | [D:src/client/cl_main.ts](../../quake-2-re-ts/src/client/cl_main.ts) | [G31](#g31) | P / T |
-| `q2.browser.master-lan` — Discover servers from UDP, HTTP, and LAN sources | [D:src/client/cl_servers.ts](../../quake-2-re-ts/src/client/cl_servers.ts) | [G32](#g32) | P / — |
-| `q2.browser.status-details` — Inspect server rules and player details | [D:src/client/cl_servers.ts](../../quake-2-re-ts/src/client/cl_servers.ts) | [G32](#g32) | P / — |
-| `q2.browser.sort-filter` — Filter and sort server results | [D:src/client/cl_servers.ts](../../quake-2-re-ts/src/client/cl_servers.ts) | [G32](#g32) | P / — |
-| `q2.browser.favorites` — Persist favorites and direct-connect addresses | [D:src/client/cl_servers.ts](../../quake-2-re-ts/src/client/cl_servers.ts) | [G32](#g32) | P / — |
-| `q2.download.path-policy` — Validate and contain content downloads | [D:src/client/cl_http.ts](../../quake-2-re-ts/src/client/cl_http.ts) | [G32](#g32) | P / — |
-| `q2.download.http-queue` — Download content through concurrent HTTP queues | [D:src/client/cl_http.ts](../../quake-2-re-ts/src/client/cl_http.ts) | [G32](#g32) | P / — |
-| `q2.download.filelists` — Expand validated server filelists | [D:src/client/cl_http.ts](../../quake-2-re-ts/src/client/cl_http.ts) | [G32](#g32) | P / — |
-| `q2.download.mount-rescan` — Mount downloaded archives and rescan missing assets | [D:src/client/cl_http.ts](../../quake-2-re-ts/src/client/cl_http.ts) | [G32](#g32) | P / — |
-| `q2.download.udp-fallback` — Fall back from HTTP to UDP transfer | [D:src/client/cl_http.ts](../../quake-2-re-ts/src/client/cl_http.ts) | [G32](#g32) | P / — |
-| `q2.admin.operator-console` — Use dedicated-server stdin | [D:src/platform/sys.ts](../../quake-2-re-ts/src/platform/sys.ts) | [G33](#g33) | P / T |
-| `q2.admin.status-kick` — Inspect clients and remove a player | [D:src/server/sv_ccmds.ts](../../quake-2-re-ts/src/server/sv_ccmds.ts) | [G33](#g33) | P / T |
-| `q2.admin.masters-heartbeat` — Configure masters and heartbeat publication | [D:src/server/sv_ccmds.ts](../../quake-2-re-ts/src/server/sv_ccmds.ts) | [G33](#g33) | P / T |
-| `q2.admin.chat-team-private` — Communicate through player and server chat | [D:src/game/g_cmds.ts](../../quake-2-re-ts/src/game/g_cmds.ts) | [G33](#g33) | P / T |
-| `q2.admin.player-identity` — Configure player names, skins, handedness, and view settings | [D:src/game/p_client.ts](../../quake-2-re-ts/src/game/p_client.ts) | [G33](#g33) | P / T |
-| `q2.admin.spectator-chase` — Enter spectator mode and chase active players | [D:src/game/g_chase.ts](../../quake-2-re-ts/src/game/g_chase.ts) | [G33](#g33) | P / T |
-| `q2.config.archived-state` — Persist binds and archived cvars | [D:src/client/cl_main.ts](../../quake-2-re-ts/src/client/cl_main.ts) | [G34](#g34) | P / T |
-| `q2.config.scripts-aliases` — Execute config scripts, aliases, and command buffers | [D:src/qcommon/cmd.ts](../../quake-2-re-ts/src/qcommon/cmd.ts) | [G34](#g34) | P / T |
-| `q2.config.console-completion` — Use console history and command or cvar completion | [D:src/qcommon/cmd.ts](../../quake-2-re-ts/src/qcommon/cmd.ts) | [G34](#g34) | P / T |
-| `q2.config.audio-video-input-menus` — Apply video, audio, and input settings | [D:src/platform/vid.ts](../../quake-2-re-ts/src/platform/vid.ts) | [G34](#g34) | P / T |
-| `q2.capture.screenshots` — Capture the active CPU and GL scene | [D:src/platform/vid.ts](../../quake-2-re-ts/src/platform/vid.ts) | [G35](#g35) | J / B2 |
-| `q2.config.renderer-restart` — Restart or switch renderer within a live session | [D:src/platform/vid.ts](../../quake-2-re-ts/src/platform/vid.ts) | [G34](#g34) | P / T |
-| `q2.diagnostics.runtime-camera` — Execute authored target cameras | [D:src/kexgame/g_target.ts](../../quake-2-re-ts/src/kexgame/g_target.ts) | [G07](#g07) | J / T |
-| `q2.assets.bspx-lightmaps` — Load decoupled BSPX lightmaps | [D:src/qcommon/bspx.ts](../../quake-2-re-ts/src/qcommon/bspx.ts) | [G36](#g36) | J / T |
-| `q2.assets.lightgrid` — Light entities from BSPX light grids | [D:src/qcommon/bspx.ts](../../quake-2-re-ts/src/qcommon/bspx.ts) | [G36](#g36) | J / T |
-| `q2.assets.md5-replacements` — Select correctly scaled skeletal model replacements | [D:src/qcommon/md5_model.ts](../../quake-2-re-ts/src/qcommon/md5_model.ts) | [G36](#g36) | J / T |
-| `q2.assets.md5-animation` — Animate skeletal models with authored scale | [D:src/qcommon/md5_model.ts](../../quake-2-re-ts/src/qcommon/md5_model.ts) | [G36](#g36) | J / T |
-| `q2.visual.dynamic-lights` — Animate and switch authored target lights | [D:src/kexgame/g_target.ts](../../quake-2-re-ts/src/kexgame/g_target.ts) | [G37](#g37) | P / T |
-| `q2.visual.sky-fog-world-effects` — Present authored sky, fog, and world effects | [D:src/kexgame/g_target.ts](../../quake-2-re-ts/src/kexgame/g_target.ts) | [G37](#g37) | P / T |
+| `q2.content.campaign-catalog` — Discover the seven Q2 content families | D:src/client/menu_content.ts | [G01](#g01) | P / T |
+| `q2.content.native-starts` — Launch authored campaign starting maps | D:src/client/menu_content.ts | [G01](#g01) | P / T |
+| `q2.content.ruleset-mount-order` — Select gameplay independently from map edition | D:src/client/menu_content.ts | [G01](#g01) | J / T |
+| `q2.content.launch-lifecycle` — Switch campaigns and modes within one process | D:src/client/menu_content.ts | [G01](#g01) | P / T |
+| `q2.content.coop-launch` — Launch campaign coop and local players | D:src/client/menu_content.ts | [G01](#g01) | P / T |
+| `q2.content.discovered-addons` — Discover installed add-on directories | D:src/client/menu_content.ts | [G01](#g01) | P / T |
+| `q2.content.start-map-discovery` — Resolve mapdb, maplist, and BSP start maps | D:src/client/menu_content.ts | [G01](#g01) | P / T |
+| `q2.content.server-map-lists` — Choose maps and inspect mode eligibility | D:src/client/menu_content.ts | [G01](#g01) | P / T |
+| `q2.content.rotation-editor` — Edit and persist ordered map rotations | D:src/client/menu_content.ts | [G01](#g01) | P / T |
+| `q2.content.auxiliary-map-assets` — Use foreign map dependencies without overriding gameplay | D:src/qcommon/files.ts | [G01](#g01) | J / T |
+| `q2.content.same-name-remount` — Invalidate caches when map provenance changes | D:src/qcommon/files.ts | [G01](#g01) | J / T |
+| `q2.content.missing-dependencies` — Report missing campaign installations and required maps | D:src/client/menu_content.ts | [G01](#g01) | J / T |
+| `q2.game.provider-selection` — Select base, expansion, CTF, LMCTF, and KEX game providers | D:src/server/bindings/legacy.ts | [G02](#g02) | J / B1–B5 |
+| `q2.game.native-entity-precedence` — Preserve native entities while supplying foreign mechanics | D:src/game/g_spawn.ts | [G02](#g02) | J / B1/B4 |
+| `q2.weapon.blaster` — Fire the blaster | D:src/game/p_weapon.ts | [G03](#g03) | J / T |
+| `q2.weapon.shotgun` — Fire the shotgun | D:src/game/p_weapon.ts | [G03](#g03) | J / T |
+| `q2.weapon.super-shotgun` — Fire the super shotgun | D:src/game/p_weapon.ts | [G03](#g03) | J / T |
+| `q2.weapon.machinegun` — Sustain machinegun fire | D:src/game/p_weapon.ts | [G03](#g03) | J / T |
+| `q2.weapon.chaingun` — Spin and fire the chaingun | D:src/game/p_weapon.ts | [G03](#g03) | J / T |
+| `q2.weapon.hand-grenade` — Cook and throw hand grenades | D:src/game/p_weapon.ts | [G03](#g03) | J / T |
+| `q2.weapon.grenade-launcher` — Fire bouncing launcher grenades | D:src/game/p_weapon.ts | [G03](#g03) | J / T |
+| `q2.weapon.rocket-launcher` — Fire rockets and apply splash knockback | D:src/game/p_weapon.ts | [G03](#g03) | J / T |
+| `q2.weapon.hyperblaster` — Sustain hyperblaster fire | D:src/game/p_weapon.ts | [G03](#g03) | J / T |
+| `q2.weapon.railgun` — Pierce targets with the railgun | D:src/game/p_weapon.ts | [G03](#g03) | J / T |
+| `q2.weapon.bfg` — Charge and detonate the BFG | D:src/game/p_weapon.ts | [G03](#g03) | J / T |
+| `q2.inventory.weapon-selection` — Select, cycle, drop, and recover weapons | D:src/game/p_weapon.ts | [G04](#g04) | J / T |
+| `q2.inventory.ammo-capacity` — Pick up ammunition up to the current capacity | D:src/game/g_items.ts | [G04](#g04) | J / T |
+| `q2.inventory.bandolier` — Increase capacities with the bandolier | D:src/game/g_items.ts | [G04](#g04) | J / T |
+| `q2.inventory.ammo-pack` — Increase capacities with the ammo pack | D:src/game/g_items.ts | [G04](#g04) | J / T |
+| `q2.inventory.health-megahealth` — Pick up health and decay megahealth | D:src/game/g_items.ts | [G04](#g04) | J / T |
+| `q2.inventory.armor-salvage` — Salvage and replace armor | D:src/game/g_items.ts | [G04](#g04) | J / T |
+| `q2.inventory.power-armor` — Toggle power armor and consume cells on protection | D:src/game/g_items.ts | [G04](#g04) | J / B5 (monster screen only) |
+| `q2.powerup.quad` — Activate and extend quad damage | D:src/game/g_items.ts | [G04](#g04) | J / T |
+| `q2.powerup.invulnerability` — Activate and expire invulnerability | D:src/game/g_items.ts | [G04](#g04) | J / T |
+| `q2.powerup.breather-envirosuit` — Use breathing and environmental protection | D:src/game/g_items.ts | [G04](#g04) | J / T |
+| `q2.powerup.silencer` — Consume silenced shots | D:src/game/g_items.ts | [G04](#g04) | J / T |
+| `q2.combat.damage-armor-knockback` — Resolve damage, armor, friendly fire, and death once | D:src/game/g_combat.ts | [G05](#g05) | J / B5 |
+| `q2.monster.base-ai` — Run native monster sensing, attacks, pain, and death | D:src/game/g_ai.ts | [G06](#g06) | J / B1–B5 |
+| `q2.world.movers-triggers` — Use doors, platforms, trains, buttons, and trigger chains | D:src/game/g_func.ts | [G07](#g07) | J / T |
+| `q2.world.flashlight` — Toggle the rerelease flashlight under every host profile | D:src/game/g_items.ts | [G20](#g20) | G / — |
+| `q2.xatrix.ionripper` — Fire the Ion Ripper | D:src/xatrix/p_weapon.ts | [G08](#g08) | J / T |
+| `q2.xatrix.phalanx` — Fire the Phalanx particle cannon | D:src/xatrix/p_weapon.ts | [G08](#g08) | J / T |
+| `q2.xatrix.trap` — Throw traps and collect food cubes | D:src/xatrix/p_weapon.ts | [G08](#g08) | J / T |
+| `q2.xatrix.quadfire` — Activate quad fire | D:src/xatrix/g_items.ts | [G08](#g08) | J / T |
+| `q2.xatrix.monsters` — Fight Reckoning monsters and variants | D:src/xatrix/g_spawn.ts | [G08](#g08) | J / T |
+| `q2.rogue.chainfist` — Cut targets with the chainfist | D:src/rogue/p_weapon.ts | [G09](#g09) | J / T |
+| `q2.rogue.etf-rifle` — Fire armor-piercing flechettes | D:src/rogue/p_weapon.ts | [G09](#g09) | J / T |
+| `q2.rogue.proximity-mines` — Deploy proximity mines | D:src/rogue/p_weapon.ts | [G09](#g09) | J / T |
+| `q2.rogue.heatbeam` — Maintain a heatbeam attack | D:src/rogue/p_weapon.ts | [G09](#g09) | J / T |
+| `q2.rogue.disintegrator` — Acquire and track a disintegrator target | D:src/rogue/p_weapon.ts | [G09](#g09) | J / T |
+| `q2.rogue.nuke` — Deploy the A-M Bomb | D:src/rogue/g_items.ts | [G09](#g09) | J / T |
+| `q2.rogue.spheres` — Use defender, hunter, and vengeance spheres | D:src/rogue/g_items.ts | [G09](#g09) | J / T |
+| `q2.rogue.doppleganger` — Spawn a doppleganger decoy | D:src/rogue/g_items.ts | [G09](#g09) | J / T |
+| `q2.rogue.double-damage` — Activate double damage | D:src/rogue/g_items.ts | [G09](#g09) | J / T |
+| `q2.rogue.infrared` — Activate infrared vision | D:src/rogue/g_items.ts | [G09](#g09) | J / T |
+| `q2.rogue.monsters-hazards` — Fight Ground Zero monsters and authored hazards | D:src/rogue/g_spawn.ts | [G09](#g09) | J / T |
+| `q2.rerelease.gun-commander` — Fight the gun commander | D:src/kexgame/m_guncmdr.ts | [G10](#g10) | J / T |
+| `q2.rerelease.shambler` — Fight the rerelease shambler | D:src/kexgame/m_shambler.ts | [G10](#g10) | J / T |
+| `q2.rerelease.guardian` — Complete the guardian encounter | D:src/kexgame/m_guardian.ts | [G10](#g10) | J / T |
+| `q2.rerelease.instanced-items` — Use coop item instancing | D:src/kexgame/g_items.ts | [G11](#g11) | P / T |
+| `q2.rerelease.squad-respawn-lives` — Use squad respawn and cooperative lives | D:src/client/menu_content.ts | [G11](#g11) | P / T |
+| `q2.rerelease.q64-movement` — Match Q2 64 server movement and prediction | D:src/kexgame/p_client.ts | [G12](#g12) | J / T |
+| `q2.mode.deathmatch-limits` — End a deathmatch on authored limits | D:src/game/g_main.ts | [G13](#g13) | P / T |
+| `q2.mode.dm-options` — Apply classic deathmatch flags | D:src/client/menu_content.ts | [G13](#g13) | P / T |
+| `q2.mode.rerelease-options` — Apply rerelease deathmatch and weapon settings | D:src/client/menu_content.ts | [G13](#g13) | P / T |
+| `q2.mode.tag` — Play Rogue Tag | D:src/kexgame/rogue/g_rogue_newdm.ts | [G13](#g13) | P / T |
+| `q2.mode.deathball` — Play rerelease DeathBall | D:src/kexgame/rogue/g_rogue_newdm.ts | [G13](#g13) | P / T |
+| `q2.ctf.flag-objective` — Capture and return CTF flags | D:src/ctf/g_ctf.ts | [G14](#g14) | J / T |
+| `q2.ctf.grapple` — Use the CTF grappling hook | D:src/ctf/g_ctf.ts | [G14](#g14) | J / T |
+| `q2.ctf.techs` — Use and drop CTF tech powerups | D:src/ctf/g_ctf.ts | [G14](#g14) | J / T |
+| `q2.ctf.team-lifecycle` — Join teams and spectate a CTF match | D:src/ctf/g_ctf.ts | [G14](#g14) | J / T |
+| `q2.lmctf.flag-objective` — Complete Loki's Minions flag objectives | D:src/lmctf/g_ctffunc.ts | [G15](#g15) | J / T |
+| `q2.lmctf.damage-resistance-runes` — Apply damage and resistance runes | D:src/lmctf/g_runes.ts | [G15](#g15) | J / T |
+| `q2.lmctf.haste-rune` — Accelerate weapons with the haste rune | D:src/lmctf/g_runes.ts | [G15](#g15) | J / T |
+| `q2.lmctf.regeneration-vampire` — Apply regeneration and vampire runes | D:src/lmctf/g_runes.ts | [G15](#g15) | J / T |
+| `q2.lmctf.offhand-hook` — Use the LMCTF offhand hook | D:src/lmctf/g_ctffunc.ts | [G15](#g15) | J / T |
+| `q2.lmctf.tournament` — Run an LMCTF tournament match | D:src/lmctf/g_tourney.ts | [G15](#g15) | J / T |
+| `q2.lmctf.voting` — Vote on map changes and referee selection | D:src/lmctf/g_vote.ts | [G15](#g15) | J / T |
+| `q2.lmctf.server-profile` — Apply LMCTF-specific server options | D:src/client/menu_content.ts | [G15](#g15) | J / T |
+| `q2.seats.view-layouts` — Render one to four local player views | D:src/client/cl_seats.ts | [G16](#g16) | J / T |
+| `q2.seats.real-player-lifecycle` — Create local seats as real game clients | D:src/server/sv_seats.ts | [G16](#g16) | J / T |
+| `q2.seats.independent-commands` — Drive each local player independently | D:src/client/cl_seats.ts | [G16](#g16) | J / T |
+| `q2.seats.private-messages` — Route private HUD and messages to the correct seat | D:src/client/cl_seats.ts | [G16](#g16) | P / T |
+| `q2.seats.hotplug-focus` — Handle controller loss and shared menu focus | D:src/client/cl_seats.ts | [G16](#g16) | P / T |
+| `q2.seats.remote-network` — Use multiple local players on a remote server | D:src/client/cl_seats.ts | [G16](#g16) | P / T |
+| `q2.seats.mixed-local-remote` — Mix local seats and remote peers on a listen server | D:src/server/sv_seats.ts | [G16](#g16) | P / T |
+| `q2.bots.add-remove-fill` — Manage bot population | D:src/server/bots/bot_client.ts | [G17](#g17) | P / T |
+| `q2.bots.skills-personalities` — Select bot skills and characters | D:src/server/bots/bot_client.ts | [G17](#g17) | P / T |
+| `q2.bots.combat-campaign-goals` — Execute bot combat and campaign decisions | D:src/server/bots/bot_client.ts | [G17](#g17) | P / T |
+| `q2.bots.map-lifecycle` — Restore bot population after map changes | D:src/server/bots/bot_client.ts | [G17](#g17) | P / T |
+| `q2.navigation.nav2-loading` — Load and validate NAV2 navigation data | D:src/server/nav.ts | [G18](#g18) | P / T |
+| `q2.navigation.path-capabilities` — Respect navigation traversal capabilities | D:src/server/nav.ts | [G18](#g18) | P / T |
+| `q2.navigation.dynamic-obstacles` — Update routes for doors, lifts, hazards, and moving floors | D:src/server/nav.ts | [G18](#g18) | P / T |
+| `q2.navigation.foreign-map-construction` — Construct navigation for maps without NAV2 | D:src/server/nav.ts | [G18](#g18) | P / T |
+| `q2.hud.profile-selection` — Select the correct classic or rerelease HUD | D:src/client/cgame/host.ts | [G19](#g19) | P / T |
+| `q2.hud.inventory` — Open and use the inventory display | D:src/client/cl_inv.ts | [G19](#g19) | P / T |
+| `q2.hud.weapon-wheel` — Select a weapon with the radial wheel | D:src/client/cl_wheel.ts | [G19](#g19) | P / T |
+| `q2.hud.powerup-wheel` — Use powerups through the radial wheel | D:src/client/cl_wheel.ts | [G19](#g19) | P / T |
+| `q2.hud.weapon-carousel` — Cycle weapons with the carousel | D:src/client/cl_wheel.ts | [G19](#g19) | P / T |
+| `q2.hud.score-help` — Display scoreboards and the help computer | D:src/kexgame/p_hud.ts | [G19](#g19) | P / T |
+| `q2.hud.poi-stages` — Activate and advance objective markers | D:src/client/cl_scrn.ts | [G20](#g20) | P / — |
+| `q2.hud.compass-help-path` — Draw the compass route to the active objective | D:src/kexgame/g_items.ts | [G20](#g20) | G / — |
+| `q2.hud.boss-health-bars` — Display and clear authored boss health bars | D:src/kexgame/p_hud.ts | [G20](#g20) | P / — |
+| `q2.hud.damage-feedback` — Display damage direction and pickup feedback | D:src/client/cl_scrn.ts | [G19](#g19) | P / T |
+| `q2.hud.centerprints-notifications` — Queue localized centerprints and notifications | D:src/client/cl_scrn.ts | [G19](#g19) | P / T |
+| `q2.hud.story` — Show and clear rerelease story text | D:src/game/g_kextarg.ts | [G19](#g19) | P / T |
+| `q2.accessibility.localization-formatting` — Resolve localized and formatted messages | D:src/qcommon/loc.ts | [G21](#g21) | P / T |
+| `q2.accessibility.language-reload` — Reload mounted localization tables | D:src/qcommon/loc.ts | [G21](#g21) | P / T |
+| `q2.accessibility.kfont-unicode` — Draw Unicode text with authored font metrics | D:src/client/cgame/host.ts | [G21](#g21) | P / T |
+| `q2.accessibility.contrast-typeface` — Choose contrast backgrounds and alternate typefaces | D:src/kexgame/cgame/cg_screen.ts | [G21](#g21) | P / T |
+| `q2.accessibility.independent-scales` — Scale menus, HUD, and console independently | D:src/client/cgame/host.ts | [G21](#g21) | P / T |
+| `q2.accessibility.color-and-captions` — Complete readable non-color-only and caption workflows | D:src/kexgame/cgame/cg_screen.ts | [G21](#g21) | P / T |
+| `q2.input.controller-assignment` — Persist controller-to-player assignments | D:src/platform/gamepad_assign.ts | [G22](#g22) | P / T |
+| `q2.input.per-player-tuning` — Tune controller axes independently | D:src/platform/gamepad_assign.ts | [G22](#g22) | P / T |
+| `q2.input.buttons-triggers` — Map controller buttons and analog triggers | D:src/platform/gamepad_map.ts | [G22](#g22) | P / T |
+| `q2.input.axis-deadzone` — Apply analog deadzones and response | D:src/platform/gamepad_map.ts | [G22](#g22) | P / T |
+| `q2.input.binds-keyboard-mouse` — Bind keyboard and mouse gameplay controls | D:src/client/keys_impl.ts | [G22](#g22) | P / T |
+| `q2.input.haptic-envelopes` — Play sound-triggered tactile envelopes | D:src/platform/haptics.ts | [G22](#g22) | P / T |
+| `q2.input.per-seat-rumble` — Route haptics to the affected local player | D:src/platform/haptics.ts | [G22](#g22) | P / T |
+| `q2.input.gyro-device-behavior` — Complete required gyro and device controls | D:src/platform/gamepad_assign.ts | [G22](#g22) | ? / — |
+| `q2.audio.spatial-channels` — Spatialize positional sounds and channel replacement | D:src/client/snd_dma.ts | [G23](#g23) | J / T |
+| `q2.audio.looping-world` — Maintain looping world and entity sounds | D:src/client/snd_dma.ts | [G23](#g23) | J / T |
+| `q2.audio.wav-resampling` — Decode and resample authored WAV sounds | D:src/client/snd_mem.ts | [G23](#g23) | J / T |
+| `q2.audio.raw-pcm` — Mix cinematic and streamed PCM | D:src/client/snd_dma.ts | [G23](#g23) | J / T |
+| `q2.audio.environment-zones` — Select and interpolate reverb environments | D:src/client/snd_environments.ts | [G24](#g24) | G / — |
+| `q2.audio.reverb-dsp` — Apply audible reverb processing | D:src/client/snd_reverb_dsp.ts | [G24](#g24) | G / — |
+| `q2.music.ogg-tracks` — Resolve and stream Ogg music tracks | D:src/platform/cd_ogg.ts | [G25](#g25) | P / T |
+| `q2.music.pause-resume-gain` — Control music pause, resume, and continuous gain | D:src/platform/cd_ogg.ts | [G25](#g25) | P / T |
+| `q2.music.menu-shuffle` — Control menu music and playlist shuffle | D:src/client/cl_scrn.ts | [G25](#g25) | P / T |
+| `q2.audio.multiple-listeners` — Apply the explicit local-player audio policy | D:src/client/snd_dma.ts | [G23](#g23) | J / T |
+| `q2.media.cin-video` — Decode and present classic CIN frames | D:src/client/cl_cin.ts | [G26](#g26) | P / T |
+| `q2.media.cin-soundtrack` — Synchronize the CIN soundtrack | D:src/client/cl_cin.ts | [G26](#g26) | P / T |
+| `q2.media.static-pcx` — Present static PCX intermission images | D:src/client/cl_cin.ts | [G26](#g26) | P / T |
+| `q2.media.pause-skip-transition` — Pause, skip, and finish cinematic transitions | D:src/client/cl_cin.ts | [G26](#g26) | P / T |
+| `q2.media.rerelease-formats` — Play required rerelease and expansion media formats | D:src/client/menu_content.ts | [G26](#g26) | ? / — |
+| `q2.media.timed-subtitles` — Display timed cinematic subtitles and captions | D:src/client/cl_cin.ts | [G26](#g26) | ? / — |
+| `q2.save.manual-slots` — Create and load manual save slots | D:src/server/sv_ccmds.ts | [G27](#g27) | P / T (B1–B5 use encoded checkpoints) |
+| `q2.save.eligibility-paths` — Enforce save eligibility and contained slot paths | D:src/server/sv_ccmds.ts | [G27](#g27) | P / T |
+| `q2.save.rerelease-json` — Persist rerelease game and level containers | D:src/kexgame/g_save.ts | [G27](#g27) | P / T |
+| `q2.save.callback-graph` — Restore entity callbacks and references | D:src/game/g_save.ts | [G27](#g27) | P / B1–B5 |
+| `q2.save.inventory-capacities` — Restore expansion ammunition capacities | D:src/game/g_save.ts | [G27](#g27) | P / B5 (cells only) |
+| `q2.save.poi-health-story` — Restore objective and presentation state | D:src/game/g_save.ts | [G27](#g27) | P / T |
+| `q2.save.fog` — Restore entity and player fog state | D:src/game/g_save.ts | [G27](#g27) | P / T |
+| `q2.save.brush-animation` — Restore brush-model animation state | D:src/game/g_save.ts | [G27](#g27) | P / T |
+| `q2.campaign.unit-backtracking` — Restore revisited levels within a unit | D:src/server/sv_ccmds.ts | [G28](#g28) | P / T |
+| `q2.campaign.landmark-arrival` — Preserve landmark-relative arrival | D:src/kexgame/p_client.ts | [G28](#g28) | P / T |
+| `q2.campaign.crosslevel-crossunit` — Persist authored crosslevel and crossunit flags | D:src/kexgame/g_target.ts | [G28](#g28) | P / T |
+| `q2.campaign.coop-keys` — Share or preserve cooperative key progression | D:src/game/g_items.ts | [G28](#g28) | P / T |
+| `q2.campaign.hub-endings` — Complete hubs, objectives, secrets, and endings | D:src/kexgame/p_hud.ts | [G28](#g28) | P / T |
+| `q2.save.autosave-transition` — Distinguish autosaves from transition snapshots | D:src/server/sv_ccmds.ts | [G27](#g27) | P / T |
+| `q2.service.achievements` — Record authored achievement events durably | D:src/game/g_kextarg.ts | [G29](#g29) | G / — |
+| `q2.service.match-report-lobby` — Complete match reporting and lobby lifecycle | D:src/kexgame/p_hud.ts | [G29](#g29) | P / — |
+| `q2.demo.client-recording` — Record and replay ordinary demos | D:src/client/cl_main.ts | [G30](#g30) | P / — |
+| `q2.demo.protocol-playback` — Play supported classic and rerelease demos | D:src/client/cl_demo.ts | [G30](#g30) | P / — |
+| `q2.demo.server-recording` — Record server demos | D:src/server/sv_ccmds.ts | [G30](#g30) | ? / — |
+| `q2.demo.mvd-recording` — Record multi-view demos | D:src/server/sv_mvd.ts | [G30](#g30) | P / — |
+| `q2.demo.gtv-streaming` — Authenticate and stream GTV spectators | D:src/server/sv_mvd.ts | [G30](#g30) | ? / — |
+| `q2.demo.view-controls-seats` — Control playback and recorded local viewpoints | D:src/client/cl_demo.ts | [G30](#g30) | P / — |
+| `q2.network.admission-reconnect` — Connect, reconnect, and disconnect remote clients | D:src/client/cl_main.ts | [G31](#g31) | P / T |
+| `q2.network.classic-protocol` — Preserve stock protocol 34 behavior | D:src/qcommon/protocol/vanilla.ts | [G31](#g31) | J / T |
+| `q2.network.extended-protocols` — Preserve supported R1Q2 and Q2PRO variants | D:src/qcommon/protocol/r1q2.ts | [G31](#g31) | P / T |
+| `q2.network.rerelease-1038` — Preserve the rerelease-derived protocol | D:src/qcommon/protocol/q2repro.ts | [G31](#g31) | P / T |
+| `q2.network.private-wide-classic` — Keep private wide-classic protocol 4038 distinct | D:src/qcommon/protocol/q2repro.ts | [G31](#g31) | P / T |
+| `q2.network.prediction-reconciliation` — Match selected movement in client prediction | D:src/client/cl_pred.ts | [G12](#g12) | J / T |
+| `q2.network.connectionless-rcon` — Process status, ping, challenges, and rcon | D:src/client/cl_main.ts | [G31](#g31) | P / T |
+| `q2.browser.master-lan` — Discover servers from UDP, HTTP, and LAN sources | D:src/client/cl_servers.ts | [G32](#g32) | P / — |
+| `q2.browser.status-details` — Inspect server rules and player details | D:src/client/cl_servers.ts | [G32](#g32) | P / — |
+| `q2.browser.sort-filter` — Filter and sort server results | D:src/client/cl_servers.ts | [G32](#g32) | P / — |
+| `q2.browser.favorites` — Persist favorites and direct-connect addresses | D:src/client/cl_servers.ts | [G32](#g32) | P / — |
+| `q2.download.path-policy` — Validate and contain content downloads | D:src/client/cl_http.ts | [G32](#g32) | P / — |
+| `q2.download.http-queue` — Download content through concurrent HTTP queues | D:src/client/cl_http.ts | [G32](#g32) | P / — |
+| `q2.download.filelists` — Expand validated server filelists | D:src/client/cl_http.ts | [G32](#g32) | P / — |
+| `q2.download.mount-rescan` — Mount downloaded archives and rescan missing assets | D:src/client/cl_http.ts | [G32](#g32) | P / — |
+| `q2.download.udp-fallback` — Fall back from HTTP to UDP transfer | D:src/client/cl_http.ts | [G32](#g32) | P / — |
+| `q2.admin.operator-console` — Use dedicated-server stdin | D:src/platform/sys.ts | [G33](#g33) | P / T |
+| `q2.admin.status-kick` — Inspect clients and remove a player | D:src/server/sv_ccmds.ts | [G33](#g33) | P / T |
+| `q2.admin.masters-heartbeat` — Configure masters and heartbeat publication | D:src/server/sv_ccmds.ts | [G33](#g33) | P / T |
+| `q2.admin.chat-team-private` — Communicate through player and server chat | D:src/game/g_cmds.ts | [G33](#g33) | P / T |
+| `q2.admin.player-identity` — Configure player names, skins, handedness, and view settings | D:src/game/p_client.ts | [G33](#g33) | P / T |
+| `q2.admin.spectator-chase` — Enter spectator mode and chase active players | D:src/game/g_chase.ts | [G33](#g33) | P / T |
+| `q2.config.archived-state` — Persist binds and archived cvars | D:src/client/cl_main.ts | [G34](#g34) | P / T |
+| `q2.config.scripts-aliases` — Execute config scripts, aliases, and command buffers | D:src/qcommon/cmd.ts | [G34](#g34) | P / T |
+| `q2.config.console-completion` — Use console history and command or cvar completion | D:src/qcommon/cmd.ts | [G34](#g34) | P / T |
+| `q2.config.audio-video-input-menus` — Apply video, audio, and input settings | D:src/platform/vid.ts | [G34](#g34) | P / T |
+| `q2.capture.screenshots` — Capture the active CPU and GL scene | D:src/platform/vid.ts | [G35](#g35) | J / B2 |
+| `q2.config.renderer-restart` — Restart or switch renderer within a live session | D:src/platform/vid.ts | [G34](#g34) | P / T |
+| `q2.diagnostics.runtime-camera` — Execute authored target cameras | D:src/kexgame/g_target.ts | [G07](#g07) | J / T |
+| `q2.assets.bspx-lightmaps` — Load decoupled BSPX lightmaps | D:src/qcommon/bspx.ts | [G36](#g36) | J / T |
+| `q2.assets.lightgrid` — Light entities from BSPX light grids | D:src/qcommon/bspx.ts | [G36](#g36) | J / T |
+| `q2.assets.md5-replacements` — Select correctly scaled skeletal model replacements | D:src/qcommon/md5_model.ts | [G36](#g36) | J / T |
+| `q2.assets.md5-animation` — Animate skeletal models with authored scale | D:src/qcommon/md5_model.ts | [G36](#g36) | J / T |
+| `q2.visual.dynamic-lights` — Animate and switch authored target lights | D:src/kexgame/g_target.ts | [G37](#g37) | P / T |
+| `q2.visual.sky-fog-world-effects` — Present authored sky, fog, and world effects | D:src/kexgame/g_target.ts | [G37](#g37) | P / T |
 
 ## Concrete gaps and unresolved comparisons
 

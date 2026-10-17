@@ -1,4 +1,6 @@
 import { beforeAll, expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { openArchive } from "../../../../src/content/archive/index.ts";
@@ -13,7 +15,7 @@ import { WeightConfigStore } from "../../../../src/bots/behavior/library/weights
 import { loadItemConfig } from "../../../../src/bots/behavior/library/goals.ts";
 import { ScriptGlobalDefines } from "../../../../src/ui/common/legacy/script/preprocessor.ts";
 
-const root = process.env["Q3_DATA"] ?? "/home/buzzkill/Projects/qfiles/q3a";
+const root = process.env["Q3_DATA"] ?? `${testCorpusRoot()}/q3a`;
 const available = existsSync(join(root, "baseq3/pak0.pk3")) && existsSync(join(root, "missionpack/pak0.pk3"));
 const products = new Map<string, BotAssetFiles>();
 

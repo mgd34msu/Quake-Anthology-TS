@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
@@ -296,7 +298,7 @@ test("Q2 pusher teams roll back earlier members before the blocked callback", ()
   expect(s.physics.bodies.read(first.id)?.origin.x).toBe(-30);
 });
 
-const pakPath = "/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK";
+const pakPath = `${testCorpusRoot()}/q1/id1/PAK0.PAK`;
 test.skipIf(!existsSync(pakPath))("shared toss physics settles a Q2 body on the real Quake start map", async () => {
   const archive = await openArchive(pakPath);
   try {

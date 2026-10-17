@@ -1,4 +1,4 @@
-// Adapted from quake-1-re-ts common.ts and quake-2-re-ts qcommon/files.ts.
+// Adapted from the reference port common.ts and the reference port qcommon/files.ts.
 // id Software PACK header and ordered 64-byte directory. GPL-2.0-or-later.
 import { BinaryReader } from "../../core/binary/index.ts";
 import { ArchiveError, checkRange, normalizeEntryPath } from "./types.ts";

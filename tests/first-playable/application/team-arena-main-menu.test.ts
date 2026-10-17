@@ -1,9 +1,11 @@
 import { encodePng } from "../../../src/formats/images/png-encoder.ts";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { expect, spyOn, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { StartupApplication } from "../../../src/app/bootstrap/startup.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.ts";
@@ -18,7 +20,7 @@ async function captureArtifact(name: string, width: number, height: number, pixe
   await Bun.write(join(directory, name), encodePng(width, height, pixels));
 }
 
-const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const corpus = testCorpusRoot();
 async function until(read: () => boolean, label: string, step: () => Promise<void>): Promise<void> {
   const deadline = performance.now() + 90000;
   while (!read()) {

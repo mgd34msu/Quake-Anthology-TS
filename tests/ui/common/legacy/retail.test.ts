@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
+import { corpusFile } from "../../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, posix } from "node:path";
+import {posix } from "node:path";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { CommandContext } from "../../../../src/contracts/common.ts";
 import type { RenderCommand } from "../../../../src/contracts/render.ts";
@@ -17,7 +18,7 @@ import { LegacyUiSeat } from "../../../../src/ui/common/legacy/input.ts";
 import { UiRuntime, type UiRuntimeResources } from "../../../../src/ui/common/legacy/runtime.ts";
 import { TeamArenaUiMemory } from "../../../../src/ui/common/legacy/team-arena/memory.ts";
 
-const archivePath = join(homedir(), "Projects/qfiles/q3a/missionpack/pak0.pk3");
+const archivePath = corpusFile("q3a/missionpack/pak0.pk3");
 
 test.skipIf(!existsSync(archivePath))("retail Team Arena menus render and execute restart through their seat", async () => {
   const archive = await openArchive(archivePath);

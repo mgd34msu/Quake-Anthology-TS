@@ -1,4 +1,6 @@
 import { SceneMaterialRegistrations } from "../../src/render/scene/material-registrations.ts";
+import { testCorpusRoot } from "../support/corpus.ts";
+
 import { sceneModelBatches } from "../../src/render/scene/submissions.ts";
 import { expect, test } from "bun:test";
 import { openArchive } from "../../src/content/archive/index.ts";
@@ -19,7 +21,7 @@ import { SceneFrameBuilder } from "../../src/render/commands/frame.ts";
 import { anglesToAxis } from "../../src/core/math.ts";
 
 async function fixture() {
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/pak0.pak");
+  const archive = await openArchive(`${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`);
   const identity = createIdentityOwner("q2-md5-loader"), owner = { identity: Symbol("q2-md5"), session: identity.session, generation: 0 };
   const images = new SceneImageRegistry(owner), overrides = new Map<string, Uint8Array | null>(), ranks = new Map<string, number>();
   async function open(path: string): Promise<OpenedResource | null> {

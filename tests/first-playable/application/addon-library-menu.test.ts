@@ -1,4 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,7 +23,7 @@ test.skipIf(process.env["QUAKE_ADDON_ASSETS"] === undefined || process.env["QUAK
   const digest="4108605842870e051b71be0721da4be004b22765dd4ba2bb0fc2e6769a55a17f";
   await copyFile(join(assets,digest+".zip"),join(user,".addons",digest+".zip"));
   await copyFile(join(assets,"quaddicted.json"),join(user,".addons","quaddicted.json"));
-  const parsed=parseApplicationCommand(["--content-root","/home/buzzkill/Projects/qfiles","--game","q1-classic-id1","--movement","q1","--character","q1","--renderer","gl","--width","640","--height","480","--user-content-root",user]);
+  const parsed=parseApplicationCommand(["--content-root",`${testCorpusRoot()}`,"--game","q1-classic-id1","--movement","q1","--character","q1","--renderer","gl","--width","640","--height","480","--user-content-root",user]);
   if(parsed.kind!=="run"&&parsed.kind!=="menu")throw new Error("Missing options");
   const observed:{controller:NativeUiController|null;labels:readonly string[]}={controller:null,labels:[]};
   const original=NativeUiController.prototype.draw;

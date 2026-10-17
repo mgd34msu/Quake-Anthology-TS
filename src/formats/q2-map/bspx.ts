@@ -1,4 +1,4 @@
-/* Adapted from quake-2-re-ts/src/qcommon/bspx.ts and q2repro/src/common/bsp.c.
+/* Adapted from the reference port and q2repro/src/common/bsp.c.
  * Copyright (C) 1997-2001 Id Software, Inc.; 2008 Andrey Nazarov.
  * GPL-2.0-or-later. */
 import type { Vec3 } from "../../contracts/math.ts";

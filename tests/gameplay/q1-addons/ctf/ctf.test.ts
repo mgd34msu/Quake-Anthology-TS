@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../../support/corpus.ts";
+
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { Q1Entity, Q1Map } from "../../../../src/formats/q1-map/index.ts";
@@ -21,7 +23,7 @@ import { fireHook, hookTouch } from "../../../../src/content/q1/addons/ctf/grapp
 import type { ItemId } from "../../../../src/contracts/gameplay.ts";
 
 async function map(name: string): Promise<Q1Map> {
-  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q1/rerelease/ctf/pak0.pak");
+  const archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/ctf/pak0.pak`);
   try { const path = `maps/${name}.bsp`, entry = archive.findEntries(path)[0]; if (entry === undefined) throw new Error(`Missing ${path}`); return readQ1Bsp(await archive.readEntry(entry), { source: path }); }
   finally { archive.close(); }
 }

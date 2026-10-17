@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
+import { testCorpusRoot } from "../../support/corpus.ts";
+
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { openArchive } from "../../../src/content/archive/index.ts";
@@ -14,7 +16,7 @@ import { aasBBoxAreas, aasTraceAreas, constructNavigation, navigationFromAsset, 
 import type { NavigationGraph } from "../../../src/bots/navigation/index.ts";
 import { navigationWorld, profile } from "./prediction.ts";
 
-const root = resolve(import.meta.dir, "../../../../qfiles");
+const root = testCorpusRoot();
 const fixtures: readonly { archive: string; map: string; nav: string; nodes: number; edges: number; decode(bytes: Uint8Array): DecodedWorld }[] = [
   { archive: "q1/rerelease/id1/pak0.pak", map: "maps/dm4.bsp", nav: "bots/navigation/dm4.nav", nodes: 85, edges: 197, decode: readQ1Bsp },
   { archive: "q2/rerelease/baseq2/pak0.pak", map: "maps/base1.bsp", nav: "bots/navigation/base1.nav", nodes: 416, edges: 1391, decode: decodeQ2Map },

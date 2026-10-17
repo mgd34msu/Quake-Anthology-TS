@@ -1,5 +1,5 @@
 // AAS v4/v5 records and BSP sampling from id Software's aasfile.h, be_aas_file.c,
-// be_aas_sample.c, and quake-3-ts/src/botlib/{aas,aas-storage}.ts.
+// be_aas_sample.c.
 // Copyright (C) 1999-2005 Id Software, Inc. SPDX-License-Identifier: GPL-2.0-or-later
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";

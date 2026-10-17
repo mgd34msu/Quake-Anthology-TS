@@ -304,8 +304,8 @@ Select a declared component under **Custom game → Mods**, or pass `--mod PRODU
 For a package without declarations, inspect the mounted program and bind callbacks established from its source:
 
 ```sh
-./quake-typescript weapon-behavior inspect q1-classic-homefix --content /path/to/qfiles
-./quake-typescript weapon-behavior declare q1-classic-homefix --content /path/to/qfiles \
+./quake-typescript weapon-behavior inspect q1-classic-homefix --content /path/to/games
+./quake-typescript weapon-behavior declare q1-classic-homefix --content /path/to/games \
   --id homefix:rocket --role rocket --fire CheckHomingRocket --activate ActivateHoming \
   --title "Homefix homing rockets"
 ```
@@ -334,9 +334,9 @@ q2/rerelease/mymod/
 Inspect the mounted image and install the supplied declaration from the source checkout:
 
 ```sh
-bun run start weapon-behavior inspect q2-rerelease-mymod --content /path/to/qfiles
+bun run start weapon-behavior inspect q2-rerelease-mymod --content /path/to/games
 bun run start weapon-behavior declare-native q2-rerelease-mymod \
-  --profile profiles/rocket.json --content /path/to/qfiles
+  --profile profiles/rocket.json --content /path/to/games
 ```
 
 `--profile` is relative to the product's mounted content, not the shell's working directory. `--user-content PATH` selects a different writable content root. The command reads one declaration, validates its artifact, and atomically writes the normalized profile into `native-weapon-behaviors.json` in the writable mod directory. It replaces the same behavior ID and preserves other valid entries. The output gives the exact `--weapon-behavior PRODUCT/ID` selector; the behavior also appears under **Custom game → Mods** in the current source.

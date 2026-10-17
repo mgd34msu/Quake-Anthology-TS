@@ -1,4 +1,6 @@
 import { SharedOriginalPickupAdmission } from "../../../src/world/gameplay/original-pickups.ts";
+import { corpusFile } from "../../support/corpus.ts";
+
 import type { RegularArmorState } from "../../../src/contracts/gameplay.ts";
 import type { OriginalPickupOffer } from "../../../src/contracts/original-pickups.ts";
 import { SharedPhysics } from "../../../src/app/bootstrap/simulation/physics.ts";
@@ -7,7 +9,6 @@ import { actorCollision, actorMotion, actorFlags } from "../../../src/app/bootst
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
 import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 import { expect, test } from "bun:test";
-import { resolve } from "node:path";
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import type { TransitionIntent } from "../../../src/contracts/gameplay.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -113,7 +114,7 @@ test("MG3 breakable pain and light ramp use shared bodies and named saved callba
 });
 
 test("actual MG1 hub and Horde map entities spawn through addon registration", async () => {
-  const archive = await openArchive(resolve(import.meta.dir, "../../../../qfiles/q1/rerelease/mg1/pak0.pak"));
+  const archive = await openArchive(corpusFile("q1/rerelease/mg1/pak0.pak"));
   try {
     for (const name of ["hub", "horde1"]) {
       const state = world("mg1", true);

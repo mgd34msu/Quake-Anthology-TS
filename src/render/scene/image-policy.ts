@@ -7,7 +7,7 @@ export interface ImagePolicy {
 }
 
 const formats: readonly ImageFormat[] = ["png", "jpg", "tga", "jpeg", "bmp", "gif"];
-// quake-2-re-ts ref_gl/gl_local.ts ImagetypeT ABI, not q2repro's six-type enum.
+// the reference port ref_gl/gl_local.ts ImagetypeT ABI, not q2repro's six-type enum.
 const usageBits: readonly (readonly [ImageUsage, number])[] = [["skin", 1], ["sprite", 2], ["wall", 4], ["picture", 8], ["sky", 16]];
 
 /** q2repro images.c r_texture_formats_changed: named tokens, then legacy initials. */
