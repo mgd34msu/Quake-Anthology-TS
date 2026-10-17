@@ -33,7 +33,7 @@ test.skipIf(!existsSync(path))("QVM collision traps use the mounted retail colli
       const words = new DataView(new ArrayBuffer((args.length + 1) * 4));
       words.setInt32(0, code, true); args.forEach((value, index) => words.setInt32((index + 1) * 4, value, true));
       return { words, memory: guest.bytes, guest, code, role: "cgame", kind: "engine", commandArguments: null,
-        invoke: () => { throw new Error("Unexpected callback"); }, invokeAsync: async () => { throw new Error("Unexpected callback"); } };
+        invoke: () => { throw new Error("Unexpected callback"); }, invokeAsync: async () => { throw new Error("Unexpected callback"); }, cancelFunction: () => { throw new Error("Unexpected cancellation"); } };
     };
     const vector = (offset: number, value: Vec3) => {
       const view = guest.view(offset, 12); view.setFloat32(0, value.x, true); view.setFloat32(4, value.y, true); view.setFloat32(8, value.z, true);

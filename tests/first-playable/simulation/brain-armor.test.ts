@@ -84,8 +84,8 @@ for (const weapon of weapons) test.skipIf(["q1/id1/PAK0.PAK", "q2/baseq2/pak0.pa
             const decision = event.payload.outcome.decision;
             if (decision.request.target.equals(target.id) && decision.request.attack.weapon === weapon.weapon && decision.request.attack.attacker?.equals(shooter)) {
               expect(decision.request.attack.cause.kind).toBe(weapon.family); expect(decision.appliedDamage).toBeGreaterThan(0);
-              for (const mutation of decision.mutations) if (mutation.kind === "armor" && mutation.before.kind === "q2" && mutation.after.kind === "q2"
-                && mutation.before.powerArmor.kind !== "none" && mutation.after.powerArmor.kind !== "none") absorbed += mutation.before.powerArmor.cells - mutation.after.powerArmor.cells;
+              for (const mutation of decision.mutations) if (mutation.kind === "armor" && mutation.before.regular.kind === "q2" && mutation.after.regular.kind === "q2"
+                && mutation.before.powered.kind !== "none" && mutation.after.powered.kind !== "none") absorbed += mutation.before.powered.cells - mutation.after.powered.cells;
               hits++;
             }
           }

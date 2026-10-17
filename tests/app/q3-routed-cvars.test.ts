@@ -32,7 +32,7 @@ for (const dialect of ["q1-netquake", "q2-classic", "q3"] satisfies readonly Com
     const words = new DataView(new ArrayBuffer(4 * (args.length + 1))); words.setInt32(0, code, true);
     args.forEach((value, index) => words.setInt32(4 * (index + 1), value, true));
     const request: QvmHostCall = { kind: "engine", role: "ui", code, guest, words, memory: guest.bytes, commandArguments: null,
-      invoke: () => { throw new Error("Unexpected invocation"); }, invokeAsync: async () => { throw new Error("Unexpected invocation"); } };
+      invoke: () => { throw new Error("Unexpected invocation"); }, invokeAsync: async () => { throw new Error("Unexpected invocation"); }, cancelFunction: () => { throw new Error("Unexpected cancellation"); } };
     return qvmCommonSyscall(request, { role: "ui", cvars: service, print: () => {}, milliseconds: () => 0, arguments: () => [], commands: {
       executeNow: text => { commands.executeNow(text); }, insert: text => commands.insert(text), append: text => commands.append(text) } });
   };

@@ -27,13 +27,15 @@ test.skipIf(process.env["QUAKE_Q2_NATIVE_APP"] !== "1")("discovered Q2 add-on la
     });
     const first = app.simulation.q2Native(), local = app.localPlayers[0];
     if (first === null || local === undefined) throw new Error("Native source/local seat was not admitted");
-    console.log("Native full-map launch", { map: "xswamp", milliseconds: performance.now() - openedAt, spawnInstructions: String(first.source.host.spawnInstructions), loadingYields, servicedFrames, maximumServiceGap, maximumGuestSliceMilliseconds: first.source.host.options.runner.maximumLoadingSliceMilliseconds });
+    const host = first.source.host;
+    if (!("spawnInstructions" in host)) throw new Error("Native source host does not track spawn instructions");
+    console.log("Native full-map launch", { map: "xswamp", milliseconds: performance.now() - openedAt, spawnInstructions: String(host.spawnInstructions), loadingYields, servicedFrames, maximumServiceGap, maximumGuestSliceMilliseconds: first.source.host.options.runner.maximumLoadingSliceMilliseconds });
     expect(loadingYields).toBeGreaterThan(100);
     expect(servicedFrames).toBeGreaterThan(100);
     expect(command.options.q2GameLibrary).toBeUndefined();
     expect(first.module.artifactPath).toBe("gamex86.dll");
     expect(first.source.host.options.instructionBudget).toBe(5_000_000);
-    expect(first.source.host.spawnInstructions).toBeGreaterThan(5_000_000n);
+    expect(host.spawnInstructions).toBeGreaterThan(5_000_000n);
     app.simulation.playerCommand(local.actor, "give", ["health", "137"]);
     const frameStarted = performance.now();
     await app.step(100);

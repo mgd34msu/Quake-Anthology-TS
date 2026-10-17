@@ -30,7 +30,7 @@ test("remote QVM command modes use the actual seat despite a local-console cvar 
     guest.writeString(512, text, 256);
     const words = new DataView(new ArrayBuffer(12)); words.setInt32(0, QvmUiImport.UI_CMD_EXECUTETEXT, true); words.setInt32(4, mode, true); words.setInt32(8, 512, true);
     expect(qvmCommonSyscall({ kind: "engine", role: "ui", code: QvmUiImport.UI_CMD_EXECUTETEXT, words, memory: guest.bytes, guest,
-      commandArguments: null, invoke: () => { throw new Error("Unexpected VM reentry"); }, invokeAsync: async () => { throw new Error("Unexpected VM reentry"); } }, services)).toBe(0);
+      commandArguments: null, invoke: () => { throw new Error("Unexpected VM reentry"); }, invokeAsync: async () => { throw new Error("Unexpected VM reentry"); }, cancelFunction: () => { throw new Error("Unexpected cancellation"); } }, services)).toBe(0);
   };
   invoke(0, 'bind w "echo staged-binding"');
   expect(program.input(seat)?.binding({ kind: "key", code: 119 })).toEqual({ kind: "command", text: "echo staged-binding" });

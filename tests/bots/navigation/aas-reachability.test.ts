@@ -78,7 +78,7 @@ test('BSP teleporter targets use the selected prediction client and retain team 
       expect(query.entityNum).toBe(7);
       expect(query.origin).toEqual(vec3(5, 0, 10));
       return { end: vec3(5, 0, 1), endArea: 2, velocity: zero, frames: 3, stopEvent: 1,
-        trajectory: [], seconds: 0.3, grounded: true, waterLevel: 0 };
+        trajectory: [], seconds: 0.3, grounded: true, waterLevel: 0, trace: null, bounds: null };
     } });
   expect(calls).toBe(1);
   expect(result.reachability.filter(reach => (reach.travelType & 0xffffff) === 10).map(reach => [reach.area, reach.travelType, reach.end])).toEqual([[2, 10 | (1 << 25), vec3(5, 0, 1)]]);
@@ -98,7 +98,7 @@ test('selected prediction preserves explicit crossing area and source stopped-fr
     predictClientMovement(query) {
       expect(query.entityNum).toBe(5);
       return { end: zero, endArea: 2, velocity: zero, frames: 3, stopEvent: stopped ? 512 : 0,
-        trajectory: [], seconds: 0.3, grounded: false, waterLevel: 0 };
+        trajectory: [], seconds: 0.3, grounded: false, waterLevel: 0, trace: null, bounds: null };
     } }, world, new AasReachabilityEntities(geometry.entities), DEFAULT_AAS_MOVEMENT_SETTINGS);
   const request = { entityNum: -1, origin: zero, presence: 2, onGround: false, velocity: zero, commandMove: zero,
     commandFrames: 0, maxFrames: 3, frameTime: Math.fround(0.1), stopEvents: 512, stopArea: 1, visualize: false } satisfies import('../../../src/bots/behavior/q3/navigation-types.ts').BotMovementPrediction;

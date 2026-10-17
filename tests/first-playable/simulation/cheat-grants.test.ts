@@ -39,7 +39,7 @@ for (const scenario of cases) test(`${scenario.game} giveall updates the chosen 
     const beforeNative = simulation.inventory.count(actor, nativeRocket);
     run("giveall");
     expect(simulation.combat.read(actor)?.health).toBeGreaterThanOrEqual(100);
-    expect(simulation.combat.read(actor)?.armor.kind).not.toBe("none");
+    expect(simulation.combat.read(actor)?.armor.regular.kind).not.toBe("none");
     const rocket = scenario.foreign ? "q3:weapon/rocketlauncher" : nativeRocket;
     const ammo = scenario.foreign ? "q3:ammo/rocketlauncher" : "q1:ammo/rockets";
     expect(simulation.inventory.count(actor, rocket)).toBe(1); expect(simulation.inventory.count(actor, ammo)).toBeGreaterThan(0);
@@ -55,7 +55,7 @@ for (const scenario of cases) test(`${scenario.game} giveall updates the chosen 
     }
     run("give health 61"); expect(simulation.combat.read(actor)?.health).toBe(61);
     if (source !== null) {
-      run("give armor 120"); expect(simulation.combat.read(actor)?.armor).toMatchObject({ points: 120, absorption: 0.6 });
+      run("give armor 120"); expect(simulation.combat.read(actor)?.armor).toMatchObject({ regular: { points: 120, absorption: 0.6 } });
       if (!scenario.foreign) {
         run("give quad"); expect((source.game.player(actor)?.powerups.get("quad") ?? 0)).toBeGreaterThan(source.game.time);
         if (scenario.game.includes("hipnotic")) { run("give 6a"); expect(simulation.inventory.count(actor, "q1:weapon/hipnotic:proximity")).toBe(1); }

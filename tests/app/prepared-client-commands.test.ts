@@ -53,7 +53,7 @@ test("guest key traps and NOW bindings share candidate state without releasing t
     const words = new DataView(new ArrayBuffer(4 * (args.length + 1))); words.setInt32(0, code, true);
     args.forEach((value, index) => words.setInt32(4 * (index + 1), value, true));
     const request: QvmHostCall = { kind: "engine", role: "ui", code, guest, words, memory: guest.bytes, commandArguments: null,
-      invoke: () => { throw new Error("Unexpected invocation"); }, invokeAsync: async () => { throw new Error("Unexpected invocation"); } };
+      invoke: () => { throw new Error("Unexpected invocation"); }, invokeAsync: async () => { throw new Error("Unexpected invocation"); }, cancelFunction: () => { throw new Error("Unexpected cancellation"); } };
     return qvmClientInputSyscall(request, staged);
   };
   expect(call(QvmUiImport.UI_KEY_ISDOWN, [119])).toBe(1);
@@ -181,7 +181,7 @@ test("candidate UI syscall NOW changes only candidate cvars before returning and
     words.setInt32(0, QvmUiImport.UI_CMD_EXECUTETEXT, true); words.setInt32(4, 0, true); words.setInt32(8, 512, true);
     expect(qvmCommonSyscall({ kind: "engine", role: "ui", code: QvmUiImport.UI_CMD_EXECUTETEXT, words,
       memory: guest.bytes, guest, commandArguments: null, invoke: () => { throw new Error("Unexpected VM reentry"); },
-      invokeAsync: async () => { throw new Error("Unexpected VM reentry"); } }, services)).toBe(0);
+      invokeAsync: async () => { throw new Error("Unexpected VM reentry"); }, cancelFunction: () => { throw new Error("Unexpected cancellation"); } }, services)).toBe(0);
   };
   invoke("set marker immediate");
   expect(next.cvars.variableString("marker")).toBe("immediate");

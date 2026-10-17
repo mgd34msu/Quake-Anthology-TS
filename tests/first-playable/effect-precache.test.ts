@@ -102,12 +102,12 @@ test("Q3 loading media stays empty and retries a deferred cinematic at actual us
       const flashShader = flash.model.surfaces[0]?.shaders[0];
       if (flashShader === undefined) throw Error("Flash has no declared shader");
       provider.shaders.addScript("effect-precache/video { { videoMap intro.roq } }");
-      provider.shaders.remap(flashShader, "effect-precache/video");
+      await provider.shaders.registrations.owner.remap({ original: flashShader, replacement: "effect-precache/video", timeOffset: 0, source: provider.shaders, current: () => true });
       const registered = spyOn(provider.shaders, "register");
       try {
         await expect(new SceneModelRenderer(provider, assets.world).preloadModel(flash, {}, false)).rejects.toThrow("Model cinematic deferred");
         expect(registered.mock.calls.some(call => call[0] === "effect-precache/video")).toBe(false);
-      } finally { registered.mockRestore(); provider.shaders.remap(flashShader, flashShader); }
+      } finally { registered.mockRestore(); await provider.shaders.registrations.owner.remap({ original: flashShader, replacement: flashShader, timeOffset: 0, source: provider.shaders, current: () => true }); }
       const read = provider.textures.reader.read.bind(provider.textures.reader);
       const failedRead = spyOn(provider.textures.reader, "read").mockImplementation(async (...args) => {
         if (args[0] === "models/weapons2/machinegun/f_machinegun.tga") throw Error("temporary flash image read");

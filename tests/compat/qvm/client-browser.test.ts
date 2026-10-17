@@ -35,7 +35,7 @@ function fixture() {
     const words = new DataView(new ArrayBuffer((args.length + 1) * 4)); words.setInt32(0, code, true);
     args.forEach((value, index) => words.setInt32((index + 1) * 4, value, true));
     const call: QvmHostCall = { kind: "engine", role: "ui", code, words, guest, memory: guest.bytes, commandArguments: null,
-      invoke: () => { throw new Error("Unexpected reentry"); }, invokeAsync: async () => { throw new Error("Unexpected reentry"); } };
+      invoke: () => { throw new Error("Unexpected reentry"); }, invokeAsync: async () => { throw new Error("Unexpected reentry"); }, cancelFunction: () => { throw new Error("Unexpected cancellation"); } };
     return qvmClientBrowserSyscall(call, view);
   }
   function add(source = 3, port = 27960, name = "Arena") {

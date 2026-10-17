@@ -102,7 +102,7 @@ test('NQ demo primes real signon, interpolates recorded source clock/camera and 
  const input=new NetQuakeDemoInput(new NetQuakeDemoReader(bytes),remote);
  try {
   expect(await input.advance({frame:0,elapsedSeconds:0,timedemo:false})).toEqual({phase:'active',recordedSeconds:10,recordsRead:1});
-  expect(remote.drainPresentationEvents().filter(value=>value.kind==='music').map(value=>value.event.track)).toEqual([9]);
+  expect(remote.drainPresentationEvents().flatMap(value=>value.kind==='music'&&value.event.kind==='cd-track'?[value.event.track]:[])).toEqual([9]);
   await input.advance({frame:1,elapsedSeconds:0.05,timedemo:false});const player=remote.player;if(player===null)throw Error('Missing demo player');
   expect(remote.playerView(player.actor).origin.x).toBeCloseTo(11,3);expect(remote.playerView(player.actor).angles.y).toBeCloseTo(360,3);
   remote.samplePresentation(900000);expect(remote.playerView(player.actor).origin.x).toBeCloseTo(11,3);
@@ -111,7 +111,7 @@ test('NQ demo primes real signon, interpolates recorded source clock/camera and 
 });
 test('NQ timedemo reads one post-signon record per rendered frame and leaves -1 track native',async()=>{
  const {content,session,options}=fixture(),remote=new Q1RemotePresentation(options),input=new NetQuakeDemoInput(new NetQuakeDemoReader(concat([writeNetQuakeDemoHeader(),nqRecord([...initial,{kind:'cd-track',track:6,loopTrack:9}]),nqRecord([{kind:'time',seconds:11}]),nqRecord([{kind:'time',seconds:12}])])),remote);
- try {await input.advance({frame:0,elapsedSeconds:0,timedemo:true});expect(remote.drainPresentationEvents().filter(value=>value.kind==='music').map(value=>value.event.track)).toEqual([6]);expect((await input.advance({frame:1,elapsedSeconds:1,timedemo:true})).recordedSeconds).toBe(11);expect((await input.advance({frame:2,elapsedSeconds:1,timedemo:true})).recordedSeconds).toBe(12);const end=await input.advance({frame:3,elapsedSeconds:0,timedemo:true});expect(end).toMatchObject({phase:'ended',reason:'eof'});}finally{input.close();session.close();await content.close();}
+ try {await input.advance({frame:0,elapsedSeconds:0,timedemo:true});expect(remote.drainPresentationEvents().flatMap(value=>value.kind==='music'&&value.event.kind==='cd-track'?[value.event.track]:[])).toEqual([6]);expect((await input.advance({frame:1,elapsedSeconds:1,timedemo:true})).recordedSeconds).toBe(11);expect((await input.advance({frame:2,elapsedSeconds:1,timedemo:true})).recordedSeconds).toBe(12);const end=await input.advance({frame:3,elapsedSeconds:0,timedemo:true});expect(end).toMatchObject({phase:'ended',reason:'eof'});}finally{input.close();session.close();await content.close();}
 });
 test('NQ close during world load rejects concurrent advancement and prevents stale publication',async()=>{
  const {content,session,options}=fixture();let release:()=>void=()=>{throw Error('Load not entered');};const loading=new Promise<void>(resolve=>{release=resolve;});

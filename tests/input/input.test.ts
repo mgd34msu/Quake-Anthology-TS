@@ -324,6 +324,7 @@ describe("seat input", () => {
       const input = new SeatInput({ seat, dialect: frame.kind, context, commands, uiEvent: () => false });
       input.commandButton("move-up", "space", true, 10);
       const command = new InputCommandBuilder(frame.kind).build(input.sample(110, 100), frame);
+      if (command.kind !== "q1-netquake" && command.kind !== "q1-quakeworld") throw new Error("Wrong command dialect");
       expect(command.buttons & 2).toBe(2);
       expect(command.upMove).toBeGreaterThan(0);
     }

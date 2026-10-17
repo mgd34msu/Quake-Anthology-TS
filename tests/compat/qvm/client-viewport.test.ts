@@ -19,7 +19,7 @@ test("cgame and UI GL config use the seat viewport while preserving renderer cap
   function call(role: "cgame" | "ui"): QvmHostCall {
     const target = role === "cgame" ? { role, code: QvmCgameImport.CG_GETGLCONFIG } : { role, code: QvmUiImport.UI_GETGLCONFIG };
     const words = new DataView(new ArrayBuffer(8)); words.setInt32(0, target.code, true); words.setInt32(4, 8, true);
-    return { kind: "engine", ...target, words, guest, memory: guest.bytes, commandArguments: null, invoke: unavailable, invokeAsync: unavailable };
+    return { kind: "engine", ...target, words, guest, memory: guest.bytes, commandArguments: null, invoke: unavailable, invokeAsync: unavailable, cancelFunction: unavailable };
   }
   try {
     expect(scalar.dispatch(call("cgame"), unavailable)).toBe(0);

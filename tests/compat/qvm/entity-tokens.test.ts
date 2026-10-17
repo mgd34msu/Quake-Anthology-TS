@@ -29,7 +29,7 @@ test("shared token trap consumes complete tokens even when the source output buf
   words.setInt32(0, QvmGameImport.G_GET_ENTITY_TOKEN, true); words.setInt32(4, 128, true); words.setInt32(8, 5, true);
   const call: QvmHostCall = { kind: "engine", role: "qagame", code: QvmGameImport.G_GET_ENTITY_TOKEN,
     guest, words, memory: guest.bytes, commandArguments: null,
-    invoke: () => { throw new Error("Unexpected source call"); }, invokeAsync: async () => { throw new Error("Unexpected source call"); } };
+    invoke: () => { throw new Error("Unexpected source call"); }, invokeAsync: async () => { throw new Error("Unexpected source call"); }, cancelFunction: () => { throw new Error("Unexpected cancellation"); } };
   guest.bytes.fill(0xcc, 128, 160);
   expect(qvmEntityTokenSyscall(call, source)).toBe(1);
   expect(guest.readString(128)).toBe("long"); expect(guest.bytes[133]).toBe(0xcc);

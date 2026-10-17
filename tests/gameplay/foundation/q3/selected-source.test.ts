@@ -213,7 +213,7 @@ test.skipIf(!existsSync(archivePath))("base Q3 selected source uses original med
   try {
     expect(source.giveHoldable(actor, "holdable_invulnerability")).toBe(false);
     expect(source.giveHoldable(actor, "holdable_medkit")).toBe(true);
-    expect(source.inventory(actor)).toEqual([{ item: "q3:holdable_medkit", label: "Medkit", count: 1, usable: true }]);
+    expect(source.inventory(actor)).toEqual([{ item: "q3:holdable_medkit", label: "Medkit", count: 1, usable: true, icon: "icons/medkit" }]);
     expect(arsenal.useItem(actor.id, "q3:holdable_medkit")).toBe(true);
     const queued = arsenal.capture(actor.id);
     expect(queued.pendingUse).toBe("q3:holdable_medkit");
