@@ -46,7 +46,13 @@ export function predictMovementCommand(configuration: MovementProbeOptions, snap
     const controls = resolveQ3ArsenalControls(source.arsenal, entry.arsenal, command, source.q3Arsenal.product);
     if (command.kind === "q3" && entry.arsenal !== undefined) command = { ...command,
       weapon: controls.requestedWeapon, buttons: (command.buttons & ~4) | (controls.useHoldable ? 4 : 0) };
-  } else if (!configuration.movementOnly && entry.arsenal !== undefined) throw new Error("Prediction has no selected arsenal owner for this intent");
+  } else if (!configuration.movementOnly && entry.arsenal !== undefined) {
+    if (entry.arsenal.provider !== source.arsenal.provider) throw new Error("Arsenal command belongs to a different provider");
+    if (source.arsenal.state.kind === "q3") throw new Error("Prediction has no selected arsenal owner for this intent");
+    // Q1/Q2 selected arsenals are stepped authoritatively by the simulation.
+    // Private prediction only moves the body; weaponStep below is a no-op for
+    // non-Q3 arsenal state, matching native Q1/Q2 client prediction.
+  }
   const environment = source.state.kind === "q3" ? { ...source.environment, gravityMultiplier: 1 } : source.environment;
   const duration = command.kind === "q1-netquake" || command.kind === "q3"
     ? Math.max(0, entry.timeMilliseconds - source.commandTimeMilliseconds) : command.milliseconds;

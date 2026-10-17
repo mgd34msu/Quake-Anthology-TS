@@ -52,7 +52,7 @@ import { createStartupScriptReader } from "./startup-config.ts";
 import { nextActorGeneration } from '../../world/actors/registry.ts';
 import { PresentationTime } from "./frame-clock.ts";
 import { readFrameTimeControls, registerFrameTimeCvars, sourceFrameMilliseconds } from "./frame-time.ts";
-import { initializeQ3ClientCvars } from "./q3-client/userinfo.ts";
+import { initializeQ3ClientCvars, q3ClientModel } from "./q3-client/userinfo.ts";
 import { remoteContentSelection, remoteContentProduct, expectedProducts } from "../../content/catalog/index.ts";
 import { setImmediate } from "node:timers/promises";
 import type { CommandContext } from "../../contracts/common.ts";
@@ -2418,7 +2418,7 @@ async function prepareRemoteConfiguration(options: ApplicationOptions, content: 
     for(const [name,value] of [["name",seat.id.index===0?"Player":`Player ${seat.id.index+1}`],["skin",`${options.characterModel}/${options.characterModel==="female"?"athena":options.characterModel==="cyborg"?"oni911":"grunt"}`],["rate","15000"],["msg","1"],["hand","0"],["fov","90"],["gender",options.characterModel==="female"?"female":"male"]] satisfies readonly(readonly[string,string])[])cvars.register(name,value,flags);
     cvars.register("password","",CvarFlag.UserInfo);cvars.register("spectator","0",CvarFlag.UserInfo);
   }
-  if (dialect === "q3") initializeQ3ClientCvars(cvars, { name: seat.id.index===0 ? "Player" : `Player ${seat.id.index+1}`, model: options.characterModel });
+  if (dialect === "q3") initializeQ3ClientCvars(cvars, { name: seat.id.index===0 ? "Player" : `Player ${seat.id.index+1}`, model: q3ClientModel(options.character, options.characterModel) });
   if (dialect === "q1-quakeworld") {
     cvars.register("cl_hightrack", "0", 0); cvars.register("cl_chasecam", "0", 0);
     cvars.register("rate", "25000", CvarFlag.Archive | CvarFlag.UserInfo);

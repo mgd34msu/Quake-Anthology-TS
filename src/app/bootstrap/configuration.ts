@@ -37,7 +37,7 @@ import { ApplicationImageSettings } from "./image-settings.ts";
 import { ApplicationViewSettings } from "./view-settings.ts";
 import { loadAudioSettings } from "./audio-settings.ts";
 import { loadCvarArchive } from "./cvar-archives.ts";
-import { initializeQ3ClientCvars } from "./q3-client/userinfo.ts";
+import { initializeQ3ClientCvars, q3ClientModel } from "./q3-client/userinfo.ts";
 import { MouseSettings } from "../../input/mouse-settings.ts";
 import { ConsoleScriptFiles, consoleConfigRoot, sourceScriptReader } from "./config-scripts.ts";
 import { createStartupScriptReader } from "./startup-config.ts";
@@ -92,7 +92,7 @@ export async function prepareProfileConfiguration(args: {
     if (args.clientSource !== undefined && (cvars.dialect !== dialect || cvars.context.origin.kind !== "local-seat" || !cvars.context.origin.seat.equals(seat.id) || !cvars.context.origin.client.equals(seat.client.id)))
       throw new Error("Client configuration requires its actual primary seat cvar owner");
     if (args.clientSource === undefined) { registerPlayerUserinfo(cvars, seat.id.index, options.character === "q2" ? options.characterModel : "male"); applyCharacterAppearance(cvars, options); }
-    if (args.clientSource === undefined && dialect === "q3") initializeQ3ClientCvars(cvars, { name: `Player ${seat.id.index + 1}`, model: options.characterModel });
+    if (args.clientSource === undefined && dialect === "q3") initializeQ3ClientCvars(cvars, { name: `Player ${seat.id.index + 1}`, model: q3ClientModel(options.character, options.characterModel) });
     const mouse = new MouseSettings(new CvarRegistry({ dialect, context, print: host.print }));
     registerRunCvar(mouse.cvars, movementDialect);
     const [profile, archive, mouseArchive] = await Promise.all([
@@ -397,7 +397,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
       const seatContext: CommandContext = local === null ? context : { session: session.session, origin: { kind: "local-seat", seat: id, client: local.client.id } };
       const cvars = new CvarRegistry({ dialect, context: seatContext, print: text => host.print(text), cheatsAllowed: () => source.variableValue("sv_cheats") === 1 });
       registerPlayerUserinfo(cvars, index, options.character === "q2" ? options.characterModel : "male"); applyCharacterAppearance(cvars, options);
-      if (dialect === "q3") initializeQ3ClientCvars(cvars, { name: `Player ${index + 1}`, model: options.characterModel });
+      if (dialect === "q3") initializeQ3ClientCvars(cvars, { name: `Player ${index + 1}`, model: q3ClientModel(options.character, options.characterModel) });
       const mouse = new MouseSettings(new CvarRegistry({ dialect, context: seatContext, print: text => host.print(text) }));
       seats.push({ context: seatContext, id, cvars, mouse,
         profile: options.dedicated ? null : await settings.loadSeat(`input/seat-${index + 1}.json`),

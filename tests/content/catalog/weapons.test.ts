@@ -82,7 +82,7 @@ test.skipIf(!existsSync(corpusRoot))("foreign base Q2 weapons resolve source res
     expect(recipe.weapons).toEqual([canonical]);
     expect(recipe.timing.filter(entry => entry.provider === canonical.provider)).toEqual([nativeProviderTiming(canonical, "q2", edition === "rerelease")]);
     const requests = selectedWeaponResources(preset.map.entities, [weapon], catalog);
-    expect(requests.filter(request => request.path.startsWith("models/weapons/v_") && request.path.endsWith("tris.md2"))).toHaveLength(11);
+    expect(requests.filter(request => request.path.startsWith("models/weapons/v_") && request.path.endsWith("tris.md2"))).toHaveLength(edition === "rerelease" ? 19 : 11);
     for (const request of requests) expect(recipe.resources.some(resource => resource.requestedPath === request.path && resource.provenance.mount.identity.content === weapon.content)).toBe(true);
     if (game === "q1-classic-id1" && edition === "classic") {
       const gear = { provider: EQUIPMENT_PROVIDERS.handGrenades, content: weapon.content };

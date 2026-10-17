@@ -65,7 +65,13 @@ export class PresentationPredictionAdapter implements PresentationMovementHost {
     const arsenal = this.latest.arsenal, runtime = this.latest.q3Arsenal;
     const weapon = arsenal.state.kind === "q3" && runtime !== null
       ? resolveQ3ArsenalControls(arsenal, input.arsenal, input.command, runtime.product).requestedWeapon : 0;
-    if (input.arsenal !== undefined && (arsenal.state.kind !== "q3" || runtime === null)) throw new Error("Cgame has no selected arsenal owner for this intent");
+    if (input.arsenal !== undefined) {
+      if (input.arsenal.provider !== arsenal.provider) throw new Error("Arsenal command belongs to a different provider");
+      // A foreign selected arsenal is authoritative in the simulation, not in
+      // this Q3 cgame clock. Retain its intent with the original command for
+      // movement prediction and feed cgame a harmless no-weapon proxy above.
+      if (arsenal.state.kind === "q3" && runtime === null) throw new Error("Cgame has no selected arsenal owner for this intent");
+    }
     const presented = presentationSourceCommand(input, milliseconds, weapon), state = this.latest.state;
     const source = state.kind === "q3" ? relativeQ3SourceCommand(input.source, input.command.kind, presented,
       { x: state.deltaAngleWords[0], y: state.deltaAngleWords[1], z: state.deltaAngleWords[2] }) : presented;

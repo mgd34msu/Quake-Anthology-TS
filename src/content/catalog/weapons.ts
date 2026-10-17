@@ -99,7 +99,7 @@ function q2BaseWeaponPaths(rerelease: boolean): readonly string[] {
     "rockfly", "rocklf1a", "rocklr1b", "hyprbu1a", "hyprbl1a", "hyprbf1a", "hyprbd1a", "rg_hum", "railgf1a", "bfg__f1y", "bfg__l1a", "bfg__x1b", "bfg_hum", "noammo"];
   return [...models.flatMap(path => [path, ...(path === "models/objects/r_explode/tris.md2"
       ? Array.from({ length: 7 }, (_, index) => `models/objects/r_explode/skin${index + 1}.pcx`) : [path.replace("tris.md2", "skin.pcx")])]),
-    ...(rerelease ? ["models/objects/explode/rskin.pcx", "models/objects/explode/skin2.pcx", "models/objects/laser/skinb.pcx", "models/objects/laser/sking.pcx"] : ["models/weapons/v_proxyl/skin.pcx"]),
+    ...(rerelease ? ["models/objects/explode/rskin.pcx", "models/objects/explode/skin2.pcx", "models/objects/laser/skinb.pcx", "models/objects/laser/sking.pcx"] : []),
     "pics/colormap.pcx", "sound/misc/lasfly.wav", ...sounds.map(name => `sound/weapons/${name}.wav`),
     ...[2, 4, 6].flatMap((count, index) => [`sprites/s_bfg${index + 1}.sp2`, ...Array.from({ length: count }, (_, frame) => `sprites/s_bfg${index + 1}_${frame}.pcx`)]),
     ...(rerelease ? ["sound/weapons/change.wav", "sound/weapons/lowammo.wav"] : [])];
@@ -120,10 +120,12 @@ const q2ExpansionWeaponPaths: Readonly<Record<string, readonly string[]>> = {
 };
 
 export function q2RegisteredWeaponResources(weapons: Pick<Q2Weapons, "registeredDefinitions">, rerelease: boolean): readonly string[] {
-  return [...q2BaseWeaponPaths(rerelease), ...weapons.registeredDefinitions().flatMap(weapon => [weapon.viewModel, weapon.worldModel,
+  return [...new Set([...q2BaseWeaponPaths(rerelease),
+    ...(!rerelease && weapons.registeredDefinitions().some(weapon => weapon.name === "proxlauncher") ? ["models/weapons/v_proxyl/skin.pcx"] : []),
+    ...weapons.registeredDefinitions().flatMap(weapon => [weapon.viewModel, weapon.worldModel,
     ...(q2ExpansionWeaponPaths[weapon.name] ?? []).filter(path => rerelease || path !== "sound/weapons/sawslice.wav"), ...weapon.name === "tesla" && !rerelease ? ["models/weapons/v_tesla2/tris.md2"] : [],
     ...weapon.name === "heatbeam" && !rerelease ? ["models/weapons/v_beamer2/tris.md2"] : []]),
-    ...rerelease ? ["sound/weapons/railgr1b.wav"] : []].filter(path => path !== "");
+    ...(rerelease ? ["sound/weapons/railgr1b.wav"] : [])].filter(path => path !== ""))];
 }
 
 export function selectedWeaponResources(map: ProviderReference, weapons: readonly ProviderReference[], catalog: InstalledCatalog): readonly ResourceRequest[] {

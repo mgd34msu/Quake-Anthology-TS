@@ -80,7 +80,7 @@ import { registerQ1ClientCommands, resolveQ1HostCommandActor } from "./q1-client
 import { resolveWeaponSelection } from "../../input/weapon-bindings.ts";
 import { loadCvarArchive, saveCvarArchive } from "./cvar-archives.ts";
 import type { CvarArchiveEntry } from "../../core/cvars/index.ts";
-import { initializeQ3ClientCvars } from "./q3-client/userinfo.ts";
+import { applyQ3ProxyModel, initializeQ3ClientCvars, q3ClientModel } from "./q3-client/userinfo.ts";
 import { q3ConfigstringCommands } from "../../network/q3/configstrings.ts";
 import { LocalQ3ClientState } from "./q3-client/client-state.ts";
 import { StartupServerBrowser } from "./server-browser.ts";
@@ -2216,16 +2216,17 @@ export class Application {
       }
     }
     if (cvars.dialect === "q3") {
-      initializeQ3ClientCvars(cvars, { name: `Player ${seat.id.index + 1}`, model: options.characterModel });
+      initializeQ3ClientCvars(cvars, { name: `Player ${seat.id.index + 1}`, model: q3ClientModel(options.character, options.characterModel) });
       for (const name of ["cl_paused", "sv_paused"]) {
         if (cvars.find(name) === undefined) cvars.register(name, "0", CvarFlag.ReadOnly);
         else cvars.addFlags(name, CvarFlag.ReadOnly);
         cvars.set(name, "0", true);
       }
       if (selectedIdentity) for (const name of ["model", "headmodel", "team_model", "team_headmodel"])
-        cvars.set(name, `${options.characterModel}/default`, true);
+        cvars.set(name, `${q3ClientModel(options.character, options.characterModel)}/default`, true);
     }
     applyCharacterAppearance(cvars, options);
+    if (cvars.dialect === "q3") applyQ3ProxyModel(cvars, options.character);
     if (userinfo === null && options.teamArenaSkirmish !== undefined && selectedIdentity) {
       const setup = options.teamArenaSkirmish;
       if (seat.id.index === 0) simulation.q3Source()?.host.cvars.set("ui_drawTimer", String(cvars.variableValue("cg_drawTimer")), true);
