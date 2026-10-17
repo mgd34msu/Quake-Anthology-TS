@@ -11,8 +11,8 @@ const cases = [
 ] as const;
 
 for (const row of cases) test(`${row.family} character, movement and weapons run in a Q3 world through Application`, async () => {
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-baseq3", "--map", "q3dm0", "--movement", row.movement,
-    "--character", row.character, "--mode", "deathmatch", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
+  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-baseq3", "--map", "q3dm1", "--movement", row.movement,
+    "--character", row.character, "--mode", "singleplayer", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const catalog = await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, discoverMods: false });
   const preset = applicationPreset(catalog, parsed.options);
@@ -26,7 +26,17 @@ for (const row of cases) test(`${row.family} character, movement and weapons run
     if (local === undefined) throw new Error("Missing local player");
     const presentations = app.simulation.presentations().filter(entry => entry.actor.equals(local.actor));
     expect(presentations.some(entry => !entry.viewWeapon && entry.path === row.body)).toBe(true);
-    expect(presentations.some(entry => entry.viewWeapon && entry.family === row.family)).toBe(true);
+    const gun = presentations.find(entry => entry.viewWeapon && entry.family === row.family);
+    expect(gun).toBeDefined();
+    expect(gun?.viewOrigin).toBeDefined();
+    // Strafe through render frames that do not align with fixed ticks; the
+    // authored gun must stay usable (scene re-anchors it to the final eye).
+    const strafe = (down: boolean): void => { app.input({ seat: local.seat.id, kind: "key", code: 100, down,
+      repeat: false, timeMilliseconds: performance.now() }); };
+    strafe(true);
+    for (let index = 0; index < 12; index++) await app.step(16);
+    strafe(false);
+    expect(app.simulation.presentations().some(entry => entry.viewWeapon && entry.actor.equals(local.actor) && entry.viewOrigin !== undefined)).toBe(true);
     expect(app.simulation.playerUi(local.actor).activeWeapon?.startsWith(`${row.family}:`)).toBe(true);
     const source = app.simulation.q3Source();
     if (source === null) throw new Error("Missing Q3 source");
@@ -34,6 +44,11 @@ for (const row of cases) test(`${row.family} character, movement and weapons run
     expect(config).toContain("model\\sarge/default");
     expect(config).not.toContain("model\\player/default");
     expect(config).not.toContain("model\\male/default");
+    // Single-player Q3 arenas are bot matches: the authored arena roster
+    // (Ranger on q3dm1) must actually enter, even with foreign weapons.
+    for (let index = 0; index < 300 && !prints.some(text => text.includes("Ranger^7 entered the game")); index++) await app.step(50);
+    expect(app.simulation.players().length).toBeGreaterThan(1);
+    expect(prints.join("")).toContain("Ranger^7 entered the game");
     expect(prints.join("")).not.toContain("Failed to load model file");
   } finally { await app.close(); }
-}, 60000);
+}, 120000);

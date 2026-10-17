@@ -6,7 +6,7 @@ import { attachSceneEntity, modelAttachmentTag } from "../../render/scene/models
 import { samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
 import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
 import { createSourceSceneOrder, sceneModelBatches, sequenceDrawGroup, type SceneOperation } from "../../render/scene/submissions.ts";
-import { weaponViewOrigin } from "./weapon-view.ts";
+import { anchoredViewWeapon, weaponViewOrigin } from "./weapon-view.ts";
 import { SelectedQ3WeaponPresenter } from "./q3-selected-weapon.ts";
 import { NativeHeldWeapons, type ResolvedHeldEntity } from "./native-held-weapon.ts";
 import { ForeignHeldWeapons } from "./held-weapon.ts";
@@ -240,7 +240,15 @@ export class ApplicationWorldScene {
         for (const pass of passes) await append(pass.content ?? equipped.content, pass.entity, pass.options, object, undefined, undefined, attach(pass.entity));
         continue;
       }
-      if (source.viewWeapon) await append(source.content, { ...entity, attachments }, options);
+      if (source.viewWeapon) {
+        const anchored = { ...entity, attachments }, anchor = source.viewOrigin ?? source.origin;
+        // The gun was authored against the simulation eye at tick time; the
+        // rendered camera (Q3 prediction/bob, client offsets, effects) can be
+        // elsewhere by frame time. Re-anchor by that delta at render so the
+        // first-person mesh stays attached to the eye that is actually drawn.
+        const resolve: ResolvedHeldEntity = (camera, purpose) => purpose === "view" ? anchoredViewWeapon(anchored, anchor, camera) : anchored;
+        await append(source.content, anchored, options, undefined, undefined, undefined, resolve);
+      }
       else await appendBody(source.content, { ...entity, attachments }, options, true);
     }
     if (this.characterAssets !== null) for (const character of characters) {

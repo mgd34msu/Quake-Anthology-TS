@@ -313,7 +313,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
             if (path === undefined)
                 throw new Error('Unknown Q1 weapon model');
             const view = this.playerView(player.actor);
-            result.push({ actor: player.actor, content: this.world.content.recipe.map.entities.content, family: 'q1', path, frame: data.weaponFrame, oldFrame: data.weaponFrame, skin: 0, effects: 0, renderFlags: 0, origin: { ...view.origin, z: view.origin.z + view.viewHeight }, angles: view.angles, alpha: ENTALPHA_DECODE(this.weaponAlpha), scale: 1, visible: data.health > 0 && (data.items & 524288) === 0, viewWeapon: true });
+            result.push({ actor: player.actor, content: this.world.content.recipe.map.entities.content, family: 'q1', path, frame: data.weaponFrame, oldFrame: data.weaponFrame, skin: 0, effects: 0, renderFlags: 0, origin: { ...view.origin, z: view.origin.z + view.viewHeight }, viewOrigin: { ...view.origin, z: view.origin.z + view.viewHeight }, angles: view.angles, alpha: ENTALPHA_DECODE(this.weaponAlpha), scale: 1, visible: data.health > 0 && (data.items & 524288) === 0, viewWeapon: true });
         }
         return result;
     }

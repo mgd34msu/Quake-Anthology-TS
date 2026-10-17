@@ -3952,7 +3952,7 @@ export class SharedSimulation implements Simulation {
 
   private frameSelectedQ2Weapon(actor: OwnedActor): undefined {
     const player = this.playerStates.get(actor);
-    if (this.selectedArsenal?.family !== "q2" || player === undefined || this.primaryCommandBlocks.has(actor.id)) return undefined;
+    if (this.selectedArsenal?.family !== "q2" || player === undefined || !this.selectedArsenal.has(actor.id) || this.primaryCommandBlocks.has(actor.id)) return undefined;
     this.selectedArsenal.frame(actor.id);
     player.arsenal = this.selectedArsenal.read(actor.id);
     this.weaponSlots.get(actor.id)?.reconcile();
@@ -4811,7 +4811,7 @@ export class SharedSimulation implements Simulation {
       const asset = source.model, heldWeapon = active?.held, model: SimulationPresentation | null = asset === null && heldWeapon === undefined ? null : { actor, content: source.source.content,
         ...(heldWeapon === undefined ? {} : { heldWeapon }),
         family: source.source.content.startsWith("q1:") ? "q1" : source.source.content.startsWith("q2:") ? "q2" : "q3", path: asset === null ? "" : asset.kind === "resolved" ? asset.resource.requestedPath : asset.path,
-        frame: asset?.frame ?? 0, oldFrame: asset?.frame ?? 0, skin: 0, effects: 0, renderFlags: 0, origin: add(view.origin, { x: 0, y: 0, z: view.viewHeight }), angles: view.angles,
+        frame: asset?.frame ?? 0, oldFrame: asset?.frame ?? 0, skin: 0, effects: 0, renderFlags: 0, origin: add(view.origin, { x: 0, y: 0, z: view.viewHeight }), viewOrigin: add(view.origin, { x: 0, y: 0, z: view.viewHeight }), angles: view.angles,
         scale: 1, visible: asset !== null && ui.health > 0 && (player === null || !player.intermission && player.cutscene === null), viewWeapon: true };
       if (asset?.kind === "resolved") this.events.registerResource(source.source.content, asset.resource.requestedPath, asset.resource);
       return { provider: source.source.provider, active: source.active === null ? null : { provider: source.source.provider, item: source.active },
@@ -4826,7 +4826,7 @@ export class SharedSimulation implements Simulation {
       path: gear.path, frame: gear.frame, oldFrame: gear.frame, skin: 0, effects: 0, renderFlags: 0,
       ...("modelAttachments" in gear ? { modelAttachments: gear.modelAttachments } : {}),
       ...("modelAnchor" in gear ? { modelAnchor: gear.modelAnchor, q3Weapon: gear.q3Weapon } : {}),
-      origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), gear.kickOrigin), angles: add(view.angles, { x: gear.kickPitch, y: 0, z: 0 }),
+      origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), gear.kickOrigin), viewOrigin: add(view.origin, { x: 0, y: 0, z: view.viewHeight }), angles: add(view.angles, { x: gear.kickPitch, y: 0, z: 0 }),
       scale: 1, visible: ui.health > 0 && (player === null || !player.intermission && player.cutscene === null), viewWeapon: true };
     return projectWeaponSlot(slot.snapshot(), primary, { source: grapple.selection.source, weapon, item: { id: weapon.item, label: grapple.selection.mechanic === "q2-lmctf" ? "Hook" : "Grapple", kind: "weapon",
       sourceOrdinal: ui.items.length, owned: this.inventory.count(actor, weapon.item) > 0, hasAmmo: true, count: null, warningCount: 0 }, model: gearModel }, sources);
@@ -5880,7 +5880,7 @@ export class SharedSimulation implements Simulation {
         const state = source.game.playerState(client.slot + 1), view = this.playerView(actor.id), path = source.game.configstrings().get((source.edition === "classic" ? 32 : 62) + state.gunIndex);
         if (state.gunIndex === 0 || path === undefined || path === "") continue;
         result.push({ actor: actor.id, content, family: "q2", path, frame: state.gunFrame, oldFrame: state.gunFrame, skin: "gunSkin" in state ? state.gunSkin : 0, effects: 0, renderFlags: 0,
-          origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), state.gunOffset), angles: add(view.angles, state.gunAngles), scale: 1, visible: true, viewWeapon: true });
+          origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), state.gunOffset), viewOrigin: add(view.origin, { x: 0, y: 0, z: view.viewHeight }), angles: add(view.angles, state.gunAngles), scale: 1, visible: true, viewWeapon: true });
       }
     }
     if (this.source.kind === "q3") result.push(...this.source.game.presentations());
@@ -5935,7 +5935,10 @@ export class SharedSimulation implements Simulation {
     for (const [actor, model] of this.detachedModels) { const body = this.bodies.read(actor.id); if (body !== null) result.push({ actor: actor.id, content: model.content, family: "q2", path: model.path,
       frame: 0, oldFrame: 0, skin: 0, effects: 2, renderFlags: 0, origin: body.origin, angles: body.angles, scale: 1, visible: true, viewWeapon: false }); }
     const weaponModels = this.selectedArsenal === null ? this.viewModels : new Map(this.players().flatMap(actor => {
-      const model = this.selectedArsenal?.view(actor); return model == null ? [] : [[actor, model] satisfies [ActorId, { readonly path: string; readonly frame: number }]];
+      // A connected bot can sit in the Q3 spawn queue before ClientBegin
+      // admits its selected arsenal; it has no first-person weapon yet.
+      if (this.selectedArsenal?.has(actor) !== true) return [];
+      const model = this.selectedArsenal.view(actor); return model == null ? [] : [[actor, model] satisfies [ActorId, { readonly path: string; readonly frame: number }]];
     }));
     for (const [actor, model] of weaponModels) {
       const player = this.player(actor);
@@ -5954,7 +5957,7 @@ export class SharedSimulation implements Simulation {
       result.push({ actor, ...q3Weapon, ...(arsenal?.activeWeapon == null ? {} : { weaponItem: arsenal.activeWeapon }), content: this.weaponProvider.content, family: providerFamily(this.weaponProvider.provider), path: model.path, frame: model.frame,
         oldFrame: viewInterpolated ? viewSnapshot.viewFrame : model.frame, backLerp: viewInterpolated ? backLerp : 0,
         skin: q2?.skin ?? 0, effects: 0, renderFlags: providerFamily(this.weaponProvider.provider) === "q2" ? 1 | 4 | 16 : 0,
-        origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), sourceView?.gunOffset ?? q2?.kickOrigin ?? zero), angles: add(view.angles, sourceView?.gunAngles ?? q2?.kickAngles ?? zero),
+        origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), sourceView?.gunOffset ?? q2?.kickOrigin ?? zero), viewOrigin: add(view.origin, { x: 0, y: 0, z: view.viewHeight }), angles: add(view.angles, sourceView?.gunAngles ?? q2?.kickAngles ?? zero),
         scale: 1, visible: this.source.kind === "q3-qvm" || (this.source.kind === "q2-native"
           ? this.source.game.playerState(this.nativeQ2Client(actor).slot + 1).gunIndex !== 0 && this.requireNativeWeapons().available(actor) : (this.combat.read(actor)?.health ?? 0) > 0), viewWeapon: true });
     }

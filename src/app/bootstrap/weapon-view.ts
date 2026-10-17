@@ -1,6 +1,25 @@
 import type { Rect, SceneCamera } from "../../contracts/render.ts";
+import type { ModelTransform } from "../../contracts/scene.ts";
 import type { Vec3 } from "../../contracts/math.ts";
+import { add3, sub3 } from "../../core/math.ts";
 import type { SimulationPresentation } from "./simulation/types.ts";
+
+export interface ViewWeaponEntity {
+  readonly transform: ModelTransform;
+  readonly previousOrigin: Vec3;
+  readonly lightingOrigin: Vec3;
+  readonly shadowPlane: number;
+}
+
+/** Translate a tick-authored first-person weapon to the eye actually being rendered. */
+export function anchoredViewWeapon<T extends ViewWeaponEntity>(entity: T, anchor: Vec3, camera: Vec3): T {
+  const delta = sub3(camera, anchor);
+  if (delta.x === 0 && delta.y === 0 && delta.z === 0) return entity;
+  const offset = (value: Vec3): Vec3 => add3(value, delta);
+  return { ...entity, transform: { ...entity.transform, origin: offset(entity.transform.origin) },
+    previousOrigin: offset(entity.previousOrigin), lightingOrigin: offset(entity.lightingOrigin),
+    shadowPlane: entity.shadowPlane + delta.z };
+}
 
 /** Q1 V_CalcRefdef's default viewsize 100 gun calibration precedes camera punch. */
 export function weaponViewOrigin(source: SimulationPresentation): Vec3 {
