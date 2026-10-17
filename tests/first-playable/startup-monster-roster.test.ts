@@ -159,7 +159,14 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
       const visible = edition === null ? 8 : 7, itemsTop = edition === null ? 138 : 164;
       const collapsed = new Set(choices.flatMap(option => option.group === undefined || option.group === current?.group ? [] : [option.group]));
       const entriesOf = (): ({ readonly kind: "header"; readonly group: string } | { readonly kind: "choice"; readonly id: string })[] => {
-        const shown = choices.filter(option => edition === null || option.edition === undefined || option.edition === edition);
+        // The picker shows one unified list: edition variants of a title collapse to one entry.
+        const shown: typeof choices = [], seen = new Map<string, (typeof choices)[number]>();
+        for (const option of choices) {
+          if (option.edition === undefined) { shown.push(option); continue; }
+          const key = `${option.group ?? ""}|${option.label}`, existing = seen.get(key);
+          if (existing === undefined) { seen.set(key, option); shown.push(option); }
+          else if (edition !== null && option.edition === edition) { shown[shown.indexOf(existing)] = option; seen.set(key, option); }
+        }
         const entries: ({ kind: "header"; group: string } | { kind: "choice"; id: string })[] = shown.filter(option => option.group === undefined).map(option => ({ kind: "choice", id: option.id }));
         for (const group of [...new Set(shown.flatMap(option => option.group === undefined ? [] : [option.group]))]) {
           entries.push({ kind: "header", group });

@@ -398,10 +398,24 @@ export class StartupMenu {
     void preparation.then(() => this.setStatus(""))
       .catch((error: unknown) => this.setStatus(error instanceof Error ? error.message : String(error)));
   }
+  /** One list for both editions: classic/rerelease variants of the same title collapse to a single entry. */
+  private variantKey(choice: StartupSelectionChoice): string {
+    return choice.edition === undefined ? choice.id : `${choice.group ?? ""}|${choice.label}`;
+  }
+  private editionVariant(row: StartupSelectionRow, choice: StartupSelectionChoice, edition: "classic" | "rerelease"): StartupSelectionChoice | undefined {
+    const key = this.variantKey(choice);
+    return row.choices.find(candidate => candidate.edition === edition && this.variantKey(candidate) === key);
+  }
   /** Flatten a picker row into group headers + choices for the dropdown window. */
   private dropdownEntries(row: StartupSelectionRow, edition: "classic" | "rerelease" | null, collapsed: readonly string[]):
     readonly ({ readonly kind: "header"; readonly group: string; readonly expanded: boolean } | { readonly kind: "choice"; readonly choice: StartupSelectionChoice })[] {
-    const visible = row.choices.filter(choice => edition === null || choice.edition === undefined || choice.edition === edition);
+    const visible: StartupSelectionChoice[] = [], byKey = new Map<string, StartupSelectionChoice>();
+    for (const choice of row.choices) {
+      if (choice.edition === undefined) { visible.push(choice); continue; }
+      const key = this.variantKey(choice), existing = byKey.get(key);
+      if (existing === undefined) { byKey.set(key, choice); visible.push(choice); }
+      else if (edition !== null && choice.edition === edition) { visible[visible.indexOf(existing)] = choice; byKey.set(key, choice); }
+    }
     const entries: ({ kind: "header"; group: string; expanded: boolean } | { kind: "choice"; choice: StartupSelectionChoice })[] = [];
     for (const choice of visible) if (choice.group === undefined) entries.push({ kind: "choice", choice });
     const groups: string[] = [];
@@ -426,7 +440,7 @@ export class StartupMenu {
     readonly dropdown: { readonly x: number; readonly title: string; readonly itemScale: number; readonly itemsTop: number;
       readonly scroll: { readonly offset: number; readonly visible: number; readonly total: number };
       readonly toggle: { readonly classic: { readonly control: UiControl; readonly selected: boolean }; readonly rerelease: { readonly control: UiControl; readonly selected: boolean } } | null;
-      readonly items: readonly { readonly control: UiControl; readonly choice: string; readonly label: string; readonly selected: boolean; readonly header: boolean; readonly unavailable: string | null }[] } | null;
+      readonly items: readonly { readonly control: UiControl; readonly choice: string; readonly label: string; readonly selected: boolean; readonly header: boolean; readonly indent: boolean; readonly unavailable: string | null }[] } | null;
     readonly footer: readonly { readonly control: UiControl; readonly rect: { x: number; y: number; width: number; height: number }; readonly label: string }[];
     readonly viewer: { readonly resource: ResourceId;
       readonly panel: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
@@ -517,7 +531,7 @@ export class StartupMenu {
     let dropdownSpec: { x: number; title: string; itemScale: number; itemsTop: number;
       scroll: { offset: number; visible: number; total: number };
       toggle: { classic: { control: UiControl; selected: boolean }; rerelease: { control: UiControl; selected: boolean } } | null;
-      items: { control: UiControl; choice: string; label: string; selected: boolean; header: boolean; unavailable: string | null }[] } | null = null;
+      items: { control: UiControl; choice: string; label: string; selected: boolean; header: boolean; indent: boolean; unavailable: string | null }[] } | null = null;
     if (dropdown !== null) {
       const row = all.get(dropdown.field);
       if (row === undefined) this.builderDropdown = null;
@@ -529,10 +543,24 @@ export class StartupMenu {
         let itemScale: number = menuText.field;
         for (const entry of entries)
           itemScale = Math.min(itemScale, this.fitScale(entry.kind === "header" ? entry.group : entry.choice.label, 216, menuText.field));
+        const switchEdition = (edition: "classic" | "rerelease"): void => {
+          if (this.builderDropdown === null) return;
+          this.builderDropdown = { ...this.builderDropdown, edition, scroll: 0 };
+          // The toggle picks which edition of the selected title is in effect;
+          // the list itself is unified and does not change.
+          const fresh = this.options.model.rows().find(candidate => candidate.id === dropdown.field);
+          const current = fresh?.choices.find(choice => choice.id === fresh.value);
+          if (fresh === undefined || current === undefined || current.edition === undefined || current.edition === edition) return;
+          const counterpart = this.editionVariant(fresh, current, edition);
+          if (counterpart !== undefined && counterpart.id !== current.id && counterpart.unavailable === null) {
+            this.options.model.select(dropdown.field, counterpart.id);
+            this.status = "";
+          }
+        };
         const toggle = dropdown.edition === null ? null : {
-          classic: { control: { ...this.button("edition-classic", "", 0, () => { if (this.builderDropdown !== null) this.builderDropdown = { ...this.builderDropdown, edition: "classic", scroll: 0 }; }),
+          classic: { control: { ...this.button("edition-classic", "", 0, () => switchEdition("classic")),
             rect: { x: panelX, y: 136, width: 120, height: 22 } }, selected: dropdown.edition === "classic" },
-          rerelease: { control: { ...this.button("edition-rerelease", "", 0, () => { if (this.builderDropdown !== null) this.builderDropdown = { ...this.builderDropdown, edition: "rerelease", scroll: 0 }; }),
+          rerelease: { control: { ...this.button("edition-rerelease", "", 0, () => switchEdition("rerelease")),
             rect: { x: panelX + 128, y: 136, width: 120, height: 22 } }, selected: dropdown.edition === "rerelease" },
         };
         const items = entries.slice(scroll, scroll + visibleCount).map((entry, index) => {
@@ -547,9 +575,16 @@ export class StartupMenu {
                 this.builderDropdown = { ...this.builderDropdown, collapsed };
                 return undefined;
               } };
-            return { control, choice: row.value, label: `${entry.expanded ? "- " : "+ "}${group}`, selected: false, header: true, unavailable: null };
+            return { control, choice: row.value, label: `${entry.expanded ? "- " : "+ "}${group}`, selected: false, header: true, indent: false, unavailable: null };
           }
-          const choice = entry.choice, selected = row.value === choice.id;
+          // If the toggle's edition variant is not installed, the other edition serves.
+          let choice = entry.choice;
+          if (choice.unavailable !== null) {
+            const alternate = row.choices.find(candidate => this.variantKey(candidate) === this.variantKey(choice) && candidate.unavailable === null);
+            if (alternate !== undefined) choice = alternate;
+          }
+          const current = row.choices.find(candidate => candidate.id === row.value);
+          const selected = current !== undefined && this.variantKey(current) === this.variantKey(choice);
           const control: UiControl = { id: appearanceDropdown || !selected ? `ui:startup:choice:${choice.id}` : `ui:startup:${row.id}`, kind: "button", label: "", rect,
             visible: true, enabled: choice.unavailable === null && !this.busy,
             activate: () => {
@@ -560,7 +595,7 @@ export class StartupMenu {
               if (dropdown.field === "enemies" && choice.id === "custom") this.openRoster();
               return undefined;
             } };
-          return { control, choice: choice.id, label: `${selected ? "> " : ""}${choice.label}`, selected, header: false, unavailable: choice.unavailable };
+          return { control, choice: choice.id, label: `${selected ? "> " : ""}${choice.label}`, selected, header: false, indent: choice.group !== undefined, unavailable: choice.unavailable };
         });
         dropdownSpec = { x: panelX, title: row.label, itemScale, itemsTop, scroll: { offset: scroll, visible: visibleCount, total: entries.length }, toggle, items };
       }
@@ -805,7 +840,7 @@ export class StartupMenu {
         for (const item of spec.dropdown.items) {
           const rect = item.control.rect, scale = spec.dropdown.itemScale;
           const itemText = this.measure(item.label, scale) <= rect.width - 20 ? item.label : this.fit(item.label, rect.width - 20, scale);
-          overlayCommands.push({ kind: "text", origin: { x: rect.x + 10, y: rect.y + 5 }, text: itemText, font: this.options.art.skin.font, scale,
+          overlayCommands.push({ kind: "text", origin: { x: rect.x + 10 + (item.indent ? 16 : 0), y: rect.y + 5 }, text: itemText, font: this.options.art.skin.font, scale,
             color: item.header || item.selected ? colors.accent : item.control.enabled ? colors.text : colors.disabled, align: "left", shadow: true });
         }
         const scroll = spec.dropdown.scroll;
