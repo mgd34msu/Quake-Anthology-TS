@@ -29,3 +29,10 @@
 /other.key.*.tmp
 /other.service.*.tmp
 /llm.json.*.tmp
+
+# Generated output from local application tests.
+tests/first-playable/application/local-content/
+tests/first-playable/application/remote-content/
+tests/first-playable/application/local.json
+tests/first-playable/application/remote.json
+tests/first-playable/application/*-frozen.png
