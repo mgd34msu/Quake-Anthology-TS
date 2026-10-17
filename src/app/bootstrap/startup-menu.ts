@@ -34,7 +34,7 @@ import type { StartupSaveList } from "./startup-saves.ts";
 import { UiTextRenderer } from "../../text/ui.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
 import type { MaterialTextDraw } from "../../text/draw2d.ts";
-import type { StartupHosting, StartupNativePreset, StartupSelectionField, StartupSelectionModel, StartupSelectionRow } from "./startup-selection.ts";
+import type { StartupHosting, StartupNativePreset, StartupSelectionChoice, StartupSelectionField, StartupSelectionModel, StartupSelectionRow } from "./startup-selection.ts";
 import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 import type { CharacterTurntableView } from "./character-turntable.ts";
 
@@ -97,7 +97,6 @@ export class StartupMenu {
   get isBusy(): boolean { return this.busy; }
   private field: StartupSelectionField = "product";
   private page = 0;
-  private rosterPage = 0;
   private monsterField: { readonly kind: "none" } | { readonly kind: "source" } | { readonly kind: "class"; readonly classname: string | null } = { kind: "none" };
   private savePage = 0;
   private nativeFamily: StartupNativePreset["family"] = "q1";
@@ -107,7 +106,8 @@ export class StartupMenu {
   private nativeArena: string | undefined;
   private hostDraft: StartupHosting = { kind: "offline", port: 27910, q1Protocol: null };
   private hostPort = "27910";
-  private builderDropdown: { readonly field: StartupSelectionField; page: number } | null = null;
+  private modsMenu: UiMenuId | null = null;
+  private builderDropdown: { readonly field: StartupSelectionField; scroll: number; edition: "classic" | "rerelease" | null; collapsed: readonly string[] } | null = null;
   private builderPreviewFocusArmed = false;
 
   constructor(private readonly options: StartupMenuOptions) {
@@ -186,35 +186,15 @@ export class StartupMenu {
     const lobby = options.lobby === undefined ? null : registerLocalLobbyMenu(this.controller, options.lobby.current, options.lobby.selection, options.lobby.seats);
     if (lobby !== null) { this.lobbyMenu = lobby.root; this.disposers.push(lobby.dispose); }
     const mods = registerModMenu(this.controller, options.model.mods);
+    this.modsMenu = mods.root;
     this.disposers.push(mods.dispose);
     this.disposers.push(this.controller.register(session, () => {
       // Two-column create-game screen: every field on one page. Section
       // heads, the column divider, and picker values are drawn in draw().
       const spec = this.builderLayout();
       const controls: UiControl[] = [...(spec.dropdown?.items.map(item => item.control) ?? []),
-        ...(spec.viewer === null ? [] : [spec.viewer.control]), ...spec.fields.map(field => field.control)];
-      const sessionEntries: { readonly control: UiControl; readonly width: number }[] = [
-        { control: this.button("hosting", options.model.hosting().kind === "offline" ? "Network: local only" : "Network: hosting", 0, () => {
-          this.hostDraft = options.model.hosting(); this.hostPort = String(this.hostDraft.port); this.status = ""; this.controller.openMenu(hostingMenu);
-        }), width: 0 },
-        { control: this.button("mods", "Mods", 0, () => this.controller.openMenu(mods.root)), width: 72 },
-        ...(options.browser === undefined ? [] : [{ control: this.button("browse", "Find servers", 0, () => this.controller.openMenu(browserMenu)), width: 118 }]),
-        ...(lobby === null ? [] : [{ control: this.button("local-lobby", "Local lobby", 0, () => this.controller.openMenu(lobby.root)), width: 102 }]),
-      ];
-      {
-        const gaps = (sessionEntries.length - 1) * 8;
-        const fixed = sessionEntries.reduce((sum, entry) => sum + entry.width, 0);
-        let x = 64;
-        for (const entry of sessionEntries) {
-          const width = entry.width === 0 ? 512 - fixed - gaps : entry.width;
-          controls.push({ ...entry.control, rect: { x, y: 390, width, height: 27 }, enabled: spec.dropdown === null && entry.control.enabled });
-          x += width + 8;
-        }
-      }
-      controls.push(
-        { ...this.button("back", "Back", 0, () => this.controller.closeMenu()), rect: { x: 64, y: 421, width: 248, height: 29 }, enabled: spec.dropdown === null },
-        { ...this.button("play", options.model.hosting().kind === "offline" ? "Play" : "Start server", 0, options.play), rect: { x: 328, y: 421, width: 248, height: 29 }, enabled: spec.dropdown === null },
-      );
+        ...(spec.dropdown?.toggle === null || spec.dropdown?.toggle === undefined ? [] : [spec.dropdown.toggle.classic.control, spec.dropdown.toggle.rerelease.control]),
+        ...(spec.viewer === null ? [] : [spec.viewer.control]), ...spec.fields.map(field => field.control), ...spec.footer.map(entry => entry.control)];
       return { id: session, title: "", fullScreen: false, controls, open: () => undefined, close: () => undefined };
     }));
     this.register(hostingMenu, () => [
@@ -262,11 +242,10 @@ export class StartupMenu {
         scroll: { rect: { x: 64, y: 118, width: 512, height: 298 }, contentHeight: controls.length * 38, controls: controls.map(control => control.id) },
         controls: [...controls, this.back()], open: () => undefined, close: () => undefined };
     }));
-    this.register(selectMenu, () => {
+    this.disposers.push(this.controller.register(selectMenu, () => {
       const row = this.selectionRow();
-      const choices = row?.choices ?? [], pages = Math.max(1, Math.ceil(choices.length / 7));
-      this.page = Math.min(this.page, pages - 1);
-      const controls = choices.slice(this.page * 7, this.page * 7 + 7).map((choice, index) => {
+      const choices = row?.choices ?? [];
+      const controls = choices.map((choice, index) => {
         const control = this.button(`choice:${choice.id}`, `${row?.value === choice.id ? "> " : ""}${this.fit(`${choice.label}${choice.unavailable === null ? "" : " (unavailable)"}`, 466, menuText.body)}`, index, () => {
           if (this.monsterField.kind === "class") options.model.selectMonster(this.monsterField.classname, choice.id);
           else if (this.monsterField.kind === "source") options.model.selectMonsterSource(choice.id);
@@ -276,25 +255,24 @@ export class StartupMenu {
         }, true);
         return { ...control, enabled: choice.unavailable === null && !this.busy };
       });
-      if (pages > 1) controls.push(this.button("previous", "Previous page", 7, () => this.prepareChoicePage((this.page + pages - 1) % pages), true),
-        this.button("next", "Next page", 8, () => this.prepareChoicePage((this.page + 1) % pages), true));
-      return [...controls, this.back()];
-    });
-    this.register(rosterMenu, () => {
-      const rows = options.model.monsterRosterRows(), pages = Math.max(1, Math.ceil(rows.length / 7));
-      this.rosterPage = Math.min(this.rosterPage, pages - 1);
+      return { id: selectMenu, title: "", fullScreen: false,
+        scroll: { rect: { x: 64, y: 118, width: 512, height: 298 }, contentHeight: controls.length * 34, controls: controls.map(control => control.id) },
+        controls: [...controls, this.back()], open: () => undefined, close: () => undefined };
+    }));
+    this.disposers.push(this.controller.register(rosterMenu, () => {
+      const rows = options.model.monsterRosterRows();
       const source = options.model.monsterSourceRow(), sourceLabel = source.choices.find(choice => choice.id === source.value)?.label ?? source.value;
-      const controls = rows.slice(this.rosterPage * 7, this.rosterPage * 7 + 7).map((row, index) => {
-        return this.button(`monster:${row.classname ?? "default"}`, this.fit(`${row.label}: ${row.effectiveLabel}`, 486, menuText.body), index, () => {
-          this.monsterField = { kind: "class", classname: row.classname }; this.page = 0; this.controller.openMenu(selectMenu);
-        }, true);
+      const controls = rows.map((row, index) => {
+        return { ...this.button(`monster:${row.classname ?? "default"}`, this.fit(`${row.label}: ${row.effectiveLabel}`, 486, menuText.body), index, () => {
+          this.monsterField = { kind: "class", classname: row.classname }; this.controller.openMenu(selectMenu);
+        }, true), rect: { x: 64, y: 118 + index * 34, width: 512, height: 30 } };
       });
-      if (pages > 1) controls.push(this.button("previous", "Previous page", 7, () => { this.rosterPage = (this.rosterPage + pages - 1) % pages; }, true),
-        this.button("next", `Next page (${this.rosterPage + 1}/${pages})`, 8, () => { this.rosterPage = (this.rosterPage + 1) % pages; }, true));
-      return [{ ...this.button("monster-source", this.fit(`Monster source: ${sourceLabel}`, 486, menuText.body), 0, () => {
-        this.monsterField = { kind: "source" }; this.page = 0; this.controller.openMenu(selectMenu);
-      }, true), rect: { x: 64, y: 78, width: 512, height: 26 } }, ...controls, this.back()];
-    });
+      return { id: rosterMenu, title: "", fullScreen: false,
+        scroll: { rect: { x: 64, y: 118, width: 512, height: 298 }, contentHeight: controls.length * 34, controls: controls.map(control => control.id) },
+        controls: [{ ...this.button("monster-source", this.fit(`Monster source: ${sourceLabel}`, 486, menuText.body), 0, () => {
+          this.monsterField = { kind: "source" }; this.controller.openMenu(selectMenu);
+        }, true), rect: { x: 64, y: 78, width: 512, height: 26 } }, ...controls, this.back()], open: () => undefined, close: () => undefined };
+    }));
     this.register(loadMenu, () => {
       const saves = options.saves(), pages = Math.max(1, Math.ceil(saves.rows.length / 5));
       this.savePage = Math.min(this.savePage, pages - 1);
@@ -397,7 +375,7 @@ export class StartupMenu {
   private openRoster(): void {
     this.setStatus("Reading this map's monster roster...", true);
     void this.options.model.prepareMonsterRoster().then(() => {
-      this.rosterPage = 0; this.setStatus(""); this.controller.openMenu(rosterMenu);
+      this.setStatus(""); this.controller.openMenu(rosterMenu);
     }).catch((error: unknown) => this.setStatus(error instanceof Error ? error.message : String(error)));
   }
   /** Largest scale at or below `maximum` that keeps text inside width (no truncation). */
@@ -410,15 +388,30 @@ export class StartupMenu {
     }
     return low;
   }
-  private prepareBuilderDropdownPage(page: number): void {
+  private prepareBuilderDropdownScroll(scroll: number): void {
     if (this.builderDropdown === null) return;
-    this.builderDropdown = { field: this.builderDropdown.field, page };
+    this.builderDropdown = { ...this.builderDropdown, scroll };
     if (this.builderDropdown.field !== "map") return;
-    const preparation = this.options.model.prepareMapChoices(page * 8, 8);
+    const preparation = this.options.model.prepareMapChoices(scroll, 8);
     if (preparation === null) return;
     this.setStatus("Checking map rules...", true);
     void preparation.then(() => this.setStatus(""))
       .catch((error: unknown) => this.setStatus(error instanceof Error ? error.message : String(error)));
+  }
+  /** Flatten a picker row into group headers + choices for the dropdown window. */
+  private dropdownEntries(row: StartupSelectionRow, edition: "classic" | "rerelease" | null, collapsed: readonly string[]):
+    readonly ({ readonly kind: "header"; readonly group: string; readonly expanded: boolean } | { readonly kind: "choice"; readonly choice: StartupSelectionChoice })[] {
+    const visible = row.choices.filter(choice => edition === null || choice.edition === undefined || choice.edition === edition);
+    const entries: ({ kind: "header"; group: string; expanded: boolean } | { kind: "choice"; choice: StartupSelectionChoice })[] = [];
+    for (const choice of visible) if (choice.group === undefined) entries.push({ kind: "choice", choice });
+    const groups: string[] = [];
+    for (const choice of visible) if (choice.group !== undefined && !groups.includes(choice.group)) groups.push(choice.group);
+    for (const group of groups) {
+      const expanded = !collapsed.includes(group);
+      entries.push({ kind: "header", group, expanded });
+      if (expanded) for (const choice of visible) if (choice.group === group) entries.push({ kind: "choice", choice });
+    }
+    return entries;
   }
   /**
    * One-page create-game layout: two columns of label/value rows. Long lists
@@ -430,8 +423,11 @@ export class StartupMenu {
     readonly fields: readonly { readonly control: UiControl; readonly rect: { x: number; y: number; width: number; height: number }; readonly label: string;
       readonly value: { readonly text: string; readonly width: number } | null }[];
     readonly heads: readonly { readonly x: number; readonly y: number; readonly label: string }[];
-    readonly dropdown: { readonly x: number; readonly title: string; readonly page: number; readonly pages: number; readonly itemScale: number;
-      readonly items: readonly { readonly control: UiControl; readonly choice: string; readonly label: string; readonly selected: boolean; readonly unavailable: string | null }[] } | null;
+    readonly dropdown: { readonly x: number; readonly title: string; readonly itemScale: number; readonly itemsTop: number;
+      readonly scroll: { readonly offset: number; readonly visible: number; readonly total: number };
+      readonly toggle: { readonly classic: { readonly control: UiControl; readonly selected: boolean }; readonly rerelease: { readonly control: UiControl; readonly selected: boolean } } | null;
+      readonly items: readonly { readonly control: UiControl; readonly choice: string; readonly label: string; readonly selected: boolean; readonly header: boolean; readonly unavailable: string | null }[] } | null;
+    readonly footer: readonly { readonly control: UiControl; readonly rect: { x: number; y: number; width: number; height: number }; readonly label: string }[];
     readonly viewer: { readonly resource: ResourceId;
       readonly panel: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
       readonly rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
@@ -441,31 +437,31 @@ export class StartupMenu {
     const dropdown = this.builderDropdown;
     const appearanceDropdown = dropdown !== null && this.options.characterTurntable !== undefined && characterAppearanceFields.has(dropdown.field);
     const panelX = dropdown === null ? -1 : appearanceDropdown ? 64
-      : ["product", "mapProduct", "map", "character", "model", "skin", "topColor", "bottomColor", "movement", "weapons"].includes(dropdown.field) ? 328 : 64;
-    const sections: readonly { readonly title: string; readonly x: number; readonly startY: number;
-      readonly fields: readonly { readonly field: StartupSelectionField; readonly label: string; readonly picker: boolean }[] }[] = [
-      { title: "WORLD", x: 64, startY: 110, fields: [
+      : ["product", "mapProduct", "map", "enemies", "character", "model", "skin", "topColor", "bottomColor", "movement", "weapons"].includes(dropdown.field) ? 328 : 64;
+    const sections: readonly { readonly title: string; readonly x: number;
+      readonly fields: readonly { readonly field: StartupSelectionField; readonly label: string; readonly picker: boolean; readonly indent?: boolean }[] }[] = [
+      { title: "WORLD", x: 64, fields: [
         { field: "product", label: "Game", picker: true },
         { field: "mapProduct", label: "Map set", picker: true },
-        { field: "map", label: "Map", picker: true },
+        { field: "map", label: "Map", picker: true, indent: true },
+        { field: "enemies", label: "Monsters", picker: true },
       ] },
-      { title: "PLAYER", x: 64, startY: 209, fields: [
+      { title: "PLAYER", x: 64, fields: [
         { field: "character", label: "Character", picker: true },
-        { field: "model", label: "Model", picker: true },
-        { field: "skin", label: "Skin", picker: true },
-        { field: "topColor", label: "Shirt", picker: true },
-        { field: "bottomColor", label: "Pants", picker: true },
+        { field: "model", label: "Model", picker: true, indent: true },
+        { field: "skin", label: "Skin", picker: true, indent: true },
+        { field: "topColor", label: "Shirt", picker: true, indent: true },
+        { field: "bottomColor", label: "Pants", picker: true, indent: true },
         { field: "movement", label: "Movement", picker: true },
         { field: "weapons", label: "Weapons", picker: true },
       ] },
-      { title: "MATCH", x: 328, startY: 110, fields: [
-        { field: "enemies", label: "Monsters", picker: true },
+      { title: "MATCH", x: 328, fields: [
         { field: "seats", label: "Players", picker: false },
         { field: "mode", label: "Mode", picker: false },
         { field: "rules", label: "Rules", picker: true },
         { field: "skill", label: "Difficulty", picker: false },
       ] },
-      { title: "KIT", x: 328, startY: 259, fields: [
+      { title: "KIT", x: 328, fields: [
         { field: "grapple", label: "Hook", picker: false },
         { field: "grappleStyle", label: "Hook style", picker: true },
         { field: "grenades", label: "Grenades", picker: false },
@@ -474,15 +470,18 @@ export class StartupMenu {
     const fields: { control: UiControl; rect: { x: number; y: number; width: number; height: number }; label: string;
       value: { text: string; width: number } | null }[] = [];
     const heads: { x: number; y: number; label: string }[] = [];
+    const cursorByColumn = new Map<number, number>();
     for (const section of sections) {
       if (appearanceDropdown || section.x === panelX) continue;
       const present = section.fields.filter(spec => all.has(spec.field));
       if (present.length === 0) continue;
-      heads.push({ x: section.x, y: section.startY, label: section.title });
+      const startY = cursorByColumn.get(section.x) ?? 110;
+      heads.push({ x: section.x, y: startY, label: section.title });
       present.forEach((spec, index) => {
         const row = all.get(spec.field);
         if (row === undefined) return;
-        const rect = { x: section.x, y: section.startY + 17 + index * 25, width: 248, height: 24 };
+        const indent = spec.indent === true ? 14 : 0;
+        const rect = { x: section.x + indent, y: startY + 15 + index * 23, width: 248 - indent, height: 22 };
         const valueWidth = rect.width - this.measure(spec.label, menuText.field) - 34;
         const enabled = !this.busy && dropdown === null;
         if (spec.picker) {
@@ -490,10 +489,18 @@ export class StartupMenu {
           const display = spec.field === "enemies" ? selected.replace(" authored monsters", "")
             : spec.field === "weapons" ? selected.replace(/ weapons$/, "") : selected;
           fields.push({ control: { ...this.button(row.id, "", 0, () => {
-              const selectedIndex = Math.max(0, row.choices.findIndex(choice => choice.id === row.value));
-              this.builderDropdown = { field: spec.field, page: Math.floor(selectedIndex / 8) };
+              const current = row.choices.find(choice => choice.id === row.value);
+              const editions = new Set(row.choices.flatMap(choice => choice.edition === undefined ? [] : [choice.edition]));
+              const edition = editions.size > 1 ? current?.edition ?? "classic" : null;
+              const groups = [...new Set(row.choices.flatMap(choice => choice.group === undefined ? [] : [choice.group]))];
+              const collapsed = groups.filter(group => group !== current?.group);
+              const entries = this.dropdownEntries(row, edition, collapsed);
+              const visibleCount = edition === null ? 8 : 7;
+              const selectedIndex = Math.max(0, entries.findIndex(entry => entry.kind === "choice" && entry.choice.id === row.value));
+              const scroll = Math.max(0, Math.min(selectedIndex, Math.max(0, entries.length - visibleCount)));
+              this.builderDropdown = { field: spec.field, scroll, edition, collapsed };
               this.builderPreviewFocusArmed = false;
-              if (spec.field === "map") this.prepareBuilderDropdownPage(this.builderDropdown.page);
+              if (spec.field === "map") this.prepareBuilderDropdownScroll(scroll);
             }), rect, enabled }, rect, label: spec.label, value: { text: `${display} >`, width: valueWidth } });
         } else {
           const available = row.choices.filter(choice => choice.unavailable === null);
@@ -505,21 +512,44 @@ export class StartupMenu {
             value: { text: row.id === "grenades" ? (row.value === "enabled" ? "On" : "Off") : selected, width: valueWidth } });
         }
       });
+      cursorByColumn.set(section.x, startY + 15 + present.length * 23 + 8);
     }
-    let dropdownSpec: { x: number; title: string; page: number; pages: number; itemScale: number;
-      items: { control: UiControl; choice: string; label: string; selected: boolean; unavailable: string | null }[] } | null = null;
+    let dropdownSpec: { x: number; title: string; itemScale: number; itemsTop: number;
+      scroll: { offset: number; visible: number; total: number };
+      toggle: { classic: { control: UiControl; selected: boolean }; rerelease: { control: UiControl; selected: boolean } } | null;
+      items: { control: UiControl; choice: string; label: string; selected: boolean; header: boolean; unavailable: string | null }[] } | null = null;
     if (dropdown !== null) {
       const row = all.get(dropdown.field);
       if (row === undefined) this.builderDropdown = null;
       else {
-        const pages = Math.max(1, Math.ceil(row.choices.length / 8));
-        const page = Math.min(dropdown.page, pages - 1);
+        const entries = this.dropdownEntries(row, dropdown.edition, dropdown.collapsed);
+        const visibleCount = dropdown.edition === null ? 8 : 7;
+        const itemsTop = dropdown.edition === null ? 138 : 164;
+        const scroll = Math.max(0, Math.min(dropdown.scroll, Math.max(0, entries.length - visibleCount)));
         let itemScale: number = menuText.field;
-        for (const choice of row.choices)
-          itemScale = Math.min(itemScale, this.fitScale(choice.label, 224, menuText.field));
-        const items: { control: UiControl; choice: string; label: string; selected: boolean; unavailable: string | null }[] = row.choices.slice(page * 8, page * 8 + 8).map((choice, index) => {
-          const rect = { x: panelX, y: 138 + index * 27, width: 248, height: 26 };
-          const selected = row.value === choice.id;
+        for (const entry of entries)
+          itemScale = Math.min(itemScale, this.fitScale(entry.kind === "header" ? entry.group : entry.choice.label, 216, menuText.field));
+        const toggle = dropdown.edition === null ? null : {
+          classic: { control: { ...this.button("edition-classic", "", 0, () => { if (this.builderDropdown !== null) this.builderDropdown = { ...this.builderDropdown, edition: "classic", scroll: 0 }; }),
+            rect: { x: panelX, y: 136, width: 120, height: 22 } }, selected: dropdown.edition === "classic" },
+          rerelease: { control: { ...this.button("edition-rerelease", "", 0, () => { if (this.builderDropdown !== null) this.builderDropdown = { ...this.builderDropdown, edition: "rerelease", scroll: 0 }; }),
+            rect: { x: panelX + 128, y: 136, width: 120, height: 22 } }, selected: dropdown.edition === "rerelease" },
+        };
+        const items = entries.slice(scroll, scroll + visibleCount).map((entry, index) => {
+          const rect = { x: panelX, y: itemsTop + index * 27, width: 248, height: 26 };
+          if (entry.kind === "header") {
+            const group = entry.group;
+            const control: UiControl = { id: `ui:startup:group:${group}`, kind: "button", label: "", rect, visible: true, enabled: !this.busy,
+              activate: () => {
+                if (this.builderDropdown === null) return undefined;
+                const collapsed = this.builderDropdown.collapsed.includes(group)
+                  ? this.builderDropdown.collapsed.filter(value => value !== group) : [...this.builderDropdown.collapsed, group];
+                this.builderDropdown = { ...this.builderDropdown, collapsed };
+                return undefined;
+              } };
+            return { control, choice: row.value, label: `${entry.expanded ? "- " : "+ "}${group}`, selected: false, header: true, unavailable: null };
+          }
+          const choice = entry.choice, selected = row.value === choice.id;
           const control: UiControl = { id: appearanceDropdown || !selected ? `ui:startup:choice:${choice.id}` : `ui:startup:${row.id}`, kind: "button", label: "", rect,
             visible: true, enabled: choice.unavailable === null && !this.busy,
             activate: () => {
@@ -530,22 +560,42 @@ export class StartupMenu {
               if (dropdown.field === "enemies" && choice.id === "custom") this.openRoster();
               return undefined;
             } };
-          return { control, choice: choice.id, label: `${selected ? "> " : ""}${choice.label}`, selected, unavailable: choice.unavailable };
+          return { control, choice: choice.id, label: `${selected ? "> " : ""}${choice.label}`, selected, header: false, unavailable: choice.unavailable };
         });
-        if (pages > 1) {
-          items.push(
-            { control: { ...this.button("previous", "< Prev", 0, () => this.prepareBuilderDropdownPage((page + pages - 1) % pages)), rect: { x: panelX, y: 356, width: 120, height: 24 } }, choice: row.value, label: "", selected: false, unavailable: null },
-            { control: { ...this.button("next", "Next >", 0, () => this.prepareBuilderDropdownPage((page + 1) % pages)), rect: { x: panelX + 128, y: 356, width: 120, height: 24 } }, choice: row.value, label: "", selected: false, unavailable: null },
-          );
-        }
-        dropdownSpec = { x: panelX, title: row.label, page, pages, itemScale, items };
+        dropdownSpec = { x: panelX, title: row.label, itemScale, itemsTop, scroll: { offset: scroll, visible: visibleCount, total: entries.length }, toggle, items };
       }
+    }
+    const footer: { control: UiControl; rect: { x: number; y: number; width: number; height: number }; label: string }[] = [];
+    {
+      const options = this.options, footerEnabled = dropdown === null;
+      const entries: { readonly control: UiControl; readonly label: string; readonly width: number }[] = [
+        { control: this.button("hosting", "", 0, () => {
+          this.hostDraft = options.model.hosting(); this.hostPort = String(this.hostDraft.port); this.status = ""; this.controller.openMenu(hostingMenu);
+        }), label: options.model.hosting().kind === "offline" ? "Network: local only" : "Network: hosting", width: 0 },
+        ...(this.modsMenu === null ? [] : [{ control: this.button("mods", "", 0, () => { if (this.modsMenu !== null) this.controller.openMenu(this.modsMenu); }), label: "Mods", width: 72 }]),
+        ...(options.browser === undefined ? [] : [{ control: this.button("browse", "", 0, () => this.controller.openMenu(browserMenu)), label: "Find servers", width: 118 }]),
+        ...(this.lobbyMenu === null ? [] : [{ control: this.button("local-lobby", "", 0, () => this.openLocalLobby()), label: "Local lobby", width: 102 }]),
+      ];
+      const gaps = (entries.length - 1) * 8, fixed = entries.reduce((sum, entry) => sum + entry.width, 0);
+      let x = 64;
+      for (const entry of entries) {
+        const width = entry.width === 0 ? 512 - fixed - gaps : entry.width;
+        const rect = { x, y: 388, width, height: 24 };
+        footer.push({ control: { ...entry.control, rect, enabled: footerEnabled && entry.control.enabled }, rect, label: entry.label });
+        x += width + 8;
+      }
+      const backRect = { x: 64, y: 416, width: 248, height: 26 }, playRect = { x: 328, y: 416, width: 248, height: 26 };
+      footer.push(
+        { control: { ...this.button("back", "", 0, () => this.controller.closeMenu()), rect: backRect, enabled: footerEnabled }, rect: backRect, label: "Back" },
+        { control: { ...this.button("play", "", 0, options.play), rect: playRect, enabled: footerEnabled }, rect: playRect,
+          label: options.model.hosting().kind === "offline" ? "Play" : "Start server" },
+      );
     }
     let viewer: { resource: ResourceId; panel: { x: number; y: number; width: number; height: number };
       rect: { x: number; y: number; width: number; height: number }; label: string; control: UiControl } | null = null;
     if (appearanceDropdown && dropdown !== null && dropdownSpec !== null && this.options.characterTurntable !== undefined) {
       const state = this.controller.state(), focusedId = state.focus.kind === "menu" ? state.focus.control : null;
-      const candidates = dropdownSpec.items.filter(item => item.label !== "" && item.unavailable === null);
+      const candidates = dropdownSpec.items.filter(item => !item.header && item.unavailable === null);
       const hoveredCandidate = candidates.find(item => contains(item.control.rect, state.cursor));
       const focusedCandidate = candidates.find(item => item.control.id === focusedId);
       const candidate = hoveredCandidate ?? (focusedCandidate !== undefined
@@ -575,7 +625,7 @@ export class StartupMenu {
           rect: { x: 328, y: 358, width: 248, height: 20 }, enabled: !this.busy },
       };
     }
-    return { fields, heads, dropdown: dropdownSpec, viewer };
+    return { fields, heads, dropdown: dropdownSpec, footer, viewer };
   }
   private row(row: StartupSelectionRow, index: number): UiControl {
     const rect = { x: 64, y: 118 + index * 34, width: 512, height: 30 };
@@ -636,21 +686,21 @@ export class StartupMenu {
       if (event.kind === "key" && event.code === KeyCode.Escape) { this.builderDropdown = null; this.builderPreviewFocusArmed = false; return true; }
       if (event.kind === "key" && [KeyCode.Tab, KeyCode.Up, KeyCode.Down, KeyCode.Left, KeyCode.Right,
         KeyCode.PageUp, KeyCode.PageDown, KeyCode.Home, KeyCode.End].includes(event.code)) this.builderPreviewFocusArmed = true;
-      if (event.kind === "mouse-wheel" && event.delta.y !== 0) {
+      if (event.kind === "key" && event.down && (event.code === KeyCode.PageDown || event.code === KeyCode.PageUp)) {
         const row = this.safeRows().find(candidate => candidate.id === this.builderDropdown?.field);
-        const pages = Math.max(1, Math.ceil((row?.choices.length ?? 0) / 8));
-        this.prepareBuilderDropdownPage(Math.max(0, Math.min(pages - 1, this.builderDropdown.page + (event.delta.y < 0 ? 1 : -1))));
+        const entries = row === undefined ? [] : this.dropdownEntries(row, this.builderDropdown.edition, this.builderDropdown.collapsed);
+        const visible = this.builderDropdown.edition === null ? 8 : 7;
+        this.prepareBuilderDropdownScroll(Math.max(0, Math.min(Math.max(0, entries.length - visible),
+          this.builderDropdown.scroll + (event.code === KeyCode.PageDown ? visible : -visible))));
         return true;
       }
-    }
-    if (event.kind === "mouse-wheel" && event.delta.y !== 0 && this.controller.activeMenu === selectMenu) {
-      const choices = this.selectionRow()?.choices ?? [];
-      this.prepareChoicePage(Math.max(0, Math.min(Math.ceil(choices.length / 7) - 1, this.page + (event.delta.y < 0 ? 1 : -1))));
-      return true;
-    }
-    if (event.kind === "mouse-wheel" && event.delta.y !== 0 && this.controller.activeMenu === rosterMenu) {
-      this.rosterPage = Math.max(0, Math.min(Math.ceil(this.options.model.monsterRosterRows().length / 7) - 1, this.rosterPage + (event.delta.y < 0 ? 1 : -1)));
-      return true;
+      if (event.kind === "mouse-wheel" && event.delta.y !== 0) {
+        const row = this.safeRows().find(candidate => candidate.id === this.builderDropdown?.field);
+        const entries = row === undefined ? [] : this.dropdownEntries(row, this.builderDropdown.edition, this.builderDropdown.collapsed);
+        const visible = this.builderDropdown.edition === null ? 8 : 7;
+        this.prepareBuilderDropdownScroll(Math.max(0, Math.min(Math.max(0, entries.length - visible), this.builderDropdown.scroll + (event.delta.y < 0 ? 1 : -1))));
+        return true;
+      }
     }
     if (event.kind === "mouse-wheel" && event.delta.y !== 0 && this.controller.activeMenu === loadMenu) {
       this.savePage = Math.max(0, Math.min(Math.ceil(this.options.saves().rows.length / 5) - 1, this.savePage + (event.delta.y < 0 ? 1 : -1)));
@@ -692,8 +742,8 @@ export class StartupMenu {
       if (unavailable?.unavailable) text(this.fit(unavailable.unavailable, 512, menuText.label), 64, 395, menuText.label, true);
     }
     if (active === selectMenu && this.status === "") {
-      const cursor = this.controller.state().cursor;
-      const hovered = this.selectionRow()?.choices.slice(this.page * 7, this.page * 7 + 7).find((_choice, index) => contains(menuRow(index), cursor));
+      const state = this.controller.state(), focused = state.focus.kind === "menu" ? state.focus.control : null;
+      const hovered = this.selectionRow()?.choices.find(choice => focused === `ui:startup:choice:${choice.id}`);
       if (hovered?.unavailable) text(this.fit(hovered.unavailable, 512, menuText.small), 64, 458, menuText.small, true);
     }
     if (active === rosterMenu) text("Map counts shown. * Custom override.", 64, 460, menuText.small);
@@ -713,10 +763,6 @@ export class StartupMenu {
           { kind: "fill", rect: { x: spec.dropdown.x - 8, y: 110, width: 1, height: 272 }, color: panelColor },
           { kind: "fill", rect: { x: spec.dropdown.x + 255, y: 110, width: 1, height: 272 }, color: panelColor });
         text(spec.dropdown.title.toUpperCase(), spec.dropdown.x, 116, menuText.section, true);
-        if (spec.dropdown.pages > 1) {
-          const pageLabel = `${spec.dropdown.page + 1}/${spec.dropdown.pages}`;
-          text(pageLabel, spec.dropdown.x + 248 - this.measure(pageLabel, menuText.section), 116, menuText.section);
-        }
       }
       if (spec.viewer !== null) {
         const panelColor = { x: 0.6, y: 0.39, z: 0.18, w: 0.55 }, panel = spec.viewer.panel;
@@ -744,13 +790,31 @@ export class StartupMenu {
         overlayCommands.push({ kind: "text", origin: { x: rect.x + 10, y: rect.y + 3 }, text: "Done", font: this.options.art.skin.font,
           scale: menuText.field, color: focusedId === spec.viewer.control.id ? colors.accent : colors.text, align: "left", shadow: true });
       }
+      for (const entry of spec.footer) {
+        overlayCommands.push({ kind: "text", origin: { x: entry.rect.x + 10, y: entry.rect.y + 4 }, text: entry.label, font: this.options.art.skin.font,
+          scale: menuText.field, color: focusedId === entry.control.id ? colors.accent : entry.control.enabled ? colors.text : colors.disabled, align: "left", shadow: true });
+      }
       if (spec.dropdown !== null) {
+        if (spec.dropdown.toggle !== null) {
+          for (const [entry, label] of [[spec.dropdown.toggle.classic, "Classic"], [spec.dropdown.toggle.rerelease, "Rerelease"]] as const) {
+            const rect = entry.control.rect;
+            overlayCommands.push({ kind: "text", origin: { x: rect.x + 10, y: rect.y + 3 }, text: label, font: this.options.art.skin.font,
+              scale: menuText.field, color: entry.selected || focusedId === entry.control.id ? colors.accent : colors.text, align: "left", shadow: true });
+          }
+        }
         for (const item of spec.dropdown.items) {
-          if (item.label === "") continue;
           const rect = item.control.rect, scale = spec.dropdown.itemScale;
           const itemText = this.measure(item.label, scale) <= rect.width - 20 ? item.label : this.fit(item.label, rect.width - 20, scale);
           overlayCommands.push({ kind: "text", origin: { x: rect.x + 10, y: rect.y + 5 }, text: itemText, font: this.options.art.skin.font, scale,
-            color: item.selected ? colors.accent : item.control.enabled ? colors.text : colors.disabled, align: "left", shadow: true });
+            color: item.header || item.selected ? colors.accent : item.control.enabled ? colors.text : colors.disabled, align: "left", shadow: true });
+        }
+        const scroll = spec.dropdown.scroll;
+        if (scroll.total > scroll.visible) {
+          const trackHeight = scroll.visible * 27 - 1, thumbHeight = Math.max(24, trackHeight * scroll.visible / scroll.total);
+          const thumbY = spec.dropdown.itemsTop + (trackHeight - thumbHeight) * scroll.offset / (scroll.total - scroll.visible);
+          overlayCommands.push(
+            { kind: "fill", rect: { x: spec.dropdown.x + 240, y: spec.dropdown.itemsTop, width: 6, height: trackHeight }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.25 } },
+            { kind: "fill", rect: { x: spec.dropdown.x + 240, y: thumbY, width: 6, height: thumbHeight }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.9 } });
         }
       }
       overlay = false;

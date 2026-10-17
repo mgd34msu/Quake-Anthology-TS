@@ -43,11 +43,19 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
   };
-  let rosterPage = 0;
-  const page = (wanted: number): void => {
-    const pages = Math.max(1, Math.ceil(model.monsterRosterRows().length / 7));
-    while (rosterPage !== wanted) { click(100, 402); rosterPage = (rosterPage + 1) % pages; }
+  const wheel = (down: boolean): void => {
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x: 100, y: 200 }, delta: { x: 0, y: 0 } });
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-wheel", delta: { x: 0, y: down ? -1 : 1 } });
   };
+  // Scroll a 34px-row scroll menu so `index` is visible; returns the new scroll offset in px.
+  const scrollRowsTo = (index: number, total: number, current: number): number => {
+    const maximum = Math.max(0, total * 34 - 298);
+    let scroll = current;
+    while (index * 34 - scroll > 298 - 34 && scroll < maximum) { wheel(true); scroll = Math.min(maximum, scroll + 84); }
+    while (index * 34 - scroll < 0 && scroll > 0) { wheel(false); scroll = Math.max(0, scroll - 84); }
+    return scroll;
+  };
+  let rosterScroll = 0;
   const source = async (id: string, screenshot?: string): Promise<void> => {
     click(100, 90); expect(menu.controller.activeMenu).toBe("menu:startup:select");
     if (screenshot !== undefined) await capture(screenshot);
@@ -58,11 +66,12 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
   const select = (classname: string, choiceId: string): void => {
     const rows = model.monsterRosterRows(), index = rows.findIndex(row => row.classname === classname), row = rows[index];
     if (index < 0 || row === undefined) throw new Error("Missing campaign slot");
-    page(Math.floor(index / 7)); click(100, 130 + index % 7 * 34);
+    rosterScroll = scrollRowsTo(index, rows.length, rosterScroll);
+    click(100, 118 + index * 34 - rosterScroll + 12);
     const choiceIndex = row.choices.findIndex(choice => choice.id === choiceId);
     if (choiceIndex < 0) throw new Error("Missing creature choice");
-    for (let page = 0; page < Math.floor(choiceIndex / 7); page++) click(100, 402);
-    click(100, 130 + choiceIndex % 7 * 34); expect(menu.controller.activeMenu).toBe("menu:startup:roster");
+    const choiceScroll = scrollRowsTo(choiceIndex, row.choices.length, 0);
+    click(100, 118 + choiceIndex * 34 - choiceScroll + 12); expect(menu.controller.activeMenu).toBe("menu:startup:roster");
   };
   const captureRoot = process.env["QUAKE_ROSTER_CAPTURE_DIR"];
   const capture = async (name: string): Promise<void> => {
@@ -141,11 +150,40 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     expect(menu.controller.activeMenu).toBe("menu:startup:main");
     click(100, 130); click(100, 300);
     const dropdownPick = (choiceId: string): void => {
-      const choices = model.rows().find(row => row.id === "enemies")?.choices ?? [];
-      const index = choices.findIndex(option => option.id === choiceId);
-      if (index < 0) throw new Error(`Missing enemies choice ${choiceId}`);
-      for (let p = 0; p < Math.floor(index / 8); p++) click(252, 368);
-      click(100, 138 + index % 8 * 27 + 12);
+      const row = model.rows().find(candidate => candidate.id === "enemies");
+      const choices = row?.choices ?? [], target = choices.find(option => option.id === choiceId);
+      if (row === undefined || target === undefined) throw new Error(`Missing enemies choice ${choiceId}`);
+      const current = choices.find(option => option.id === row.value);
+      const editions = new Set(choices.flatMap(option => option.edition === undefined ? [] : [option.edition]));
+      let edition: "classic" | "rerelease" | null = editions.size > 1 ? current?.edition ?? "classic" : null;
+      const visible = edition === null ? 8 : 7, itemsTop = edition === null ? 138 : 164;
+      const collapsed = new Set(choices.flatMap(option => option.group === undefined || option.group === current?.group ? [] : [option.group]));
+      const entriesOf = (): ({ readonly kind: "header"; readonly group: string } | { readonly kind: "choice"; readonly id: string })[] => {
+        const shown = choices.filter(option => edition === null || option.edition === undefined || option.edition === edition);
+        const entries: ({ kind: "header"; group: string } | { kind: "choice"; id: string })[] = shown.filter(option => option.group === undefined).map(option => ({ kind: "choice", id: option.id }));
+        for (const group of [...new Set(shown.flatMap(option => option.group === undefined ? [] : [option.group]))]) {
+          entries.push({ kind: "header", group });
+          if (!collapsed.has(group)) for (const option of shown) if (option.group === group) entries.push({ kind: "choice", id: option.id });
+        }
+        return entries;
+      };
+      let entries = entriesOf();
+      const selectedIndex = Math.max(0, entries.findIndex(entry => entry.kind === "choice" && entry.id === row.value));
+      let scroll = Math.max(0, Math.min(selectedIndex, Math.max(0, entries.length - visible)));
+      const scrollTo = (index: number): void => {
+        while (index - scroll > visible - 1) { wheel(true); scroll++; }
+        while (index - scroll < 0) { wheel(false); scroll--; }
+      };
+      const clickEntry = (index: number): void => { scrollTo(index); click(360, itemsTop + (index - scroll) * 27 + 12); };
+      if (target.edition !== undefined && edition !== null && target.edition !== edition) {
+        click(target.edition === "classic" ? 388 : 516, 147);
+        edition = target.edition; scroll = 0; entries = entriesOf();
+      }
+      if (target.group !== undefined && collapsed.has(target.group)) {
+        clickEntry(entries.findIndex(entry => entry.kind === "header" && entry.group === target.group));
+        collapsed.delete(target.group); entries = entriesOf();
+      }
+      clickEntry(entries.findIndex(entry => entry.kind === "choice" && entry.id === choiceId));
     };
     focusControl("ui:startup:enemies"); key(KeyCode.Enter);
     await capture("roster-combat-source-presets");
@@ -166,13 +204,13 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     expect(rows.find(row => row.classname === "monster_soldier")?.effectiveLabel).toBe("Grunt (Q1 classic)");
     expect(rows.find(row => row.classname === "monster_gunner")?.effectiveLabel).toBe("Ogre (Q1 classic)");
     await capture("roster-first-page");
-    const infantry = rows.findIndex(row => row.classname === "monster_infantry"); page(Math.floor(infantry / 7)); await capture("roster-infantry-page");
-    page(Math.ceil(rows.length / 7) - 1); await capture("roster-last-page");
+    const infantry = rows.findIndex(row => row.classname === "monster_infantry"); rosterScroll = scrollRowsTo(infantry, rows.length, rosterScroll); await capture("roster-infantry-page");
+    rosterScroll = scrollRowsTo(rows.length - 1, rows.length, rosterScroll); await capture("roster-last-page");
     select("monster_berserk", "q1:monsters/classic/id1/monster_wizard");
     expect(model.monsterRosterRows().find(row => row.classname === "monster_berserk")?.effectiveLabel).toBe("Scrag (Q1 classic) *");
     const monsterRow = model.rows().find(row => row.id === "enemies");
     expect(monsterRow?.value).toBe("custom");
-    expect(monsterRow?.choices.find(choice => choice.id === "custom")?.label).toBe("Quake (classic) (custom)");
+    expect(monsterRow?.choices.find(choice => choice.id === "custom")?.label).toBe("Quake (custom)");
     const recipe = (await model.resolve()).recipe;
     expect(recipe.enemies).toMatchObject({ kind: "replace", byClassname: { monster_berserk: { classname: "monster_wizard" }, monster_infantry: { classname: "monster_enforcer" }, monster_gunner: { classname: "monster_ogre" } } });
     await source("q1:monsters/rerelease/id1");

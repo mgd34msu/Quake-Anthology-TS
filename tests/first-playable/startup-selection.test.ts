@@ -127,17 +127,31 @@ test.skipIf(!corpusHasFile("q1/id1/PAK0.PAK"))("mouse startup roster edits actua
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
   };
-  let currentRosterPage = 0;
+  const wheelRows = (down: boolean) => {
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x: 100, y: 200 }, delta: { x: 0, y: 0 } });
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-wheel", delta: { x: 0, y: down ? -1 : 1 } });
+  };
+  const scrollRowsTo = (index: number, total: number, current: number): number => {
+    const maximum = Math.max(0, total * 34 - 298);
+    let scroll = current;
+    while (index * 34 - scroll > 298 - 34 && scroll < maximum) { wheelRows(true); scroll = Math.min(maximum, scroll + 84); }
+    while (index * 34 - scroll < 0 && scroll > 0) { wheelRows(false); scroll = Math.max(0, scroll - 84); }
+    return scroll;
+  };
+  const clickScrolledRow = (index: number, scroll: number) => {
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x: 100, y: 118 + index * 34 - scroll + 12 }, delta: { x: 0, y: 0 } });
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
+  };
+  let currentRosterScroll = 0;
   const choose = (classname: string | null, id: string) => {
     const rows = model.monsterRosterRows(), rowIndex = rows.findIndex(row => row.classname === classname);
     if (rowIndex < 0) throw new Error("Missing authored roster row");
-    const pages = Math.max(1, Math.ceil(rows.length / 7)), wantedPage = Math.floor(rowIndex / 7);
-    while (currentRosterPage !== wantedPage) { click(8); currentRosterPage = (currentRosterPage + 1) % pages; }
-    click(rowIndex % 7);
+    currentRosterScroll = scrollRowsTo(rowIndex, rows.length, currentRosterScroll);
+    clickScrolledRow(rowIndex, currentRosterScroll);
     const row = rows[rowIndex], index = row?.choices.findIndex(choice => choice.id === id) ?? -1;
-    if (index < 0) throw new Error("Missing replacement choice");
-    for (let page = 0; page < Math.floor(index / 7); page++) click(8);
-    click(index % 7);
+    if (index < 0 || row === undefined) throw new Error("Missing replacement choice");
+    clickScrolledRow(index, scrollRowsTo(index, row.choices.length, 0));
     expect(menu.controller.activeMenu).toBe("menu:startup:roster");
   };
   const { SeatInput } = await import("../../src/input/seat.ts");
@@ -206,8 +220,11 @@ test.skipIf(!corpusHasFile("q1/id1/PAK0.PAK"))("mouse startup roster edits actua
       menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });
       menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
     };
-    for (let page = 0; page < Math.floor(customIndex / 8); page++) clickAt(252, 368);
-    clickAt(100, 138 + customIndex % 8 * 27 + 12);
+    // "custom" is an ungrouped entry ahead of the grouped sources; the edition
+    // toggle is shown for this picker, so items start at y 164, 7 visible.
+    let dropdownScroll = 0;
+    while (customIndex - dropdownScroll > 6) { wheelRows(true); dropdownScroll++; }
+    clickAt(360, 164 + (customIndex - dropdownScroll) * 27 + 12);
     await model.prepareMonsterRoster();
     expect(menu.controller.activeMenu).toBe("menu:startup:roster");
     expect(model.monsterRosterRows()[0]?.value).toBe("native");

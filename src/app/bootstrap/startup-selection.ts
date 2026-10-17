@@ -39,15 +39,19 @@ import type { Q1ProtocolIdentity } from "../../contracts/protocol.ts";
 import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 
 export type StartupSelectionField = "doppler" | "environment" | "product" | "mapProduct" | "map" | "movement" | "character" | "model" | "skin" | "topColor" | "bottomColor" | "weapons" | "enemies" | "grapple" | "grappleStyle" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer";
-export interface StartupSelectionChoice { readonly id: string; readonly label: string; readonly unavailable: string | null; }
+export interface StartupSelectionChoice { readonly id: string; readonly label: string; readonly unavailable: string | null;
+  /** Picker category (collapsible group header); absent means ungrouped. */
+  readonly group?: string;
+  /** Picker edition filter; absent means the choice exists in every edition. */
+  readonly edition?: "classic" | "rerelease"; }
 export interface StartupSelectionRow { readonly id: StartupSelectionField; readonly label: string; readonly value: string; readonly choices: readonly StartupSelectionChoice[]; }
 export interface MonsterRosterRow { readonly classname: string | null; readonly label: string; readonly value: string; readonly effectiveLabel: string; readonly choices: readonly StartupSelectionChoice[]; }
-export interface StartupNativePreset extends StartupSelectionChoice {
+export type StartupNativePreset = Omit<StartupSelectionChoice, "edition"> & {
   readonly family: GameFamily;
   readonly edition: string;
   readonly difficulties: readonly StartupSelectionChoice[];
   readonly defaultSkill: string;
-}
+};
 export interface StartupLaunch { readonly options: ApplicationOptions; readonly recipe: ExecutableRecipe; }
 export interface StartupCharacterPreview {
   readonly product: CatalogProduct["id"];
@@ -79,7 +83,10 @@ function unavailable(product: CatalogProduct): string | null {
   return state.kind === "installed" ? null : state.kind === "unresolved" ? state.reason : `Missing: ${state.requirements.join(", ")}`;
 }
 function productChoice(product: CatalogProduct): StartupSelectionChoice {
-  return choice(product.expectation.id, `${product.expectation.title} (${product.expectation.edition})`, unavailable(product));
+  const edition = product.expectation.edition;
+  return { ...choice(product.expectation.id, product.expectation.title, unavailable(product)),
+    group: product.expectation.family === "q1" ? "Quake" : product.expectation.family === "q2" ? "Quake II" : "Quake III Arena",
+    ...(edition === "classic" || edition === "rerelease" ? { edition } : {}) };
 }
 
 /** The draft stores UI choices; the existing launch resolver remains the recipe authority. */
@@ -552,7 +559,8 @@ export class StartupSelectionModel {
   monsterSourceRow(): { readonly label: string; readonly value: string; readonly choices: readonly StartupSelectionChoice[] } {
     return { label: "Monster source", value: this.roster().source, choices: [choice("native", "Authored campaign monsters"), ...monsterSources.map(source => {
       const product = this.catalog.products.find(product => product.expectation.family === source.family && product.expectation.edition === source.edition && product.expectation.campaign === source.program);
-      return choice(source.provider, `${monsterSourceTitle(source.family, source.program, product?.expectation.title)} (${source.edition})`, product === undefined ? "Source content unavailable" : unavailable(product));
+      return { ...choice(source.provider, monsterSourceTitle(source.family, source.program, product?.expectation.title), product === undefined ? "Source content unavailable" : unavailable(product)),
+        group: source.family === "q1" ? "Quake" : source.family === "q2" ? "Quake II" : "Quake III Arena", edition: source.edition };
     })] };
   }
   selectMonsterSource(id: string): void {
