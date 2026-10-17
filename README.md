@@ -4,10 +4,10 @@ Quake, Quake II, and Quake III gameplay in one engine and executable, written in
 strict TypeScript and run or compiled with Bun. Mix movement, characters, weapons,
 monsters, and equipment while retaining each selected source's behavior.
 
-**Version 1.1.2** is available from [GitHub Releases](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.1.2),
-with a Linux x64 executable and source. See the [release notes](docs/releases/1.1.2.md).
+**Version 1.1.3** is available from [GitHub Releases](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.1.3),
+with a Linux x64 executable and source. See the [release notes](docs/releases/1.1.3.md).
 Native DLL gameplay can still lag in demanding scenes. That remaining performance
-work is scheduled for a patch release; saving and loading are accepted for 1.1.2.
+work is scheduled for a later release; saving and loading are accepted for 1.1.3.
 Supported mod interfaces and compatibility limits are documented below.
 
 Classic Quake and Quake II components must preserve their original gameplay,
@@ -76,8 +76,14 @@ mod packages, maps, music, and configuration files. Game data is not bundled.
 
 Choose an installed game or expansion under **Play a game**. Use
 **Play a game → Custom game** to mix the world, movement, character, weapons,
-monsters, and equipment. Under **World**, **Map content** selects maps
-independently from the game or mod that supplies the rules.
+monsters, and equipment on one screen. Pickers group titles under Quake,
+Quake II, and Quake III Arena categories with a Classic/Rerelease toggle for
+which edition of the chosen title is in effect. Under **World**, choose a
+**Map set** independently from the game or mod that supplies the rules, then
+a **Map** from that set. Character appearance (Q1 shirt/pants colors, Q2/Q3
+model and skin) is chosen under **Character** with a live rotating preview.
+On Quake III maps, **Monsters** selects which game's player models the
+single-player bots use. Settings changes persist as you make them.
 
 **Custom game → Mods** enables or disables independent components individually.
 Multiple compatible components can run together, including components from
@@ -85,9 +91,9 @@ different games. The project requires general cross-game mod composition;
 installed packages still need supported source interfaces and dependencies.
 Discovery alone does not establish compatibility.
 
-Under **Equipment**, **Hook** selects **Off**, **Weapon slot**, or **Offhand**.
+Under **Kit**, **Hook** selects **Off**, **Weapon slot**, or **Offhand**.
 **Hook style** independently selects Threewave for Q1/Q2/Q3, LMCTF for Q2, or
-LRCTF for Q3. **Offhand grenades** is one **Off/On** option.
+LRCTF for Q3. **Grenades** is one **Off/On** option.
 
 Use **Options → Controls → Bindings (Player 1)** to edit keys and mouse buttons.
 See [playing and selections](docs/playing.md) for command-line examples, equipment,
@@ -99,7 +105,9 @@ supported original interfaces and component declarations.
 Use `find <text>` and `help <name>` in the console to inspect commands and settings.
 Tab completes commands; Up/Down recalls history; PageUp/PageDown scrolls output.
 
-**Options → LLM options** configures subscription or API access. The
+**Options → LLM options** configures subscription or API access. One LLM
+session is primed with the console catalog at startup and reused for the
+whole program run, so in-game queries start warm. The
 [console and LLM guide](docs/console-and-llm.md) explains authentication, credential
 locations, `llm_ask`, `llm_exec`, and command validation.
 

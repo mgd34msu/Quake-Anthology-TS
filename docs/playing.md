@@ -1,14 +1,20 @@
 # Choose a game and customize it
 
-Open **Play a game → Custom game**. The menu offers installed campaigns, starting
-maps, movement, character source and model, weapons, supported monster replacements,
-and equipment. Unsupported combinations can fail preparation or report an error
-in the menu. See [current compatibility](mod-compatibility.md) for source interfaces.
+Open **Play a game → Custom game**. Everything is on one screen: **World**,
+**Player**, **Match**, and **Kit**. Long lists open as scrollable dropdowns on
+the same screen, grouped under Quake, Quake II, and Quake III Arena categories.
+Where a title exists in both editions, a **Classic/Rerelease** toggle chooses
+which edition of it is in effect; the list itself does not change. Unsupported
+combinations can fail preparation or report an error in the menu. See
+[current compatibility](mod-compatibility.md) for source interfaces.
 
 ## Choose rules and maps
 
-Under **World**, choose the game or mod that supplies the rules. **Map content**
-selects the installed product supplying the map independently.
+Under **World**, choose the game or mod that supplies the rules. **Map set**
+selects the installed product supplying maps independently, and **Map** (under
+it) selects the starting map from that set. **Monsters** is also under World:
+it selects authored monster replacements, and on Quake III maps it selects
+which game's player models the single-player bots use.
 
 The command-line equivalent is:
 
@@ -31,7 +37,9 @@ their original engine supports.
 
 ## Choose movement and characters
 
-Select movement and character sources in the custom-game menu. On the command line,
+Select movement and character sources in the custom-game menu. Appearance is
+chosen under **Character** — model and skin for Q2/Q3 sources, shirt and pants
+colors for Q1 — with a live rotating preview while you choose. On the command line,
 `--movement` accepts `q1`, `q2`, `q3`, `qw`, or an exact installed product such as
 `q2-rerelease-baseq2`. `qw` selects `q1-quakeworld`, including its command timing.
 
@@ -67,13 +75,13 @@ unfinished. See [component declarations and limits](mod-compatibility.md#indepen
 
 ## Configure equipment
 
-Under **Custom game → Equipment**:
+Under **Custom game → Kit**:
 
 | Control | Choices |
 | --- | --- |
 | Hook | Off, Weapon slot, Offhand |
 | Hook style | Threewave for Q1, Q2, or Q3; LMCTF for Q2; LRCTF for Q3 |
-| Offhand grenades | Off, On |
+| Grenades | Off, On |
 
 Hook style selects the source implementation independently from placement. The
 picker lists hook providers rather than every installed mod and combines classic
