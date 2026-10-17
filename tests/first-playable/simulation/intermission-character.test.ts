@@ -20,14 +20,13 @@ async function viewsDuring(game: string, map: string): Promise<{ play: boolean; 
     const client = identity.client(0, 0), actor = simulation.admitPlayer(client).actor;
     const movement = simulation.movementPlayer(actor);
     if (movement === null) throw new Error("Missing movement player");
-    const playerState = movement as unknown as { intermission: boolean; cutscene: { readonly origin: { x: number; y: number; z: number }; readonly angles: { x: number; y: number; z: number }; readonly viewOffset: { x: number; y: number; z: number } } | null };
     for (let frame = 0; frame < 10; frame++) simulation.step({ elapsedMilliseconds: 50, commands: [] });
     const visible = (): boolean => simulation.characterViews().some(view => view.actor.equals(actor));
     const play = visible();
-    playerState.intermission = true;
+    Object.assign(movement, { intermission: true });
     const intermission = visible();
-    playerState.intermission = false;
-    playerState.cutscene = { origin: { x: 0, y: 0, z: 0 }, angles: { x: 0, y: 0, z: 0 }, viewOffset: { x: 0, y: 0, z: 0 } };
+    Object.assign(movement, { intermission: false });
+    Object.assign(movement, { cutscene: { origin: { x: 0, y: 0, z: 0 }, angles: { x: 0, y: 0, z: 0 }, viewOffset: { x: 0, y: 0, z: 0 } } });
     const cutscene = visible();
     return { play, intermission, cutscene };
   } finally { simulation.close(); await content.close(); }

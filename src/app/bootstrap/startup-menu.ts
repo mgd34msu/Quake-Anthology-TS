@@ -831,7 +831,9 @@ export class StartupMenu {
       }
       if (spec.dropdown !== null) {
         if (spec.dropdown.toggle !== null) {
-          for (const [entry, label] of [[spec.dropdown.toggle.classic, "Classic"], [spec.dropdown.toggle.rerelease, "Rerelease"]] as const) {
+          const toggleLabels: readonly (readonly [{ readonly control: UiControl; readonly selected: boolean }, string])[] = [
+            [spec.dropdown.toggle.classic, "Classic"], [spec.dropdown.toggle.rerelease, "Rerelease"]];
+          for (const [entry, label] of toggleLabels) {
             const rect = entry.control.rect;
             overlayCommands.push({ kind: "text", origin: { x: rect.x + 10, y: rect.y + 3 }, text: label, font: this.options.art.skin.font,
               scale: menuText.field, color: entry.selected || focusedId === entry.control.id ? colors.accent : colors.text, align: "left", shadow: true });
