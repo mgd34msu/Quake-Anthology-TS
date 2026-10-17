@@ -67,3 +67,83 @@ for (const row of cases) test(`${row.family} character, movement and weapons run
     expect(prints.join("")).not.toContain("Failed to load model file");
   } finally { await app.close(); }
 }, 120000);
+
+test("Q1 setup in Q3: +back moves backwards and arena bot combat never selects weapon 0", async () => {
+  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-baseq3", "--map", "q3dm0", "--movement", "q1",
+    "--character", "q1", "--mode", "singleplayer", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
+  if (parsed.kind !== "run") throw new Error("Missing launch");
+  const catalog = await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, discoverMods: false });
+  const preset = applicationPreset(catalog, parsed.options);
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id),
+    weapons: { kind: "selected", value: [{ provider: "q1:official", content: catalog.require("q1-classic-id1").id }] } } });
+  const prints: string[] = [];
+  const app = await Application.open(parsed.options, { print: text => { prints.push(text); } }, recipe);
+  try {
+    const local = app.localPlayers[0];
+    if (local === undefined) throw new Error("Missing local player");
+    const key = (code: number, down: boolean): void => { app.input({ seat: local.seat.id, kind: "key", code, down,
+      repeat: false, timeMilliseconds: performance.now() }); };
+    for (let index = 0; index < 20; index++) await app.step(50);
+    key(119, true); // W / +forward: leave the spawn wall first
+    for (let index = 0; index < 40; index++) await app.step(50);
+    key(119, false);
+    const before = app.simulation.playerView(local.actor);
+    if (before === null) throw new Error("Missing local view");
+    key(115, true); // S / +back
+    for (let index = 0; index < 40; index++) await app.step(50);
+    key(115, false);
+    const afterBack = app.simulation.playerView(local.actor);
+    if (afterBack === null) throw new Error("Missing local view after +back");
+    const yaw = before.angles.y * Math.PI / 180;
+    const backward = -(afterBack.origin.x - before.origin.x) * Math.cos(yaw) - (afterBack.origin.y - before.origin.y) * Math.sin(yaw);
+    expect(backward).toBeGreaterThan(50);
+    // Soak bot combat in the reported setup (Crash on q3dm0): keep putting the
+    // bot in front of the local player so battle/retreat nodes run; the old
+    // build threw "Bot weapon 0 has no loaded weapon information".
+    for (let index = 0; index < 300 && !prints.some(text => text.includes("Crash^7 entered the game")); index++) await app.step(50);
+    expect(prints.join("")).toContain("Crash^7 entered the game");
+    const simulation = app.simulation as unknown as { setPlayerMovement(actor: unknown, change: unknown): void };
+    for (let index = 0; index < 800; index++) {
+      await app.step(50);
+      const bot = app.simulation.players().find(actor => !actor.equals(local.actor));
+      const view = app.simulation.playerView(local.actor);
+      if (bot !== undefined && view !== null && index % 100 === 99) {
+        const radians = view.angles.y * Math.PI / 180;
+        simulation.setPlayerMovement(bot, { kind: "teleport",
+          origin: { x: view.origin.x + Math.cos(radians) * 300, y: view.origin.y + Math.sin(radians) * 300, z: view.origin.z },
+          angles: { x: 0, y: (view.angles.y + 180) % 360, z: 0 }, velocity: { x: 0, y: 0, z: 0 },
+          commandAngles: { x: 0, y: (view.angles.y + 180) % 360, z: 0 }, holdMilliseconds: 0, spectator: false });
+      }
+    }
+    // The bot must aim at the player, not a wall: place the local player at a
+    // trace-clear spot next to the bot and require bot damage. The old build
+    // rotated bot aim by the Q3 spawn delta angles, so shots never landed.
+    const bot = app.simulation.players().find(actor => !actor.equals(local.actor));
+    if (bot === undefined) throw new Error("Missing bot player");
+    const botView = app.simulation.playerView(bot);
+    if (botView === null) throw new Error("Missing bot view");
+    interface TraceGame { world: { trace(query: unknown): { fraction: number; solidity: string } };
+      records: { byActor(actor: unknown): { r: { mins: unknown; maxs: unknown }; s: { number: number } } | null } }
+    const game = (app.simulation as unknown as { source: { game: TraceGame } }).source.game;
+    const botEntity = game.records.byActor((bot as unknown as { id?: unknown }).id ?? bot);
+    if (botEntity === null) throw new Error("Missing bot entity");
+    let placed: { x: number; y: number; z: number } | null = null;
+    for (const offset of [{ x: 120, y: 0 }, { x: -120, y: 0 }, { x: 0, y: 120 }, { x: 0, y: -120 }]) {
+      const end = { x: botView.origin.x + offset.x, y: botView.origin.y + offset.y, z: botView.origin.z };
+      const trace = game.world.trace({ start: botView.origin, end, shape: { kind: "box", mins: botEntity.r.mins, maxs: botEntity.r.maxs },
+        passEntityNum: botEntity.s.number, mask: 0x2010001 });
+      if (trace.fraction === 1 && trace.solidity === "clear") { placed = end; break; }
+    }
+    if (placed === null) throw new Error("No trace-clear placement near bot");
+    const faceYaw = (Math.atan2(botView.origin.y - placed.y, botView.origin.x - placed.x) * 180 / Math.PI + 360) % 360;
+    simulation.setPlayerMovement(local.actor, { kind: "teleport", origin: placed,
+      angles: { x: 0, y: faceYaw, z: 0 }, velocity: { x: 0, y: 0, z: 0 },
+      commandAngles: { x: 0, y: faceYaw, z: 0 }, holdMilliseconds: 0, spectator: false });
+    let damaged = false;
+    for (let index = 0; index < 600 && !damaged; index++) {
+      await app.step(50);
+      damaged = app.simulation.playerUi(local.actor).health < 100;
+    }
+    expect(damaged).toBe(true);
+  } finally { await app.close(); }
+}, 240000);

@@ -6,9 +6,9 @@ import type { UserCommand as SelectedCommand } from "../../../contracts/protocol
 import type { UserCommand } from "../../../content/q3/base/shared/player-state.ts";
 import type { MovementPlayer } from "./players.ts";
 
-/** Foreign local input owns absolute aim; Q3 commands already contain source-relative words. */
+/** Foreign local/bot input owns absolute aim; Q3 commands already contain source-relative words. */
 export function relativeQ3SourceCommand(source: ActorCommand["source"], dialect: SelectedCommand["kind"], command: UserCommand, delta: Vec3, angleSpace?: ActorCommand["angleSpace"]): UserCommand {
-  return angleSpace === "absolute" || angleSpace === undefined && source.kind === "local-seat" && dialect !== "q3" ? { ...command, angles: {
+  return angleSpace === "absolute" || angleSpace === undefined && (source.kind === "local-seat" || source.kind === "bot") && dialect !== "q3" ? { ...command, angles: {
     x: command.angles.x - delta.x, y: command.angles.y - delta.y, z: command.angles.z - delta.z
   } } : command;
 }

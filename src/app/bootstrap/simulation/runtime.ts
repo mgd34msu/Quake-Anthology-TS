@@ -3532,6 +3532,16 @@ export class SharedSimulation implements Simulation {
         && effect.value.provider !== this.selectedQ3Source?.host.provider) client.ps.addEvent(effect.value.event, effect.value.parameter);
     }
     client.ps.commandTime = command.serverTime; client.ps.viewangles = player.viewAngles; client.ps.viewheight = player.viewHeight;
+    if (player.state.kind !== "q3") {
+      // Native Q3 pmove ages pm_time and clears the TIME_* flags; a foreign provider
+      // never writes them back, so the spawn knockback timer would re-arm forever
+      // (syncQ3Player maps it to NetQuake's no-backward-after-teleport hold).
+      client.ps.pmTime -= elapsed;
+      if (client.ps.pmTime <= 0) {
+        client.ps.pmTime = 0;
+        client.ps.pmFlags &= ~(MoveFlags.TIME_LAND | MoveFlags.TIME_KNOCKBACK | MoveFlags.TIME_WATERJUMP);
+      }
+    }
     client.ps.groundEntityNum = player.ground.kind === "world" ? 1022 : player.ground.kind === "actor" ? this.source.game.records.nativeByActor(player.ground.actor)?.slot ?? 1023 : 1023;
     if (player.state.kind === "q3") writeQ3MovementState(entity, player.state, this.source.game.records);
     if (player.animation.state.kind === "q3") { const animation = player.animation.state;

@@ -106,6 +106,7 @@ export function createBotArsenalKnowledge(data: BotArsenalData): BotArsenalKnowl
       return -1;
     },
     chooseWeapon(library, state) {
+      const available = refresh(library, state.ws);
       let bestWeight = Math.fround(0), bestWeapon = 0, bestRole: number | null = null, bestRate = 0;
       const consider = (candidate: BotWeaponKnowledge, role: number, weight: number | null): void => {
         if (weight === null) return;
@@ -114,7 +115,7 @@ export function createBotArsenalKnowledge(data: BotArsenalData): BotArsenalKnowl
           bestWeight = weight; bestWeapon = info.number; bestRole = role; bestRate = rate;
         }
       };
-      for (const candidate of refresh(library, state.ws)) {
+      for (const candidate of available) {
         const role = personalityRole(candidate);
         if (candidate.personalityRole !== null) {
           const weight = library.weapons.evaluateFightWeapon(state.ws, role, state.inventory);
@@ -131,6 +132,13 @@ export function createBotArsenalKnowledge(data: BotArsenalData): BotArsenalKnowl
         if (profile.ammo !== null) projected[profile.ammo] = ammunition(state, candidate);
         const weight = library.weapons.evaluateFightWeapon(state.ws, role, projected);
         consider(candidate, role, weight);
+      }
+      if (bestWeapon === 0) {
+        // Source BotChooseFightWeapon defaults to the gauntlet; weapon 0 has no weapon info.
+        const fallback = available.find(candidate => candidate.info.valid && candidate.melee && owned(state, candidate))
+          ?? available.find(candidate => candidate.info.valid && owned(state, candidate) && ammunition(state, candidate) >= candidate.info.ammoAmount)
+          ?? available.find(candidate => candidate.info.valid);
+        if (fallback !== undefined) bestWeapon = fallback.info.number;
       }
       return bestWeapon;
     },

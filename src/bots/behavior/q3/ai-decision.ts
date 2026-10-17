@@ -803,7 +803,7 @@ export function aiNodeSeekActivateEntity(context: GameAiContext, state: BotState
     else state.idealViewangles = vectorToAngles(result.moveDirection);
     halfRoll(state);
   }
-  if ((result.flags & BotMoveResultFlag.MOVEMENTWEAPON) !== 0) state.weaponNum = result.weapon;
+  if ((result.flags & BotMoveResultFlag.MOVEMENTWEAPON) !== 0 && context.game.knowledge.weaponInfo(context.library, state.ws, result.weapon) !== undefined) state.weaponNum = result.weapon;
   if (botFindEnemy(context, state, -1)) {
     if (botWantsToRetreat(context, state)) aiEnterBattleNbg(context, state, "activate entity: found enemy");
     else {
@@ -850,7 +850,7 @@ export function aiNodeSeekNbg(context: GameAiContext, state: BotState): boolean 
     else state.idealViewangles = vectorToAngles(result.moveDirection);
     halfRoll(state);
   }
-  if ((result.flags & BotMoveResultFlag.MOVEMENTWEAPON) !== 0) state.weaponNum = result.weapon;
+  if ((result.flags & BotMoveResultFlag.MOVEMENTWEAPON) !== 0 && context.game.knowledge.weaponInfo(context.library, state.ws, result.weapon) !== undefined) state.weaponNum = result.weapon;
   if (botFindEnemy(context, state, -1)) {
     if (botWantsToRetreat(context, state)) aiEnterBattleNbg(context, state, "seek nbg: found enemy");
     else {
@@ -956,7 +956,7 @@ export function aiNodeSeekLtg(context: GameAiContext, state: BotState): boolean 
     else if (context.random() < f(state.thinkTime * f(0.8))) { lookAt(state, botRoamGoal(context, state)); halfRoll(state); }
     halfRoll(state);
   }
-  if ((result.flags & BotMoveResultFlag.MOVEMENTWEAPON) !== 0) state.weaponNum = result.weapon;
+  if ((result.flags & BotMoveResultFlag.MOVEMENTWEAPON) !== 0 && context.game.knowledge.weaponInfo(context.library, state.ws, result.weapon) !== undefined) state.weaponNum = result.weapon;
   if (scripted && (result.flags & (MOVEMENT_VIEW | BotMoveResultFlag.MOVEMENTWEAPON)) === 0) scriptedCombat(context, state);
   return true;
 }
@@ -1060,7 +1060,7 @@ export function aiNodeBattleChase(context: GameAiContext, state: BotState): bool
     }
     halfRoll(state);
   }
-  if ((result.flags & BotMoveResultFlag.MOVEMENTWEAPON) !== 0) state.weaponNum = result.weapon;
+  if ((result.flags & BotMoveResultFlag.MOVEMENTWEAPON) !== 0 && context.game.knowledge.weaponInfo(context.library, state.ws, result.weapon) !== undefined) state.weaponNum = result.weapon;
   if (state.areaNum === state.lastEnemyAreaNum) state.chaseTime = 0;
   if (botWantsToRetreat(context, state)) { aiEnterBattleRetreat(context, state, "battle chase: wants to retreat"); return true; }
   return true;
@@ -1078,7 +1078,7 @@ function retreatView(context: GameAiContext, state: BotState, goal: BotGoalState
       halfRoll(state);
     }
   }
-  if ((result.flags & BotMoveResultFlag.MOVEMENTWEAPON) !== 0) state.weaponNum = result.weapon;
+  if ((result.flags & BotMoveResultFlag.MOVEMENTWEAPON) !== 0 && context.game.knowledge.weaponInfo(context.library, state.ws, result.weapon) !== undefined) state.weaponNum = result.weapon;
 }
 
 export function aiNodeBattleRetreat(context: GameAiContext, state: BotState): boolean {
