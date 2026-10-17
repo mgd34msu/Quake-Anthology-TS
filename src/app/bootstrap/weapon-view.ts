@@ -1,7 +1,7 @@
 import type { Rect, SceneCamera } from "../../contracts/render.ts";
 import type { ModelTransform } from "../../contracts/scene.ts";
-import type { Vec3 } from "../../contracts/math.ts";
-import { add3, sub3 } from "../../core/math.ts";
+import type { Axis, Vec3 } from "../../contracts/math.ts";
+import { add3, dot3, scale3, sub3 } from "../../core/math.ts";
 import type { SimulationPresentation } from "./simulation/types.ts";
 
 export interface ViewWeaponEntity {
@@ -19,6 +19,13 @@ export function anchoredViewWeapon<T extends ViewWeaponEntity>(entity: T, anchor
   return { ...entity, transform: { ...entity.transform, origin: offset(entity.transform.origin) },
     previousOrigin: offset(entity.previousOrigin), lightingOrigin: offset(entity.lightingOrigin),
     shadowPlane: entity.shadowPlane + delta.z };
+}
+
+/** Re-express a gun axis authored against `anchor` eye axes in the final camera axes. */
+export function anchoredViewWeaponAxis(axis: Axis, anchor: Axis, camera: Axis): Axis {
+  const rotate = (vector: Vec3): Vec3 => add3(add3(scale3(camera[0], dot3(vector, anchor[0])),
+    scale3(camera[1], dot3(vector, anchor[1]))), scale3(camera[2], dot3(vector, anchor[2])));
+  return [rotate(axis[0]), rotate(axis[1]), rotate(axis[2])];
 }
 
 /** Q1 V_CalcRefdef's default viewsize 100 gun calibration precedes camera punch. */

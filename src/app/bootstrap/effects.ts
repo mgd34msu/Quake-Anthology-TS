@@ -206,6 +206,7 @@ export class ApplicationEffects {
     if (recipe.enemies.kind === "replace") for (const target of [recipe.enemies.default, ...Object.values(recipe.enemies.byClassname)]) {
       if ("source" in target) contents.add(target.source.content);
     }
+    if (recipe.enemies.kind === "players") contents.add(recipe.enemies.character.content);
     const failures: { content: ContentId; path: string; error: string }[] = [];
     if (character !== recipe.map.entities.content && this.assets.content.catalog.product(character).expectation.family === "q3" && !this.q3.has(character)) {
       try { this.q3.set(character, await Q3ApplicationEffects.create(this.assets, this.queries, character, this.isPlayer, "character", this.readHardware)); }

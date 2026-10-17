@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { anchoredViewWeapon, type ViewWeaponEntity } from "../../src/app/bootstrap/weapon-view.ts";
+import { anchoredViewWeapon, anchoredViewWeaponAxis, type ViewWeaponEntity } from "../../src/app/bootstrap/weapon-view.ts";
 
 const axis = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }] as const;
 
@@ -18,6 +18,16 @@ test("view weapon follows the rendered eye while preserving its authored offset"
   expect(anchored.lightingOrigin).toEqual({ x: 113, y: 188, z: 309 });
   expect(anchored.shadowPlane).toBe(46);
   expect(anchored.transform.axis).toEqual(gun.transform.axis);
+});
+
+test("view weapon axis follows a ninety-degree camera turn while preserving its local tilt", () => {
+  // Anchor eye faces +x; final camera faces +y. A gun pitched toward anchor
+  // up must keep that pitch relative to the new forward.
+  const anchor = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }] as const;
+  const camera = [{ x: 0, y: 1, z: 0 }, { x: -1, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }] as const;
+  const gun = [{ x: 0, y: 0, z: 1 }, { x: 0, y: 1, z: 0 }, { x: -1, y: 0, z: 0 }] as const;
+  expect(anchoredViewWeaponAxis([...gun], [...anchor], [...camera])).toEqual([
+    { x: 0, y: 0, z: 1 }, { x: -1, y: 0, z: 0 }, { x: 0, y: -1, z: 0 }]);
 });
 
 test("view weapon already at the rendered eye is returned unchanged", () => {

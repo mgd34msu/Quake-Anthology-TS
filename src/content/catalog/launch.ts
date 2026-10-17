@@ -8,6 +8,7 @@ import type { InstalledCatalog } from "./index.ts";
 import { EQUIPMENT_PROVIDERS, equipmentProviders, equipmentResources, equipmentTiming, validateEquipment } from "./equipment.ts";
 import { selectedMonsterDefinitions, monsterResources, monsterSources, selectedMonsterTiming, validateMonsters } from "./monsters.ts";
 import { admitWeaponTiming, canonicalWeaponSource, Q1_HIPNOTIC_WEAPON_PROVIDERS, Q1_WEAPON_PROVIDERS, Q2_WEAPON_PROVIDERS, selectedWeaponResources, selectedWeaponTiming } from "./weapons.ts";
+import { nativeProviderTiming } from "./timing.ts";
 
 export interface LaunchPreset extends Omit<ExecutableRecipe, "schemaVersion" | "preset" | "map" | "execution" | "mounts" | "resources"> {
   readonly map: MapSelection;
@@ -51,6 +52,7 @@ function requiredContent(launch: SelectedLaunch): readonly ContentId[] {
     launch.presentation.hud, launch.presentation.effects, launch.presentation.audio, ...launch.execution.map(module => module.owner)];
   if (launch.campaign.kind === "campaign") references.push(launch.campaign.mission, launch.campaign.gamecode);
   references.push(...selectedMonsterDefinitions(launch.enemies).map(definition => definition.source));
+  if (launch.enemies.kind === "players") references.push(launch.enemies.character);
   return [...new Set([launch.map.geometry.content, launch.presentation.assets, ...(launch.presentation.environment.kind === "selected" ? [launch.presentation.environment.resource.content] : []), ...references.map(reference => reference.content),
     ...launch.execution.flatMap(module => module.kind === "typescript" ? [] : [module.artifact.content])])];
 }
@@ -171,14 +173,18 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
   }
   const selectedSourceIds = new Set<string>([...Object.values(EQUIPMENT_PROVIDERS), ...equipmentProviders(selected.equipment).map(source => source.provider), ...Object.values(Q1_WEAPON_PROVIDERS), ...Object.values(Q1_HIPNOTIC_WEAPON_PROVIDERS), ...Object.values(Q2_WEAPON_PROVIDERS), ...monsterSources.map(source => source.provider)]);
   const monsterProfiles = selectedMonsterTiming(selected.enemies);
+  const enemyProfiles = selected.enemies.kind === "players"
+    ? [nativeProviderTiming(selected.enemies.character, options.catalog.require(selected.enemies.character.content).expectation.family,
+      options.catalog.require(selected.enemies.character.content).expectation.edition === "rerelease")] : [];
   const weaponProfiles = selectedWeaponTiming(selected.map.entities, selected.weapons, options.catalog);
-  const timing = [...selected.timing.filter(entry => !selectedSourceIds.has(entry.provider)), ...equipmentTiming(selected.equipment), ...monsterProfiles];
+  const timing = [...selected.timing.filter(entry => !selectedSourceIds.has(entry.provider)), ...equipmentTiming(selected.equipment), ...monsterProfiles,
+    ...enemyProfiles.filter(profile => !selected.timing.some(entry => entry.provider === profile.provider))];
   for (const profile of weaponProfiles) admitWeaponTiming(timing, profile);
-  const selectedSourceOrder = [...equipmentProviders(selected.equipment).map(source => source.provider), ...monsterProfiles.map(source => source.provider)];
+  const selectedSourceOrder = [...equipmentProviders(selected.equipment).map(source => source.provider), ...monsterProfiles.map(source => source.provider), ...enemyProfiles.map(source => source.provider)];
   const existingOrder = selected.ordering.kind === "mixed" ? [...selected.ordering.providers.filter(provider => !selectedSourceIds.has(provider)), ...selectedSourceOrder] : [];
   const ordering = selected.ordering.kind === "mixed"
     ? { ...selected.ordering, providers: [...existingOrder, ...weaponProfiles.map(profile => profile.provider).filter(provider => !existingOrder.includes(provider))] }
-    : weaponProfiles.length === 0 ? selected.ordering : { kind: "mixed", providers: [...new Set([selected.map.entities.provider, ...selected.timing.map(profile => profile.provider), ...selectedSourceOrder, ...weaponProfiles.map(profile => profile.provider)])],
+    : weaponProfiles.length === 0 && enemyProfiles.length === 0 ? selected.ordering : { kind: "mixed", providers: [...new Set([selected.map.entities.provider, ...selected.timing.map(profile => profile.provider), ...selectedSourceOrder, ...weaponProfiles.map(profile => profile.provider)])],
       entityOrder: selected.ordering.traversal, ties: "provider-entity-invocation" } satisfies ExecutableRecipe["ordering"];
   return { ...selected, schemaVersion: 3, map: { geometryContent: selected.map.geometry.content, geometry, entities: selected.map.entities }, execution, timing, ordering,
     mounts: mounted.plan, resources: [...resources.values()] };

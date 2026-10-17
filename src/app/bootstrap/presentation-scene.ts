@@ -6,7 +6,7 @@ import { attachSceneEntity, modelAttachmentTag } from "../../render/scene/models
 import { samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
 import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
 import { createSourceSceneOrder, sceneModelBatches, sequenceDrawGroup, type SceneOperation } from "../../render/scene/submissions.ts";
-import { anchoredViewWeapon, weaponViewOrigin } from "./weapon-view.ts";
+import { anchoredViewWeapon, anchoredViewWeaponAxis, weaponViewOrigin } from "./weapon-view.ts";
 import { SelectedQ3WeaponPresenter } from "./q3-selected-weapon.ts";
 import { NativeHeldWeapons, type ResolvedHeldEntity } from "./native-held-weapon.ts";
 import { ForeignHeldWeapons } from "./held-weapon.ts";
@@ -28,7 +28,7 @@ import type { ModelSkinningFrame, ModelSourceOptions } from "../../render/scene/
 import { shadowBodyFilter } from "../../render/scene/shadows.ts";
 import { prepareFlare } from "../../render/scene/flare.ts";
 import type { SceneFlare } from "../../contracts/flare.ts";
-import type { Vec3 } from "../../contracts/math.ts";
+import type { Axis, Vec3 } from "../../contracts/math.ts";
 import type { RendererImage } from "../../contracts/render.ts";
 import type { RegisteredSceneMaterial } from "../../render/scene/material-registrations.ts";
 import { railGeometry } from "../../render/scene/particles/primitives.ts";
@@ -36,6 +36,7 @@ import { prepareMaterialBatches } from "../../materials/evaluate.ts";
 
 interface ModelPass {
   readonly resolve?: ResolvedHeldEntity;
+  readonly viewAxis?: Axis;
   readonly time?: SourceTime;
   readonly entity: SceneEntity;
   readonly options: (entity: SceneEntity) => ModelSourceOptions;
@@ -105,7 +106,7 @@ export class ApplicationWorldScene {
     for (const group of this.groups.values()) group.passes.length = 0;
     const inlineModels: NonNullable<WorldViewInput["inlineModels"]>[number][] = [];
     const brushModels: BrushPresentation[] = [];
-    const append = async (content: ContentId, entity: SceneEntity, options?: (entity: SceneEntity) => ModelSourceOptions, object?: PresentationObject, shaderContent?: ContentId, time?: SourceTime, resolve?: ResolvedHeldEntity): Promise<void> => {
+    const append = async (content: ContentId, entity: SceneEntity, options?: (entity: SceneEntity) => ModelSourceOptions, object?: PresentationObject, shaderContent?: ContentId, time?: SourceTime, resolve?: ResolvedHeldEntity, viewAxis?: Axis): Promise<void> => {
       const key = `${content}/${shaderContent ?? content}`;
       let group = this.groups.get(key);
       if (group === undefined) {
@@ -113,7 +114,7 @@ export class ApplicationWorldScene {
         group = { renderer: new SceneModelRenderer(shaderContent === undefined ? provider : { family: "q3", palette: provider.palette, textures: provider.textures, shaders: (await this.assets.provider(shaderContent)).shaders }, this.assets.world), passes: [] };
         this.groups.set(key, group);
       }
-      const pass: ModelPass = { entity, ...(resolve === undefined ? {} : { resolve }), options: options ?? (() => ({})), ...(time === undefined ? {} : { time }) };
+      const pass: ModelPass = { entity, ...(resolve === undefined ? {} : { resolve }), ...(viewAxis === undefined ? {} : { viewAxis }), options: options ?? (() => ({})), ...(time === undefined ? {} : { time }) };
       group.passes.push(pass);
       this.ordered.push({ group, pass });
       const logical = object ?? { opacity: entity.opacity ?? 1, passes: [] };
@@ -247,7 +248,7 @@ export class ApplicationWorldScene {
         // elsewhere by frame time. Re-anchor by that delta at render so the
         // first-person mesh stays attached to the eye that is actually drawn.
         const resolve: ResolvedHeldEntity = (camera, purpose) => purpose === "view" ? anchoredViewWeapon(anchored, anchor, camera) : anchored;
-        await append(source.content, anchored, options, undefined, undefined, undefined, resolve);
+        await append(source.content, anchored, options, undefined, undefined, undefined, resolve, anglesToAxis(source.viewAngles ?? source.angles));
       }
       else await appendBody(source.content, { ...entity, attachments }, options, true);
     }
@@ -360,15 +361,17 @@ export class ApplicationWorldScene {
     const inline = this.inlineModels.flatMap(model => this.assets.world.prepareModel(model.model, model.transform,
       { ...input, ...(model.animationFrame === undefined ? {} : { animationFrame: model.animationFrame }),
         ...(model.alternateAnimation === undefined ? {} : { alternateAnimation: model.alternateAnimation }) }));
-    return [...inline, ...this.modelOperations(input, infrared, weaponCamera)];
+    return [...inline, ...this.modelOperations(input, infrared, weaponCamera, { meshes: new WeakMap(), poses: new WeakMap() }, true)];
   }
 
   private modelOperations(input: WorldViewInput, infrared: boolean, weaponCamera: SceneCamera,
-    skinningFrame: ModelSkinningFrame = { meshes: new WeakMap(), poses: new WeakMap() }): readonly SceneOperation[] {
+    skinningFrame: ModelSkinningFrame = { meshes: new WeakMap(), poses: new WeakMap() }, anchorViewRotation = false): readonly SceneOperation[] {
     const modelOperations: SceneOperation[] = [], emitted = new Set<PresentationObject>();
     const prepare = (group: ModelGroup, pass: ModelPass) => {
-      const entity = pass.resolve === undefined ? pass.entity : pass.resolve(input.camera.origin, "view");
+      let entity = pass.resolve === undefined ? pass.entity : pass.resolve(input.camera.origin, "view");
       if (entity === null || pass.options(entity).viewModel === true && input.camera.clip.kind === "portal") return [];
+      if (anchorViewRotation && pass.viewAxis !== undefined && pass.options(entity).viewModel === true)
+        entity = { ...entity, transform: { ...entity.transform, axis: anchoredViewWeaponAxis(entity.transform.axis, pass.viewAxis, weaponCamera.axis) } };
       const current = pass.time === undefined ? input : { ...input, time: pass.time };
       return group.renderer.prepare([entity], pass.options(entity).viewModel === true ? { ...current, camera: weaponCamera } : current,
         entity => ({ ...pass.options(entity), infrared, noWorldModel: input.noWorldModel === true, planarShadow: input.noWorldModel !== true && this.planarShadows() }), skinningFrame);

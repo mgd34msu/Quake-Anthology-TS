@@ -193,7 +193,9 @@ export type MonsterSelectionTarget = MonsterDefinitionReference | { readonly kin
 export type EnemySelection =
   | { readonly kind: "map-defined" }
   | { readonly kind: "replace"; readonly default: MonsterSelectionTarget;
-      readonly byClassname: Readonly<Record<string, MonsterSelectionTarget>> };
+      readonly byClassname: Readonly<Record<string, MonsterSelectionTarget>> }
+  /** Multiplayer-player enemies (Q3 arena bots): character family for bot clients. */
+  | { readonly kind: "players"; readonly character: ProviderReference };
 
 export type GrappleSelection =
   | { readonly kind: "disabled" }

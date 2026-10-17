@@ -239,8 +239,13 @@ test.skipIf(!corpusHasFile("q1/id1/PAK0.PAK"))("mouse startup roster edits actua
     choose(finalClass.classname, "native");
     expect(model.monsterRosterRows()[7]?.value).toBe("native");
     model.select("product", "q3-baseq3");
-    expect(() => model.select("enemies", "custom")).toThrow("authored monster roster");
+    expect(model.rows().find(row => row.id === "enemies")?.label).toBe("Enemies");
     expect(model.rows().find(row => row.id === "enemies")?.value).toBe("native");
+    model.select("enemies", "q2-classic-baseq2");
+    expect((await model.resolve()).recipe.enemies).toEqual({ kind: "players",
+      character: { provider: "q2:character", content: catalog.require("q2-classic-baseq2").id } });
+    model.select("enemies", "native");
+    expect((await model.resolve()).recipe.enemies).toEqual({ kind: "map-defined" });
   } finally { menu.close(); art.close(); font.close(); mounted.close(); }
 }, 60000);
 

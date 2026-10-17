@@ -299,7 +299,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         const gunPath = this.configs.get(this.layout.models + current.player.gunindex);
         if (gunPath !== undefined && current.player.gunindex !== 0) {
             const view = this.playerView(player.actor), offset = vector(current.player.gunoffset);
-            result.push({ actor: player.actor, content: this.world.content.recipe.map.entities.content, family: 'q2', path: gunPath, frame: current.player.gunframe, oldFrame: this.previousFrame?.player.gunindex === current.player.gunindex ? this.previousFrame.player.gunframe : current.player.gunframe, backLerp: 1 - this.fraction, skin: current.player.gunskin, effects: 0, renderFlags: 0, origin: { x: view.origin.x + offset.x, y: view.origin.y + offset.y, z: view.origin.z + view.viewHeight + offset.z }, viewOrigin: { ...view.origin, z: view.origin.z + view.viewHeight }, angles: view.angles, scale: 1, visible: true, viewWeapon: true });
+            result.push({ actor: player.actor, content: this.world.content.recipe.map.entities.content, family: 'q2', path: gunPath, frame: current.player.gunframe, oldFrame: this.previousFrame?.player.gunindex === current.player.gunindex ? this.previousFrame.player.gunframe : current.player.gunframe, backLerp: 1 - this.fraction, skin: current.player.gunskin, effects: 0, renderFlags: 0, origin: { x: view.origin.x + offset.x, y: view.origin.y + offset.y, z: view.origin.z + view.viewHeight + offset.z }, viewOrigin: { ...view.origin, z: view.origin.z + view.viewHeight }, viewAngles: view.angles, angles: view.angles, scale: 1, visible: true, viewWeapon: true });
         }
         return result;
     }

@@ -7,7 +7,7 @@ import type { Q1MovementState, Q1MovementResult, QwMovementState, QwMovementProf
 import type { Q1UserCommand, QwUserCommand } from "../../../contracts/protocol.ts";
 import type { Q2RereleaseMovementContext } from "../../../movement/q2/index.ts";
 import type { ArsenalIntent } from "../../../contracts/gameplay.ts";
-import type { ExecutableRecipe, GameFamily, ProviderTiming } from "../../../contracts/content.ts";
+import type { ExecutableRecipe, GameFamily, ProviderReference, ProviderTiming } from "../../../contracts/content.ts";
 import type { ActorId, ClientId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
 import type { ActorAnimationState, ArsenalState, MovementContinuation, MovementInput, MovementProfile, MovementResult, MovementServices, MovementState, Q1MovementInput, Q2MovementInput, Q2RereleaseMovementInput, Q3MovementInput, Q3MovementResult, Q3MovementState } from "../../../contracts/movement.ts";
@@ -127,6 +127,9 @@ export class MovementPlayer {
   }
   get q2MovementConfig(): { readonly airAccelerate: number; readonly n64Physics: boolean } | null { return this.host.q2MovementConfig?.() ?? null; }
   readonly character: GameFamily;
+  /** Per-client character definition; bots need not wear the local player's selected character. */
+  readonly characterDefinition: ProviderReference;
+  readonly characterAppearance: ProviderReference;
   readonly standingBounds: Bounds;
   readonly profile: MovementProfile;
   readonly services: MovementServices;
@@ -216,8 +219,12 @@ export class MovementPlayer {
   }
 
   constructor(readonly actor: OwnedActor, readonly client: ClientId, readonly recipe: ExecutableRecipe,
-    private readonly host: PlayerMovementHost, origin: Vec3, angles: Vec3, arsenal: ArsenalState) {
-    this.character = providerFamily(recipe.character.definition.provider);
+    private readonly host: PlayerMovementHost, origin: Vec3, angles: Vec3, arsenal: ArsenalState,
+    characterDefinition: ProviderReference = recipe.character.definition,
+    characterAppearance: ProviderReference = recipe.character.appearance) {
+    this.characterDefinition = characterDefinition;
+    this.characterAppearance = characterAppearance;
+    this.character = providerFamily(characterDefinition.provider);
     this.standingBounds = playerStandingBounds(this.character);
     this.bounds = this.standingBounds;
     this.viewHeight = this.character === "q3" ? 26 : 22;
@@ -225,7 +232,7 @@ export class MovementPlayer {
     this.commandAngles = angles;
     this.profile = movementProfile(recipe);
     this.arsenal = arsenal;
-    this.animation = { provider: recipe.character.definition.provider,
+    this.animation = { provider: characterDefinition.provider,
       state: this.character === "q1" ? { kind: "q1", frame: 12, nextFrameSeconds: 0 }
         : this.character === "q2" ? { kind: "q2", frame: 0, endFrame: 39, priority: 0, duck: false, run: false }
         : { kind: "q3", legs: 22, torso: 11, legsTimerMilliseconds: 0, torsoTimerMilliseconds: 0 } };

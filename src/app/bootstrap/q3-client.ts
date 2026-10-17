@@ -386,7 +386,13 @@ export class ApplicationQ3Client {
       character: (entity, render) => {
         if (this.bodyHidden(entity.currentState.number)) render();
         else if (o.hooks !== undefined) o.hooks.character(entity, render);
-        else if (o.assets.content.recipe.character.appearance.provider.startsWith("q3:")) render();
+        else {
+          // Supplemental presentations own foreign-character bodies (human
+          // seats). Clients with no supplemental body (native Q3 bots) are
+          // drawn by cgame from their own CS_PLAYERS model.
+          const actor = this.source.actorAt(entity.currentState.number);
+          if (this.poseActors.get(actor.slot)?.equals(actor) !== true) render();
+        }
       },
       event: async (entity, position, render) => { this.eventCount++; if (o.hooks === undefined) await render(); else await o.hooks.event(entity, position, render); },
       predictItem: (entity, predict) => o.hooks === undefined ? predict() : o.hooks.predictItem(entity, predict),
@@ -530,7 +536,9 @@ export class ApplicationQ3Client {
       if (surface?.kind !== "q3" || surface.shader.finished.sort !== 1 || surface.plane === null) continue;
       const child = portalCamera(surface.plane, scene.portals.map(portal => portal.source), input.camera, this.source.time);
       if (child === null || portalSurfaceOffscreen(surface.geometry, input.camera, surface.shader.material.portalRange, child.mirror)) continue;
-      return { ...input, camera: child.camera, pvsOrigin: child.pvsOrigin };
+      // The parent snapshot's area mask describes the parent eye, not the
+      // portal destination; let BSP PVS from the portal origin decide.
+      return { ...input, camera: child.camera, pvsOrigin: child.pvsOrigin, visibleAreas: null };
     }
     return null;
   }
@@ -571,7 +579,9 @@ export class ApplicationQ3Client {
         const worldInput = { ...input, ...environment };
         const child = worldInput.noWorldModel === true ? null : this.portal(scene, worldInput);
         if (child !== null) publish(child);
-        publish(worldInput);
+        // The portal child is drawn first; the parent must clear depth only
+        // or its color clear erases the destination the surface should reveal.
+        publish(child === null ? worldInput : { ...worldInput, clear: { depth: 1, color: null, stencil: false } });
       }
     }
     return this.frames.finish(false);

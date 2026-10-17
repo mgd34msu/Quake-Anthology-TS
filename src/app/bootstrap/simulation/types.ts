@@ -174,6 +174,8 @@ export interface SimulationPresentation {
   readonly origin: Vec3;
   /** Eye point a first-person weapon origin is offset from; lets render re-anchor it to the final camera. */
   readonly viewOrigin?: Vec3;
+  /** Eye angles a first-person weapon axis is offset from; lets render re-anchor it to the final camera. */
+  readonly viewAngles?: Vec3;
   readonly previousOrigin?: Vec3;
   readonly modelBeam?: { readonly segmentLength: number };
   readonly shaderBeam?: { readonly path: string; readonly end: Vec3; readonly width: number };

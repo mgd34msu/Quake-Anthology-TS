@@ -55,7 +55,9 @@ function readCampaign(reader: SaveReader): CampaignSelection {
 }
 export function readCharacter(reader: SaveReader): CharacterSelection { return { definition: readProvider(reader.field("definition")), appearance: readProvider(reader.field("appearance")) }; }
 function readEnemies(reader: SaveReader): EnemySelection {
-  if (reader.field("kind").choice("map-defined", "replace") === "map-defined") return { kind: "map-defined" };
+  const kind = reader.field("kind").choice("map-defined", "replace", "players");
+  if (kind === "map-defined") return { kind: "map-defined" };
+  if (kind === "players") return { kind: "players", character: readProvider(reader.field("character")) };
   const definition = (value: SaveReader): MonsterSelectionTarget => {
     if (value.field("kind").value !== undefined) {
       const kind = value.field("kind").literal("map-defined");

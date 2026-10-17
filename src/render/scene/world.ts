@@ -726,12 +726,14 @@ export class WorldScene {
         const milliseconds = input.time.kind === "seconds" ? input.time.value * 1000 : input.time.value;
         const child = portalCamera(surface.plane, portals, input.camera, milliseconds);
         if (child === null || portalSurfaceOffscreen(surface.geometry, input.camera, shader.material.portalRange, child.mirror)) continue;
-        result.push(this.prepareView({ ...input, camera: child.camera, pvsOrigin: child.pvsOrigin, operations: [], beforeView: [],
+        result.push(this.prepareView({ ...input, camera: child.camera, pvsOrigin: child.pvsOrigin, visibleAreas: null, operations: [], beforeView: [],
           ...(input.source === undefined ? {} : { source: createWorldSurfaceAdmission(createSourceSceneOrder(input.source.view.registrations)) }) }));
         break;
       }
     }
-    result.push(this.prepareView(input));
+    const parent: WorldViewInput = result.length === 0 || input.clear === undefined || input.clear === null ? input
+      : { ...input, clear: { depth: input.clear.depth ?? 1, color: null, stencil: input.clear.stencil ?? false } };
+    result.push(this.prepareView(parent));
     return result;
   }
 }

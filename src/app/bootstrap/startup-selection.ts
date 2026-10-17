@@ -653,7 +653,9 @@ export class StartupSelectionModel {
         ? [row("topColor", "Shirt color", this.colorChoices()), row("bottomColor", "Pants color", this.colorChoices())]
         : [row("skin", "Skin", this.skins())]),
       row("weapons", "Weapons", [nativeWeapons, ...this.catalog.products.filter(product => supportsSelectedWeaponProduct(product.expectation)).map(productChoice)]),
-      row("enemies", "Monsters", [nativeMonsters, choice("custom", this.values.enemies === "custom" ? `${sourceLabel} (custom)` : "Custom roster", current.expectation.family === "q3" ? "This map has no supported authored monster roster" : null), ...this.monsterSourceRow().choices.filter(source => source.id !== "native").map(source => ({ ...source, unavailable: current.expectation.family === "q3" ? "This map has no supported authored monster roster" : source.unavailable }))]),
+      this.geometry().expectation.family === "q3"
+        ? row("enemies", "Enemies", [choice("native", `${productChoice(this.geometry()).label} enemies`), ...characterChoices], this.values.enemies)
+        : row("enemies", "Monsters", [nativeMonsters, choice("custom", this.values.enemies === "custom" ? `${sourceLabel} (custom)` : "Custom roster", current.expectation.family === "q3" ? "This map has no supported authored monster roster" : null), ...this.monsterSourceRow().choices.filter(source => source.id !== "native").map(source => ({ ...source, unavailable: current.expectation.family === "q3" ? "This map has no supported authored monster roster" : source.unavailable }))]),
       row("grapple", "Hook", [choice("disabled", "Off"), choice("slot", "Weapon slot", hookUnavailable), choice("offhand", "Offhand", hookUnavailable)], placement),
       ...(placement === "disabled" ? [] : [row("grappleStyle", "Hook style", styles.map(style => choice(style.id, style.title, style.unavailable)), style)]),
       row("grenades", "Offhand grenades", [choice("disabled", "Off"), choice("enabled", "On", grenadeSource === null ? "Requires Quake II grenade assets" : null)], grenades),
@@ -669,6 +671,7 @@ export class StartupSelectionModel {
     const selected = this.rows().find(row => row.id === field)?.choices.find(option => option.id === id);
     if (selected === undefined) throw new Error(`Unknown ${field} selection: ${id}`);
     if (selected.unavailable !== null) throw new Error(selected.unavailable);
+    if (field === "enemies" && this.geometry().expectation.family === "q3") { this.values.enemies = id; return; }
     if (field === "enemies" && id !== "native" && id !== "custom") { this.selectMonsterSource(id); return; }
     this.values[field] = id;
     if (field === "product") {
@@ -681,6 +684,7 @@ export class StartupSelectionModel {
       if (this.product("product").expectation.family === "q3") this.values.enemies = "native";
     }
     if (field === "mapProduct") this.values.map = this.defaultMap();
+    if (field === "mapProduct" && this.geometry().expectation.family !== "q3" && this.values.enemies !== "native" && this.values.enemies !== "custom") this.values.enemies = "native";
     if (field === "mode" || field === "product") {
       const product = sourceProgramProduct(this.catalog, this.product("product").id);
       const rules = this.values.rules;
@@ -790,7 +794,11 @@ export class StartupSelectionModel {
       const product = this.catalog.require(this.values.weapons);
       selections = { ...selections, weapons: { kind: "selected", value: [canonicalWeaponSource(base.map.entities, { provider: `${product.expectation.family}:official`, content: product.id }, this.catalog)] } };
     }
-    if (this.values.enemies === "custom") {
+    if (mapContent.expectation.family === "q3" && this.values.enemies !== "native") {
+      const product = this.catalog.require(this.values.enemies);
+      selections = { ...selections, enemies: { kind: "selected", value: { kind: "players",
+        character: { provider: `${product.expectation.family}:character`, content: product.id } } } };
+    } else if (this.values.enemies === "custom") {
       selections = { ...selections, enemies: { kind: "selected", value: this.effectiveMonsterRoster() } };
     }
     selections = { ...selections, equipment: { kind: "selected", value: this.selectedEquipment(base.equipment) } };
