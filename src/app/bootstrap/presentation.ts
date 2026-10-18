@@ -424,6 +424,7 @@ export class WorldSeatPresentation implements SeatPresentation {
     const nativeFrame = this.q3Client?.frame((camera, source) => {
       const effects = this.effectFrame(camera, source, this.local.player.actor, fog);
       const input: WorldViewInput = { noWorldModel, camera, time, target: { kind: "seat", seat: this.local.player.seat.id },
+        worldSpaceBatches: this.native.window.backend === "gl" && process.env["QTS_WORLD_SPACE"] !== "0",
         source: createWorldSurfaceAdmission(source), lights: effects.lights, q3Lights: effects.q3Lights,
         ...(fog === undefined ? {} : { q1Fog: fog }) };
       return { ...effects, operations: [...effects.operations, ...this.scene.supplemental(input, this.q3Client?.supplementalWeaponCamera(camera) ?? camera, infrared)] };

@@ -156,6 +156,7 @@ function sameLighting(a: BatchLighting, b: BatchLighting): boolean {
   return false;
 }
 function mergeable(a: DrawBatch, b: DrawBatch): boolean {
+  if ((a.space ?? "clip") !== (b.space ?? "clip")) return false;
   if (a.texturing !== b.texturing || a.primitive !== b.primitive || a.textureEffect !== b.textureEffect) return false;
   if (a.primitive === "lines" && b.primitive === "lines" && a.lineWidth !== b.lineWidth) return false;
   if (!sameTexture(a.texture, b.texture) || !sameRenderState(a.state, b.state) || !sameLighting(a.lighting, b.lighting)) return false;

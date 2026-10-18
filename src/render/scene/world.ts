@@ -81,6 +81,8 @@ export function createWorldSurfaceAdmission(view: SourceSceneOrder): WorldSurfac
 }
 export interface WorldViewInput extends WorldVisibilityOptions {
   readonly noWorldModel?: boolean;
+  /** Emit legacy world batches in world space for GPU transformation. */
+  readonly worldSpaceBatches?: boolean;
   readonly source?: WorldSurfaceAdmission;
   readonly camera: SceneCamera;
   readonly target: RenderView["target"];
@@ -155,6 +157,8 @@ export class WorldScene {
   private readonly staticLightStyles = new Map<WorldSurface, readonly number[]>();
   /** Static world position/normal arrays for fragment lighting, reused across frames. */
   private readonly staticWorldArrays = new WeakMap<MaterialGeometry, { readonly worldPositions: readonly Vec3[]; readonly normals: readonly Vec3[] }>();
+  /** Prepared legacy batches for static world surfaces in world-space mode. */
+  private readonly legacyBatchCache = new Map<WorldSurface, { readonly key: string; readonly operations: readonly SceneOperation[] }>();
   /** Modulated fragment-light lists are identical for every surface in a view; build once per lights array. */
   private readonly fragmentLightsCache = new WeakMap<readonly unknown[], { all: unknown; shadowOnly: unknown }>();
 
@@ -589,6 +593,31 @@ export class WorldScene {
     const selectedShader = surface.shader ?? this.rawRemaps.get(surface.index)?.material;
     if (selectedShader !== undefined && selectedShader !== null) return this.shaderOperations(surface, selectedShader, input, context, model, lighting, order);
     const fragmentLighting = input.q2FragmentLighting;
+    // GPU-transform path: emit world-space positions and let the backend's
+    // view-projection matrix project them. Portal child views keep the
+    // clip-space path (their oblique clip plane semantics differ).
+    const worldSpace = input.worldSpaceBatches === true && input.camera.clip.kind === "none";
+    // Static world surfaces in world space are camera-independent: cache the
+    // prepared batches until an input that shapes them changes. Liquids and
+    // flowing/warp textures animate texcoords continuously, and fragment
+    // lighting embeds per-frame light state, so those stay uncached.
+    const liquid = material.kind === "q1"
+      ? material.surface === "water" || material.surface === "slime" || material.surface === "lava" || material.surface === "teleport"
+      : material.warp || material.flowing;
+    const cacheable = worldSpace && model === undefined && !liquid && fragmentLighting === undefined;
+    const animBucket = !cacheable ? 0 : material.kind === "q1"
+      ? (material.animation.length !== 0 || material.alternateAnimation.length !== 0 ? Math.trunc(context.time * 10) : 0)
+      : (input.animationFrame ?? Math.trunc(context.time * 2));
+    const cacheKey = !cacheable ? "" : [animBucket, input.alternateAnimation === true ? 1 : 0,
+      context.entityRGBA.x, context.entityRGBA.y, context.entityRGBA.z, context.entityRGBA.w,
+      (input.q1Fog?.density ?? 0) > 0 ? 1 : 0, material.kind === "q1" ? this.fullbrightByTexture.get(q1AnimatedTexture(material, context.time, input.alternateAnimation ?? false)) !== undefined ? 1 : 0 : 0].join("|");
+    if (cacheable) {
+      const hit = this.legacyBatchCache.get(surface);
+      if (hit?.key === cacheKey) return hit.operations;
+    }
+    const project = worldSpace
+      ? (point: Vec3) => { const world = model === undefined ? point : worldPoint(point, model); return { x: world.x, y: world.y, z: world.z, w: 1 }; }
+      : context.project;
     const batches = prepareLegacyMaterialBatches(material, surface.geometry, { time: context.time, entityRGBA: context.entityRGBA, animationFrame: input.animationFrame ?? Math.trunc(context.time * 2),
       alternateAnimation: input.alternateAnimation ?? false,
       fullbright: material.kind === "q1" ? this.fullbrightByTexture.get(q1AnimatedTexture(material, context.time, input.alternateAnimation ?? false)) ?? null : surface.fullbright,
@@ -596,8 +625,11 @@ export class WorldScene {
       q1LightmapEncoding: surface.lightmap?.encoding ?? "rgb",
       ...(fragmentLighting === undefined ? {} : { fragmentLighting: { kind: "q2-world",
         ...this.worldArrays(surface.geometry, model), pass: "texture", lights: this.fragmentLights(fragmentLighting.lights, material.kind === "q1"), atlas: fragmentLighting.atlas } }),
-      ...(surface.lightmap === null ? {} : { translucentLightmap: surface.lightmap.direct }), cull: context.deformView.mirror !== (model !== undefined && modelScale(model) < 0) ? "back" : "front", depthRange: context.depthRange, project: context.project });
-    return [sequenceDrawGroup(material.alpha * context.entityRGBA.w / 255 < 1 ? "translucent" : "opaque", batches)];
+      ...(surface.lightmap === null ? {} : { translucentLightmap: surface.lightmap.direct }), cull: context.deformView.mirror !== (model !== undefined && modelScale(model) < 0) ? "back" : "front", depthRange: context.depthRange, project });
+    const operations = [sequenceDrawGroup(material.alpha * context.entityRGBA.w / 255 < 1 ? "translucent" : "opaque",
+      worldSpace ? batches.map(batch => ({ ...batch, space: "world" as const })) : batches)];
+    if (cacheable) this.legacyBatchCache.set(surface, { key: cacheKey, operations });
+    return operations;
   }
 
   private shaderOperations(surface: WorldSurface, sourceShader: RegisteredSceneMaterial, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform, lighting?: { readonly mask: number; readonly lights: readonly DynamicLight[] }, order?: SourceSurfaceOrder): readonly SceneOperation[] {
