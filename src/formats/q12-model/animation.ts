@@ -42,14 +42,24 @@ interface AliasTopology {
   readonly indices: readonly number[];
 }
 const md2Topologies = new WeakMap<Q2AliasModel, AliasTopology>();
+const mdlTopologies = new WeakMap<Q1AliasModel, AliasTopology>();
 function poseGeometry(topology: AliasTopology, pose: readonly ModelVertex[]): AliasGeometry {
   return { indices: topology.indices, vertices: topology.corners.map(corner => ({
     ...at(pose, corner.vertex, "pose vertex"), texCoord: corner.texCoord,
   })) };
 }
+/** MDL callers contract fresh index/texCoord objects per call; topology itself is still cached. */
+function mdlPoseGeometry(topology: AliasTopology, pose: readonly ModelVertex[]): AliasGeometry {
+  return { indices: [...topology.indices], vertices: topology.corners.map(corner => ({
+    ...at(pose, corner.vertex, "pose vertex"), texCoord: { ...corner.texCoord },
+  })) };
+}
 
 /** Expand corners so back-facing seam vertices can use the other half of the skin. */
 export function buildMdlGeometry(model: Q1AliasModel, pose: readonly ModelVertex[]): AliasGeometry {
+  const cached = mdlTopologies.get(model);
+  if (cached !== undefined) return mdlPoseGeometry(cached, pose);
+  const corners: { readonly vertex: number; readonly texCoord: Vec2 }[] = [];
   const vertices: AliasMeshVertex[] = [];
   const indices: number[] = [];
   for (const triangle of model.triangles) {
@@ -58,9 +68,12 @@ export function buildMdlGeometry(model: Q1AliasModel, pose: readonly ModelVertex
       const coordinate = at(model.textureCoordinates, index, "texture coordinate");
       const s = coordinate.s + (!triangle.front && coordinate.onSeam ? model.skinWidth / 2 : 0);
       indices.push(vertices.length);
-      vertices.push({ ...vertex, texCoord: { x: (s + 0.5) / model.skinWidth, y: (coordinate.t + 0.5) / model.skinHeight } });
+      const texCoord = { x: (s + 0.5) / model.skinWidth, y: (coordinate.t + 0.5) / model.skinHeight };
+      vertices.push({ ...vertex, texCoord });
+      corners.push({ vertex: index, texCoord });
     }
   }
+  mdlTopologies.set(model, { corners, indices });
   return { vertices, indices };
 }
 
