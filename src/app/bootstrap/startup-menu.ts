@@ -162,7 +162,7 @@ export class StartupMenu {
       const toggle = familyPresets.some(preset => preset.edition === "classic") && familyPresets.some(preset => preset.edition === "rerelease")
         ? (["classic", "rerelease"] as const).map((edition, index) => ({
           ...this.button(`edition-${edition}`, `${this.nativeEdition === edition ? "> " : ""}${edition === "classic" ? "Classic" : "Rerelease"}`, 0, () => { this.nativeEdition = edition; this.status = ""; }, true),
-          rect: { x: index === 0 ? 64 : 328, y: 118, width: 248, height: 30 } })) : [];
+          rect: { x: index === 0 ? 64 : 328, y: 114, width: 248, height: 29 } })) : [];
       const offset = toggle.length === 0 ? 0 : 1;
       return [...this.nativeCampaigns().map((preset, index) => ({
         ...this.button(`preset:${preset.id}`, this.fit(`${preset.label}${preset.unavailable === null ? "" : " (unavailable)"}`, 486, menuText.body), offset + index, () => {
@@ -241,12 +241,12 @@ export class StartupMenu {
     this.disposers.push(settings.dispose);
     this.disposers.push(this.controller.register(soundMenu, () => {
       const bindings = (options.settings ?? []).filter(binding => binding.category === "audio");
-      const rect = (index: number) => ({ x: 64, y: 118 + index * 38, width: 496, height: 34 });
+      const rect = (index: number) => ({ x: 64, y: 114 + index * 36, width: 496, height: 32 });
       const rows = this.rows(["environment", "doppler"]);
       const controls = [...rows.map((row, index) => ({ ...this.row(row, index), rect: rect(index) })),
         ...bindings.map((binding, index) => settingControl(binding, rect(index + rows.length), options.seat))];
       return { id: soundMenu, title: "", fullScreen: false,
-        scroll: { rect: { x: 64, y: 118, width: 512, height: 298 }, contentHeight: controls.length * 38, controls: controls.map(control => control.id) },
+        scroll: { rect: { x: 64, y: 114, width: 512, height: 288 }, contentHeight: controls.length * 36, controls: controls.map(control => control.id) },
         controls: [...controls, this.back()], open: () => undefined, close: () => undefined };
     }));
     this.disposers.push(this.controller.register(selectMenu, () => {
@@ -263,7 +263,7 @@ export class StartupMenu {
         return { ...control, enabled: choice.unavailable === null && !this.busy };
       });
       return { id: selectMenu, title: "", fullScreen: false,
-        scroll: { rect: { x: 64, y: 118, width: 512, height: 298 }, contentHeight: controls.length * 34, controls: controls.map(control => control.id) },
+        scroll: { rect: { x: 64, y: 114, width: 512, height: 297 }, contentHeight: controls.length * 33, controls: controls.map(control => control.id) },
         controls: [...controls, this.back()], open: () => undefined, close: () => undefined };
     }));
     this.disposers.push(this.controller.register(rosterMenu, () => {
@@ -272,10 +272,10 @@ export class StartupMenu {
       const controls = rows.map((row, index) => {
         return { ...this.button(`monster:${row.classname ?? "default"}`, this.fit(`${row.label}: ${row.effectiveLabel}`, 486, menuText.body), index, () => {
           this.monsterField = { kind: "class", classname: row.classname }; this.controller.openMenu(selectMenu);
-        }, true), rect: { x: 64, y: 118 + index * 34, width: 512, height: 30 } };
+        }, true), rect: { x: 64, y: 114 + index * 33, width: 512, height: 29 } };
       });
       return { id: rosterMenu, title: "", fullScreen: false,
-        scroll: { rect: { x: 64, y: 118, width: 512, height: 298 }, contentHeight: controls.length * 34, controls: controls.map(control => control.id) },
+        scroll: { rect: { x: 64, y: 114, width: 512, height: 297 }, contentHeight: controls.length * 33, controls: controls.map(control => control.id) },
         controls: [{ ...this.button("monster-source", this.fit(`Monster source: ${sourceLabel}`, 486, menuText.body), 0, () => {
           this.monsterField = { kind: "source" }; this.controller.openMenu(selectMenu);
         }, true), rect: { x: 64, y: 78, width: 512, height: 26 } }, ...controls, this.back()], open: () => undefined, close: () => undefined };
@@ -377,7 +377,7 @@ export class StartupMenu {
     this.disposers.push(this.controller.register(id, () => ({ id, title: "", fullScreen: false, controls: controls(), open: () => undefined, close: () => undefined })));
   }
   private button(id: string, label: string, row: number, activate: () => void, wide = false): UiControl {
-    return { id: `ui:startup:${id}`, kind: "button", label, rect: { x: 64, y: 118 + row * 34, width: wide ? 512 : 224, height: 30 },
+    return { id: `ui:startup:${id}`, kind: "button", label, rect: { x: 64, y: 114 + row * 33, width: wide ? 512 : 224, height: 29 },
       visible: true, enabled: !this.busy, activate: () => { activate(); return undefined; } };
   }
   private back(): UiControl { return this.button("back", "Back", 9, () => this.controller.closeMenu(), true); }
@@ -729,7 +729,7 @@ export class StartupMenu {
     return { fields, heads, dropdown: dropdownSpec, footer, viewer };
   }
   private row(row: StartupSelectionRow, index: number): UiControl {
-    const rect = { x: 64, y: 118 + index * 34, width: 512, height: 30 };
+    const rect = { x: 64, y: 114 + index * 33, width: 512, height: 29 };
     if (row.id === "grapple") return {
       id: "ui:startup:grapple", kind: "choice", label: row.label, rect, visible: true, enabled: !this.busy,
       selected: row.value, choices: row.choices.filter(choice => choice.unavailable === null),
@@ -834,8 +834,8 @@ export class StartupMenu {
       : active === nativeDifficultyMenu ? "Difficulty"
       : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
       : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === browserDetailsMenu ? "Server details" : active === browserOptionsMenu ? "Server filters" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
-    if (!active?.startsWith("menu:settings:") && !active?.startsWith("menu:library:") && !active?.startsWith("menu:bindings:") && !active?.startsWith("menu:mods:") && !active?.startsWith("menu:settings:llm") && !active?.startsWith("menu:settings:display:") && !active?.startsWith("menu:settings:input:") && !active?.startsWith("menu:settings:accessibility:")) text(title, 64, 44, active === main ? menuText.mainTitle : menuText.title, true, true);
-    if (active === this.bindingMenu) text(this.fit(`Player 1 - ${this.options.model.catalog.product(this.options.model.options.product).expectation.title}`, 512, menuText.small), 64, 458, menuText.small);
+    if (!active?.startsWith("menu:settings:") && !active?.startsWith("menu:library:") && !active?.startsWith("menu:bindings:") && !active?.startsWith("menu:mods:") && !active?.startsWith("menu:settings:llm") && !active?.startsWith("menu:settings:display:") && !active?.startsWith("menu:settings:input:") && !active?.startsWith("menu:settings:accessibility:") && !active?.startsWith("menu:local:")) text(title, 64, 44, active === main ? menuText.mainTitle : menuText.title, true, true);
+    if (active === this.bindingMenu) text(this.fit(`Player 1 - ${this.options.model.catalog.product(this.options.model.options.product).expectation.title}`, 512, menuText.small), 64, 443, menuText.small);
 
     if (active === nativeDifficultyMenu && this.nativePreset !== null) text(this.fit(this.nativePreset.family === "q3" ? this.nativePreset.label
       : `${this.nativePreset.label} · ${this.nativePreset.edition === "rerelease" ? "Rerelease" : "Classic"}`, 512, menuText.label), 64, 86, menuText.label);
@@ -846,9 +846,9 @@ export class StartupMenu {
     if (active === selectMenu && this.status === "") {
       const state = this.controller.state(), focused = state.focus.kind === "menu" ? state.focus.control : null;
       const hovered = this.selectionRow()?.choices.find(choice => focused === `ui:startup:choice:${choice.id}`);
-      if (hovered?.unavailable) text(this.fit(hovered.unavailable, 512, menuText.small), 64, 458, menuText.small, true);
+      if (hovered?.unavailable) text(this.fit(hovered.unavailable, 512, menuText.small), 64, 442, menuText.small, true);
     }
-    if (active === rosterMenu) text("Map counts shown. * Custom override.", 64, 460, menuText.small);
+    if (active === rosterMenu) text("Map counts shown. * Custom override.", 64, 442, menuText.small);
     commands.push({ kind: "fill", rect: { x: 64, y: 104, width: active === main ? 224 : 512, height: 1 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.65 } });
 
     if (active === session) {
@@ -925,8 +925,8 @@ export class StartupMenu {
     }
     if (active === browserMenu && this.options.browser !== undefined && this.status.length === 0) {
       const browser = this.options.browser, selected = browser.rows().find(entry => addressKey(entry.address) === browser.selected);
-      if (browser.rows().length === 0) text(browser.emptyMessage, 64, 430, menuText.small);
-      text(this.fit(selected?.status === null || selected === undefined ? browser.status : `${selected.status.map} — ${browser.status}`, 512, menuText.label), 64, 450, menuText.label);
+      if (browser.rows().length === 0) text(browser.emptyMessage, 64, 432, menuText.small);
+      else text(this.fit(selected?.status === null || selected === undefined ? browser.status : `${selected.status.map} — ${browser.status}`, 512, menuText.label), 64, 432, menuText.label);
     }
     if (active === loadMenu) {
       const saves = this.options.saves();
@@ -942,11 +942,11 @@ export class StartupMenu {
       if (saves.error !== null) text(this.fit(saves.error, 512, menuText.small), 64, 390, menuText.small);
     }
     overlay = false;
-    if (this.status.length !== 0) text(this.fit(this.status, 512, menuText.small), 64, 450, menuText.small, true);
+    if (this.status.length !== 0) text(this.fit(this.status, 512, menuText.small), 64, 442, menuText.small, true);
     else if (active === session) {
       const spec = this.builderLayout(), cursor = this.controller.state().cursor;
       const hoveredItem = spec.dropdown?.items.find(item => contains(item.control.rect, cursor));
-      if (hoveredItem?.unavailable) text(this.fit(hoveredItem.unavailable, 512, menuText.small), 64, 450, menuText.small, true);
+      if (hoveredItem?.unavailable) text(this.fit(hoveredItem.unavailable, 512, menuText.small), 64, 442, menuText.small, true);
     }
     renderUiCommands(context, [backdrop, panel, ...commands.map(command => transformUi(command, transform))], { text: this.text, white: this.options.art.white,
       picture: resource => this.options.characterTurntable?.picture(resource) ?? this.options.art.picture(resource), emit, material });
@@ -956,7 +956,7 @@ export class StartupMenu {
       picture: resource => this.options.characterTurntable?.picture(resource) ?? this.options.art.picture(resource), emit, material });
   }
   bindGyro(settings: GyroSettingsUi): void {
-    const menu = registerGyroSettingsMenu(this.controller, settings, ""); this.gyroMenu = menu.root; this.disposers.push(menu.dispose);
+    const menu = registerGyroSettingsMenu(this.controller, settings); this.gyroMenu = menu.root; this.disposers.push(menu.dispose);
   }
   bindInput(input: SeatInput, actions: () => readonly BindingAction[], reset?: import("../../ui/settings/bindings.ts").BindingReset): void {
     const menu = registerBindingMenus(this.controller, input, actions, reset); this.bindingMenu = menu.root; this.disposers.push(menu.dispose);

@@ -47,12 +47,12 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x: 100, y: 200 }, delta: { x: 0, y: 0 } });
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-wheel", delta: { x: 0, y: down ? -1 : 1 } });
   };
-  // Scroll a 34px-row scroll menu so `index` is visible; returns the new scroll offset in px.
+  // Scroll a 33px-row scroll menu so `index` is visible; returns the new scroll offset in px.
   const scrollRowsTo = (index: number, total: number, current: number): number => {
-    const maximum = Math.max(0, total * 34 - 298);
+    const maximum = Math.max(0, total * 33 - 297);
     let scroll = current;
-    while (index * 34 - scroll > 298 - 34 && scroll < maximum) { wheel(true); scroll = Math.min(maximum, scroll + 84); }
-    while (index * 34 - scroll < 0 && scroll > 0) { wheel(false); scroll = Math.max(0, scroll - 84); }
+    while (index * 33 - scroll > 297 - 33 && scroll < maximum) { wheel(true); scroll = Math.min(maximum, scroll + 84); }
+    while (index * 33 - scroll < 0 && scroll > 0) { wheel(false); scroll = Math.max(0, scroll - 84); }
     return scroll;
   };
   let rosterScroll = 0;
@@ -61,17 +61,17 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     if (screenshot !== undefined) await capture(screenshot);
     const index = model.monsterSourceRow().choices.findIndex(choice => choice.id === id);
     if (index < 0) throw new Error("Missing source choice");
-    click(100, 130 + index * 34); expect(menu.controller.activeMenu).toBe("menu:startup:roster");
+    click(100, 128 + index * 33); expect(menu.controller.activeMenu).toBe("menu:startup:roster");
   };
   const select = (classname: string, choiceId: string): void => {
     const rows = model.monsterRosterRows(), index = rows.findIndex(row => row.classname === classname), row = rows[index];
     if (index < 0 || row === undefined) throw new Error("Missing campaign slot");
     rosterScroll = scrollRowsTo(index, rows.length, rosterScroll);
-    click(100, 118 + index * 34 - rosterScroll + 12);
+    click(100, 114 + index * 33 - rosterScroll + 12);
     const choiceIndex = row.choices.findIndex(choice => choice.id === choiceId);
     if (choiceIndex < 0) throw new Error("Missing creature choice");
     const choiceScroll = scrollRowsTo(choiceIndex, row.choices.length, 0);
-    click(100, 118 + choiceIndex * 34 - choiceScroll + 12); expect(menu.controller.activeMenu).toBe("menu:startup:roster");
+    click(100, 114 + choiceIndex * 33 - choiceScroll + 12); expect(menu.controller.activeMenu).toBe("menu:startup:roster");
   };
   const captureRoot = process.env["QUAKE_ROSTER_CAPTURE_DIR"];
   const capture = async (name: string): Promise<void> => {

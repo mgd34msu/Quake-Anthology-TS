@@ -389,14 +389,42 @@ export class NativeUiController implements SeatUiController {
       commands.push({ kind: "text", origin: { x, y }, text: this.options.localize?.(value) ?? value, font: skin.font,
         scale: skin.fontScale, color, align, shadow: true });
     };
+    // Shrink (then ellipsize) so control text never leaves its rect.
+    const measure = (value: string, scale: number): number => this.options.measureText?.(this.options.localize?.(value) ?? value, scale) ?? Array.from(value).length * 8 * scale;
+    const fitText = (value: string, maxWidth: number, base = skin.fontScale): { readonly text: string; readonly scale: number } => {
+      const width = measure(value, base);
+      if (width <= maxWidth) return { text: value, scale: base };
+      const shrunk = base * Math.max(0, maxWidth) / Math.max(1, width);
+      if (shrunk >= base * 0.7) return { text: value, scale: shrunk };
+      const scale = base * 0.7, glyphs = Array.from(value);
+      let low = 0, high = glyphs.length;
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        if (measure(`${glyphs.slice(0, middle).join("")}…`, scale) <= maxWidth) low = middle; else high = middle - 1;
+      }
+      return { text: measure("…", scale) <= maxWidth ? `${glyphs.slice(0, low).join("")}…` : "", scale };
+    };
+    const textFit = (value: string, x: number, y: number, maxWidth: number, color: Vec4, align: "left" | "center" | "right" = "left"): number => {
+      const fit = fitText(value, maxWidth);
+      commands.push({ kind: "text", origin: { x, y: y + (8 * skin.fontScale - 8 * fit.scale) / 2 }, text: this.options.localize?.(fit.text) ?? fit.text, font: skin.font,
+        scale: fit.scale, color, align, shadow: true });
+      return measure(fit.text, fit.scale);
+    };
     if (active.menu.fullScreen && skin.background !== null) commands.push({ kind: "image", resource: skin.background,
       rect: { x: 0, y: 0, width: 640, height: 480 }, texCoords: [{ x: 0, y: 0 }, { x: 1, y: 1 }], color: white });
     const panel = { x: 32, y: 24, width: 576, height: 432 };
     commands.push({ kind: "fill", rect: panel, color: skin.colors.panel });
     if (skin.panel !== null) commands.push(...nineSlice(skin.panel, panel, white));
-    if (skin.titleFont === undefined) text(active.menu.title, 320, 48, skin.colors.accent, "center");
-    else commands.push({ kind: "text", origin: { x: 64, y: 44 }, text: this.options.localize?.(active.menu.title) ?? active.menu.title,
-      font: skin.titleFont, scale: skin.titleScale ?? skin.fontScale, color: skin.colors.accent, align: "left", shadow: true });
+    if (skin.titleFont === undefined) {
+      const fit = fitText(active.menu.title, 512);
+      commands.push({ kind: "text", origin: { x: 320, y: 48 }, text: this.options.localize?.(fit.text) ?? fit.text, font: skin.font,
+        scale: fit.scale, color: skin.colors.accent, align: "center", shadow: true });
+    } else {
+      const titleScale = skin.titleScale ?? skin.fontScale;
+      const fit = fitText(active.menu.title, 512, titleScale);
+      commands.push({ kind: "text", origin: { x: 64, y: 44 }, text: this.options.localize?.(fit.text) ?? fit.text,
+        font: skin.titleFont, scale: fit.scale, color: skin.colors.accent, align: "left", shadow: true });
+    }
     for (const control of active.menu.controls) {
       if (!control.visible) continue;
       const region = active.menu.scroll;
@@ -419,7 +447,7 @@ export class NativeUiController implements SeatUiController {
           const y = control.rect.y + index * layout.height;
           if (row.id === control.selected) commands.push({ kind: "fill", rect: { x: control.rect.x, y, width: contentWidth, height: layout.height }, color: skin.colors.focused });
           const rowColor = !row.enabled ? skin.colors.disabled : row.id === control.selected ? skin.colors.accent : skin.colors.text;
-          if (control.columnWidths === undefined) text(row.cells.join("  "), control.rect.x + 8, y, rowColor);
+          if (control.columnWidths === undefined) textFit(row.cells.join("  "), control.rect.x + 8, y + (layout.height - 8 * skin.fontScale) / 2, contentWidth - 16 - (row.action === undefined ? 0 : 28), rowColor);
           else {
             let x = control.rect.x;
             for (const [column, value] of row.cells.entries()) {
@@ -452,12 +480,15 @@ export class NativeUiController implements SeatUiController {
         }
         continue;
       }
-      if (control.kind !== "slider") text(control.label, control.rect.x + 10, control.rect.y + 6, color);
       const right = control.rect.x + control.rect.width - 10, y = control.rect.y + 6;
+      if (control.kind !== "slider") {
+        const value = control.kind === "toggle" ? (control.checked ? "On" : "Off")
+          : control.kind === "choice" ? (control.choices.find(choice => choice.id === control.selected)?.label ?? "") : "";
+        const valueWidth = value === "" ? 0 : textFit(value, right, y, control.rect.width * 0.45, color, "right");
+        textFit(control.label, control.rect.x + 10, y, control.rect.width - 20 - (valueWidth === 0 ? 0 : valueWidth + 10), color);
+      }
       switch (control.kind) {
-        case "button": break;
-        case "toggle": text(control.checked ? "On" : "Off", right, y, color, "right"); break;
-        case "choice": text(control.choices.find(choice => choice.id === control.selected)?.label ?? "", right, y, color, "right"); break;
+        case "button": case "toggle": case "choice": break;
         case "slider": {
           const x = control.rect.x + control.rect.width * 0.6, width = control.rect.width * 0.32;
           const value = control.valueLabel ?? String(Number(control.value.toFixed(6)));

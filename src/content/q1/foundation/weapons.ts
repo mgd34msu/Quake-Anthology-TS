@@ -10,7 +10,7 @@ import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 import { ammoItem } from "./entity-services.ts";
 import type { Q1PlayerState, Q1Weapon } from "./types.ts";
-import { POINT, ZERO, vadd, vsub, vscale, normalize, isQ1BaseWeapon } from "./types.ts";
+import { POINT, ZERO, vadd, vsub, vscale, normalize, isQ1BaseWeapon, yawFor } from "./types.ts";
 
 export function weaponModel(weapon: Q1Weapon): string {
   if (!isQ1BaseWeapon(weapon)) throw new Error(`Use registered Q1 weapon model for ${weapon}`);
@@ -75,7 +75,10 @@ function projectile(game: Q1EntityServices, player: Q1PlayerState, kind: "rocket
   entity.movement = kind === "grenade" ? "bounce" : "flymissile"; entity.solid = "bbox";
   entity.model = kind === "rocket" ? "progs/missile.mdl" : kind === "grenade" ? "progs/grenade.mdl" : kind === "superspike" ? "progs/s_spike.mdl" : "progs/spike.mdl";
   if (kind === "grenade") entity.angularVelocity = { x: 300, y: 300, z: 300 };
-  game.setBody(entity, { origin, velocity }); game.link(entity);
+  // weapons.qc orients rockets and spikes along their velocity (vectoangles);
+  // unified body angles use view convention (pitch negative looking up).
+  const angles = kind === "grenade" ? ZERO : { x: -Math.atan2(velocity.z, Math.hypot(velocity.x, velocity.y)) * 180 / Math.PI, y: yawFor(velocity), z: 0 };
+  game.setBody(entity, { origin, velocity, angles }); game.link(entity);
   entity.touch = game.named.touch(entity, "projectile_touch");
   game.schedule(entity, kind === "grenade" ? 2.5 : kind === "rocket" ? 5 : 6,
     game.named.action(entity, kind === "grenade" ? "GrenadeExplode" : "SUB_Remove"));

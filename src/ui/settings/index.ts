@@ -112,7 +112,7 @@ export function registerSettingsMenus(controller: NativeUiController, bindings: 
     disposers.push(controller.register(id, () => {
       const controls = selected.map((binding, index) => settingControl(binding, menuRow(index, { width: 496 }), controller.seat));
       return { id, title, fullScreen: false,
-        scroll: { rect: { x: 64, y: 92, width: 512, height: 300 }, contentHeight: selected.length * 28, controls: controls.map(control => control.id) },
+        scroll: { rect: { x: 64, y: 92, width: 512, height: 308 }, contentHeight: selected.length * 28, controls: controls.map(control => control.id) },
         controls: [...controls, back()], open: () => undefined, close: () => {
           for (const binding of selected) if (binding.kind === "text-entry") binding.commit?.cancel();
           return undefined;
@@ -135,7 +135,7 @@ export function registerSettingsMenus(controller: NativeUiController, bindings: 
       const controls = direct.map((binding, index) => settingControl(binding, menuRow(groups.length + index, { width: 496 }), controller.seat));
       const scrolled = [...groupControls, ...controls];
       return { id, title: category.label, fullScreen: false,
-        scroll: { rect: { x: 64, y: 92, width: 512, height: 300 }, contentHeight: scrolled.length * 28, controls: scrolled.map(control => control.id) },
+        scroll: { rect: { x: 64, y: 92, width: 512, height: 308 }, contentHeight: scrolled.length * 28, controls: scrolled.map(control => control.id) },
         controls: [...scrolled, back()], open: () => undefined, close: () => {
           for (const binding of direct) if (binding.kind === "text-entry") binding.commit?.cancel();
           return undefined;

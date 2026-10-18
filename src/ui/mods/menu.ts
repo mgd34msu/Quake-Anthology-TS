@@ -66,7 +66,7 @@ export function registerModMenu(controller: NativeUiController, service: ModMenu
       ...details,
     ];
     return { id: root, title: "Mods", fullScreen: true, controls,
-      scroll: { rect: { x: 48, y: 372, width: 544, height: 76 }, contentHeight: lines.length * 24, controls: details.map(control => control.id) },
+      scroll: { rect: { x: 48, y: 372, width: 544, height: 72 }, contentHeight: lines.length * 24, controls: details.map(control => control.id) },
       open: () => { service.refresh(); return undefined; }, close: () => undefined };
   });
   return { root, dispose };

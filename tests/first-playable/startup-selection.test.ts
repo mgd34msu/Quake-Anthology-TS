@@ -123,7 +123,7 @@ test.skipIf(!corpusHasFile("q1/id1/PAK0.PAK"))("mouse startup roster edits actua
   const menu = new StartupMenu({ seat, model, art, font: font.font, titleFont: font.font, now: () => 0, play: () => undefined, load: () => undefined,
     saves: () => ({ rows: [], error: null }), refreshSaves: () => undefined, quit: () => undefined });
   const click = (row: number) => {
-    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x: 100, y: 130 + row * 34 }, delta: { x: 0, y: 0 } });
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x: 100, y: 128 + row * 33 }, delta: { x: 0, y: 0 } });
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
   };
@@ -132,14 +132,14 @@ test.skipIf(!corpusHasFile("q1/id1/PAK0.PAK"))("mouse startup roster edits actua
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-wheel", delta: { x: 0, y: down ? -1 : 1 } });
   };
   const scrollRowsTo = (index: number, total: number, current: number): number => {
-    const maximum = Math.max(0, total * 34 - 298);
+    const maximum = Math.max(0, total * 33 - 297);
     let scroll = current;
-    while (index * 34 - scroll > 298 - 34 && scroll < maximum) { wheelRows(true); scroll = Math.min(maximum, scroll + 84); }
-    while (index * 34 - scroll < 0 && scroll > 0) { wheelRows(false); scroll = Math.max(0, scroll - 84); }
+    while (index * 33 - scroll > 297 - 33 && scroll < maximum) { wheelRows(true); scroll = Math.min(maximum, scroll + 84); }
+    while (index * 33 - scroll < 0 && scroll > 0) { wheelRows(false); scroll = Math.max(0, scroll - 84); }
     return scroll;
   };
   const clickScrolledRow = (index: number, scroll: number) => {
-    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x: 100, y: 118 + index * 34 - scroll + 12 }, delta: { x: 0, y: 0 } });
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x: 100, y: 114 + index * 33 - scroll + 12 }, delta: { x: 0, y: 0 } });
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
   };

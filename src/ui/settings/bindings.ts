@@ -94,18 +94,18 @@ export function registerBindingMenus(controller: NativeUiController, input: Seat
             ...(row.physical === null ? {} : { action: { label: "X", activate: () => { if (row.physical !== null) input.unbind(row.physical); return undefined; } } }) })),
         select: (_seat, id) => { selected = id; return undefined; },
         activate: (_seat, id) => { const row = rows.find(row => row.id === id); return row === undefined ? undefined : capture(row); } },
-      { id: "ui:bindings:add", kind: "button", label: "Add binding", rect: { x: 48, y: 384, width: 176, height: 28 },
+      { id: "ui:bindings:add", kind: "button", label: "Add binding", rect: { x: 48, y: 380, width: 176, height: 28 },
         enabled: current !== undefined, visible: true, activate: () => current === undefined ? undefined : capture({ ...current, physical: null, target: current.action.target }) },
-      { id: "ui:bindings:remove", kind: "button", label: "Remove key", rect: { x: 232, y: 384, width: 176, height: 28 },
+      { id: "ui:bindings:remove", kind: "button", label: "Remove key", rect: { x: 232, y: 380, width: 176, height: 28 },
         enabled: current !== undefined && current.physical !== null, visible: true, activate: () => { if (current?.physical !== undefined && current.physical !== null) input.unbind(current.physical); return undefined; } },
-      { id: "ui:bindings:clear", kind: "button", label: "Clear action", rect: { x: 416, y: 384, width: 176, height: 28 },
+      { id: "ui:bindings:clear", kind: "button", label: "Clear action", rect: { x: 416, y: 380, width: 176, height: 28 },
         enabled: current !== undefined && current.physical !== null, visible: true, activate: () => {
           if (current !== undefined) for (const binding of input.bindings) if (bindingMatchesAction(binding.target, current.action)) input.unbind(binding.input);
           return undefined;
         } },
-      ...(reset === undefined ? [] : [{ id: "ui:bindings:reset", kind: "button", label: "Reset bindings", rect: { x: 416, y: 420, width: 176, height: 28 },
+      ...(reset === undefined ? [] : [{ id: "ui:bindings:reset", kind: "button", label: "Reset bindings", rect: { x: 416, y: 412, width: 176, height: 28 },
         enabled: reset.available(), visible: true, activate: () => controller.openMenu(confirmation) } satisfies UiControl]),
-      { id: "ui:bindings:back", kind: "button", label: "Back", rect: { x: 48, y: 420, width: 100, height: 28 }, enabled: true, visible: true, activate: () => controller.closeMenu() },
+      { id: "ui:bindings:back", kind: "button", label: "Back", rect: { x: 48, y: 412, width: 100, height: 28 }, enabled: true, visible: true, activate: () => controller.closeMenu() },
     ];
     return { id: root, title: "Bindings", fullScreen: false, controls, open: () => undefined, close: () => undefined };
   }));

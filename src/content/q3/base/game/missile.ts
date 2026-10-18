@@ -223,7 +223,13 @@ export class MissileRuntime {
       get time() { return combat.time; }, get previousTime() { return runtime.host.previousTime; }, live,
       phase: () => entity.freeAfterEvent ? "event" : entity.s.eType === EntityType.ET_MISSILE ? "flight" : "attached",
       eventTime: () => entity.eventTime, clearEvent: () => { entity.s.event = 0; }, origin: () => entity.r.currentOrigin,
-      move: (origin, velocity) => { const body = runtime.host.bodies.read(projectile.actor.id); if (body !== null) runtime.host.bodies.write(projectile.actor, { ...body, origin, velocity }); },
+      move: (origin, velocity) => { const body = runtime.host.bodies.read(projectile.actor.id); if (body !== null) runtime.host.bodies.write(projectile.actor, { ...body, origin, velocity,
+        // Native cgame derives missile orientation from velocity (CG_Missile);
+        // the unified body must carry it for foreign-family presentation.
+        // Grenades and prox mines tumble on their angle trajectory instead.
+        angles: entity.s.weapon === Weapon.WP_GRENADE_LAUNCHER || entity.s.weapon === Weapon.WP_PROX_LAUNCHER ? body.angles : vectorToAngles(velocity) });
+        if (entity.s.weapon !== Weapon.WP_GRENADE_LAUNCHER && entity.s.weapon !== Weapon.WP_PROX_LAUNCHER)
+          entity.s.apos = { ...entity.s.apos, type: TrajectoryType.TR_STATIONARY, base: vectorToAngles(velocity), delta: vec3(0, 0, 0) }; },
       setOrigin: origin => { setOrigin(entity, origin); const body = runtime.host.bodies.read(projectile.actor.id); if (body !== null) runtime.host.bodies.write(projectile.actor, { ...body, velocity: vec3(0, 0, 0) }); }, link: () => { runtime.host.world.link(entity); },
       release: () => { pool.free(entity); },
       trace: (start, end, passActor) => combat.spatial.traceActor({ start, end, passActor,
@@ -418,8 +424,18 @@ export class MissileRuntime {
     bolt.r.ownerNum = self.s.number; bolt.parent = weapon === Weapon.WP_GRAPPLING_HOOK || weapon === Weapon.WP_PROX_LAUNCHER ? self : null; bolt.damage = direct; bolt.splashDamage = splash; bolt.splashRadius = radius;
     bolt.methodOfDeath = method; bolt.splashMethodOfDeath = splashMethod; bolt.clipmask = MASK_SHOT; bolt.targetEnt = null;
     bolt.s.pos = launch.trajectory;
+    // Foreign-family presentation orients models from apos (q3PoolModels);
+    // native cgame derives missile orientation from velocity, so mirror
+    // that into apos for every non-tumbling projectile.
+    if (weapon !== Weapon.WP_GRENADE_LAUNCHER && weapon !== Weapon.WP_PROX_LAUNCHER
+      && (launch.trajectory.delta.x !== 0 || launch.trajectory.delta.y !== 0 || launch.trajectory.delta.z !== 0))
+      bolt.s.apos = { ...bolt.s.apos, type: TrajectoryType.TR_STATIONARY, base: vectorToAngles(launch.trajectory.delta), delta: vec3(0, 0, 0), time };
     bolt.r.currentOrigin = vec3(start.x, start.y, start.z);
     this.projectiles.set(bolt, this.bindProjectile(bolt, owner, owner, { kind: "none" }, null));
+    if (weapon !== Weapon.WP_GRENADE_LAUNCHER && weapon !== Weapon.WP_PROX_LAUNCHER && (launch.trajectory.delta.x !== 0 || launch.trajectory.delta.y !== 0 || launch.trajectory.delta.z !== 0)) {
+      const body = this.host.bodies.read(bolt.actor.id);
+      if (body !== null) this.host.bodies.write(bolt.actor, { ...body, angles: vectorToAngles(launch.trajectory.delta) });
+    }
     if (weapon !== Weapon.WP_NAILGUN) this.applyBehaviorLaunch(bolt, owner);
     return bolt;
   }

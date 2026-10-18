@@ -142,7 +142,7 @@ function backpackTouch(game: Q1EntityServices, pack: Q1Actor, other: ActorId): u
 
 export function createMissile(game: Q1EntityServices, owner: ActorId | null, classname: string, model: string, origin: Vec3, velocity: Vec3, lifetime = 5): Q1Actor {
   const missile = game.create(classname); missile.owner = owner; missile.model = `progs/${model}.mdl`; missile.solid = "bbox"; missile.movement = "flymissile";
-  game.setBody(missile, { origin, velocity, bounds: POINT, angles: { x: Math.atan2(velocity.z, Math.hypot(velocity.x, velocity.y)) * 180 / Math.PI, y: yawFor(velocity), z: 0 } });
+  game.setBody(missile, { origin, velocity, bounds: POINT, angles: { x: -Math.atan2(velocity.z, Math.hypot(velocity.x, velocity.y)) * 180 / Math.PI, y: yawFor(velocity), z: 0 } });
   game.schedule(missile, lifetime, game.named.action(missile, "SUB_Remove")); game.link(missile); return missile;
 }
 export function launchSpike(game: Q1EntityServices, owner: ActorId | null, origin: Vec3, velocity: Vec3, kind: "spike" | "superspike" | "wizard" | "knight" = "spike"): Q1Actor {

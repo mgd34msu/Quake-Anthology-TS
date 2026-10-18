@@ -328,9 +328,14 @@ export class DeathRuntime {
     if (this.host.characterDeath === "selected") {
       self.s.weapon = Weapon.WP_NONE;
       self.s.powerups = 0;
+      // The selected character presents its own death, but the client body must
+      // still stop blocking movement like a native corpse (or vanish when gibbed).
+      self.r.contents = self.health <= GIB_HEALTH ? 0 : CONTENTS_CORPSE;
+      self.r.maxs = vec3(self.r.maxs.x, self.r.maxs.y, -8);
       self.s.loopSound = 0;
       client.respawnTime = (frame.time + 1700) | 0;
       for (let index = 0; index < client.ps.powerups.length; index++) client.ps.powerups.set(index, 0);
+      this.host.world.link(self);
       return;
     }
     self.takedamage = true;

@@ -25,7 +25,9 @@ export function convertContents(contents: number, from: CollisionFamily, to: Col
         // Playerclip and ladder brushes block players in their home families; Q1 has no
         // clip concept, so they must read as solid or Q1-family movement falls through them.
         // Monsterclip stays non-solid: it only fences monsters in its home family.
-        if ((contents & (from === 'q2' ? 0xe6010003 : 0x06010001)) !== 0)
+        // CONTENTS_CORPSE (0x4000000 in both Q2 and Q3) is excluded: dead
+        // players and monsters never block movement in any family.
+        if ((contents & (from === 'q2' ? 0xe2010003 : 0x02010001)) !== 0)
             return -2;
         if ((contents & 8) !== 0)
             return -5;
@@ -56,6 +58,8 @@ export function convertContents(contents: number, from: CollisionFamily, to: Col
 export function actorContents(collision: ActorCollision, to: CollisionFamily): number {
     if (collision.family === 'q1' && collision.shape.kind !== 'model' && to !== 'q1')
         return collision.deadMonster ? 0x04000000 : 0x02000000;
+    if (collision.deadMonster && collision.shape.kind !== 'model' && to === 'q1')
+        return -1;
     return convertContents(collision.contents, collision.family, to);
 }
 export function contentsBlock(contents: number, family: CollisionFamily, policy: TracePolicy): boolean {

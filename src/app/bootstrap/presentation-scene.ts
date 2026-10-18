@@ -38,6 +38,8 @@ interface ModelPass {
   readonly resolve?: ResolvedHeldEntity;
   readonly viewAxis?: Axis;
   readonly time?: SourceTime;
+  /** The viewer's own body: drawn only in portal/mirror child views. */
+  readonly personal?: boolean;
   readonly entity: SceneEntity;
   readonly options: (entity: SceneEntity) => ModelSourceOptions;
 }
@@ -114,7 +116,8 @@ export class ApplicationWorldScene {
         group = { renderer: new SceneModelRenderer(shaderContent === undefined ? provider : { family: "q3", palette: provider.palette, textures: provider.textures, shaders: (await this.assets.provider(shaderContent)).shaders }, this.assets.world), passes: [] };
         this.groups.set(key, group);
       }
-      const pass: ModelPass = { entity, ...(resolve === undefined ? {} : { resolve }), ...(viewAxis === undefined ? {} : { viewAxis }), options: options ?? (() => ({})), ...(time === undefined ? {} : { time }) };
+      const personal = viewer !== null && entity.actor?.equals(viewer) === true && (options?.(entity).viewModel !== true);
+      const pass: ModelPass = { entity, ...(personal ? { personal } : {}), ...(resolve === undefined ? {} : { resolve }), ...(viewAxis === undefined ? {} : { viewAxis }), options: options ?? (() => ({})), ...(time === undefined ? {} : { time }) };
       group.passes.push(pass);
       this.ordered.push({ group, pass });
       const logical = object ?? { opacity: entity.opacity ?? 1, passes: [] };
@@ -165,7 +168,10 @@ export class ApplicationWorldScene {
         continue;
       }
       if (source.path === "") continue;
-      if (!seatModelVisible(viewer, source)) continue;
+      // Other seats' view weapons are never drawn. The viewer's own body is
+      // retained as a personal pass and filtered per view in modelOperations
+      // so portal/mirror child views can show it (native RF_THIRD_PERSON).
+      if (source.viewWeapon && !(viewer?.equals(source.actor) ?? false)) continue;
       if (!source.viewWeapon && characters.some(character => character.actor.equals(source.actor))) continue;
       const cable = source.q3GrappleCable;
       let cableStart: Vec3 | null = null;
@@ -343,7 +349,7 @@ export class ApplicationWorldScene {
 
     if (shadowLights.length > 0 && input.noWorldModel !== true) {
       const retainBody = shadowBodyFilter(shadowLights);
-      const casters = [...this.groups.values()].flatMap(group => group.passes.filter(pass => (this.objects.get(pass)?.opacity ?? 1) === 1).flatMap(pass => {
+      const casters = [...this.groups.values()].flatMap(group => group.passes.filter(pass => (this.objects.get(pass)?.opacity ?? 1) === 1 && (pass.personal !== true || input.camera.clip.kind === "portal")).flatMap(pass => {
         const entity = pass.resolve === undefined ? pass.entity : pass.resolve(input.camera.origin, "shadow");
         return entity === null ? [] : group.renderer.prepareShadowCasters([entity], pass.time === undefined ? input : { ...input, time: pass.time }, pass.options, skinningFrame, retainBody);
       }));
@@ -370,6 +376,7 @@ export class ApplicationWorldScene {
     const prepare = (group: ModelGroup, pass: ModelPass) => {
       let entity = pass.resolve === undefined ? pass.entity : pass.resolve(input.camera.origin, "view");
       if (entity === null || pass.options(entity).viewModel === true && input.camera.clip.kind === "portal") return [];
+      if (pass.personal === true && input.camera.clip.kind !== "portal") return [];
       if (anchorViewRotation && pass.viewAxis !== undefined && pass.options(entity).viewModel === true)
         entity = { ...entity, transform: { ...entity.transform, axis: anchoredViewWeaponAxis(entity.transform.axis, pass.viewAxis, weaponCamera.axis) } };
       const current = pass.time === undefined ? input : { ...input, time: pass.time };

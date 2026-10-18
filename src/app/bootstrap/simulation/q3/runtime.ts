@@ -695,7 +695,8 @@ export class Q3SourceRuntime {
     const bounds = this.host.bodies.linked(entity.actor.id)?.absoluteBounds;
     if (bounds === undefined) throw new Error("Area portal mover must be linked");
     const leaves = this.host.scene.boxLeaves(bounds, 128);
-    const areas = [...new Set(leaves.leaves.map(leaf => this.host.scene.leafArea(leaf)))];
+    // Q3 SV_LinkEntity skips outside leaves (area -1) when deriving areanum/areanum2.
+    const areas = [...new Set(leaves.leaves.map(leaf => this.host.scene.leafArea(leaf)).filter(area => area !== -1))];
     const first = areas[0], second = areas[1];
     if (first !== undefined && second !== undefined) this.host.scene.adjustAreaPortalState(first, second, open);
   }

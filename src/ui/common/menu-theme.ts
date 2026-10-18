@@ -11,13 +11,13 @@ export const menuTitleFont: ResourceId = "resource:engine-menu:title";
  * game builder) use the single field size for labels and values alike.
  */
 export const menuText = {
-  mainTitle: 6,
-  title: 4,
-  section: 1.7,
-  label: 1.8,
-  body: 2.6,
-  field: 2.05,
-  small: 1.5,
+  mainTitle: 5.4,
+  title: 3.6,
+  section: 1.55,
+  label: 1.65,
+  body: 2.3,
+  field: 1.9,
+  small: 1.35,
 } as const;
 export function menuSkin(font: ResourceId): UiSkin {
   return { font, titleFont: menuTitleFont, titleScale: menuText.title, fontScale: menuText.body, lineHeight: 24,
@@ -32,7 +32,9 @@ export function menuBackdrop(context: UiDrawContext): UiDrawCommand {
   return { kind: "image", resource: "resource:engine-menu:main-background", rect: viewport,
     texCoords: [{ x: cropX, y: cropY }, { x: 1 - cropX, y: 1 - cropY }], color: { x: 1, y: 1, z: 1, w: 1 } };
 }
+/** The one menu box in 640x480 UI space; the controller draws its panel on the same rect. */
+export const menuPanelRect = { x: 32, y: 24, width: 576, height: 432 } as const;
 export function menuPanel(context: UiDrawContext, narrow = false): UiDrawCommand {
-  return transformUi({ kind: "fill", rect: { x: 40, y: 28, width: narrow ? 264 : 560, height: 420 },
+  return transformUi({ kind: "fill", rect: { x: 32, y: 24, width: narrow ? 272 : 576, height: 432 },
     color: { x: 0.025, y: 0.035, z: 0.045, w: narrow ? 0.86 : 0.96 } }, fitUi(context.binding.safeArea));
 }
