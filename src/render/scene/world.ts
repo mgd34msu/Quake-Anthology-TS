@@ -153,6 +153,23 @@ export class WorldScene {
   private preparedMaterialRevision: number | null = null;
   private shadowMaterialRevision = -1;
   private readonly staticLightStyles = new Map<WorldSurface, readonly number[]>();
+  /** Static world position/normal arrays for fragment lighting, reused across frames. */
+  private readonly staticWorldArrays = new WeakMap<MaterialGeometry, { readonly worldPositions: readonly Vec3[]; readonly normals: readonly Vec3[] }>();
+
+  private worldArrays(geometry: MaterialGeometry, model?: ModelTransform): { readonly worldPositions: readonly Vec3[]; readonly normals: readonly Vec3[] } {
+    if (model !== undefined) return {
+      worldPositions: geometry.vertices.map(vertex => worldPoint(vertex.position, model)),
+      normals: geometry.vertices.map(vertex => normalize3(worldVector(vertex.normal, model))),
+    };
+    const cached = this.staticWorldArrays.get(geometry);
+    if (cached !== undefined) return cached;
+    const built = {
+      worldPositions: geometry.vertices.map(vertex => vertex.position),
+      normals: geometry.vertices.map(vertex => normalize3(vertex.normal)),
+    };
+    this.staticWorldArrays.set(geometry, built);
+    return built;
+  }
   private staticShadowWorld: { readonly surfaces: readonly WorldSurface[]; readonly first: number; readonly count: number; readonly world: StaticShadowWorld } | null = null;
 
   private constructor(readonly map: DecodedWorld, readonly shaders: SceneShaderRegistry,
@@ -556,15 +573,13 @@ export class WorldScene {
     const selectedShader = surface.shader ?? this.rawRemaps.get(surface.index)?.material;
     if (selectedShader !== undefined && selectedShader !== null) return this.shaderOperations(surface, selectedShader, input, context, model, lighting, order);
     const fragmentLighting = input.q2FragmentLighting;
-    const rotateNormal = (normal: Vec3): Vec3 => normalize3(model === undefined ? normal : worldVector(normal, model));
     const batches = prepareLegacyMaterialBatches(material, surface.geometry, { time: context.time, entityRGBA: context.entityRGBA, animationFrame: input.animationFrame ?? Math.trunc(context.time * 2),
       alternateAnimation: input.alternateAnimation ?? false,
       fullbright: material.kind === "q1" ? this.fullbrightByTexture.get(q1AnimatedTexture(material, context.time, input.alternateAnimation ?? false)) ?? null : surface.fullbright,
       q1FogActive: (input.q1Fog?.density ?? 0) > 0,
       q1LightmapEncoding: surface.lightmap?.encoding ?? "rgb",
       ...(fragmentLighting === undefined ? {} : { fragmentLighting: { kind: "q2-world",
-        worldPositions: surface.geometry.vertices.map(vertex => model === undefined ? vertex.position : worldPoint(vertex.position, model)),
-        normals: surface.geometry.vertices.map(vertex => rotateNormal(vertex.normal)), pass: "texture", lights: fragmentLighting.lights.filter(light => material.kind !== "q1" || light.cone !== null || light.shadow.kind !== "none").map(light => ({ ...light, scale: light.scale * (this.options.q2LightModulate ?? 1) })), atlas: fragmentLighting.atlas } }),
+        ...this.worldArrays(surface.geometry, model), pass: "texture", lights: fragmentLighting.lights.filter(light => material.kind !== "q1" || light.cone !== null || light.shadow.kind !== "none").map(light => ({ ...light, scale: light.scale * (this.options.q2LightModulate ?? 1) })), atlas: fragmentLighting.atlas } }),
       ...(surface.lightmap === null ? {} : { translucentLightmap: surface.lightmap.direct }), cull: context.deformView.mirror !== (model !== undefined && modelScale(model) < 0) ? "back" : "front", depthRange: context.depthRange, project: context.project });
     return [sequenceDrawGroup(material.alpha * context.entityRGBA.w / 255 < 1 ? "translucent" : "opaque", batches)];
   }
@@ -592,8 +607,7 @@ export class WorldScene {
     const fragmentLighting = input.q2FragmentLighting;
     const lightmapLighting: MaterialDrawContext["lightmapLighting"] = fragmentLighting === undefined ? undefined : geometry => ({
       kind: "q2-world", pass: "material-lightmap",
-      worldPositions: geometry.vertices.map(vertex => model === undefined ? vertex.position : worldPoint(vertex.position, model)),
-      normals: geometry.vertices.map(vertex => normalize3(model === undefined ? vertex.normal : worldVector(vertex.normal, model))),
+      ...this.worldArrays(geometry, model),
       lights: fragmentLighting.lights.map(light => ({ ...light, scale: light.scale * (this.options.q2LightModulate ?? 1) })), atlas: fragmentLighting.atlas,
     });
     const drawContext = { ...(fog === null ? context : this.materialContext(input, model, fog)), timeOffset: remap?.timeOffset ?? 0,

@@ -147,23 +147,36 @@ export function shadowBodyFilter(source: readonly SceneLight[]): (sphere: Shadow
     .map(light => lightContainsSphere({ ...light, cone: light.profile.kind === "q2" ? light.profile.cone : null }));
   return sphere => tests.some(test => test(sphere));
 }
-function worldMeshVisible(mesh: ShadowMesh, light: Q2FragmentLight, forward: Vec3 | null): boolean {
-  let inRadius = false, inFront = forward === null;
-  const radiusSquared = Math.max(light.radius, 8) ** 2;
+/** Bounding spheres are computed once per mesh object; static world meshes are stable identities. */
+const meshSpheres = new WeakMap<ShadowMesh, ShadowSphere>();
+function meshSphere(mesh: ShadowMesh): ShadowSphere {
+  const cached = meshSpheres.get(mesh);
+  if (cached !== undefined) return cached;
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   for (const position of mesh.positions) {
-    const delta = difference(position, light.origin);
-    inRadius ||= dot(delta, delta) <= radiusSquared;
-    inFront ||= forward !== null && dot(delta, forward) > 0;
-    if (inRadius && inFront) return true;
+    if (position.x < minX) minX = position.x; if (position.x > maxX) maxX = position.x;
+    if (position.y < minY) minY = position.y; if (position.y > maxY) maxY = position.y;
+    if (position.z < minZ) minZ = position.z; if (position.z > maxZ) maxZ = position.z;
   }
-  return false;
+  const center = mesh.positions.length === 0 ? { x: 0, y: 0, z: 0 }
+    : { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2 };
+  let radius = 0;
+  for (const position of mesh.positions) radius = Math.max(radius, length(difference(position, center)));
+  const sphere = { origin: center, radius };
+  meshSpheres.set(mesh, sphere);
+  return sphere;
+}
+function worldMeshVisible(mesh: ShadowMesh, light: Q2FragmentLight, forward: Vec3 | null): boolean {
+  const sphere = meshSphere(mesh), delta = difference(sphere.origin, light.origin);
+  if (length(delta) > Math.max(light.radius, 8) + sphere.radius) return false;
+  return forward === null || dot(delta, forward) + sphere.radius > 0;
 }
 function draw(mesh: ShadowMesh, matrix: Mat4, entity: boolean): DepthAtlasDraw {
   return { positions: mesh.positions.map(position => shadowProject(matrix, position)), indices: mesh.indices, cull: "none",
     polygonOffset: entity ? { factor: 1, units: 2 } : { factor: 2, units: 4 } };
 }
-function depthPass(candidate: Candidate, viewport: Rect, matrix: Mat4, world: readonly ShadowMesh[], forward: Vec3 | null): DepthAtlasPass {
-  const draws = world.filter(mesh => worldMeshVisible(mesh, candidate.light, forward)).map(mesh => draw(mesh, matrix, false));
+function depthPass(candidate: Candidate, viewport: Rect, matrix: Mat4, worldDraws: readonly DepthAtlasDraw[], forward: Vec3 | null): DepthAtlasPass {
+  const draws: DepthAtlasDraw[] = [...worldDraws];
   for (const caster of candidate.casters) {
     if (forward !== null && dot(difference(caster.origin, candidate.light.origin), forward) + caster.radius <= 0) continue;
     draws.push(...caster.meshes.map(mesh => draw(mesh, matrix, true)));
@@ -171,20 +184,25 @@ function depthPass(candidate: Candidate, viewport: Rect, matrix: Mat4, world: re
   return { viewport, clearDepth: 1, draws };
 }
 
-/** Geometry digests include actual interpolated/deformed positions, including attached models. */
+/**
+ * Geometry digests include actual interpolated/deformed positions, including attached models.
+ * A fast FNV-1a mix over float32 bit patterns; only used to detect unchanged
+ * caster geometry between frames, so collisions at worst reuse one stale
+ * shadow frame — never worth SHA-256 over every vertex every frame.
+ */
+const digestBits = new DataView(new ArrayBuffer(4));
 function geometryDigest(meshes: readonly ShadowMesh[]): string {
-  const hash = new Bun.CryptoHasher("sha256");
+  let hash = 0x811c9dc5;
+  const mix = (value: number): void => {
+    digestBits.setFloat32(0, value);
+    hash = Math.imul(hash ^ digestBits.getUint32(0), 0x01000193);
+  };
   for (const mesh of meshes) {
-    hash.update(new Float64Array([mesh.positions.length, mesh.indices.length]));
-    const positions = new Float64Array(mesh.positions.length * 3);
-    let offset = 0;
-    for (const position of mesh.positions) {
-      positions[offset++] = position.x; positions[offset++] = position.y; positions[offset++] = position.z;
-    }
-    hash.update(positions);
-    hash.update(new Float64Array(mesh.indices));
+    mix(mesh.positions.length); mix(mesh.indices.length);
+    for (const position of mesh.positions) { mix(position.x); mix(position.y); mix(position.z); }
+    for (const index of mesh.indices) hash = Math.imul(hash ^ index, 0x01000193);
   }
-  return hash.digest("hex");
+  return (hash >>> 0).toString(16);
 }
 
 export class StaticShadowWorld {
@@ -206,7 +224,18 @@ export class StaticShadowWorld {
 export class Q2ShadowScene {
   private image: RendererImage | null = null;
   private cached = new Map<number, string>();
+  /** Projected static-world draws per light/face; casters are re-projected per rebuild. */
+  private worldDrawCache = new Map<string, readonly DepthAtlasDraw[]>();
   constructor(readonly images: SceneImageRegistry) {}
+
+  private worldDraws(key: string, compute: () => readonly DepthAtlasDraw[]): readonly DepthAtlasDraw[] {
+    const cached = this.worldDrawCache.get(key);
+    if (cached !== undefined) return cached;
+    if (this.worldDrawCache.size >= 256) this.worldDrawCache.clear();
+    const draws = compute();
+    this.worldDrawCache.set(key, draws);
+    return draws;
+  }
 
   prepare(source: readonly SceneLight[], worldInput: readonly ShadowMesh[] | StaticShadowWorld, casters: readonly ShadowCaster[], options: ShadowAtlasOptions = {}): PreparedShadows {
     const lights: Q2FragmentLight[] = source.filter(light => light.profile.kind === "q2").slice(0, maximumLights).map(light => ({ origin: light.origin, radius: light.radius,
@@ -239,11 +268,14 @@ export class Q2ShadowScene {
       signatures.set(candidate.index, signature);
       if (this.cached.get(candidate.index) === signature) { cachedLights++; continue; }
       rebuiltLights++; entityCasters += candidate.casters.length;
-      if (matrix !== null) passes.push(depthPass(candidate, slot, matrix, world, null));
+      const worldKeyPrefix = JSON.stringify([candidate.index, slot, light.origin, light.radius, light.cone, worldKey]);
+      if (matrix !== null) passes.push(depthPass(candidate, slot, matrix,
+        this.worldDraws(`${worldKeyPrefix}|cone`, () => world.filter(mesh => worldMeshVisible(mesh, light, null)).map(mesh => draw(mesh, matrix, false))), null));
       else for (const [face, basis] of Q2_SHADOW_CUBE_FACES.entries()) {
         const projection = shadowMatrixMultiply(perspective(90, light.radius), view(light.origin, basis));
         passes.push(depthPass(candidate, { x: slot.x + face % 3 * candidate.face, y: slot.y + Math.floor(face / 3) * candidate.face,
-          width: candidate.face, height: candidate.face }, projection, world, basis.forward));
+          width: candidate.face, height: candidate.face }, projection,
+          this.worldDraws(`${worldKeyPrefix}|${face}`, () => world.filter(mesh => worldMeshVisible(mesh, light, basis.forward)).map(mesh => draw(mesh, projection, false))), basis.forward));
       }
     }
     this.cached = signatures;
@@ -252,5 +284,5 @@ export class Q2ShadowScene {
       stats: { lights: cachedLights + rebuiltLights, cachedLights, rebuiltLights, facesRendered: passes.length, entityCasters } };
   }
 
-  close(): void { if (this.image !== null) { this.images.release(this.image); this.image = null; } this.cached.clear(); }
+  close(): void { if (this.image !== null) { this.images.release(this.image); this.image = null; } this.cached.clear(); this.worldDrawCache.clear(); }
 }

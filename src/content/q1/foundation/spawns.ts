@@ -94,6 +94,14 @@ export function spawnMapActor(game: Q1EntityServices, entity: Q1Actor): undefine
     case "func_plat": return spawnPlat(game, entity);
     case "func_wall": entity.solid = "bsp"; entity.movement = "push"; game.setBody(entity, { angles: ZERO }); entity.use = game.named.use(entity, "func_wall_use"); return undefined;
     case "trigger_once": case "trigger_multiple": case "trigger_secret": return spawnMulti(game, entity);
+    case "trigger_activate_coop_spawns": {
+      // Rerelease (Dimension of the Machine): touching this brush activates
+      // the map's info_player_coop points as respawn checkpoints.
+      initTrigger(game, entity);
+      entity.use = game.named.use(entity, "activate_coop_spawns_use");
+      if ((entity.spawnflags & 1) === 0) entity.touch = game.named.touch(entity, "activate_coop_spawns_touch");
+      return undefined;
+    }
     case "trigger_counter": return spawnCounter(game, entity);
     case "trigger_relay": entity.use = game.named.use(entity, "trigger_relay_use"); return undefined;
     case "trigger_teleport": return teleport(game, entity);
@@ -192,7 +200,16 @@ function pathTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): und
         else actor.idealYaw = yawFor(vsub(game.body(next.target).origin, game.body(actor).origin));
         return undefined;
 }
+function activateCoopSpawns(game: Q1EntityServices, entity: Q1Actor, activator: ActorId | null): undefined {
+  if (!game.live(entity)) return undefined;
+  for (const candidate of game.entities.values()) if (candidate.classname === "info_player_coop") candidate.activated = true;
+  game.useTargets(entity, activator);
+  if (game.live(entity)) { entity.touch = null; game.schedule(entity, 0.1, game.named.action(entity, "SUB_Remove")); }
+  return undefined;
+}
 export function registerSpawnCallbacks(game: Q1EntityServices): undefined {
+  game.named.register("activate_coop_spawns_use", { use: (runtime, entity, _other, activator) => activateCoopSpawns(runtime, entity, activator) });
+  game.named.register("activate_coop_spawns_touch", { touch: (runtime, entity, other) => runtime.isPlayer(other) ? activateCoopSpawns(runtime, entity, other) : undefined });
   game.named.register("multi_use", { use: (runtime, entity, _other, activator) => multiFire(runtime, entity, activator) });
   game.named.register("multi_killed", { die: multiFire });
   game.named.register("multi_touch", { touch: (runtime, entity, other) => {

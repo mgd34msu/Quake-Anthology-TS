@@ -45,7 +45,9 @@ export class Q1SpawnSelector {
     const region = entities.find(entity => entity.classname === "testplayerstart"); if (region !== undefined) return region;
     if (game.options.coop) {
       const after = this.lastSpawn === null ? -1 : entities.indexOf(this.lastSpawn);
-      const point = entities.slice(after + 1).find(entity => entity.classname === "info_player_coop") ?? entities.find(entity => entity.classname === "info_player_start");
+      const activated = entities.some(entity => entity.classname === "info_player_coop" && entity.activated);
+      const coopPoint = (entity: (typeof entities)[number]): boolean => entity.classname === "info_player_coop" && (!activated || entity.activated);
+      const point = entities.slice(after + 1).find(coopPoint) ?? entities.find(coopPoint) ?? entities.find(entity => entity.classname === "info_player_start");
       if (point !== undefined) { this.lastSpawn = point; return point; }
     } else if (game.options.deathmatch !== 0) {
       const points = entities.filter(entity => entity.classname === "info_player_deathmatch");

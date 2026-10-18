@@ -74,6 +74,8 @@ export class ApplicationWorldScene {
   private readonly foreignWeapons: ForeignHeldWeapons;
   private readonly nativeWeapons: NativeHeldWeapons;
   private readonly lightStyles = new Map<number, { readonly pattern: string; readonly owner?: PresentationOwner }>();
+  private lightStylesVersion = 0;
+  private stylesCache: { readonly key: string; readonly value: Pick<WorldViewInput, "q1Styles" | "q2Styles"> } | null = null;
   private inlineModels: NonNullable<WorldViewInput["inlineModels"]> = [];
   private brushModels: readonly BrushPresentation[] = [];
   private preparedTime = 0;
@@ -88,9 +90,11 @@ export class ApplicationWorldScene {
 
   receive(events: readonly SimulationPresentationEvent[]): void {
     for (const source of events) if (source.kind === "presentation-owner" && source.event.kind === "retired") {
-      for (const [style, value] of this.lightStyles) if (samePresentationOwner(value.owner, source.event.owner)) this.lightStyles.delete(style);
-    } else if ((source.kind === "q1" || source.kind === "q2") && source.event.kind === "lightstyle")
+      for (const [style, value] of this.lightStyles) if (samePresentationOwner(value.owner, source.event.owner)) { this.lightStyles.delete(style); this.lightStylesVersion++; }
+    } else if ((source.kind === "q1" || source.kind === "q2") && source.event.kind === "lightstyle") {
       this.lightStyles.set(source.event.style, { pattern: source.event.pattern, ...(source.owner === undefined ? {} : { owner: source.owner }) });
+      this.lightStylesVersion++;
+    }
   }
 
   style(index: number, absent: number): number {
@@ -337,10 +341,16 @@ export class ApplicationWorldScene {
   }
 
   styles(): Pick<WorldViewInput, "q1Styles" | "q2Styles"> {
-    return {
+    // Style values step at 10 Hz (style() truncates time), so the tables only
+    // change on a new step or when a pattern arrives — not every frame.
+    const key = `${Math.trunc(this.preparedTime * 10)}:${this.lightStylesVersion}`;
+    if (this.stylesCache?.key === key) return this.stylesCache.value;
+    const value = {
       q1Styles: Array.from({ length: 256 }, (_, index) => this.lightStyles.has(index) ? this.style(index, 12) * 22 : 256),
-      q2Styles: Array.from({ length: 256 }, (_, index) => { const value = this.style(index, 12) / 12; return { rgb: { x: value, y: value, z: value }, white: value * 3 }; })
+      q2Styles: Array.from({ length: 256 }, (_, index) => { const v = this.style(index, 12) / 12; return { rgb: { x: v, y: v, z: v }, white: v * 3 }; })
     };
+    this.stylesCache = { key, value };
+    return value;
   }
 
   view(input: WorldViewInput, operations: readonly SceneOperation[], shadowLights: readonly SceneLight[], infrared: boolean, weaponCamera: SceneCamera = input.camera): ReturnType<WorldScene["prepareView"]> {
