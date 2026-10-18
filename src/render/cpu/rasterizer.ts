@@ -21,6 +21,7 @@ import type { Q1Fog } from "../../materials/legacy-fog.ts";
 import { emitSourceTriangleStrips, sourcePrimitiveMode } from "./source.ts";
 import type { SourceStageData, SourceStageCell, PreparedSourceDraw } from "./source.ts";
 import { SourceStateBit, sourceStateChanges } from "../../materials/source-state.ts";
+import { projectPoint } from "../scene/view.ts";
 type TextureEnvironment = Extract<DrawBatch, { readonly texturing: "pair" }>["secondTexture"]["environment"];
 type CurrentTexCoord = { readonly kind: "known"; readonly value: Vec2 } | { readonly kind: "source-indeterminate" };
 type CurrentColor = { readonly kind: "known"; readonly value: Vec4 } | { readonly kind: "source-indeterminate" };
@@ -78,13 +79,18 @@ function snapshotSourceCells(scratch: readonly SourceStageCell[]): readonly Sour
     rawTexCoord: { ...cell.rawTexCoord }, rawTexCoord2: { ...cell.rawTexCoord2 } }));
 }
 
-function snapshotBatch(batch: DrawBatch): DrawBatch {
+function snapshotBatch(batch: DrawBatch, viewProjection: Mat4 | null = null): DrawBatch {
   const state = snapshotState(batch.state);
+  const project = (position: Vec4): Vec4 => {
+    if (batch.space !== "world") return { ...position };
+    if (viewProjection === null) throw new Error("CPU world-space batch requires a view projection");
+    return projectPoint(viewProjection, position);
+  };
   if (batch.texturing === "pair") return { ...batch, state, indices: [...batch.indices],
-    vertices: batch.vertices.map(vertex => ({ position: { ...vertex.position }, color: { ...vertex.color }, texCoord: { ...vertex.texCoord }, texCoord2: { ...vertex.texCoord2 } })),
+    vertices: batch.vertices.map(vertex => ({ position: project(vertex.position), color: { ...vertex.color }, texCoord: { ...vertex.texCoord }, texCoord2: { ...vertex.texCoord2 } })),
     texture: { ...batch.texture }, secondTexture: { ...batch.secondTexture, binding: { ...batch.secondTexture.binding } } };
   return { ...batch, state, indices: [...batch.indices], texture: { ...batch.texture },
-    vertices: batch.vertices.map(vertex => ({ position: { ...vertex.position }, color: { ...vertex.color }, texCoord: { ...vertex.texCoord } })) };
+    vertices: batch.vertices.map(vertex => ({ position: project(vertex.position), color: { ...vertex.color }, texCoord: { ...vertex.texCoord } })) };
 }
 
 function snapshotSourceBatch(batch: SourceStageData["batch"], state: RenderState): DrawBatch {
@@ -287,6 +293,7 @@ export class SoftwareRenderer implements RendererBackend {
   private blendEnabled = false;
   private depthTestEnabled = false;
   private portalView = false;
+  private viewProjectionState: Mat4 | null = null;
   private closed = false;
 
   constructor(readonly width: number, readonly height: number, readonly owner: RendererResourceOwner,
@@ -411,6 +418,7 @@ export class SoftwareRenderer implements RendererBackend {
     if (view.clipPlane !== null && !finiteVector(view.clipPlane)) throw new RangeError("CPU clip plane must be finite");
     this.viewport = { x, y, width, height };
     this.clipPlane = view.clipPlane;
+    this.viewProjectionState = view.viewProjection ?? null;
     this.portalView = view.clipPlane !== null;
     if (view.clear === null) return;
     const clear = view.clear;
@@ -477,7 +485,7 @@ export class SoftwareRenderer implements RendererBackend {
   prepareGeometry(input: DrawBatch): PreparedBackendDraw {
     this.assertOpen();
     const resolveTexture = createTextureResolver(resource => this.applyImageResource(resource));
-    const batch = snapshotBatch(input);
+    const batch = snapshotBatch(input, this.viewProjectionState);
     if (batch.lighting.kind !== "vertex") {
       if (batch.lighting.lights.length > 8) throw new RangeError("Q2 fragment lighting accepts at most eight selected lights per draw");
       for (const index of batch.indices) {

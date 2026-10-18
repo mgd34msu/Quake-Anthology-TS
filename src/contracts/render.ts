@@ -190,6 +190,9 @@ export type BatchFog = { readonly kind: "exp2"; readonly effect?: "color" | "non
 interface BatchData {
   readonly fog?: BatchFog;
   readonly textureEffect?: "luminance-alpha";
+  /** Vertex position space: pre-projected clip coordinates (default) or world
+   * coordinates to be transformed by the view's viewProjection matrix. */
+  readonly space?: "clip" | "world";
   readonly indices: readonly number[]; readonly texture: TextureBinding; readonly state: RenderState;
   readonly lighting: BatchLighting;
 }
@@ -252,6 +255,8 @@ export interface RenderViewState {
   readonly viewport: Rect;
   readonly clear: { readonly depth: number; readonly color: Vec4 | null; readonly stencil: boolean } | null;
   readonly clipPlane: Vec4 | null;
+  /** Column-major view-projection for batches in "world" space. */
+  readonly viewProjection?: Mat4;
 }
 export interface RenderView extends RenderViewState {
   readonly target: { readonly kind: "seat"; readonly seat: SeatId } | { readonly kind: "preview"; readonly id: string };

@@ -44,6 +44,7 @@ export class GlRenderer implements RendererBackend {
   private alphaTest: RenderState["alphaTest"] = "none";
   private textureUnit: 0 | 1 | 2 | 3 | null = null;
   private matricesIdentity = false;
+  private viewProjection: Float32Array | null = null;
   private currentCull: RenderState["cull"] | undefined;
   private rangeNear: number | undefined;
   private rangeFar: number | undefined;
@@ -171,6 +172,15 @@ export class GlRenderer implements RendererBackend {
     this.matricesIdentity = true;
   }
 
+  /** World-space batches are transformed by the GPU with the view's matrix. */
+  private worldMatrices(): void {
+    const projection = this.viewProjection;
+    if (projection === null) throw new Error("OpenGL world-space batch requires a view projection");
+    this.gl.glMatrixMode(0x1701); this.gl.glLoadMatrixf(projection);
+    this.gl.glMatrixMode(0x1700); this.gl.glLoadIdentity();
+    this.matricesIdentity = false;
+  }
+
   private invalidateState(): void {
     this.textureUnit = null;
     this.matricesIdentity = false;
@@ -266,6 +276,8 @@ export class GlRenderer implements RendererBackend {
     if (![x, y, width, height, bottom].every(value => Number.isInteger(value) && value >= -0x80000000 && value <= 0x7fffffff)
       || width < 1 || height < 1) throw new RangeError("OpenGL viewport requires positive int32 dimensions");
     const gl = this.gl;
+    this.viewProjection = view.viewProjection === undefined ? null : Float32Array.from(view.viewProjection);
+    if (this.viewProjection !== null && ![...this.viewProjection].every(Number.isFinite)) throw new RangeError("OpenGL view projection must be finite");
     gl.glViewport(x, bottom, width, height);
     gl.glEnable(0xc11);
     gl.glScissor(x, bottom, width, height);
@@ -315,7 +327,7 @@ export class GlRenderer implements RendererBackend {
         if (atlas !== null && atlas.content.kind !== "depth32f") throw new Error("Q2 shadow atlas requires a depth32f image");
         this.drawTarget();
         this.state(state);
-        this.identityMatrices();
+        if (batch.space === "world") this.worldMatrices(); else this.identityMatrices();
         this.program.use(environment, state.alphaTest, batch.lighting, batch.textureEffect === "luminance-alpha", batch.fog);
         this.activeArrays = arrays;
         phase = "active";

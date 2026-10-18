@@ -2,7 +2,7 @@
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Axis, Bounds, Mat4, Plane, Vec3, Vec4 } from "../../contracts/math.ts";
 import type { SceneCamera } from "../../contracts/render.ts";
-import { add3, dot3, scale3, sub3 } from "../../core/math.ts";
+import { add3, dot3, multiplyMat4, scale3, sub3 } from "../../core/math.ts";
 
 export interface ModelTransform { readonly origin: Vec3; readonly axis: Axis; readonly scale?: number; }
 
@@ -28,6 +28,31 @@ export function perspectiveProjection(fovX: number, fovY: number, far: number, n
   const height = f(2 * f(near * Math.tan(fovY * Math.PI / 360))), depth = f(far - near);
   return [f(2 * near / width), 0, 0, 0, 0, f(2 * near / height), 0, 0,
     0, 0, f(-f(far + near) / depth), -1, 0, 0, f(f(-2 * far * near) / depth), 0];
+}
+
+/** Full world-to-clip matrix for a camera: projection * view (column-major). */
+export function viewProjectionMatrix(camera: SceneCamera): Mat4 {
+  const [forward, left, up] = camera.axis;
+  const eyeX = { x: -left.x, y: -left.y, z: -left.z, w: dot3(camera.origin, left) };
+  const eyeY = { ...up, w: -dot3(camera.origin, up) };
+  const eyeZ = { x: -forward.x, y: -forward.y, z: -forward.z, w: dot3(camera.origin, forward) };
+  const view: Mat4 = [
+    eyeX.x, eyeY.x, eyeZ.x, 0,
+    eyeX.y, eyeY.y, eyeZ.y, 0,
+    eyeX.z, eyeY.z, eyeZ.z, 0,
+    eyeX.w, eyeY.w, eyeZ.w, 1,
+  ];
+  return multiplyMat4(camera.projection, view);
+}
+
+/** Stage-frounded matrix projection, matching createViewProjector's arithmetic. */
+export function projectPoint(matrix: Mat4, point: Vec3): Vec4 {
+  const component = (a: number, b: number, c: number, d: number): number =>
+    f(f(f(f(point.x * a) + f(point.y * b)) + f(point.z * c)) + d);
+  return { x: component(matrix[0], matrix[4], matrix[8], matrix[12]),
+    y: component(matrix[1], matrix[5], matrix[9], matrix[13]),
+    z: component(matrix[2], matrix[6], matrix[10], matrix[14]),
+    w: component(matrix[3], matrix[7], matrix[11], matrix[15]) };
 }
 
 export function createViewProjector(camera: SceneCamera, model?: ModelTransform): (point: Vec3) => Vec4 {

@@ -30,7 +30,7 @@ import { SceneShaderRegistry } from "./shaders.ts";
 import type { SceneShaderBinding } from "./shaders.ts";
 import { normalizeShaderName, stripShaderExtension } from "../../materials/material.ts";
 import type { SceneTexture } from "./textures.ts";
-import { boundsInFrustum, cameraFrustum, createViewProjector, farClip, portalClipPlane, worldPoint, localPoint, modelScale, worldVector } from "./view.ts";
+import { boundsInFrustum, cameraFrustum, createViewProjector, farClip, portalClipPlane, viewProjectionMatrix, worldPoint, localPoint, modelScale, worldVector } from "./view.ts";
 import type { ModelTransform } from "./view.ts";
 import { visibleWorld } from "./visibility.ts";
 import type { VisibleWorld, WorldVisibilityOptions } from "./visibility.ts";
@@ -540,6 +540,7 @@ export class WorldScene {
         ? (this.remap(surface)?.material ?? surface.shader)?.finished.iterator.kind === "sky"
         : surface.kind === "legacy" && surface.material.kind === "q2" && (surface.material.surfaceFlags & 4) !== 0) });
     return { visibility, imageOperations: this.shaders.textures.images.drainOperations(), view: { target: input.target, time: input.time,
+      viewProjection: viewProjectionMatrix(input.camera),
       viewport: input.camera.viewport, clear: input.clear === undefined ? { color: null, depth: 1, stencil: false } : input.clear,
       clipPlane: portalClipPlane(input.camera), beforeView: input.beforeView ?? [], operations: mergeDrawOperations(fogSceneOperations(finishSceneOperations(operations), input.noWorldModel === true ? undefined : input.q1Fog)) } };
   }

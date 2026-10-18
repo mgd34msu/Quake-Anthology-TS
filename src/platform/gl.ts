@@ -73,6 +73,7 @@ export function loadGl(window: Pick<SdlRenderContext, "getGlProcAddress" | "reta
     glFrontFace: { args: ["u32"], returns: "void", ptr: window.getGlProcAddress("glFrontFace") },
     glMatrixMode: { args: ["u32"], returns: "void", ptr: window.getGlProcAddress("glMatrixMode") },
     glLoadIdentity: { args: [], returns: "void", ptr: window.getGlProcAddress("glLoadIdentity") },
+    glLoadMatrixf: { args: ["buffer"], returns: "void", ptr: window.getGlProcAddress("glLoadMatrixf") },
     glOrtho: { args: ["f64", "f64", "f64", "f64", "f64", "f64"], returns: "void", ptr: window.getGlProcAddress("glOrtho") },
     glBegin: { args: ["u32"], returns: "void", ptr: window.getGlProcAddress("glBegin") },
     glEnd: { args: [], returns: "void", ptr: window.getGlProcAddress("glEnd") },
