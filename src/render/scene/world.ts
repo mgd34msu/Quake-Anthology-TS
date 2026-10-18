@@ -208,8 +208,11 @@ export class WorldScene {
           grid = createPatchGrid(tessellatePatch(vertices, surface.width, surface.height, options.subdivisions ?? 4), [surface.lightmap.vectors[0], surface.lightmap.vectors[1]]);
           patchOrdinals.push(index); patches.push(grid);
         } else if (surface.kind === "planar") plane = { normal: surface.lightmap.vectors[2], distance: vertices[0] === undefined ? 0 : dot3(vertices[0].position, surface.lightmap.vectors[2]) };
-        else if (vertices.length >= 3) {
-          const a = at(vertices, 0).position, normal = normalize3(cross3(sub3(at(vertices, 1).position, a), sub3(at(vertices, 2).position, a)));
+        else if (vertices.length >= 3 && geometry.indices.length >= 3) {
+          // Q3 R_PlaneForSurface: PlaneFromPoints on the first indexed triangle,
+          // normal = (c-a) x (b-a) ("out of the clock" for clockwise points).
+          const a = at(vertices, at(geometry.indices, 0)).position;
+          const normal = normalize3(cross3(sub3(at(vertices, at(geometry.indices, 2)).position, a), sub3(at(vertices, at(geometry.indices, 1)).position, a)));
           plane = { normal, distance: dot3(a, normal) };
         }
         const lightmapIndex = surface.kind === "planar" || surface.kind === "patch" ? surface.lightmap.image : -3;

@@ -39,9 +39,10 @@ export class Q3WorldAdapter implements ServerWorld, ActorSpatialQueries {
     const result = this.traceActor({ ...input, passActor: this.actor(input.passEntityNum) });
     let entityNum = result.hit.kind === "none" ? 1023 : 1022;
     if (result.hit.kind === "actor") {
+      // A foreign actor without a Q3 projection (e.g. a Q1 rocket) still blocks the
+      // trace; Q3 sees it as the world rather than an entity it cannot name.
       const entity = this.records.byActor(result.hit.actor);
-      if (entity === null) throw new Error("Shared collision actor has no Q3 source projection");
-      entityNum = entity.slot;
+      if (entity !== null) entityNum = entity.slot;
     }
     return { fraction: result.fraction, end: result.end, entityNum, contact: result.contact,
       solidity: result.solidity, contents: result.contents, surfaceFlags: result.surfaceFlags };
@@ -62,8 +63,7 @@ export class Q3WorldAdapter implements ServerWorld, ActorSpatialQueries {
     const output: number[] = [];
     for (const actor of this.areaActors(bounds, maximum)) {
       const entity = this.records.byActor(actor);
-      if (entity === null) throw new Error("Shared spatial actor has no Q3 source projection");
-      output.push(entity.slot);
+      if (entity !== null) output.push(entity.slot);
     }
     return output;
   }

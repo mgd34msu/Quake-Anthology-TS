@@ -261,8 +261,14 @@ export class GameBotCatalog {
     this.game.activateBot(clientNum);
     this.game.options.engine.setUserinfo(clientNum, userinfo);
     if (this.game.clientConnect(clientNum, true, true) !== null) return;
-    if (delay === 0) { this.game.clientBegin(clientNum); return; }
-    this.addToSpawnQueue(clientNum, delay);
+    if (delay === 0) this.game.clientBegin(clientNum);
+    else this.addToSpawnQueue(clientNum, delay);
+    // Q3's G_AddBot tells clients to finish deferred model loads. The original
+    // also required level time > 1s because a client still loading reads the
+    // configstring during init; here init may already be done within that
+    // window, and a loaddefered sent before init is harmless because the
+    // loading pass registers the bot's own model from the configstring.
+    if (this.cvarInteger("cl_running") !== 0) this.game.options.engine.sendServerCommand(-1, "loaddefered\n");
   }
 
   consoleCommand(argv: readonly string[]): void {
@@ -274,9 +280,6 @@ export class GameBotCatalog {
     if (!name) { this.print("Usage: Addbot <botname> [skill 1-5] [team] [msec delay] [altname]\n"); return; }
     const skill = argument(2), delay = argument(4);
     this.addBot(name, skill ? gameAtof(skill) : 4, argument(3), delay ? gameAtoi(delay) : 0, argument(5));
-    if (((this.game.clock.time - this.game.clock.startTime) | 0) > 1000 && this.cvarInteger("cl_running") !== 0) {
-      this.game.options.engine.sendServerCommand(-1, "loaddefered\n");
-    }
   }
 
   private listBots(): void {

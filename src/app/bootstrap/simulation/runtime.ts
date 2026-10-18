@@ -2882,7 +2882,9 @@ export class SharedSimulation implements Simulation {
           return clientSpeedMultiplier(client.ps);
         },
         previewPickup: item => this.previewSelectedQ3Pickup(item),
-        foreign: actor => { if (this.actors.isLive(actor)) throw new Error("Foreign Q3 actor projection is not attached"); return null; },
+        // Foreign arsenal/world actors (Q1/Q2 projectiles, gibs) live in the shared
+        // simulation without Q3 entity projections; Q3 queries report them as no entity.
+        foreign: () => null,
         isPlayer: actor => this.player(actor) !== null,
         moverActors: {
           observe: id => {
@@ -2920,6 +2922,10 @@ export class SharedSimulation implements Simulation {
         for (const definition of q3GameCvarDefinitions(product)) host.cvars.register(definition.name, definition.value, definition.flags);
         this.initializeServerSettings(host.cvars);
       }
+      // Q3's client layer owns cl_running; game code (bot admission) reads it to
+      // decide whether a local client should finish deferred model loads.
+      if (host.cvars.find("cl_running") === undefined) host.cvars.register("cl_running", this.options.dedicated === true ? "0" : "1");
+      else host.cvars.set("cl_running", this.options.dedicated === true ? "0" : "1", true);
       const objectives = adaptForeignQ3Objectives(this.options.world, product, host.cvars.variableValue("g_gametype"));
       if (objectives.kind !== "ready") throw new Error(`Selected Q3 objectives are unavailable: ${JSON.stringify(objectives)}`);
       return { kind: "q3", game: new Q3SourceRuntime({ recipe, weaponBehavior: this.weaponBehavior, weaponProvider: this.weaponProvider, product, entities: objectives.entities,

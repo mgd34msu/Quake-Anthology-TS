@@ -107,7 +107,7 @@ export class StartupMenu {
   private hostDraft: StartupHosting = { kind: "offline", port: 27910, q1Protocol: null };
   private hostPort = "27910";
   private modsMenu: UiMenuId | null = null;
-  private builderDropdown: { readonly field: StartupSelectionField; scroll: number; edition: "classic" | "rerelease" | null; collapsed: readonly string[] } | null = null;
+  private builderDropdown: { readonly field: StartupSelectionField; readonly stage: StartupSelectionField; scroll: number; edition: "classic" | "rerelease" | null; collapsed: readonly string[] } | null = null;
   private builderPreviewFocusArmed = false;
 
   constructor(private readonly options: StartupMenuOptions) {
@@ -391,12 +391,63 @@ export class StartupMenu {
   private prepareBuilderDropdownScroll(scroll: number): void {
     if (this.builderDropdown === null) return;
     this.builderDropdown = { ...this.builderDropdown, scroll };
-    if (this.builderDropdown.field !== "map") return;
+    if (this.builderDropdown.stage !== "map") return;
     const preparation = this.options.model.prepareMapChoices(scroll, 8);
     if (preparation === null) return;
     this.setStatus("Checking map rules...", true);
     void preparation.then(() => this.setStatus(""))
       .catch((error: unknown) => this.setStatus(error instanceof Error ? error.message : String(error)));
+  }
+  /** Fields that stage inside one picker panel: maps live inside Map set; model/skin/colors inside Character. */
+  private stageChain(field: StartupSelectionField): readonly StartupSelectionField[] {
+    if (field === "mapProduct") return ["mapProduct", "map"];
+    if (field === "character") return ["character", "model", "skin", "topColor", "bottomColor"];
+    return [field];
+  }
+  /** Edition/collapse/scroll state for opening a picker stage at its current selection. */
+  private dropdownOpenState(row: StartupSelectionRow): { edition: "classic" | "rerelease" | null; collapsed: readonly string[]; scroll: number } {
+    const current = row.choices.find(choice => choice.id === row.value);
+    const editions = new Set(row.choices.flatMap(choice => choice.edition === undefined ? [] : [choice.edition]));
+    const edition = editions.size > 1 ? current?.edition ?? "classic" : null;
+    const groups = [...new Set(row.choices.flatMap(choice => choice.group === undefined ? [] : [choice.group]))];
+    const collapsed = groups.filter(group => group !== current?.group);
+    const entries = this.dropdownEntries(row, edition, collapsed);
+    const visibleCount = edition === null ? 8 : 7;
+    const selectedIndex = Math.max(0, entries.findIndex(entry => entry.kind === "choice" && entry.choice.id === row.value));
+    // Open at the selection's category header when the selection still
+    // fits below it; only scroll past the header for deep selections.
+    let headerIndex = -1;
+    for (let index = selectedIndex - 1; index >= 0; index--) if (entries[index]?.kind === "header") { headerIndex = index; break; }
+    const anchored = headerIndex >= 0 && selectedIndex - headerIndex < visibleCount ? headerIndex : selectedIndex;
+    const scroll = Math.max(0, Math.min(anchored, Math.max(0, entries.length - visibleCount)));
+    return { edition, collapsed, scroll };
+  }
+  /** Move the open picker to its next stage (e.g. Map set -> Map). Returns false at the final stage. */
+  private advanceStage(): boolean {
+    const dropdown = this.builderDropdown;
+    if (dropdown === null) return false;
+    const chain = this.stageChain(dropdown.field);
+    const rows = new Map(this.safeRows().map(row => [row.id, row]));
+    const next = chain.slice(chain.indexOf(dropdown.stage) + 1).find(field => rows.has(field));
+    if (next === undefined) return false;
+    const row = rows.get(next);
+    if (row === undefined) return false;
+    this.builderDropdown = { field: dropdown.field, stage: next, ...this.dropdownOpenState(row) };
+    if (next === "map") this.prepareBuilderDropdownScroll(this.builderDropdown.scroll);
+    return true;
+  }
+  /** Move the open picker back one stage. Returns false when already at the first stage. */
+  private retreatStage(): boolean {
+    const dropdown = this.builderDropdown;
+    if (dropdown === null || dropdown.stage === dropdown.field) return false;
+    const chain = this.stageChain(dropdown.field);
+    const rows = new Map(this.safeRows().map(row => [row.id, row]));
+    const previous = chain.slice(0, chain.indexOf(dropdown.stage)).reverse().find(field => rows.has(field));
+    if (previous === undefined) return false;
+    const row = rows.get(previous);
+    if (row === undefined) return false;
+    this.builderDropdown = { field: dropdown.field, stage: previous, ...this.dropdownOpenState(row) };
+    return true;
   }
   /** One list for both editions: classic/rerelease variants of the same title collapse to a single entry. */
   private variantKey(choice: StartupSelectionChoice): string {
@@ -449,7 +500,7 @@ export class StartupMenu {
   } {
     const all = new Map(this.safeRows().map(row => [row.id, row]));
     const dropdown = this.builderDropdown;
-    const appearanceDropdown = dropdown !== null && this.options.characterTurntable !== undefined && characterAppearanceFields.has(dropdown.field);
+    const appearanceDropdown = dropdown !== null && this.options.characterTurntable !== undefined && characterAppearanceFields.has(dropdown.stage);
     const panelX = dropdown === null ? -1 : appearanceDropdown ? 64
       : ["product", "mapProduct", "map", "enemies", "character", "model", "skin", "topColor", "bottomColor", "movement", "weapons"].includes(dropdown.field) ? 328 : 64;
     const sections: readonly { readonly title: string; readonly x: number;
@@ -457,15 +508,10 @@ export class StartupMenu {
       { title: "WORLD", x: 64, fields: [
         { field: "product", label: "Game", picker: true },
         { field: "mapProduct", label: "Map set", picker: true },
-        { field: "map", label: "Map", picker: true, indent: true },
         { field: "enemies", label: "Monsters", picker: true },
       ] },
       { title: "PLAYER", x: 64, fields: [
         { field: "character", label: "Character", picker: true },
-        { field: "model", label: "Model", picker: true, indent: true },
-        { field: "skin", label: "Skin", picker: true, indent: true },
-        { field: "topColor", label: "Shirt", picker: true, indent: true },
-        { field: "bottomColor", label: "Pants", picker: true, indent: true },
         { field: "movement", label: "Movement", picker: true },
         { field: "weapons", label: "Weapons", picker: true },
       ] },
@@ -500,21 +546,16 @@ export class StartupMenu {
         const enabled = !this.busy && dropdown === null;
         if (spec.picker) {
           const selected = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
-          const display = spec.field === "enemies" ? selected.replace(" authored monsters", "")
+          let display = spec.field === "enemies" ? selected.replace(" authored monsters", "")
             : spec.field === "weapons" ? selected.replace(/ weapons$/, "") : selected;
+          // Staged pickers summarize their deeper stages on the root row.
+          const stagedSummary = spec.field === "mapProduct" ? all.get("map") : spec.field === "character" ? all.get("model") : undefined;
+          const stagedRaw = stagedSummary?.choices.find(choice => choice.id === stagedSummary.value)?.label;
+          const stagedLabel = spec.field === "mapProduct" && stagedRaw !== undefined ? stagedRaw.replace(/^maps\//, "").replace(/\.bsp$/, "") : stagedRaw;
+          if (stagedLabel !== undefined) display = `${display} / ${stagedLabel}`;
           fields.push({ control: { ...this.button(row.id, "", 0, () => {
-              const current = row.choices.find(choice => choice.id === row.value);
-              const editions = new Set(row.choices.flatMap(choice => choice.edition === undefined ? [] : [choice.edition]));
-              const edition = editions.size > 1 ? current?.edition ?? "classic" : null;
-              const groups = [...new Set(row.choices.flatMap(choice => choice.group === undefined ? [] : [choice.group]))];
-              const collapsed = groups.filter(group => group !== current?.group);
-              const entries = this.dropdownEntries(row, edition, collapsed);
-              const visibleCount = edition === null ? 8 : 7;
-              const selectedIndex = Math.max(0, entries.findIndex(entry => entry.kind === "choice" && entry.choice.id === row.value));
-              const scroll = Math.max(0, Math.min(selectedIndex, Math.max(0, entries.length - visibleCount)));
-              this.builderDropdown = { field: spec.field, scroll, edition, collapsed };
+              this.builderDropdown = { field: spec.field, stage: spec.field, ...this.dropdownOpenState(row) };
               this.builderPreviewFocusArmed = false;
-              if (spec.field === "map") this.prepareBuilderDropdownScroll(scroll);
             }), rect, enabled }, rect, label: spec.label, value: { text: `${display} >`, width: valueWidth } });
         } else {
           const available = row.choices.filter(choice => choice.unavailable === null);
@@ -533,11 +574,12 @@ export class StartupMenu {
       toggle: { classic: { control: UiControl; selected: boolean }; rerelease: { control: UiControl; selected: boolean } } | null;
       items: { control: UiControl; choice: string; label: string; selected: boolean; header: boolean; indent: boolean; unavailable: string | null }[] } | null = null;
     if (dropdown !== null) {
-      const row = all.get(dropdown.field);
+      const row = all.get(dropdown.stage);
       if (row === undefined) this.builderDropdown = null;
       else {
         const entries = this.dropdownEntries(row, dropdown.edition, dropdown.collapsed);
-        const visibleCount = dropdown.edition === null ? 8 : 7;
+        const staged = dropdown.stage !== dropdown.field;
+        const visibleCount = (dropdown.edition === null ? 8 : 7) - (staged ? 1 : 0);
         const itemsTop = dropdown.edition === null ? 138 : 164;
         const scroll = Math.max(0, Math.min(dropdown.scroll, Math.max(0, entries.length - visibleCount)));
         let itemScale: number = menuText.field;
@@ -548,12 +590,12 @@ export class StartupMenu {
           this.builderDropdown = { ...this.builderDropdown, edition, scroll: 0 };
           // The toggle picks which edition of the selected title is in effect;
           // the list itself is unified and does not change.
-          const fresh = this.options.model.rows().find(candidate => candidate.id === dropdown.field);
+          const fresh = this.options.model.rows().find(candidate => candidate.id === dropdown.stage);
           const current = fresh?.choices.find(choice => choice.id === fresh.value);
           if (fresh === undefined || current === undefined || current.edition === undefined || current.edition === edition) return;
           const counterpart = this.editionVariant(fresh, current, edition);
           if (counterpart !== undefined && counterpart.id !== current.id && counterpart.unavailable === null) {
-            this.options.model.select(dropdown.field, counterpart.id);
+            this.options.model.select(dropdown.stage, counterpart.id);
             this.status = "";
           }
         };
@@ -563,8 +605,8 @@ export class StartupMenu {
           rerelease: { control: { ...this.button("edition-rerelease", "", 0, () => switchEdition("rerelease")),
             rect: { x: panelX + 128, y: 136, width: 120, height: 22 } }, selected: dropdown.edition === "rerelease" },
         };
-        const items = entries.slice(scroll, scroll + visibleCount).map((entry, index) => {
-          const rect = { x: panelX, y: itemsTop + index * 27, width: 248, height: 26 };
+        const entryItems = entries.slice(scroll, scroll + visibleCount).map((entry, index) => {
+          const rect = { x: panelX, y: itemsTop + (index + (staged ? 1 : 0)) * 27, width: 248, height: 26 };
           if (entry.kind === "header") {
             const group = entry.group;
             const control: UiControl = { id: `ui:startup:group:${group}`, kind: "button", label: "", rect, visible: true, enabled: !this.busy,
@@ -588,15 +630,25 @@ export class StartupMenu {
           const control: UiControl = { id: appearanceDropdown || !selected ? `ui:startup:choice:${choice.id}` : `ui:startup:${row.id}`, kind: "button", label: "", rect,
             visible: true, enabled: choice.unavailable === null && !this.busy,
             activate: () => {
-              const wasSelected = this.options.model.rows().find(candidate => candidate.id === dropdown.field)?.value === choice.id;
-              this.options.model.select(dropdown.field, choice.id);
+              const wasSelected = this.options.model.rows().find(candidate => candidate.id === dropdown.stage)?.value === choice.id;
+              this.options.model.select(dropdown.stage, choice.id);
               this.status = "";
-              if (!appearanceDropdown || wasSelected) { this.builderDropdown = null; this.builderPreviewFocusArmed = false; }
-              if (dropdown.field === "enemies" && choice.id === "custom") this.openRoster();
+              if (!this.advanceStage() && (!appearanceDropdown || wasSelected)) { this.builderDropdown = null; this.builderPreviewFocusArmed = false; }
+              if (dropdown.stage === "enemies" && choice.id === "custom") this.openRoster();
               return undefined;
             } };
           return { control, choice: choice.id, label: `${selected ? "> " : ""}${choice.label}`, selected, header: false, indent: choice.group !== undefined, unavailable: choice.unavailable };
         });
+        const items = entryItems;
+        if (staged) {
+          const chain = this.stageChain(dropdown.field);
+          const previousField = chain.slice(0, chain.indexOf(dropdown.stage)).reverse().find(field => all.has(field));
+          const previousRow = previousField === undefined ? undefined : all.get(previousField);
+          const previousLabel = previousRow?.choices.find(choice => choice.id === previousRow.value)?.label ?? previousRow?.label ?? "Back";
+          items.unshift({ control: { id: "ui:startup:stage-back", kind: "button", label: "", rect: { x: panelX, y: itemsTop, width: 248, height: 26 },
+            visible: true, enabled: !this.busy, activate: () => { this.retreatStage(); return undefined; } },
+            choice: row.value, label: `< ${previousLabel}`, selected: false, header: true, indent: false, unavailable: null });
+        }
         dropdownSpec = { x: panelX, title: row.label, itemScale, itemsTop, scroll: { offset: scroll, visible: visibleCount, total: entries.length }, toggle, items };
       }
     }
@@ -638,11 +690,11 @@ export class StartupMenu {
         ? focusedCandidate : undefined);
       const overrides: Parameters<StartupSelectionModel["characterPreview"]>[0] = {};
       if (candidate !== undefined) {
-        if (dropdown.field === "character") overrides.character = candidate.choice;
-        else if (dropdown.field === "model") overrides.model = candidate.choice;
-        else if (dropdown.field === "skin") overrides.skin = candidate.choice;
-        else if (dropdown.field === "topColor") overrides.topColor = candidate.choice;
-        else if (dropdown.field === "bottomColor") overrides.bottomColor = candidate.choice;
+        if (dropdown.stage === "character") overrides.character = candidate.choice;
+        else if (dropdown.stage === "model") overrides.model = candidate.choice;
+        else if (dropdown.stage === "skin") overrides.skin = candidate.choice;
+        else if (dropdown.stage === "topColor") overrides.topColor = candidate.choice;
+        else if (dropdown.stage === "bottomColor") overrides.bottomColor = candidate.choice;
       }
       const preview = this.options.model.characterPreview(overrides);
       const colorLabel = (field: "topColor" | "bottomColor", value: number): string =>
@@ -718,11 +770,11 @@ export class StartupMenu {
   input(event: SeatInputEvent): boolean {
     if (this.busy) return true;
     if (this.controller.activeMenu === session && this.builderDropdown !== null) {
-      if (event.kind === "key" && event.code === KeyCode.Escape) { this.builderDropdown = null; this.builderPreviewFocusArmed = false; return true; }
+      if (event.kind === "key" && event.down && event.code === KeyCode.Escape) { if (!this.retreatStage()) { this.builderDropdown = null; this.builderPreviewFocusArmed = false; } return true; }
       if (event.kind === "key" && [KeyCode.Tab, KeyCode.Up, KeyCode.Down, KeyCode.Left, KeyCode.Right,
         KeyCode.PageUp, KeyCode.PageDown, KeyCode.Home, KeyCode.End].includes(event.code)) this.builderPreviewFocusArmed = true;
       if (event.kind === "key" && event.down && (event.code === KeyCode.PageDown || event.code === KeyCode.PageUp)) {
-        const row = this.safeRows().find(candidate => candidate.id === this.builderDropdown?.field);
+        const row = this.safeRows().find(candidate => candidate.id === this.builderDropdown?.stage);
         const entries = row === undefined ? [] : this.dropdownEntries(row, this.builderDropdown.edition, this.builderDropdown.collapsed);
         const visible = this.builderDropdown.edition === null ? 8 : 7;
         this.prepareBuilderDropdownScroll(Math.max(0, Math.min(Math.max(0, entries.length - visible),
@@ -730,7 +782,7 @@ export class StartupMenu {
         return true;
       }
       if (event.kind === "mouse-wheel" && event.delta.y !== 0) {
-        const row = this.safeRows().find(candidate => candidate.id === this.builderDropdown?.field);
+        const row = this.safeRows().find(candidate => candidate.id === this.builderDropdown?.stage);
         const entries = row === undefined ? [] : this.dropdownEntries(row, this.builderDropdown.edition, this.builderDropdown.collapsed);
         const visible = this.builderDropdown.edition === null ? 8 : 7;
         this.prepareBuilderDropdownScroll(Math.max(0, Math.min(Math.max(0, entries.length - visible), this.builderDropdown.scroll + (event.delta.y < 0 ? 1 : -1))));
