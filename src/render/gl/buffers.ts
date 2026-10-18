@@ -79,9 +79,10 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
   if (vertices.length > 0x1fffffff) throw new RangeError("OpenGL vertex allocation is too large");
   if (batch.primitive === "lines" && (!Number.isFinite(Math.fround(batch.lineWidth)) || batch.lineWidth <= 0))
     throw new RangeError("OpenGL line width must be positive and finite");
-  // Indices/attributes come from internal batch producers; per-element
-  // validation here ran over every vertex of every batch every frame and
-  // cost more than the packing itself. Structural checks above remain.
+  for (const index of indices) {
+    if (!(index >= 0) || index >= vertices.length || index % 1 !== 0)
+      throw new RangeError("OpenGL vertex index is outside its allocation");
+  }
   const arrays = allocate(vertices.length, indices.length, batch.lighting.kind);
   arrays.indices.set(indices);
   if (batch.texturing === "single") arrays.coordinates2.fill(0);
@@ -117,6 +118,12 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
         offset += 3;
       }
     }
+  }
+  // Native typed-array scans keep the finite-float32 contract without the
+  // per-element JS validation that used to dominate this function.
+  for (const values of [arrays.positions, arrays.colors, arrays.coordinates, arrays.coordinates2, arrays.worldPositions, arrays.normals]) {
+    if (values.includes(Number.NaN) || values.includes(Number.POSITIVE_INFINITY) || values.includes(Number.NEGATIVE_INFINITY))
+      throw new RangeError("OpenGL attributes must be finite float32 values");
   }
   return arrays;
 }

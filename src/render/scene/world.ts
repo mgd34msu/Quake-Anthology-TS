@@ -1,6 +1,6 @@
 import { currentRemap } from "./material-registrations.ts";
 import type { SceneMaterialRemap, RegisteredSceneMaterial, ShaderWorldIdentity, ShaderRemapResult } from "./material-registrations.ts";
-import { compiledDrawGroup, createSourceSceneOrder, sourceDrawGroup, sequenceDrawGroup, finishSceneOperations } from "./submissions.ts";
+import { compiledDrawGroup, createSourceSceneOrder, sourceDrawGroup, sequenceDrawGroup, finishSceneOperations, mergeDrawOperations } from "./submissions.ts";
 import type { SceneOperation, SourceEntityOrder, SourceSceneOrder, SourceSurfaceOrder } from "./submissions.ts";
 /* Unified world preparation uses Q1/Q2 brush surfaces and Q3 tr_bsp/tr_world.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
@@ -541,7 +541,7 @@ export class WorldScene {
         : surface.kind === "legacy" && surface.material.kind === "q2" && (surface.material.surfaceFlags & 4) !== 0) });
     return { visibility, imageOperations: this.shaders.textures.images.drainOperations(), view: { target: input.target, time: input.time,
       viewport: input.camera.viewport, clear: input.clear === undefined ? { color: null, depth: 1, stencil: false } : input.clear,
-      clipPlane: portalClipPlane(input.camera), beforeView: input.beforeView ?? [], operations: fogSceneOperations(finishSceneOperations(operations), input.noWorldModel === true ? undefined : input.q1Fog) } };
+      clipPlane: portalClipPlane(input.camera), beforeView: input.beforeView ?? [], operations: mergeDrawOperations(fogSceneOperations(finishSceneOperations(operations), input.noWorldModel === true ? undefined : input.q1Fog)) } };
   }
 
   private surfaceOperations(surface: WorldSurface, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform, lighting?: { readonly mask: number; readonly lights: readonly DynamicLight[] }, order?: SourceSurfaceOrder): readonly SceneOperation[] {

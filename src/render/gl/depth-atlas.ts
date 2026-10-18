@@ -47,10 +47,17 @@ export class DepthAtlasTarget {
         throw new RangeError("OpenGL depth atlas viewport is outside its image");
       if (pass.clearDepth !== null && (!Number.isFinite(pass.clearDepth) || pass.clearDepth < 0 || pass.clearDepth > 1))
         throw new RangeError("OpenGL depth atlas clear must be in 0..1");
-      // Vertex/index data comes from internal producers (shadowProject over
-      // finite scene geometry); per-vertex validation here cost more than
-      // the draw itself on shadow-heavy maps, so only structure is checked.
-      for (const draw of pass.draws) if (draw.indices.length % 3 !== 0) throw new RangeError("OpenGL depth atlas triangles are incomplete");
+      for (const draw of pass.draws) {
+        if (draw.indices.length % 3 !== 0) throw new RangeError("OpenGL depth atlas triangles are incomplete");
+        for (const position of draw.positions) {
+          if (!Number.isFinite(Math.fround(position.x)) || !Number.isFinite(Math.fround(position.y))
+            || !Number.isFinite(Math.fround(position.z)) || !Number.isFinite(Math.fround(position.w)))
+            throw new RangeError("OpenGL depth atlas vertices must be finite float32");
+        }
+        for (const index of draw.indices) {
+          if (!(index >= 0) || index >= draw.positions.length || index % 1 !== 0) throw new RangeError("OpenGL depth atlas vertex index is invalid");
+        }
+      }
     }
     const integer = (name: number, count = 1): Int32Array => {
       const values = new Int32Array(count); gl.glGetIntegerv(name, values); return values;

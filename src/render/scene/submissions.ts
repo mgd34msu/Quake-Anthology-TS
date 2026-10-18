@@ -1,4 +1,4 @@
-import type { DrawBatch, RenderOperation } from "../../contracts/render.ts";
+import type { BatchLighting, DrawBatch, RenderOperation, RenderState, TextureBinding } from "../../contracts/render.ts";
 import type { CompiledMaterial } from "../../materials/compile.ts";
 import type { RegisteredSceneMaterial, SceneMaterialRegistrations, ShaderRegistration } from "./material-registrations.ts";
 import { packSourceDrawSort, sortDrawSurfs } from "./source-sort.ts";
@@ -126,6 +126,97 @@ export function finishSceneOperations(input: readonly SceneOperation[]): readonl
   for (const operation of input) {
     if (operation.kind === "scene-group") pending.push({ group: operation, ordinal: pending.length });
     else { flush(); result.push(operation); }
+  }
+  flush();
+  return result;
+}
+
+function sameRenderState(a: RenderState, b: RenderState): boolean {
+  return a.blend.source === b.blend.source && a.blend.destination === b.blend.destination
+    && a.depthTest === b.depthTest && a.depthWrite === b.depthWrite && a.alphaTest === b.alphaTest && a.cull === b.cull
+    && a.depthRange[0] === b.depthRange[0] && a.depthRange[1] === b.depthRange[1]
+    && (a.polygonOffset === null && b.polygonOffset === null
+      || a.polygonOffset !== null && b.polygonOffset !== null && a.polygonOffset.factor === b.polygonOffset.factor && a.polygonOffset.units === b.polygonOffset.units);
+}
+function sameTexture(a: TextureBinding, b: TextureBinding): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "bind-image" && b.kind === "bind-image") return a.image === b.image;
+  if (a.kind === "dynamic-image" && b.kind === "dynamic-image") return a.source === b.source;
+  return true;
+}
+function sameLighting(a: BatchLighting, b: BatchLighting): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "vertex") return true;
+  if (a.kind === "q2-model-shadow" && b.kind === "q2-model-shadow")
+    return a.atlas === b.atlas && a.shadeScale === b.shadeScale && a.lights === b.lights;
+  if (a.kind === "q2-world" && b.kind === "q2-world") {
+    if (a.pass !== b.pass || a.atlas !== b.atlas || a.lights !== b.lights) return false;
+    return a.pass !== "model" || b.pass === "model" && a.shadeScale === b.shadeScale;
+  }
+  return false;
+}
+function mergeable(a: DrawBatch, b: DrawBatch): boolean {
+  if (a.texturing !== b.texturing || a.primitive !== b.primitive || a.textureEffect !== b.textureEffect) return false;
+  if (a.primitive === "lines" && b.primitive === "lines" && a.lineWidth !== b.lineWidth) return false;
+  if (!sameTexture(a.texture, b.texture) || !sameRenderState(a.state, b.state) || !sameLighting(a.lighting, b.lighting)) return false;
+  if (a.texturing === "pair" && b.texturing === "pair"
+    && (a.secondTexture.environment !== b.secondTexture.environment || !sameTexture(a.secondTexture.binding, b.secondTexture.binding))) return false;
+  const fa = a.fog, fb = b.fog;
+  if ((fa === undefined) !== (fb === undefined)) return false;
+  if (fa !== undefined && fb !== undefined) {
+    if (fa.kind !== fb.kind || fa.color.x !== fb.color.x || fa.color.y !== fb.color.y || fa.color.z !== fb.color.z) return false;
+    if (fa.kind === "exp2" && fb.kind === "exp2" && (fa.density !== fb.density || fa.effect !== fb.effect)) return false;
+    if (fa.kind === "constant" && fb.kind === "constant" && fa.amount !== fb.amount) return false;
+  }
+  return true;
+}
+function mergedLighting(a: BatchLighting, b: BatchLighting): BatchLighting {
+  if (a.kind === "q2-world" && b.kind === "q2-world")
+    return { ...a, worldPositions: [...a.worldPositions, ...b.worldPositions], normals: [...a.normals, ...b.normals] };
+  if (a.kind === "q2-model-shadow" && b.kind === "q2-model-shadow")
+    return { ...a, worldPositions: [...a.worldPositions, ...b.worldPositions] };
+  return a;
+}
+function mergeBatch(a: DrawBatch, b: DrawBatch): DrawBatch {
+  const offset = a.vertices.length;
+  return { ...a, lighting: mergedLighting(a.lighting, b.lighting),
+    vertices: [...a.vertices, ...b.vertices] as never,
+    indices: [...a.indices, ...b.indices.map(index => index + offset)] } as DrawBatch;
+}
+/**
+ * Adjacent draws with identical state render identically when concatenated
+ * (primitive order is preserved), so merge them: static world surfaces share
+ * materials heavily, and each unmerged batch pays full pack + bind costs.
+ */
+export function mergeDrawOperations(input: readonly RenderOperation[]): readonly RenderOperation[] {
+  const result: RenderOperation[] = [];
+  let pending: DrawBatch[] = [];
+  const owned = new WeakSet<DrawBatch>();
+  const flush = (): void => { if (pending.length !== 0) { result.push({ kind: "draw", batches: pending }); pending = []; } };
+  for (const operation of input) {
+    if (operation.kind !== "draw") { flush(); result.push(operation); continue; }
+    for (const batch of operation.batches) {
+      const last = pending[pending.length - 1];
+      if (last === undefined || !mergeable(last, batch)) { pending.push(batch); continue; }
+      if (!owned.has(last)) {
+        const merged = mergeBatch(last, batch);
+        owned.add(merged);
+        pending[pending.length - 1] = merged;
+        continue;
+      }
+      // `last` was built by this pass; extend its fresh arrays in place
+      // instead of re-copying the accumulated geometry on every merge.
+      const offset = last.vertices.length;
+      const vertices = last.vertices as DrawBatch["vertices"][number][], indices = last.indices as number[];
+      for (const vertex of batch.vertices) vertices.push(vertex as never);
+      for (const index of batch.indices) indices.push(index + offset);
+      if (last.lighting.kind === "q2-world" && batch.lighting.kind === "q2-world") {
+        (last.lighting.worldPositions as { x: number; y: number; z: number }[]).push(...batch.lighting.worldPositions);
+        (last.lighting.normals as { x: number; y: number; z: number }[]).push(...batch.lighting.normals);
+      } else if (last.lighting.kind === "q2-model-shadow" && batch.lighting.kind === "q2-model-shadow") {
+        (last.lighting.worldPositions as { x: number; y: number; z: number }[]).push(...batch.lighting.worldPositions);
+      }
+    }
   }
   flush();
   return result;

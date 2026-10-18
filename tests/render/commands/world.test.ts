@@ -2,7 +2,7 @@ import { SceneMaterialRegistrations } from "../../../src/render/scene/material-r
 import { testCorpusRoot } from "../../support/corpus.ts";
 
 import { prepareMaterialBatches } from "../../../src/materials/evaluate.ts";
-import { compiledDrawGroup, sequenceDrawGroup, finishSceneOperations, sceneModelBatches, createSourceSceneOrder, sourceDrawGroup } from "../../../src/render/scene/submissions.ts";
+import { compiledDrawGroup, sequenceDrawGroup, finishSceneOperations, sceneModelBatches, createSourceSceneOrder, sourceDrawGroup, mergeDrawOperations } from "../../../src/render/scene/submissions.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -139,7 +139,8 @@ ordering/flash { cull none
     } finally { missingScene.close(); }
     const legacy = sequenceDrawGroup("opaque", legacyBatches);
     const before = drawBatches(scene.prepareView({ ...input, operations: [flashGroup, legacy, markGroup] }).view.operations);
-    expect(before.slice(1)).toEqual([...legacyBatches, ...markBatches, ...flashBatches]);
+    // Ordering is preserved; prepareView may merge adjacent identical-state batches.
+    expect(before.slice(1)).toEqual(drawBatches(mergeDrawOperations([{ kind: "draw", batches: [...legacyBatches, ...markBatches, ...flashBatches] }] )));
     await scene.remapShader("ordering/world", "ordering/remap");
     shaders.addScript("ordering/peer { sort 6 { map $whiteimage } }");
     const peer = await shaders.register("ordering/peer"), peerGroup = sourceDrawGroup(peer, sourceOrder, markBatches);
@@ -154,9 +155,11 @@ ordering/flash { cull none
     expect(finishSceneOperations([...genericRemapped, compiledDrawGroup(peer, markBatches)])[0]?.kind).toBe("draw");
     expect(drawBatches(finishSceneOperations([...genericRemapped, compiledDrawGroup(peer, markBatches)]))[0]).toBe(markBatches[0]);
     const remapped = drawBatches(scene.prepareView({ ...input, operations: [flashGroup, legacy, markGroup] }).view.operations);
-    expect(remapped.slice(0, legacyBatches.length + markBatches.length)).toEqual([...legacyBatches, ...markBatches]);
-    expect(remapped.at(legacyBatches.length + markBatches.length)?.vertices[0]?.color.x).toBeCloseTo(0.2, 2);
-    expect(remapped.slice(-2)).toEqual([...flashBatches]);
+    const remappedExpected = drawBatches(mergeDrawOperations([{ kind: "draw", batches: [...legacyBatches, ...markBatches] }]));
+    expect(remapped.slice(0, remappedExpected.length)).toEqual(remappedExpected);
+    expect(remapped.at(remappedExpected.length)?.vertices[0]?.color.x).toBeCloseTo(0.2, 2);
+    // Identical additive state lets the world batch merge with both flash stages, in order.
+    expect(remapped.at(-1)?.vertices.map(vertex => Math.round(vertex.color.x * 10))).toEqual([2, 2, 2, 4, 4, 4, 6, 6, 6]);
     const barrier: RenderOperation = { kind: "depth-range", range: [0, 0.3] };
     expect(finishSceneOperations([sourceA, barrier, otherView])).toEqual([...sourceA.operations, barrier, ...otherView.operations]);
     expect(finishSceneOperations([flashGroup, barrier, markGroup])).toEqual([...flashGroup.operations, barrier, ...markGroup.operations]);
