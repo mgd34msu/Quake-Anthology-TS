@@ -47,7 +47,7 @@ test.skipIf(!enabled)("public Q3 training selection launches skill four Crash an
       expect(controller.state().focus).toMatchObject({ control: id }); tap(KeyCode.Enter); await owner.step();
     };
     await choose("ui:startup:native");
-    await choose("ui:startup:game:q3:classic");
+    await choose("ui:startup:game:q3");
     await choose("ui:startup:preset:q3-baseq3");
     await until(() => observed.controller?.activeMenu === "menu:library:arena-selection", "authored arena picker");
     await choose("ui:arena-select:play");

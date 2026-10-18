@@ -74,7 +74,7 @@ test.skipIf(process.env["QUAKE_ADDON_ASSETS"] === undefined || process.env["QUAK
     expect(owner.inputSeat).toBe(retained);
     for(let attempt=0;attempt<8&&observed.controller?.activeMenu!=="menu:startup:main";attempt++){key(KeyCode.Escape);await owner.step();}
     expect(observed.controller?.activeMenu).toBe("menu:startup:main");await screenshot("addon-return-main.png");
-    await choose("ui:startup:native");await choose("ui:startup:game:q3:classic");await choose("ui:startup:preset:q3-baseq3");
+    await choose("ui:startup:native");await choose("ui:startup:game:q3");await choose("ui:startup:preset:q3-baseq3");
     await until(()=>observed.controller?.activeMenu==="menu:library:arena-selection"&&observed.labels.some(label=>label.startsWith("Opponents:")),"drawn Q3 arena menu",()=>owner.step());
     expect(observed.labels.some(label=>label.startsWith("Opponents:"))).toBe(true);await screenshot("q3-tier-selection.png");
     for(let attempt=0;attempt<8&&observed.controller?.activeMenu!=="menu:startup:main";attempt++){key(KeyCode.Escape);await owner.step();}

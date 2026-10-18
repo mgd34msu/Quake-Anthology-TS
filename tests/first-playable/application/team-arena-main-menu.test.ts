@@ -61,7 +61,7 @@ test.skipIf(!existsSync(join(corpus, "q3a/missionpack/pak0.pk3")))("Team Arena n
       if (dispatch) await owner.step();
     };
     await chooseStartup("ui:startup:native");
-    await chooseStartup("ui:startup:game:q3:classic");
+    await chooseStartup("ui:startup:game:q3");
     await chooseStartup("ui:startup:preset:q3-missionpack");
     await chooseStartup("ui:startup:play-preset", false);
     await owner.step();

@@ -140,33 +140,40 @@ export class StartupMenu {
     this.register(libraryMenu, () => [...libraryPages.map((page, index) => this.button(`library:${page.name}`, page.label, index, () => this.controller.openMenu(page.root), true)), this.back()]);
     this.register(nativeFamilyMenu, () => [
       ...([
-        { family: "q1", edition: "classic", label: "Quake classic" },
-        { family: "q1", edition: "rerelease", label: "Quake rerelease" },
-        { family: "q2", edition: "classic", label: "Quake II classic" },
-        { family: "q2", edition: "rerelease", label: "Quake II rerelease" },
-        { family: "q3", edition: "classic", label: "Quake III Arena" },
-      ] satisfies { family: StartupNativePreset["family"]; edition: string; label: string }[]).map((game, index) => ({
-        ...this.button(`game:${game.family}:${game.edition}`, game.label, index, () => {
-          this.nativeFamily = game.family; this.nativeEdition = game.edition; this.status = ""; this.controller.openMenu(nativeCampaignMenu);
-        }, true), enabled: !this.busy && options.model.presets().some(preset => preset.family === game.family && preset.edition === game.edition),
-      })), this.button("custom", "Custom game", 5, () => { this.status = ""; this.controller.openMenu(session); }, true), this.back(),
+        { family: "q1", label: "Quake" },
+        { family: "q2", label: "Quake II" },
+        { family: "q3", label: "Quake III" },
+      ] satisfies { family: StartupNativePreset["family"]; label: string }[]).map((game, index) => ({
+        ...this.button(`game:${game.family}`, game.label, index, () => {
+          this.nativeFamily = game.family; this.status = ""; this.controller.openMenu(nativeCampaignMenu);
+        }, true), enabled: !this.busy && options.model.presets().some(preset => preset.family === game.family),
+      })), this.button("custom", "Custom game", 3, () => { this.status = ""; this.controller.openMenu(session); }, true), this.back(),
     ]);
     const arenas: UiMenuId = "menu:library:arena-selection";
     this.disposers.push(registerArenaSelectionMenu(this.controller, arenas, {
       read: () => options.model.baseArenas(),
       choose: map => { this.nativeArena = map; this.controller.openMenu(nativeDifficultyMenu); },
     }));
-    this.register(nativeCampaignMenu, () => [
-      ...this.nativeCampaigns().map((preset, index) => ({
-        ...this.button(`preset:${preset.id}`, this.fit(`${preset.label}${preset.unavailable === null ? "" : " (unavailable)"}`, 486, menuText.body), index, () => {
+    this.register(nativeCampaignMenu, () => {
+      // One unified title list per family; the Classic/Rerelease toggle only
+      // chooses which edition variant of the picked title launches (titles
+      // with a single edition, e.g. Quake II 64, always use that edition).
+      const familyPresets = options.model.presets().filter(preset => preset.family === this.nativeFamily);
+      const toggle = familyPresets.some(preset => preset.edition === "classic") && familyPresets.some(preset => preset.edition === "rerelease")
+        ? (["classic", "rerelease"] as const).map((edition, index) => ({
+          ...this.button(`edition-${edition}`, `${this.nativeEdition === edition ? "> " : ""}${edition === "classic" ? "Classic" : "Rerelease"}`, 0, () => { this.nativeEdition = edition; this.status = ""; }, true),
+          rect: { x: index === 0 ? 64 : 328, y: 118, width: 248, height: 30 } })) : [];
+      const offset = toggle.length === 0 ? 0 : 1;
+      return [...this.nativeCampaigns().map((preset, index) => ({
+        ...this.button(`preset:${preset.id}`, this.fit(`${preset.label}${preset.unavailable === null ? "" : " (unavailable)"}`, 486, menuText.body), offset + index, () => {
           this.nativePreset = preset; this.nativeSkill = preset.defaultSkill; this.nativeArena = undefined; this.status = "";
           if (preset.id !== "q3-baseq3") { this.controller.openMenu(nativeDifficultyMenu); return; }
           this.setStatus("Loading arenas...", true);
           options.model.refreshBaseArenas().then(() => { this.setStatus(""); this.controller.openMenu(arenas); })
             .catch((error: unknown) => this.setStatus(error instanceof Error ? error.message : String(error)));
         }, true), enabled: !this.busy && preset.unavailable === null,
-      })), this.back(),
-    ]);
+      })), ...toggle, this.back()];
+    });
     this.register(nativeDifficultyMenu, () => {
       const preset = this.nativePreset;
       if (preset === null) return [this.back()];
@@ -288,8 +295,15 @@ export class StartupMenu {
   private familyLabel(family: StartupNativePreset["family"]): string {
     return family === "q1" ? "Quake" : family === "q2" ? "Quake II" : "Quake III Arena";
   }
+  /** Unified by title: the edition toggle picks the variant, it never changes which titles are listed. */
   private nativeCampaigns(): readonly StartupNativePreset[] {
-    return this.options.model.presets().filter(preset => preset.family === this.nativeFamily && preset.edition === this.nativeEdition);
+    const variants = new Map<string, StartupNativePreset[]>();
+    for (const preset of this.options.model.presets()) {
+      if (preset.family !== this.nativeFamily) continue;
+      const list = variants.get(preset.label);
+      if (list === undefined) variants.set(preset.label, [preset]); else list.push(preset);
+    }
+    return [...variants.values()].map(list => list.find(preset => preset.edition === this.nativeEdition) ?? list[0] as StartupNativePreset);
   }
   /** Menu display must survive a selected product whose content is not installed. */
   private safeRows(): readonly StartupSelectionRow[] {
@@ -816,14 +830,15 @@ export class StartupMenu {
     const panel = appearance.highContrast && originalPanel.kind === "fill" ? { ...originalPanel, color: colors.panel } : originalPanel;
     const title = active === main ? "QUAKE" : active === session ? "Custom game" : active === hostingMenu ? "Host a game"
       : active === libraryMenu ? "Library" : active === nativeFamilyMenu ? "Play a game"
-      : active === nativeCampaignMenu ? `${this.familyLabel(this.nativeFamily)}${this.nativeFamily === "q3" ? "" : this.nativeEdition === "classic" ? " classic" : " rerelease"}`
+      : active === nativeCampaignMenu ? this.familyLabel(this.nativeFamily)
       : active === nativeDifficultyMenu ? "Difficulty"
       : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
       : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === browserDetailsMenu ? "Server details" : active === browserOptionsMenu ? "Server filters" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
     if (!active?.startsWith("menu:settings:") && !active?.startsWith("menu:library:") && !active?.startsWith("menu:bindings:") && !active?.startsWith("menu:mods:") && !active?.startsWith("menu:settings:llm") && !active?.startsWith("menu:settings:display:") && !active?.startsWith("menu:settings:input:") && !active?.startsWith("menu:settings:accessibility:")) text(title, 64, 44, active === main ? menuText.mainTitle : menuText.title, true, true);
     if (active === this.bindingMenu) text(this.fit(`Player 1 - ${this.options.model.catalog.product(this.options.model.options.product).expectation.title}`, 512, menuText.small), 64, 458, menuText.small);
 
-    if (active === nativeDifficultyMenu && this.nativePreset !== null) text(this.fit(this.nativePreset.label, 512, menuText.label), 64, 86, menuText.label);
+    if (active === nativeDifficultyMenu && this.nativePreset !== null) text(this.fit(this.nativePreset.family === "q3" ? this.nativePreset.label
+      : `${this.nativePreset.label} · ${this.nativePreset.edition === "rerelease" ? "Rerelease" : "Classic"}`, 512, menuText.label), 64, 86, menuText.label);
     if (active === nativeCampaignMenu) {
       const unavailable = this.nativeCampaigns().find(preset => preset.unavailable !== null);
       if (unavailable?.unavailable) text(this.fit(unavailable.unavailable, 512, menuText.label), 64, 395, menuText.label, true);

@@ -200,7 +200,7 @@ test.skipIf(!corpusHasFile("q1/id1/PAK0.PAK"))("mouse startup roster edits actua
     click(1); click(0);
     expect((await model.resolve()).recipe.presentation.doppler).toEqual({ kind: "source" });
     menu.controller.closeMenu(); menu.controller.closeMenu();
-    click(0); click(5);
+    click(0); click(3);
     expect(menu.controller.activeMenu).toBe("menu:startup:session");
     const pressEnter = (): void => {
       menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 13, down: true, repeat: false });

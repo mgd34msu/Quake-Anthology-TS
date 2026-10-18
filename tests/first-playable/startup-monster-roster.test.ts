@@ -98,17 +98,20 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
       throw new Error(`Unreachable control ${id}`);
     };
     for (const [familyIndex, family] of ["q1", "q2", "q3"].entries()) {
-      for (const [editionIndex, edition] of (family === "q3" ? ["classic"] : ["classic", "rerelease"]).entries()) {
+      for (const edition of family === "q3" ? ["classic"] : ["classic", "rerelease"]) {
         const presets = model.presets().filter(preset => preset.family === family && preset.edition === edition);
         if (presets.length === 0) continue;
         click(100, 130); expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
         await capture("native-game-choices");
-        click(100, 130 + (familyIndex * 2 + editionIndex) * 34);
+        click(100, 130 + familyIndex * 34);
         expect(menu.controller.activeMenu).toBe("menu:startup:native-campaign");
+        // Unified title list; the toggle row selects the edition variant.
+        if (family !== "q3") click(edition === "classic" ? 188 : 452, 130);
+        const campaignRowOffset = family === "q3" ? 0 : 1;
         await capture(`native-${family}-${edition}-campaigns`);
         for (const [index, preset] of presets.entries()) {
           const before = nativeLaunches.length;
-          click(100, 130 + index * 34);
+          click(100, 130 + (campaignRowOffset + index) * 34);
           if (preset.unavailable !== null) {
             expect(menu.controller.activeMenu).toBe("menu:startup:native-campaign"); expect(nativeLaunches).toHaveLength(before); continue;
           }
@@ -138,7 +141,7 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     key(KeyCode.Enter); expect(menu.controller.activeMenu).toBe("menu:startup:native-difficulty");
     for (let index = 0; index < 3; index++) key(KeyCode.Escape);
     await capture("native-main-menu");
-    click(100, 130); click(100, 300);
+    click(100, 130); click(100, 232);
     expect(menu.controller.activeMenu).toBe("menu:startup:session");
     key(KeyCode.Escape);
     expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
@@ -148,7 +151,7 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
     key(KeyCode.Escape);
     expect(menu.controller.activeMenu).toBe("menu:startup:main");
-    click(100, 130); click(100, 300);
+    click(100, 130); click(100, 232);
     const dropdownPick = (choiceId: string): void => {
       const row = model.rows().find(candidate => candidate.id === "enemies");
       const choices = row?.choices ?? [], target = choices.find(option => option.id === choiceId);
