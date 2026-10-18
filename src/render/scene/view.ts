@@ -62,9 +62,13 @@ export function cameraFrustum(camera: SceneCamera): readonly Plane[] {
 }
 
 export function boundsInFrustum(bounds: Bounds, planes: readonly Plane[]): boolean {
-  return planes.every(plane => dot3({ x: plane.normal.x >= 0 ? bounds.max.x : bounds.min.x,
-    y: plane.normal.y >= 0 ? bounds.max.y : bounds.min.y,
-    z: plane.normal.z >= 0 ? bounds.max.z : bounds.min.z }, plane.normal) >= plane.distance);
+  for (const plane of planes) {
+    const x = plane.normal.x >= 0 ? bounds.max.x : bounds.min.x;
+    const y = plane.normal.y >= 0 ? bounds.max.y : bounds.min.y;
+    const z = plane.normal.z >= 0 ? bounds.max.z : bounds.min.z;
+    if (x * plane.normal.x + y * plane.normal.y + z * plane.normal.z < plane.distance) return false;
+  }
+  return true;
 }
 
 export function farClip(origin: Vec3, bounds: Bounds): number {
