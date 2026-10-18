@@ -6,7 +6,7 @@ import type { ApplicationBotNavigation, ApplicationBotNavigationCheckpoint } fro
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
 import { createSharedBotWorld } from "./bot-world.ts";
 import type { SourceBotGame } from "../../../bots/behavior/q3/game-host.ts";
-import { closeSync, fstatSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
+import { closeSync, fstatSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { ActorId, ClientId, OwnedActor } from "../../../contracts/identity.ts";
@@ -588,7 +588,10 @@ function applicationBotLog(filename: string, resumePosition: number | null): Bot
           offset += written; position += written;
         }
       }),
-      flush: () => result(() => { fsyncSync(descriptor); }),
+      // Writes above are synchronous writeSync calls, already visible to any
+      // reader; the source fflush has no durability requirement, and an
+      // fsync per botlib log line stalls frames whenever bots are active.
+      flush: () => ({ kind: "ok" }),
       close: () => result(() => { closeSync(descriptor); }),
     } };
   } catch (error) { return { kind: "failed", error: error instanceof Error ? error : new Error(String(error)) }; }
