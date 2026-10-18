@@ -49,8 +49,9 @@ export class Q2RereleaseLights implements Q2SpawnModule {
   };
   private readonly think: Q2Think = (entity, game) => {
     if ((entity.spawnflags & 4) !== 0 && game.host.random() < 0.5) entity.serverFlags ^= 1;
-    const style = this.hooks.lightStyle(entity.style), target = game.entity(entity.chain);
-    if (style.length === 0) throw new Error(`target_light requires source lightstyle ${entity.style}`);
+    // Unseeded styles (e.g. N64's offset table) render steady elsewhere in
+    // the engine; cycle against "m" instead of aborting the whole frame.
+    const style = this.hooks.lightStyle(entity.style) || "m", target = game.entity(entity.chain);
     if (target === null) throw new Error("target_light lost its source color target");
     entity.delay += entity.speed;
     const index = Math.trunc(entity.delay) % style.length, current = (style.charCodeAt(index) - 97) / 25;

@@ -84,6 +84,10 @@ export function createQ2TargetModule(): Q2SpawnModule {
         for (let index = 0; index < 8; index++) {
           const body = game.create("bodyque"); body.visible = false; body.serverFlags = 1;
         }
+        // Source SP_worldspawn seeds the canonical animated light styles;
+        // styled faces and target_light color cycling rely on them existing.
+        const styles = ["m", "mmnmmommommnonmmonqnmmo", "abcdefghijklmnopqrstuvwxyzyxwvutsrqponmlkjihgfedcba", "mmmmmaaaaammmmmaaaaaabcdefgabcdefg", "mamamamamama", "jklmnopqrstuvwxyzyxwvutsrqponmlkj", "nmonqnmomnmomomno", "mmmaaaabcdefgmmmmaaaammmaamm", "mmmaaammmaaammmabcdefaaaammmmabcdefmmmaaaa", "aaaaaaaazzzzzzzz", "mmamammmmammamamaaamammma", "abcdefghijklmnopqrrqponmlkjihgfedcba"];
+        for (const [style, pattern] of styles.entries()) game.host.emit({ kind: "lightstyle", style, pattern });
         game.host.emit({ kind: "music", track: entity.spawn.values.get("sounds") ?? "0" });
         return true;
       }
