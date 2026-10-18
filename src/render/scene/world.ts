@@ -155,6 +155,21 @@ export class WorldScene {
   private readonly staticLightStyles = new Map<WorldSurface, readonly number[]>();
   /** Static world position/normal arrays for fragment lighting, reused across frames. */
   private readonly staticWorldArrays = new WeakMap<MaterialGeometry, { readonly worldPositions: readonly Vec3[]; readonly normals: readonly Vec3[] }>();
+  /** Modulated fragment-light lists are identical for every surface in a view; build once per lights array. */
+  private readonly fragmentLightsCache = new WeakMap<readonly unknown[], { all: unknown; shadowOnly: unknown }>();
+
+  private fragmentLights(lights: readonly import("../../contracts/render.ts").Q2FragmentLight[], shadowOnly: boolean): readonly import("../../contracts/render.ts").Q2FragmentLight[] {
+    let entry = this.fragmentLightsCache.get(lights);
+    if (entry === undefined) { entry = { all: null, shadowOnly: null }; this.fragmentLightsCache.set(lights, entry as { all: unknown; shadowOnly: unknown }); }
+    const slot = entry as { all: unknown; shadowOnly: unknown };
+    const modulate = this.options.q2LightModulate ?? 1;
+    if (shadowOnly) {
+      slot.shadowOnly ??= lights.filter(light => light.cone !== null || light.shadow.kind !== "none").map(light => ({ ...light, scale: light.scale * modulate }));
+      return slot.shadowOnly as readonly import("../../contracts/render.ts").Q2FragmentLight[];
+    }
+    slot.all ??= lights.map(light => ({ ...light, scale: light.scale * modulate }));
+    return slot.all as readonly import("../../contracts/render.ts").Q2FragmentLight[];
+  }
 
   private worldArrays(geometry: MaterialGeometry, model?: ModelTransform): { readonly worldPositions: readonly Vec3[]; readonly normals: readonly Vec3[] } {
     if (model !== undefined) return {
@@ -541,8 +556,8 @@ export class WorldScene {
     }
     if (surface.lightmap !== null) {
       const lightmap = surface.lightmap;
-      const lights = (material.kind === "q2" && input.q2FragmentLighting !== undefined ? [] : input.lights ?? []).map(light => {
-        if (model === undefined) return light;
+      const sourceLights = material.kind === "q2" && input.q2FragmentLighting !== undefined ? [] : input.lights ?? [];
+      const lights = model === undefined ? sourceLights : sourceLights.map(light => {
         const scale = Math.abs(modelScale(model));
         return { ...light, origin: localPoint(light.origin, model), radius: light.radius / scale, minimum: light.minimum / scale,
           color: { x: light.color.x * scale, y: light.color.y * scale, z: light.color.z * scale } };
@@ -579,7 +594,7 @@ export class WorldScene {
       q1FogActive: (input.q1Fog?.density ?? 0) > 0,
       q1LightmapEncoding: surface.lightmap?.encoding ?? "rgb",
       ...(fragmentLighting === undefined ? {} : { fragmentLighting: { kind: "q2-world",
-        ...this.worldArrays(surface.geometry, model), pass: "texture", lights: fragmentLighting.lights.filter(light => material.kind !== "q1" || light.cone !== null || light.shadow.kind !== "none").map(light => ({ ...light, scale: light.scale * (this.options.q2LightModulate ?? 1) })), atlas: fragmentLighting.atlas } }),
+        ...this.worldArrays(surface.geometry, model), pass: "texture", lights: this.fragmentLights(fragmentLighting.lights, material.kind === "q1"), atlas: fragmentLighting.atlas } }),
       ...(surface.lightmap === null ? {} : { translucentLightmap: surface.lightmap.direct }), cull: context.deformView.mirror !== (model !== undefined && modelScale(model) < 0) ? "back" : "front", depthRange: context.depthRange, project: context.project });
     return [sequenceDrawGroup(material.alpha * context.entityRGBA.w / 255 < 1 ? "translucent" : "opaque", batches)];
   }
@@ -608,7 +623,7 @@ export class WorldScene {
     const lightmapLighting: MaterialDrawContext["lightmapLighting"] = fragmentLighting === undefined ? undefined : geometry => ({
       kind: "q2-world", pass: "material-lightmap",
       ...this.worldArrays(geometry, model),
-      lights: fragmentLighting.lights.map(light => ({ ...light, scale: light.scale * (this.options.q2LightModulate ?? 1) })), atlas: fragmentLighting.atlas,
+      lights: this.fragmentLights(fragmentLighting.lights, false), atlas: fragmentLighting.atlas,
     });
     const drawContext = { ...(fog === null ? context : this.materialContext(input, model, fog)), timeOffset: remap?.timeOffset ?? 0,
       dynamicLightBatches, ...(lightmapLighting === undefined ? {} : { lightmapLighting }) };
