@@ -45,8 +45,10 @@ export class Q3GuestSpatial implements QvmServerSpatialOperations {
       const slot = this.records.requireSlot(actor.body.actor);
       if (slot === passEntityNum) continue;
       const entity = this.records.entity(slot), model = entity.r.model;
+      // Source CM_TransformedPointContents uses the entity-state transform
+      // (s.origin/s.angles), which can diverge from the link transform.
       if (model.kind === 'inline') {
-        const value = this.scene.pointContents({ point, target: { kind: 'model', model: model.index, origin: entity.r.currentOrigin, angles: entity.r.currentAngles }, passActor: null, numeric: Q3_BINARY32_PROFILE,
+        const value = this.scene.pointContents({ point, target: { kind: 'model', model: model.index, origin: entity.s.origin, angles: entity.s.angles }, passActor: null, numeric: Q3_BINARY32_PROFILE,
           policy: { kind: 'q3', contentsMask: -1, curves: true, playerCurveClip: true } });
         if (value.kind !== 'q3') throw new Error('Guest inline contents query lost its Q3 policy');
         contents |= value.contents;
@@ -54,7 +56,7 @@ export class Q3GuestSpatial implements QvmServerSpatialOperations {
       else {
         const bounds = { min: entity.r.mins, max: entity.r.maxs };
         const temporary = model.kind === 'capsule' ? createCapsuleModel(bounds, models?.world.counters) : createBoxModel(bounds, models?.world.counters);
-        contents |= temporary.transformedPointContents(point, entity.r.currentOrigin, entity.r.currentAngles);
+        contents |= temporary.transformedPointContents(point, entity.s.origin, entity.s.angles);
       }
     }
     return contents;

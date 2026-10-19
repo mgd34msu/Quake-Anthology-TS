@@ -32,7 +32,7 @@ test("native HUD uses reported stats and leaves private inventory and unknown mo
   const configs = new Map([[39, "models/weapons/v_rocket/tris.md2"]]);
   const ui = classicGuestPlayerUi(state, configs, source);
   expect(ui.health).toBe(-17);
-  expect(ui.armor).toMatchObject({ kind: "q2", points: 23 });
+  expect(ui.armor).toMatchObject({ regular: { kind: "q2", points: 23 }, powered: { kind: "none" } });
   expect(ui.activeWeapon).toBe("q2:weapon_rocketlauncher");
   expect(ui.ammo).toEqual({ item: "q2:ammo_rockets", count: 11 });
   expect(ui.weaponStatus?.ammo).toMatchObject({ kind: "finite", count: 11, hasAmmoToStart: true });

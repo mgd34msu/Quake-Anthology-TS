@@ -18,7 +18,7 @@ for (const dialect of ["q1-netquake", "q1-quakeworld"] satisfies ("q1-netquake" 
     if (command.kind !== "q1-netquake" && command.kind !== "q1-quakeworld") throw new Error("Wrong command dialect");
     const converted = q3CommandForControls({ command }, 120, { requestedWeapon: 10, useHoldable: false });
     if (text === "+jump") { expect(command.buttons & 2).toBe(2); expect(command.upMove).toBe(0); expect(converted.upmove).toBe(127); }
-    else { expect(command.buttons & 2).toBe(0); expect(Math.sign(converted.upmove)).toBe(text === "+moveup" ? 1 : -1); }
+    else { expect(command.buttons & 2).toBe(text === "+moveup" ? 2 : 0); expect(Math.sign(converted.upmove)).toBe(text === "+moveup" ? 1 : -1); }
     expect(converted.buttons).toBe(0); dispose();
   }
 });

@@ -222,7 +222,8 @@ test('QW and custom Q3 client metadata is map independent while local authority 
       } finally { await content.close(); }
     }
     const progs = { ...options('q1-classic-id1'), quakeCProgram: 'missing-progs.dat' };
-    expect(() => applicationPreset(catalog, progs)).toThrow('--progs requires');
+    expect(() => applicationPreset(catalog, { ...progs, network: { kind: 'q1-client', remote: '127.0.0.1:26000' } })).toThrow('--progs requires');
+    expect(() => applicationPreset(catalog, progs)).not.toThrow();
     const preset = applicationConfigurationPreset(catalog, progs);
     const content = await openApplicationConfigurationContent(catalog, { kind: 'launch', preset, choice: presetChoice(preset.id) });
     await content.close();

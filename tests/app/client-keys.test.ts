@@ -28,7 +28,8 @@ test('prepared key profile reads actual home/base roots without replacing publis
     const original = await keys.prepare(options, catalog, cvars);
     if (original === null) throw new Error('Missing base descriptor');
     keys.publish(original, cvars);
-    const pending = await keys.prepare({ ...options, product: mod.id }, catalog, cvars);
+    const pending = await keys.prepare({ ...options, product: mod.id,
+      q3Product: { policy: { kind: 'retail' }, restriction: { kind: 'demo', directory: 'demota', pakChecksum: 437558517 } } }, catalog, cvars);
     if (pending === null) throw new Error('Missing mod descriptor');
     const bytes = new Uint8Array(33); keys.active.readAuthorization(bytes);
     expect(String.fromCharCode(...bytes.subarray(0, 16))).toBe('2'.repeat(16));
