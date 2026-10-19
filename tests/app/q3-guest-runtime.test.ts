@@ -60,6 +60,7 @@ async function fixture(branches: ReadonlyMap<QvmGameExport, readonly Operation[]
   const physics = new SharedPhysics({ actors, callbacks, scene, numeric: Q3_BINARY32_PROFILE, sourceOrder: (a, b) => a.slot - b.slot,
     worldActor: () => null, onBlocked: () => { throw new Error('No source traversal'); } });
   const printed: string[] = [], state = new Q3ServerState({ session: identities.session, settings: { gameType: 4, singlePlayer: false, maxClients: 2, mapName: 'q3dm7' }, now: () => 1000, print: text => { printed.push(text); } });
+  state.cvars.set('bot_enable', '0', true);
   const game = new Q3QvmServerGame({ ...observers, artifact: artifact(branches), state, mounts, writable: new UserFileStore(root), maxClients: 2, seed: 42, entityText: '{}', now: () => 1000, assertCurrent: () => {},
     records: { actors, bodies: physics.bodies, scene, provider: 'q3:guest', collision: (actor, collision) => physics.setCollision(actor, collision) },
     common: { milliseconds: () => 1, realTime: () => 0, commands: { executeNow: () => { throw new Error('No immediate commands'); }, append: () => {}, insert: () => {} } } });

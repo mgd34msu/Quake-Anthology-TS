@@ -26,6 +26,11 @@ export class Q3GuestWorld {
     }
   }
   capturePortalCheckpoint(): unknown {
+    // Native Q3 topology is the ground truth when present; restore rebuilds
+    // the reference counts from its portal matrix. Foreign worlds only have
+    // the reference ledger.
+    const native = this.scene.nativeQ3ClipModels();
+    if (native !== null) return native.world.capturePortalCheckpoint();
     return { kind: this.scene.geometry.kind, references: [...this.references].map(([pair, count]) => ({ pair, count })) };
   }
   close(): void {
