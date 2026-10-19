@@ -159,11 +159,18 @@ test('KEX seats retain independent frame history and positioned sounds', () => {
     const zero = new PlayerStateT(), one = new PlayerStateT();
     zero.stats[0] = 100;
     one.stats[0] = 75;
-    decodedFrame(reader, encodeQ2Frame(writer, packetFrame(zero, []), null, new Map<number, EntityStateT>(), 4));
-    reader.read(encodeQ2ServerEvent(writer, { kind: 'seat', seat: 1 }));
-    decodedFrame(reader, encodeQ2Frame(writer, packetFrame(one, []), null, new Map<number, EntityStateT>(), 4));
+    // KEX carries every seat in one frame; server-data clientnums set the split count.
+    reader.read(encodeQ2ServerEvent(writer, { kind: 'server-data', data: { servercount: 1, attractloop: false, gamedir: 'baseq2', clientnum: 0, clientnums: [0, 1], levelname: 'test', serverState: 0, serverFps: 40 } }));
+    const splitFrame = (primary: PlayerStateT, split: PlayerStateT, serverFrame: number): Q2WireFrame => ({ ...packetFrame(primary, [], serverFrame), splitPlayers: [{ areaBits: Uint8Array.of(2), player: split }] });
+    decodedFrame(reader, encodeQ2Frame(writer, splitFrame(zero, one, 1), null, new Map<number, EntityStateT>(), 4));
+    const zeroLater = new PlayerStateT(), oneLater = new PlayerStateT();
+    zeroLater.stats[0] = 50; oneLater.stats[0] = 25;
+    decodedFrame(reader, encodeQ2Frame(writer, splitFrame(zeroLater, oneLater, 2), null, new Map<number, EntityStateT>(), 4));
     expect(reader.history(0).get(1)?.player.stats[0]).toBe(100);
-    expect(reader.history(1).get(1)?.player.stats[0]).toBe(75);
+    expect(reader.history(0).get(1)?.splitPlayers?.[0]?.player.stats[0]).toBe(75);
+    expect(reader.history(0).get(2)?.player.stats[0]).toBe(50);
+    expect(reader.history(0).get(2)?.splitPlayers?.[0]?.player.stats[0]).toBe(25);
+    reader.read(encodeQ2ServerEvent(writer, { kind: 'seat', seat: 1 }));
     const record = reader.read(encodeQ2ServerEvent(writer, { kind: 'sound', sound: { flags: 0, index: 300, entity: 0, channel: 0, position: { x: 1.9, y: -12, z: 3 }, volume: 1, attenuation: 1, delaySeconds: 0 } }))[0];
     expect(record?.seat).toBe(1);
     if (record?.event.kind !== 'sound')

@@ -2398,7 +2398,7 @@ async function prepareRemoteConfiguration(options: ApplicationOptions, content: 
   if(seat===undefined)throw new Error("Remote configuration has no primary seat");
   const retained = retainedSeats.find(entry=>entry.seat===seat);
   const sourceContext: CommandContext = { session: session.session, origin: { kind: "local-console" } };
-  const product = content.catalog.require(options.product);
+  const product = content.catalog.require(options.network.kind === "qw-client" ? "q1-quakeworld" : options.product);
   const settings = new ConfigStore(product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
   const seatSources=new Map<SeatId,CvarRegistry>();
   const transfers = new Map<CvarRegistry, { readonly owner: CvarRegistry; readonly transfer: ReturnType<CvarRegistry["prepareCandidate"]> }>();

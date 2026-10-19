@@ -79,8 +79,9 @@ test("remote startup cfg overrides its saved seat before admission and retains t
       await client.step(50); await Bun.sleep(1); await server.step(50); await Bun.sleep(1); await client.step(50);
     }
     expect(client.networkPhase).toBe("active");
-    const admitted = (await Promise.all(opened.flatMap(spy => spy.mock.results.filter(entry => entry.type === "return").map(async entry => await entry.value))))
-      .filter(candidate => candidate.locals.length > 0).at(-1);
+    const candidates: ApplicationInput[] = [];
+    for (const spy of opened) for (const entry of spy.mock.results) if (entry.type === "return") candidates.push(await entry.value);
+    const admitted = candidates.filter(candidate => candidate.locals.length > 0).at(-1);
     if (admitted === undefined) throw new Error("Missing admitted input");
     const input = admitted, local = input.locals[0]; if (local === undefined) throw new Error("Missing remote seat");
     expect(input.inputCvars(local.player.seat.id)).toBe(early.cvars);

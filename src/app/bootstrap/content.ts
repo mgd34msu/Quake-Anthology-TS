@@ -98,7 +98,9 @@ export async function openRemoteApplicationContent(options: ApplicationOptions):
 }
 
 export function remoteConfigurationContent(options: ApplicationOptions, content: MountedApplicationContent): ApplicationConfigurationContent {
-  const preset = applicationConfigurationPreset(content.catalog, options);
+  // A QuakeWorld connection configures as the QW product even on classic Q1
+  // content: client cvars, userinfo propagation and timing follow the wire.
+  const preset = applicationConfigurationPreset(content.catalog, options.network.kind === "qw-client" ? { ...options, product: "q1-quakeworld" } : options);
   return { catalog: content.catalog, mounts: content.mounts, ...(content.q3Product === null ? {} : { q3Product: content.q3Product }), close: () => content.close(),
     selection: { source: preset.map.entities, engineBehavior: preset.engineBehavior,
     match: preset.match, combat: preset.combat, movement: preset.movement, timing: preset.timing } };
