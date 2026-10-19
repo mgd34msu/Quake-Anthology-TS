@@ -467,7 +467,9 @@ export class QuakeCSource {
     });
   }
   private checkpointHost(): QcExecutorHost {
-    return { checkpoint: () => ({ state: { module: this.module, format: "quakec:source-v1", bytes: encodeCheckpointValue({
+    // Source-registry effects are transfer bookkeeping with no queued consumer (info strings
+    // already updated synchronously); a save boundary drains them instead of refusing to save.
+    return { checkpoint: () => { this.cvars.takeEffects(); return { state: { module: this.module, format: "quakec:source-v1", bytes: encodeCheckpointValue({
       kind: this.kind, teams: this.prepared.teams ?? [], messageDialect: this.prepared.messageDialect ?? "known-retail", pickupCallers: this.prepared.declaredPickups ?? [], weaponStage: this.prepared.weaponDeclaration ?? null, combat: this.prepared.combatDeclaration ?? null, maxClients: this.options.maxClients, reservedClientSlots: this.reservedClientSlots, currentTime: this.currentTime,
       changeLevelIssued: this.changeLevelIssued, spawning: this.spawning, activeClients: [...this.activeClients].map(savedQcActor),
       borrowedActors: this.borrowed.checkpoint(),
@@ -489,7 +491,7 @@ export class QuakeCSource {
       precached: [...this.precached].map(([key, entry]) => ({ key, index: entry.index, id: entry.resource.id, digest: entry.resource.digest })),
       modelCount: this.modelCount, soundCount: this.soundCount, cvars: this.cvars.captureQuakeCState(),
       visibility: this.clients.visibility.capture(), messages: this.messages.capture(), projectiles: this.projectiles.capture(),
-    }) }, random: [], callbacks: [] }), restore: saved => {
+    }) }, random: [], callbacks: [] }; }, restore: saved => {
       if (saved.state.format !== "quakec:source-v1" || saved.random.length !== 0 || saved.callbacks.length !== 0) throw new Error("Unsupported QC source host checkpoint");
       this.restoreHost(decodeCheckpointValue(saved.state.bytes)); return undefined;
     } };
