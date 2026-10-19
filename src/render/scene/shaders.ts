@@ -145,8 +145,19 @@ export class SceneShaderRegistry {
     }, discard: () => { if (finished) return; if (parent === null) stage.discard(); finished = true; } };
   }
 
-  async register(name: string, binding: SceneShaderBinding = { kind: "unlit", lightmapIndex: -1, mipmap: true }): Promise<RegisteredSceneMaterial> {
-    const material = await this.registerMaterial(name, binding);
+  private readonly registerPromises = new WeakMap<Promise<RegisteredSceneMaterial>, Promise<RegisteredSceneMaterial>>();
+  register(name: string, binding: SceneShaderBinding = { kind: "unlit", lightmapIndex: -1, mipmap: true }): Promise<RegisteredSceneMaterial> {
+    const materialPromise = this.registerMaterial(name, binding);
+    const existing = this.registerPromises.get(materialPromise);
+    if (existing !== undefined) return existing;
+    const pending = this.registerBound(materialPromise, binding);
+    this.registerPromises.set(materialPromise, pending);
+    void pending.catch(() => { this.registerPromises.delete(materialPromise); });
+    return pending;
+  }
+
+  private async registerBound(materialPromise: Promise<RegisteredSceneMaterial>, binding: SceneShaderBinding): Promise<RegisteredSceneMaterial> {
+    const material = await materialPromise;
     const previous = this.bindings.get(material.registration);
     if (previous === undefined) {
       this.bindings.set(material.registration, { material, binding });
