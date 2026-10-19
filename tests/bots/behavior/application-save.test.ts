@@ -43,7 +43,7 @@ test("Application restores native bot disk state with unpublished clients and ex
     active.app.queueCommand("addbot", ["sarge", "3"], null);
     await frames(active.app, 80);
     expect(active.app.simulation.players()).toHaveLength(3);
-    const path = join(directory, "native.sav");
+    const path = join(directory, "saves", "native.sav");
     await active.app.saveGame(path);
     const continuous = await frames(active.app, 20), random = active.app.simulation.random.checkpoint();
     await active.app.close(); active = null;
@@ -79,15 +79,18 @@ test("Application restores native bot disk state with unpublished clients and ex
   } finally { await active?.app.close(); await rm(directory, { recursive: true, force: true }); }
 }, 120000);
 
-test("native local autosave waits for a completed frame and restore preserves its seat", async () => {
+test("native local Q3 singleplayer writes no autosave and a completed-frame save restores its seat", async () => {
   const directory = await mkdtemp(join(tmpdir(), "application-native-autosave-"));
   const parsed = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", directory]);
   if (parsed.kind !== "run") throw new Error("Expected local native launch");
   const app = await Application.open(parsed.options, { print: () => undefined, saveDirectory: join(directory, "saves") });
   try {
-    const path = join(directory, "saves", "q3-baseq3", "autosave.sav");
-    expect(await Bun.file(path).exists()).toBe(false);
-    await app.step(50);
+    const path = join(directory, "saves", "manual.sav");
+    // Q3 singleplayer respawns instead of autosaving; no autosave is written.
+    expect(await Bun.file(join(directory, "saves", "q3-baseq3", "autosave.sav")).exists()).toBe(false);
+    for (let frame = 0; frame < 60; frame++) await app.step(50);
+    expect(await Bun.file(join(directory, "saves", "q3-baseq3", "autosave.sav")).exists()).toBe(false);
+    await app.saveGame(path);
     expect(await Bun.file(path).exists()).toBe(true);
     const bytes = await Bun.file(path).bytes();
     const local = app.localPlayers[0];
@@ -130,7 +133,7 @@ test("restored native dead scoreboard requests saved player rows after initial o
     app.simulation.playerCommand(player.actor, "kill", []);
     await app.step(100);
     expect(app.simulation.playerUi(player.actor).health).toBeLessThanOrEqual(0);
-    const path = join(directory, "dead.sav"); await app.saveGame(path);
+    const path = join(directory, "saves", "dead.sav"); await app.saveGame(path);
     const image = await readSaveImage(path);
     await app.close(); app = null;
     scoreboardRequests.mockClear();

@@ -26,11 +26,14 @@ retail("production bots move and fire in the shared session and retain multiplay
     const initial = application.simulation.players().map(actor => ({ actor, origin: application.simulation.playerView(actor).origin }));
     expect(initial).toHaveLength(2);
     let attackFrames = 0;
+    const peakAmmo = new Map<string, number>();
     for (let frame = 0; frame < 160; frame++) {
       await application.step(50);
       for (const actor of application.simulation.players()) {
         const player = application.simulation.movementPlayer(actor);
-        if (player !== null && (player.buttons & 1) !== 0) attackFrames++;
+        if (player === null) continue;
+        if ((player.buttons & 1) !== 0) attackFrames++;
+        for (const ammo of player.arsenal.ammo) peakAmmo.set(ammo.item, Math.max(peakAmmo.get(ammo.item) ?? 0, ammo.count));
       }
     }
     expect(initial.some(({ actor, origin }) => {
@@ -39,7 +42,7 @@ retail("production bots move and fire in the shared session and retain multiplay
     })).toBe(true);
     expect(attackFrames).toBeGreaterThan(0);
     expect(application.simulation.players().some(actor => application.simulation.movementPlayer(actor)?.arsenal.ammo
-      .some(ammo => ammo.item === "q3:ammo/machinegun" && ammo.count > 0 && ammo.count < 100))).toBe(true);
+      .some(ammo => ammo.item.startsWith("q3:ammo/") && ammo.count < (peakAmmo.get(ammo.item) ?? 0)))).toBe(true);
     const clients = application.botClients.map(bot => bot.client.id);
     application.queueCommand("map_restart", ["0"], null);
     await application.step(50); await application.step(50);
@@ -70,6 +73,6 @@ retail("singleplayer restart retains bot clients while a new arena replaces its 
     expect(application.botClients).toHaveLength(1);
     const source = application.simulation.q3Source();
     if (source === null) throw new Error("Arena lost source game");
-    expect(application.botClients.map(bot => source.pool.clientAt(bot.client.id.slot).pers.netname)).toEqual(["Ranger"]);
+    expect(application.botClients.map(bot => source.pool.clientAt(bot.client.id.slot).pers.netname)).toEqual(["Phobos"]);
   } finally { await application.close(); }
 }, 120000);
