@@ -35,6 +35,24 @@ supply the objectives and entities those rules need. Changing geometry does not
 create missing CTF flags or mission scripts. Native clients also need a map format
 their original engine supports.
 
+Every campaign also plays under the other editions of its game: the Classic/
+Rerelease toggle selects classic engine behavior for rerelease campaigns
+(Dimension of the Past, Dimension of the Machine, Dawn of the Machine, Quake 64,
+Call of the Machine, Quake II 64) without changing the campaign's own program.
+
+Under **Match**, **Match rules** offers more than the standard game:
+
+- **Horde** runs in every game: authored monster waves on Quake horde maps,
+  campaign monster waves in Quake II, and escalating bot waves in Quake III.
+- **Tag** (Rogue's token deathmatch) runs on any deathmatch map in any game;
+  the token spawns at a deathmatch spawn point when the map has none.
+- **Capture the Flag** runs natively in Quake II and Quake III on maps with
+  authored flags; Quake uses the Threewave Capture the Flag product.
+- **DeathBall** and **Loki's Minions CTF** are Quake II modes and need their
+  authored Quake II maps.
+
+Launcher presets with those mode names pick a suitable authored map for you.
+
 ## Choose movement and characters
 
 Select movement and character sources in the custom-game menu. Appearance is
