@@ -15,7 +15,7 @@ import type { AuthoredStartCatalog } from "./start-maps.ts";
 
 export { expectedProducts } from "./products.ts";
 export type { ProductExpectation } from "./products.ts";
-export { resolveLaunch, selectLaunch, presetChoice } from "./launch.ts";
+export { resolveLaunch, selectLaunch, presetChoice, validateLaunchRoles } from "./launch.ts";
 export type { LaunchPreset, SelectedLaunch, ResolveLaunchOptions } from "./launch.ts";
 export { EQUIPMENT_PROVIDERS, disabledEquipment, nativeEquipment } from "./equipment.ts";
 
@@ -329,7 +329,12 @@ export class InstalledCatalog {
         }
       }
       if (product.expectation.baseProduct !== null) await visit(this.product(product.expectation.baseProduct).id);
-      if (product.expectation.edition === "rerelease" && product.expectation.baseProduct === null) {
+      // Edition root archives (e.g. QuakeEX.kpf) belong to the content tree a
+      // product's files live in, not to the edition selected to play them:
+      // classic products pointing into a rerelease tree still need its HUD
+      // and shared assets.
+      if (product.expectation.baseProduct === null && product.expectation.edition === "rerelease"
+        || product.expectation.contentDirectory.split("/")[1] === "rerelease") {
         const root = dirname(product.looseRoot ?? resolve(this.corpusRoot, product.expectation.contentDirectory));
         for (const archive of this.rootArchives.filter(candidate => dirname(candidate.path) === root)) await addArchive(product, archive);
       }

@@ -77,6 +77,8 @@ export interface SimulationOptions {
   readonly nativeQ2Travel?: NativeQ2Travel;
   readonly originalSaveCandidate?: true;
   readonly startItems?: string;
+  /** Local player's Q1 shirt/pants colors for foreign-character presentation. */
+  readonly playerColors?: { readonly top: number; readonly bottom: number };
   readonly initialSpawnPoint?: string;
   readonly q2NextServer?: string;
   readonly q3Guest?: Pick<Q3GuestRuntimeOptions, "writable" | "common"> & {

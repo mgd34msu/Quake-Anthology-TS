@@ -686,7 +686,10 @@ export class Q3SourceRuntime {
     const entity = this.records.nativeByActor(actor.id);
     if (decision.reaction === "death" && entity?.client != null) {
       const cause = decision.request.attack.cause;
-      this.death.playerDie(entity, this.records.damageInflictor(decision.request.attack.inflictor), this.records.damageInflictor(decision.request.attack.attacker),
+      // Native G_Damage dispatches through ent->die: player_die first, then
+      // body_die for the corpse it leaves behind (gibbing at GIB_HEALTH).
+      const die = entity.die ?? this.death.playerDie;
+      die(entity, this.records.damageInflictor(decision.request.attack.inflictor), this.records.damageInflictor(decision.request.attack.attacker),
         decision.appliedDamage, cause.kind === "q3" ? cause.meansOfDeath : 0);
     }
   }

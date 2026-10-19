@@ -12,6 +12,7 @@ import { Q2Ctf, decodeQ2CtfCheckpoint } from "../../q2/multiplayer/ctf/index.ts"
 import { Q2Lmctf } from "../../q2/multiplayer/lmctf/runtime.ts";
 import type { Q2ProductRuntime } from "./index.ts";
 import { Q2Tag, Q2DeathBall } from "../../q2/missionpacks/modes/index.ts";
+import { Q2Horde } from "../../q2/multiplayer/horde.ts";
 import { readSavedActor } from "../../../persistence/save-image.ts";
 import { encodeQ2BaseEntitiesCheckpoint, decodeQ2BaseEntitiesCheckpoint } from "../../../persistence/q2-base-entities.ts";
 
@@ -78,6 +79,7 @@ export function restoreQ2Product(source: Q2ProductRuntime, checkpoints: readonly
   const match = source.match.source === null ? null : { module: source.match.source, reader: new SaveReader(decodeCheckpointValue(read("q2:match")), "q2-match") };
   const tag = match?.module instanceof Q2Tag ? { module: match.module, state: { token: match.reader.field("token").nullable(readSavedActor), owner: match.reader.field("owner").nullable(readSavedActor), count: match.reader.field("count").integer(0) } } : null;
   const ball = match?.module instanceof Q2DeathBall ? { module: match.module, state: { ball: match.reader.field("ball").nullable(readSavedActor), starts: match.reader.field("starts").integer(0), team1Score: match.reader.field("team1Score").integer(), team2Score: match.reader.field("team2Score").integer() } } : null;
+  const horde = match?.module instanceof Q2Horde ? { module: match.module, state: { wave: match.reader.field("wave").integer(0), spawned: match.reader.field("spawned").integer(0), intermission: match.reader.field("intermission").integer(0), monsters: match.reader.field("monsters").list(readSavedActor) } } : null;
   source.registerCallbacks();
   source.setDeathmatchFlags(deathmatchFlags);
   source.game.restore(foundation);
@@ -100,5 +102,6 @@ export function restoreQ2Product(source: Q2ProductRuntime, checkpoints: readonly
   if (match?.module instanceof Q2Lmctf) match.module.restore(match.reader, source.game);
   if (tag !== null) tag.module.restore(source.game, tag.state);
   if (ball !== null) ball.module.restore(source.game, ball.state);
+  if (horde !== null) horde.module.restore(source.game, horde.state);
   return undefined;
 }

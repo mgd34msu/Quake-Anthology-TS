@@ -1,4 +1,5 @@
 import { sourceProgramProduct, selectedSourceProgram } from "../../content/catalog/source-program.ts";
+import { GameType } from "../../content/q3/base/shared/definitions.ts";
 import { adaptForeignQ3Objectives } from "../../content/q3/team-arena/foreign-objectives.ts";
 import { parseQ1Entities, q1EntityValue } from "../../formats/q1-map/entities.ts";
 import type { LoadedApplicationContent } from "./content.ts";
@@ -16,7 +17,7 @@ export function preflightApplicationMatch(content: Pick<LoadedApplicationContent
   if (source.family === "q3") {
     let configured: string | undefined;
     for (const value of sourceValues) if (value.name === "g_gametype") configured = value.value;
-    const gameType = configured === undefined ? options.mode === "singleplayer" ? 2 : 0 : Number(configured);
+    const gameType = configured === undefined ? content.recipe.match.provider === "q3:ctf" ? GameType.GT_CTF : options.mode === "singleplayer" ? 2 : 0 : Number(configured);
     const result = adaptForeignQ3Objectives(content.world, selectedSourceProgram(content.recipe) === "missionpack" ? "missionpack" : "baseq3", gameType);
     if (result.kind === "missing-objectives") throw new Error(`Selected Q3 match map is missing: ${result.classnames.join(", ")}`);
     if (result.kind === "unsupported-mode") throw new Error(`Selected Q3 product does not support game type ${result.gameType}`);

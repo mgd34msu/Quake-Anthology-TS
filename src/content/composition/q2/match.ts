@@ -8,13 +8,14 @@ import { q2EntitiesNamed, q2PlayersRange, q2SpawnOrigin, selectQ2Spawn } from ".
 import { Q2Tag, Q2DeathBall } from "../../q2/missionpacks/modes/index.ts";
 import { Q2Ctf } from "../../q2/multiplayer/ctf/index.ts";
 import { Q2Lmctf } from "../../q2/multiplayer/lmctf/runtime.ts";
+import { Q2Horde } from "../../q2/multiplayer/horde.ts";
 import type { Q2CtfHooks } from "../../q2/multiplayer/ctf/types.ts";
 import type { Q2DamageSourceEffects } from "../../../world/gameplay/policies.ts";
 import type { Q2CompositionServices } from "./types.ts";
 import type { Q2MatchSelection } from "./types.ts";
 
 export class Q2ProductMatch implements Q2SpawnModule {
-  readonly source: Q2Tag | Q2DeathBall | Q2Ctf | Q2Lmctf | null;
+  readonly source: Q2Tag | Q2DeathBall | Q2Ctf | Q2Lmctf | Q2Horde | null;
   constructor(readonly selection: Q2MatchSelection, private readonly players: () => Q2Players, items: Q2ItemModule, world: () => Q2GameServices, hooks: Omit<Q2CtfHooks, "emit">, services: Q2CompositionServices) {
     const addScore = (actor: ActorId, amount: number): undefined => {
       const state = players().states.get(actor);
@@ -25,7 +26,7 @@ export class Q2ProductMatch implements Q2SpawnModule {
       const spot = selectQ2Spawn(game, players().states.get(entity.actor.id) ?? new Q2PlayerState(0, game.host.now()), players().rules.spawnPoint);
       return { origin: q2SpawnOrigin(spot, game), angles: game.body(spot).angles };
     };
-    this.source = selection.kind === "ctf" ? new Q2Ctf({ ...hooks, emit: event => services.emit({ kind: "ctf", event }) }, {}, services.sharedGrapple ?? null) : selection.kind === "lmctf" ? new Q2Lmctf({ ...hooks, emit: event => services.emit({ kind: "lmctf", event }) }, selection.travel?.rules, selection.travel, services.sharedGrapple ?? null) : selection.kind === "standard" ? null : selection.kind === "tag" ? new Q2Tag({ items, addScore, selectSpawn,
+    this.source = selection.kind === "ctf" ? new Q2Ctf({ ...hooks, emit: event => services.emit({ kind: "ctf", event }) }, {}, services.sharedGrapple ?? null) : selection.kind === "lmctf" ? new Q2Lmctf({ ...hooks, emit: event => services.emit({ kind: "lmctf", event }) }, selection.travel?.rules, selection.travel, services.sharedGrapple ?? null) : selection.kind === "standard" ? null : selection.kind === "horde" ? new Q2Horde() : selection.kind === "tag" ? new Q2Tag({ items, addScore, selectSpawn,
       farthestSpawn: game => {
         let selected: Q2Entity | null = null, distance = -1;
         for (const spot of q2EntitiesNamed(game, "info_player_deathmatch")) {
@@ -53,9 +54,9 @@ export class Q2ProductMatch implements Q2SpawnModule {
     }
     return this.source?.spawn(entity, game) ?? false;
   }
-  afterSpawn(game: Q2GameServices): undefined { return this.source instanceof Q2Ctf ? this.source.afterSpawn(game) : this.source?.postSpawn(game); }
+  afterSpawn(game: Q2GameServices): undefined { return this.source instanceof Q2Ctf ? this.source.afterSpawn(game) : this.source instanceof Q2Horde ? undefined : this.source?.postSpawn(game); }
   admitted(entity: Q2Entity, game: Q2GameServices): undefined { return this.source instanceof Q2Ctf || this.source instanceof Q2Lmctf ? this.source.admitted(entity, game) : this.source instanceof Q2DeathBall ? this.source.clientBegin(entity, game) : undefined; }
-  selectSpawn(entity: Q2Entity, game: Q2GameServices) { return this.source !== null && !(this.source instanceof Q2Tag) ? this.source.selectSpawn(entity, game) : null; }
+  selectSpawn(entity: Q2Entity, game: Q2GameServices) { return this.source !== null && !(this.source instanceof Q2Tag) && !(this.source instanceof Q2Horde) ? this.source.selectSpawn(entity, game) : null; }
   score(victim: Q2Entity, game: Q2GameServices, change: number, means: number, recipient: Q2Entity, attacker: Q2Entity | null = recipient): undefined {
     if (this.source instanceof Q2Ctf || this.source instanceof Q2Lmctf) return this.source.score(victim, attacker, game, change, means, recipient);
     if (this.source instanceof Q2Tag) return this.source.score(recipient, victim, game, change, means);

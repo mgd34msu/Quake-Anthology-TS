@@ -326,6 +326,7 @@ export class DeathRuntime {
         follower.sess.spectatorClient === self.s.number) this.host.sendScoreboard(this.host.pool.at(index));
     }
     if (this.host.characterDeath === "selected") {
+      self.takedamage = true;
       self.s.weapon = Weapon.WP_NONE;
       self.s.powerups = 0;
       // The selected character presents its own death, but the client body must
@@ -335,6 +336,12 @@ export class DeathRuntime {
       self.s.loopSound = 0;
       client.respawnTime = (frame.time + 1700) | 0;
       for (let index = 0; index < client.ps.powerups.length; index++) client.ps.powerups.set(index, 0);
+      if ((self.health <= GIB_HEALTH && !(contents & CONTENTS_NODROP) && frame.blood) || meansOfDeath === MOD_SUICIDE) {
+        this.gibEntity(self, killer);
+      } else {
+        if (self.health <= GIB_HEALTH) self.health = GIB_HEALTH + 1;
+        self.die = this.host.pool.callbacks.die.resolve("q3.death.body");
+      }
       this.host.world.link(self);
       return;
     }

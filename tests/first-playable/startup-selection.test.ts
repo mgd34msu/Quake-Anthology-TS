@@ -407,7 +407,7 @@ test.skipIf(!corpusHasFile("q2/rerelease/baseq2/pak0.pak"))("native rerelease pr
   await model.prepareMaps();
   for (const preset of model.presets()) {
     const launch = await model.resolvePreset(preset.id);
-    const content = catalog.require(preset.id).id;
+    const content = catalog.require(preset.productId ?? preset.id).id;
     expect(launch.recipe.movement.content).toBe(content);
     expect(launch.recipe.character.definition.content).toBe(content);
     expect(launch.recipe.timing.find(timing => timing.provider === "q2:movement")?.clock.kind).toBe("q2-rerelease");

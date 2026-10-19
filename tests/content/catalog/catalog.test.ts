@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { testCorpusRoot } from "../../support/corpus.ts";
+import { callFunction } from "../../support/reflect.ts";
 
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from "node:fs/promises";
@@ -8,7 +9,7 @@ import { resolve } from "node:path";
 import type { ContentId, ExecutionSelection, ProviderReference } from "../../../src/contracts/content.ts";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
-import { discoverInstalledContent, expectedProducts, presetChoice, resolveLaunch, selectLaunch } from "../../../src/content/catalog/index.ts";
+import { discoverInstalledContent, expectedProducts, presetChoice, resolveLaunch, selectLaunch, validateLaunchRoles } from "../../../src/content/catalog/index.ts";
 import type { LaunchPreset } from "../../../src/content/catalog/index.ts";
 import { openMountPlan } from "../../../src/content/mounts/index.ts";
 
@@ -118,9 +119,9 @@ describe("installed content catalog", () => {
     const root = await mkdtemp(resolve(tmpdir(), "quake-catalog-"));
     try {
       const catalog = await discoverInstalledContent({ corpusRoot: root });
-      expect(expectedProducts).toHaveLength(27);
-      expect(catalog.products).toHaveLength(27);
-      expect(catalog.products.filter(product => product.availability.kind === "missing")).toHaveLength(27);
+      expect(expectedProducts).toHaveLength(40);
+      expect(catalog.products).toHaveLength(40);
+      expect(catalog.products.filter(product => product.availability.kind === "missing")).toHaveLength(40);
       expect(catalog.product("q1-rerelease-quake64").availability.kind).toBe("missing");
       expect(catalog.product("q1-rerelease-quake64").expectation).toMatchObject({ contentDirectory: "q1/rerelease/q64", mapWitness: "maps/start.bsp", baseProduct: "q1-rerelease-id1" });
       expect(catalog.product("q3-demota").expectation.baseProduct).toBeNull();
@@ -175,10 +176,25 @@ describe("installed content catalog", () => {
     expect(resolved.presentation).toEqual(native.presentation);
   });
 
-  test.skipIf(!existsSync(corpusRoot))("discovers the supplied 25 products and reads campaign progs under selected classic behavior", async () => {
+  test("family-by-role cross-check rejects family-bound match providers on foreign worlds", () => {
+    const native = preset("q1:rerelease:mg1:installed");
+    const catalog = { product: (id: string) => ({ expectation: { family: String(id).split(":")[0] } }) };
+    const validate = (launch: ReturnType<typeof selectLaunch>): void => { callFunction(validateLaunchRoles, undefined, launch, catalog); };
+    const valid = selectLaunch({ ...presetChoice(native.id), match: { kind: "selected", value: { provider: "q1:horde", content: native.map.entities.content } } }, native);
+    expect(() => validate(valid)).not.toThrow();
+    const foreign = selectLaunch({ ...presetChoice(native.id), match: { kind: "selected", value: { provider: "q2:deathball", content: native.map.entities.content } } }, native);
+    expect(() => validate(foreign)).toThrow("requires a q2 world");
+    // Tag runs on any world through the runtime match layer, so it is not family-bound.
+    const tag = selectLaunch({ ...presetChoice(native.id), match: { kind: "selected", value: { provider: "q2:tag", content: native.map.entities.content } } }, native);
+    expect(() => validate(tag)).not.toThrow();
+    const unknown = selectLaunch({ ...presetChoice(native.id), movement: { kind: "selected", value: { provider: "doom:movement", content: native.map.entities.content } } }, native);
+    expect(() => validate(unknown)).toThrow("no known family");
+  });
+
+  test.skipIf(!existsSync(corpusRoot))("discovers the supplied 36 products and reads campaign progs under selected classic behavior", async () => {
     const catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
-    expect(catalog.products).toHaveLength(27);
-    expect(catalog.products.filter(product => product.availability.kind === "installed")).toHaveLength(25);
+    expect(catalog.products).toHaveLength(40);
+    expect(catalog.products.filter(product => product.availability.kind === "installed")).toHaveLength(36);
     expect(catalog.product("q1-rerelease-quake64").availability.kind).toBe("missing");
     expect(catalog.mapsFor("q1-quakeworld").some(map => map.path === "maps/start.bsp")).toBe(true);
     const native = preset(catalog.product("q1-rerelease-mg1").id);

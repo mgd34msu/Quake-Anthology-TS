@@ -17,7 +17,11 @@ test("source mode admission and authored map eligibility reject incompatible mod
   expect(matchMapUnavailable(q2, ["dm_dball_ball", "dm_dball_ball_start", "dm_dball_goal", "dm_dball_team1_start", "dm_dball_team2_start"])).toBeNull();
   expect(matchModeUnavailable({ ...q2, mode: "coop" })).toContain("deathmatch");
   expect(matchMapUnavailable({ family: "q1", edition: "rerelease", campaign: "mg1", mode: "coop", rules: "horde" }, ["horde_manager", "info_monster_start"])).toBeNull();
-  expect(matchModeUnavailable({ family: "q1", edition: "classic", campaign: "id1", mode: "coop", rules: "horde" })).toContain("rerelease");
+  // Unified modes: horde is a match mode on any Q1 program/edition (authored
+  // horde entities in the map remain the real eligibility requirement).
+  expect(matchModeUnavailable({ family: "q1", edition: "classic", campaign: "id1", mode: "coop", rules: "horde" })).toBeNull();
+  expect(matchModeUnavailable({ family: "q2", edition: "rerelease", campaign: "baseq2", mode: "deathmatch", rules: "lmctf" })).toBeNull();
+  expect(matchModeUnavailable({ family: "q2", edition: "classic", campaign: "baseq2", mode: "deathmatch", rules: "deathball" })).toBeNull();
   for (const rules of ["tag", "deathball", "horde"]) expect(parseApplicationCommand(["--rules", rules]).kind).not.toBe("error");
 });
 test("DeathBall selection uses source cvar defaults and remains live", () => {

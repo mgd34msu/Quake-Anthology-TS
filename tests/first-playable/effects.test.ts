@@ -479,3 +479,47 @@ test("Q1 entity lights retain keyed precedence, rerelease colors and paused-fram
     } finally { effects.close(); }
   } finally { assets.close(); await content.close(); }
 }, 30000);
+
+test.skipIf(!existsSync(`${testCorpusRoot()}/q2/baseq2/pak0.pak`))("pitched Q1 lightning beam renders toward its endpoint, not mirrored", async () => {
+  const command = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q2-classic-baseq2", "--map", "base1", "--renderer", "cpu"]);
+  if (command.kind !== "run") throw new Error("Expected executable fixture");
+  const content = await loadApplicationContent(command.options), identity = createIdentityOwner("beam-pitch");
+  const owner: RendererResourceOwner = { identity: Symbol("beam-pitch"), session: identity.session, generation: 0 };
+  const assets = new ApplicationAssets(content, owner);
+  try {
+    await assets.loadWorld();
+    const actors = new SessionActorRegistry(identity), actor = actors.allocate("q3:character", "q3:character/sarge");
+    const effects = new ApplicationEffects(assets, createSceneQueries(content.world), id => id.equals(actor.id));
+    const rogue = content.catalog.require("q1-classic-rogue").id;
+    const snapshot = (seconds: number): WorldSnapshot => ({ session: identity.session, frame: { frame: Math.trunc(seconds * 10),
+      time: { kind: "seconds", value: seconds }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+      actors: actors.observations(), bodies: [], inventories: [], configurations: [], scene: { session: identity.session, time: { kind: "seconds", value: seconds },
+        world: null, entities: [], lights: [], particles: [], lightStyles: [], areaBits: null } });
+    const camera: SceneCamera = { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
+      viewport: { x: 0, y: 0, width: 160, height: 120 }, projection: perspectiveProjection(90, 73.739795, 4096), clip: { kind: "none" } };
+    const renderer = new SoftwareRenderer(160, 120, owner), target = new CpuRenderTarget(renderer), frames = new SceneFrameBuilder(assets.images);
+    try {
+      const centroid = async (seconds: number, sequence: number, startZ: number, endZ: number): Promise<number> => {
+        effects.receive([{ kind: "q1", content: rogue, seconds, sequence,
+          event: { kind: "beam", style: "lightning2", actor: actor.id, start: { x: 80, y: -25, z: startZ }, end: { x: 80, y: 25, z: endZ } } }]);
+        await effects.prepare(snapshot(seconds), []);
+        const frame = loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations)));
+        frames.begin();
+        frames.view({ target: { kind: "seat", seat: identity.seat(0) }, time: snapshot(seconds).frame.time, viewport: camera.viewport,
+          clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false }, clipPlane: null, beforeView: [], operations: frame.operations });
+        target.execute(frames.finish(false));
+        let weighted = 0, count = 0;
+        for (let y = 0; y < 120; y++) for (let x = 0; x < 160; x++) {
+          const offset = (y * 160 + x) * 4;
+          if ((renderer.pixels[offset] ?? 0) + (renderer.pixels[offset + 1] ?? 0) + (renderer.pixels[offset + 2] ?? 0) > 0) { weighted += y; count++; }
+        }
+        expect(count).toBeGreaterThan(20);
+        await effects.prepare(snapshot(seconds + 1), []);
+        return weighted / count;
+      };
+      const down = await centroid(8, 1, 28, -28), up = await centroid(10, 2, -28, 28);
+      expect(Math.abs(down - up)).toBeGreaterThan(8);
+      expect(down).toBeGreaterThan(up);
+    } finally { effects.close(); target.close(); }
+  } finally { assets.close(); await content.close(); }
+}, 60000);

@@ -348,7 +348,7 @@ export class GameBotCatalog {
     }
     return false;
   }
-  addRandomBot(team: number): void {
+  addRandomBot(team: number): boolean {
     let count = 0;
     for (let index = 0; index < this.bots.count; index++) {
       if (!this.nameInUse(infoValueForKey(catalogInfo(this.bots, index).readString(), "name"), team)) count++;
@@ -363,8 +363,20 @@ export class GameBotCatalog {
       const skill = this.cvarValue("g_spSkill");
       const teamName = team === Team.TEAM_RED ? "red" : team === Team.TEAM_BLUE ? "blue" : "";
       this.game.options.engine.insertConsoleCommand(gameFormat("addbot %s %f %s %i\n", [clean(name.slice(0, 35)), skill, teamName, 0]));
-      return;
+      return true;
     }
+    return false;
+  }
+
+  /** Queues one roster bot for the running match, balancing team games. */
+  addMatchBot(): boolean {
+    if (this.cvarInteger("bot_enable") === 0) return false;
+    if (this.game.gameType >= GameType.GT_TEAM) {
+      const red = this.countHumanPlayers(Team.TEAM_RED) + this.countBotPlayers(Team.TEAM_RED);
+      const blue = this.countHumanPlayers(Team.TEAM_BLUE) + this.countBotPlayers(Team.TEAM_BLUE);
+      return this.addRandomBot(red <= blue ? Team.TEAM_RED : Team.TEAM_BLUE);
+    }
+    return this.addRandomBot(Team.TEAM_FREE);
   }
 
   removeRandomBot(team: number): boolean {

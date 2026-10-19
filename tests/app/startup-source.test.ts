@@ -80,5 +80,6 @@ test("startup providers resolve without a map, archive or executable recipe", ()
   const context = { session: createIdentityOwner("mapless-source-metadata").session, origin: { kind: "local-console" } } satisfies Parameters<typeof createStartupSource>[3];
   expect(createStartupSource(command.options, selected, "q3", context, 8, () => {}).variableString("g_redteam")).toBe("Stroggs");
   expect(applicationSourceSelection(catalog, { product: "q2-classic-baseq2", rules: "ctf" }).match.content).toBe(catalog.require("q2-classic-ctf").id);
-  expect(() => applicationSourceSelection(catalog, { product: "q3-baseq3", rules: "ctf" })).toThrow("requires a classic Quake II");
+  expect(applicationSourceSelection(catalog, { product: "q3-baseq3", rules: "ctf" }).match.provider).toBe("q3:ctf");
+  expect(() => applicationSourceSelection(catalog, { product: "q1-classic-id1", rules: "ctf" })).toThrow("requires a Quake II or Quake III game provider");
 });

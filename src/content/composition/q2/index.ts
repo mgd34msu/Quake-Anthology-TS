@@ -58,7 +58,7 @@ export class Q2ProductRuntime {
   private readonly activeRules: { deathmatchFlags: number };
 
   constructor(readonly configuration: Q2CompositionOptions) {
-    if (configuration.match !== undefined && configuration.match.kind !== "standard" && configuration.options.mode !== "deathmatch")
+    if (configuration.match !== undefined && configuration.match.kind !== "standard" && configuration.match.kind !== "horde" && configuration.options.mode !== "deathmatch")
       throw new Error("Q2 Tag and DeathBall require deathmatch admission");
     this.weapons = configuration.weapons;
     this.monsters = new Q2Monsters(this.weapons, { dropItem: (actor, game, classname) => { this.items.dropMonster(actor, game, classname); return undefined; }, platformState: actor => {
@@ -101,7 +101,8 @@ export class Q2ProductRuntime {
       if (this.armory !== null) for (const pack of this.packs()) this.armory.items.ammoPack(actor, game, full, pack);
       return undefined;
     } });
-    this.armory = configuration.edition === "classic" && configuration.program === "baseq2" ? null : registerQ2MissionPackArmory(
+    this.armory = configuration.edition === "classic" && configuration.program === "baseq2"
+      && configuration.match?.kind !== "tag" && configuration.match?.kind !== "deathball" ? null : registerQ2MissionPackArmory(
       configuration.program === "xatrix" ? "xatrix" : "rogue", {
         weapons: this.weapons, items: this.items, monster: actor => this.monsters.context(actor),
         hunterCamera: configuration.services.hunterCamera, strongMines: configuration.services.strongMines,
@@ -228,8 +229,12 @@ export class Q2ProductRuntime {
   }
 
   private packs(): readonly Q2MissionPack[] {
-    return this.configuration.edition === "rerelease" ? ["xatrix", "rogue"]
-      : this.configuration.program === "baseq2" ? [] : [this.configuration.program];
+    if (this.configuration.edition === "rerelease") return ["xatrix", "rogue"];
+    // Tag/DeathBall are Rogue modes; selecting them on a baseq2 program pulls
+    // the Rogue pack in unifiedly instead of refusing the match.
+    if (this.configuration.program === "baseq2")
+      return this.configuration.match?.kind === "tag" || this.configuration.match?.kind === "deathball" ? ["rogue"] : [];
+    return [this.configuration.program];
   }
 
   setDeathmatchFlags(flags: number): undefined {

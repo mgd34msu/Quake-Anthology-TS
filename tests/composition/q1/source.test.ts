@@ -33,10 +33,10 @@ interface Saved {
   readonly combat: readonly { readonly actor: { readonly slot: number; readonly generation: number }; readonly state: NonNullable<ReturnType<GameplayAuthority["read"]>> }[];
   readonly inventory: readonly { readonly actor: { readonly slot: number; readonly generation: number }; readonly entries: ReturnType<SharedInventoryTable["entries"]> }[];
 }
-function sourceWorld(map: Q1Map, program: Q1SourceProgram, saved?: Saved) {
+function sourceWorld(map: Q1Map, program: Q1SourceProgram, saved?: Saved, horde = false) {
   const owner = createIdentityOwner("q1-composition-check"), actors = saved === undefined ? new SessionActorRegistry(owner) : SessionActorRegistry.restore(owner, saved.slots, saved.sources);
   const callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map), players: ActorId[] = [], events: Q1CompositionEvent[] = [], sourceEvents: Q1Event[] = [];
-  const pending = new Map<OwnedActor, number>(), cvars = new Map<string, number>([["teamplay", program === "ctf" ? 130 : 0]]);
+  const pending = new Map<OwnedActor, number>(), cvars = new Map<string, number>([["teamplay", program === "ctf" ? 130 : 0], ["horde", horde ? 1 : 0]]);
   let runtime: Q1Foundation | null = null, composed: Q1SourceComposition | null = null;
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onUnlink: actor => { scene.unlink(actor); return undefined; }, onLink: body => {
     const entity = runtime?.entity(body.actor); if (entity == null || entity.solid === "none" || entity.classname === "worldspawn") { scene.unlink(body.actor); return undefined; }
@@ -70,7 +70,7 @@ function sourceWorld(map: Q1Map, program: Q1SourceProgram, saved?: Saved) {
     selectWeapon: (actor, item) => { const player = game.player(actor), weapon = Q1_WEAPON_IDS.find(value => game.weaponItem(value) === item); return player !== null && weapon !== undefined && game.selectWeapon(player.actor, weapon); },
     weaponChanged: () => undefined, promptSupported: () => true, restartSession: () => undefined, finishCampaign: () => undefined,
   };
-  const source = new Q1SourceComposition(game, { program, campaign: new Q1CampaignState(), officialCampaign: true, registered: true }, services); composed = source;
+  const source = new Q1SourceComposition(game, { program, campaign: new Q1CampaignState(), horde, officialCampaign: true, registered: true }, services); composed = source;
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => ({ ...game.combatContext(request), teamplay: services.cvar("teamplay") }), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })), sourceEffects: game.damageSourceEffects }));
   if (saved === undefined) source.spawnMap(map);
   else {
@@ -151,6 +151,16 @@ test("actual MG1 horde and campaign maps register their authored source behavior
     world.game.beginFrame(0.5, 0.05); world.source.preFrame(0.05); world.source.playerPreThink(actor.id); world.game.playerFrame(actor, 0.5, 0); world.game.playerAfterPhysics(actor, 0.5); world.source.playerPostThink(actor.id);
     expect(world.source.addon?.frameTime).toBe(0.05); expect(world.source.clients.require(actor.id).name).toBe("Sarge"); expect(() => world.capture()).not.toThrow();
     if (name === "horde1") expect(world.source.horde?.manager?.classname).toBe("horde_manager"); world.actors.close();
+  }
+});
+
+test("horde match registers on non-MG1 Q1 programs with an authored horde map", async () => {
+  const programs: readonly Q1SourceProgram[] = ["id1", "hipnotic", "mg3"];
+  for (const program of programs) {
+    const world = sourceWorld(await map("mg1", "horde1"), program, undefined, true); world.admit("Sarge", 4); world.advance(0.5);
+    expect(world.source.horde).not.toBeNull();
+    expect(world.source.horde?.manager?.classname).toBe("horde_manager");
+    world.actors.close();
   }
 });
 

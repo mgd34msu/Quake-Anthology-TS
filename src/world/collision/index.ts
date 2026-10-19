@@ -170,13 +170,22 @@ export class SharedSceneQueries implements SceneQueries {
             const id = linked.body.actor, collision = this.#readActorCollision === null ? linked.collision : this.#readActorCollision(id);
             if (collision === null || collision.role !== 'solid') continue;
             if (excluded.some(actor => sameActor(actor, id))) continue;
+            // Corpses never block movement (box traces), but point weapon traces
+            // must hit them in every family or foreign corpses cannot be gibbed.
+            // Corpse ownership is body provenance, not projectile ownership, so
+            // owned-entity skipping must not hide a corpse from its killer.
+            const corpse = collision.q1Corpse === true || collision.deadMonster
+                || collision.family !== 'q1' && (collision.contents & 0x04000000) !== 0;
+            const pointLike = query.shape.kind === 'point'
+                || query.shape.bounds.min.x === query.shape.bounds.max.x && query.shape.bounds.min.y === query.shape.bounds.max.y && query.shape.bounds.min.z === query.shape.bounds.max.z;
+            const corpsePoint = corpse && pointLike;
             if (query.passActor !== null) {
                 if (sameActor(query.passActor, id)) continue;
                 const rawPass = passCollision?.q3Owner, rawCandidate = collision.q3Owner;
                 if (query.policy.kind === 'q3' && rawPass !== undefined && rawCandidate !== undefined) {
                     const passOwner = rawPass.ownerNumber === 1023 ? -1 : rawPass.ownerNumber;
-                    if (rawCandidate.ownerNumber === rawPass.entityNumber || rawCandidate.ownerNumber === passOwner) continue;
-                } else {
+                    if (!corpsePoint && (rawCandidate.ownerNumber === rawPass.entityNumber || rawCandidate.ownerNumber === passOwner)) continue;
+                } else if (!corpsePoint) {
                     if (collision.owner !== null && sameActor(query.passActor, collision.owner)) continue;
                     const owner = passCollision?.owner;
                     if (owner !== null && owner !== undefined && (query.policy.kind === 'q3'
@@ -188,7 +197,7 @@ export class SharedSceneQueries implements SceneQueries {
                 continue;
             if (query.policy.kind === 'q1' && query.policy.move === 'no-monsters' && collision.shape.kind !== 'model')
                 continue;
-            if (query.policy.kind === 'q1' ? actorContents(collision, 'q1') !== -2 : (actorContents(collision, query.policy.kind) & query.policy.contentsMask) === 0)
+            if (!corpsePoint && (query.policy.kind === 'q1' ? actorContents(collision, 'q1') !== -2 : (actorContents(collision, query.policy.kind) & query.policy.contentsMask) === 0))
                 continue;
             const actor = refresh ? this.#snapshotActor(linked, collision) : linked;
             if (actor === null) continue;

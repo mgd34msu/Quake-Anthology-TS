@@ -723,7 +723,9 @@ export class ApplicationEffects {
       const models: SceneEntity[] = [];
       const delta = sub3(beam.end, start), length = length3(delta), direction = normalize3OrZero(delta), horizontal = Math.hypot(delta.x, delta.y);
       const yawAngle = horizontal === 0 ? 0 : Math.atan2(delta.y, delta.x) * 180 / Math.PI;
-      const pitchAngle = horizontal === 0 ? delta.z > 0 ? 90 : 270 : Math.atan2(delta.z, horizontal) * (beam.family === "q1" ? 180 : -180) / Math.PI;
+      const pitchAngle = beam.family === "q1"
+        ? horizontal === 0 ? delta.z > 0 ? -90 : 90 : -Math.atan2(delta.z, horizontal) * 180 / Math.PI
+        : horizontal === 0 ? delta.z > 0 ? 90 : 270 : -Math.atan2(delta.z, horizontal) * 180 / Math.PI;
       const yaw = beam.family === "q1" ? Math.trunc(yawAngle) : yawAngle < 0 ? yawAngle + 360 : yawAngle;
       const pitch = beam.family === "q1" ? Math.trunc(pitchAngle) : pitchAngle < 0 ? pitchAngle + 360 : pitchAngle;
       const lightning = beam.model === Q2_TRANSIENT_MODELS.lightning, modelLength = lightning ? 35 : 30;

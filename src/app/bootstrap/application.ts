@@ -839,6 +839,7 @@ export class Application {
           skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
           ...(initialSave === undefined ? {} : { restore: initialSave, restoredClients: [...restoredClients.values()].map(client => client.id) }),
           maxClients,
+          playerColors: { top: Math.min(13, Math.max(0, Math.trunc(options.characterTopColor ?? 0))), bottom: Math.min(13, Math.max(0, Math.trunc(options.characterBottomColor ?? 0))) },
           promptSupported: client => !options.dedicated && localSeats.has(client),
           playerIdentity: client => networkPlayerIdentities.get(client) ?? ({ seat: localSeats.get(client)?.id.index ?? 0, socialId: "" }) }, nextFrame);
         const simulation = host.loading?.nextFrame === undefined ? await serviceLoading(loadSource, () => {}) : await loadSource(host.loading.nextFrame);
@@ -2776,6 +2777,7 @@ export class Application {
         preparedMods: content.preparedMods, enabledMods: content.recipe.mods?.map(mod => mod.selection) ?? [], modCommands, ...(modTravel === undefined ? {} : { modTravel }),
         modFiles: new ModUserFiles(options.userContentRoot ?? defaultUserContentRoot()),
         skill: options.skill, mode: options.mode, seed: options.seed, maxClients: settings?.maxClients ?? (q3Map?.maxClients === undefined ? undefined : previousSimulation.q3Guest() === null ? q3Map.maxClients : Math.max(q3Map.maxClients, ...clients.map(client => client.slot + 1))) ?? skirmish?.maxClients ?? nextRules?.maxClients ?? this.simulation.options.maxClients,
+        playerColors: { top: Math.min(13, Math.max(0, Math.trunc(options.characterTopColor ?? 0))), bottom: Math.min(13, Math.max(0, Math.trunc(options.characterBottomColor ?? 0))) },
         promptSupported: client => !options.dedicated && this.localSeats.has(client),
         playerIdentity: client => this.networkPlayerIdentities.get(client) ?? ({ seat: this.localSeats.get(client)?.id.index ?? 0, socialId: "" }),
         ...(save === undefined ? { q2NextServer, ...(skirmish === undefined && q3Map === undefined ? { serverProfile } : {}), sourceArchive, ...(q1SourceRegistry === undefined ? {} : { sourceRegistry: q1SourceRegistry }), ...(q2Cvars === undefined ? {} : { q2Cvars }), ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined || skirmish !== undefined ? {} : { q3Session }),

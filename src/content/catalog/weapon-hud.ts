@@ -44,7 +44,7 @@ const roguePictures: typeof q1Pictures = [
 ];
 const mg3Pictures: typeof q1Pictures = [
   { item: "q1:weapon/mg3:laser", classic: "laser", wheel: "ui_h_weapon_laser", ammo: "sb_cells" },
-  { item: "q1:weapon/mg3:mjolnir", classic: null, wheel: "axe", ammo: "sb_cells" },
+  { item: "q1:weapon/mg3:mjolnir", classic: null, wheel: "ui_h_weapon_mjolnir", ammo: "sb_cells" },
 ];
 function q1WeaponPictures(program: string): typeof q1Pictures {
   return [...q1Pictures, ...(program === "hipnotic" ? hipnoticPictures : program === "rogue" ? roguePictures : program === "mg3" ? mg3Pictures : [])];
@@ -65,8 +65,12 @@ export function weaponHudIcons(source: ProviderReference, product: ProductExpect
   if (product.family === "q1" && ["id1", "hipnotic", "rogue", "dopa", "mg1", "mg3"].includes(product.campaign) && (product.edition === "classic" || product.edition === "rerelease")) {
     const pictures = q1WeaponPictures(product.campaign).find(entry => entry.item === item);
     if (pictures === undefined) return null;
-    return { weapon: product.edition === "rerelease" ? image(source, `gfx/weapons/${pictures.wheel.startsWith("ui_") ? pictures.wheel : `ww_${pictures.wheel}`}_1.lmp`) : pictures.classic === null ? null : wad(source, pictures.classic.startsWith("r_") ? pictures.classic : `inv_${pictures.classic}`),
-      selectedWeapon: product.edition === "rerelease" ? image(source, `gfx/weapons/${pictures.wheel.startsWith("ui_") ? pictures.wheel : `ww_${pictures.wheel}`}_2.lmp`) : pictures.classic === null ? null : wad(source, pictures.classic.startsWith("r_") ? pictures.classic : `inv2_${pictures.classic}`),
+    // Icon dialect follows the shipped content: MG3's new weapons only ever
+    // shipped wheel .lmp pictures (in the MG3 pak), never classic WAD lumps,
+    // so classic-edition MG3 launches use those too.
+    const imageIcons = product.edition === "rerelease" || item.startsWith("q1:weapon/mg3:");
+    return { weapon: imageIcons ? image(source, `gfx/weapons/${pictures.wheel.startsWith("ui_") ? pictures.wheel : `ww_${pictures.wheel}`}_1.lmp`) : pictures.classic === null ? null : wad(source, pictures.classic.startsWith("r_") ? pictures.classic : `inv_${pictures.classic}`),
+      selectedWeapon: imageIcons ? image(source, `gfx/weapons/${pictures.wheel.startsWith("ui_") ? pictures.wheel : `ww_${pictures.wheel}`}_2.lmp`) : pictures.classic === null ? null : wad(source, pictures.classic.startsWith("r_") ? pictures.classic : `inv2_${pictures.classic}`),
       ammo: pictures.ammo === null ? null : wad(source, pictures.ammo) };
   }
   if (product.family === "q2" && ["baseq2", "xatrix", "rogue", "mg2"].includes(product.campaign) && (product.edition === "classic" || product.edition === "rerelease")) {

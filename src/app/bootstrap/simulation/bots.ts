@@ -36,6 +36,17 @@ export class SimulationBotServices {
   moveToPoint(actor: ActorId, point: Vec3, tolerance: number): RereleaseGoalStatus { return this.transport?.moveToPoint(actor, point, tolerance) ?? 0; }
   followActor(actor: ActorId, target: ActorId): RereleaseGoalStatus { return this.transport?.followActor(actor, target) ?? 0; }
   isBot(actor: ActorId): boolean { return this.transport?.isBot(actor) ?? false; }
+  /** Admits one roster bot for the running match when a director is attached. */
+  tryAddBot(): boolean { return this.director?.addMatchBot() ?? false; }
+  /** Retires one bot through its transport, freeing the session client slot. */
+  tryDisconnectBot(actor: ActorId): boolean {
+    const transport = this.transport;
+    if (transport === null) return false;
+    for (const entry of transport.clients()) {
+      if (transport.actor(entry.client.id)?.equals(actor) === true) return transport.disconnect(entry.client.id.slot);
+    }
+    return false;
+  }
   get configuration(): CvarRegistry | null { return this.transport?.configuration ?? null; }
   checkpoint(): ApplicationBotsCheckpoint | null { return this.transport?.checkpoint() ?? null; }
   private director: SourceBotDirector | null = null;

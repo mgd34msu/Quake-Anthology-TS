@@ -183,6 +183,8 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { ArsenalIntent } from "../../../contracts/gameplay.ts";
 import type { AnimationStepInput, AnimationStepResult, ArsenalState, MovementContinuation, MovementState, MovementTouchContact, WeaponStepInput, WeaponStepResult } from "../../../contracts/movement.ts";
+import type { TouchContact } from "../../../contracts/world.ts";
+import { parseEntities } from "../../../formats/q3-map/index.ts";
 import type { ActorCommand, InputBatch, SaveImage, Simulation, SimulationOutput, SimulationProgress, WorldSnapshot } from "../../../contracts/session.ts";
 import type { ModSessionCheckpoint, ModTravelCheckpoint } from "../../../contracts/mods.ts";
 import { SessionMods } from "../../../world/session/mods.ts";
@@ -294,6 +296,24 @@ export class SharedSimulation implements Simulation {
   readonly scheduler: FrameScheduler;
   readonly random: SourceRandom;
   readonly botServices = new SimulationBotServices();
+  /** Q3 horde wave state (match provider q3:horde): bots are admitted per
+   * wave and retired when every wave bot has been fragged once. */
+  private hordeWave = 0;
+  private hordePendingWave = 1;
+  private hordeFragged = new Map<ActorId, { deaths: number; fragged: boolean }>();
+  private hordeNextWaveAt = 0;
+  private hordeAdmissionAt = -Infinity;
+  private hordeAdmissionPlayers = -1;
+  /** Runtime Tag state (match provider q2:tag on a foreign world; Q2 worlds
+   * keep the native composition module). Mirrors Rogue dm_tag over unified
+   * actors: one token, owner frags score 3, killing the owner scores 5 and
+   * takes the token, damage between non-owners is reduced to 3/4. */
+  private tagToken: OwnedActor | null = null;
+  private tagOwner: ActorId | null = null;
+  private tagCount = 0;
+  private tagDroppedAt: number | null = null;
+  private tagHealth = new Map<ActorId, number>();
+  private tagSpawns: readonly Vec3[] | null = null;
   readonly clock: SourceClock;
   readonly events: SimulationEvents;
   private readonly actorExecutions = new Map<ActorId, ActorExecution>();
@@ -2863,6 +2883,10 @@ export class SharedSimulation implements Simulation {
       schedule: (actor, due) => due === null ? this.scheduler.cancel(actor) : this.schedule(actor, due) };
     if (recipe.map.entities.provider.startsWith("q3:")) {
       const product = selectedSourceProgram(recipe) === "missionpack" ? "missionpack" : "baseq3";
+      // Rules-driven team launches put every client straight into play
+      // instead of the source's pick-a-team spectator step.
+      const q3Cvars = [...(this.options.q3Cvars ?? []),
+        ...(recipe.match.provider === "q3:ctf" ? [{ name: "g_teamAutoJoin", value: "1" }, { name: "g_teamForceBalance", value: "1" }] : [])];
       const host = createQ3SourceHost({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
         grantSelectedArsenal: (actor, category) => this.grantSelectedArsenal(actor, category),
         giveSelectedItem: (actor, args) => this.giveSelectedItem(actor, args),
@@ -2912,11 +2936,11 @@ export class SharedSimulation implements Simulation {
         },
         spawnPlayer: (entity, pose) => this.spawnQ3Player(entity, pose), moveClient: (entity, command, options) => this.moveQ3Client(entity, command, options),
         emit: event => { this.events.emit(content, { kind: "q3-source", event }); }, clientNumber: actor => this.requirePlayer(actor).client.slot,
-      }, { gameType: this.options.mode === "singleplayer" ? 2 : 0, singlePlayer: this.options.mode === "singleplayer", maxClients: this.options.maxClients,
+      }, { gameType: recipe.match.provider === "q3:ctf" ? GameType.GT_CTF : this.options.mode === "singleplayer" ? 2 : 0, singlePlayer: this.options.mode === "singleplayer", maxClients: this.options.maxClients,
         mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
         ...(this.options.restore !== undefined || this.options.sourceRegistry === undefined ? {} : { sourceRegistry: this.options.sourceRegistry }),
           ...(this.options.restore !== undefined || this.options.sourceArchive === undefined ? {} : { sourceArchive: this.options.sourceArchive }),
-        ...(this.options.q3Cvars === undefined ? {} : { cvars: this.options.q3Cvars }) });
+        ...(q3Cvars.length === 0 ? {} : { cvars: q3Cvars }) });
       const saved = this.options.restore;
       if (saved === undefined) {
         for (const definition of q3GameCvarDefinitions(product)) host.cvars.register(definition.name, definition.value, definition.flags);
@@ -2980,13 +3004,16 @@ export class SharedSimulation implements Simulation {
         restartSession: (map, flags) => { this.q1Restart = true; this.q1Campaign.flags = flags; this.transitions.admit({ kind: "campaign-level", campaign, map: `q1:${map}`, spawnPoint: "", gates: [], cause: null }); return undefined; },
         finishCampaign: () => { this.transitions.admit({ kind: "campaign-complete", campaign, gates: [] }); return undefined; },
       };
-      const program = selectedSourceProgram(recipe);
+      const selectedProgram = selectedSourceProgram(recipe);
+      // Quake 64 is the id1 campaign on N64-authored maps; its BSP/texture
+      // dialect is handled by the unified Q1 map reader, not a new program.
+      const program = selectedProgram === "quake64" ? "id1" : selectedProgram;
       if (program !== "id1" && program !== "hipnotic" && program !== "rogue" && program !== "dopa" && program !== "mg1" && program !== "mg3" && program !== "ctf") throw new Error(`Unsupported Q1 source program ${program}`);
       const composition = createQ1SourceComposition(host, { edition: content.includes(":rerelease:") ? "rerelease" : "classic", skill: this.q1Campaign.skill,
         physicsEdition: this.q1PhysicsEdition,
         deathmatch: this.options.mode === "deathmatch" ? 1 : 0, coop: this.options.mode === "coop", maxClients: this.options.maxClients,
         campaign, combatProvider: recipe.combat.provider, movementProvider: recipe.movement.provider, inventoryProvider: recipe.inventory.provider, gravity: 800 },
-        { program, campaign: this.q1Campaign, registered: true, officialCampaign: program === "id1" }, services);
+        { program, campaign: this.q1Campaign, horde: recipe.match.provider === "q1:horde", registered: true, officialCampaign: program === "id1" }, services);
       return { kind: "q1", game: composition.game, composition, cvars };
     }
 
@@ -3081,7 +3108,10 @@ export class SharedSimulation implements Simulation {
     const selectedProgram = selectedSourceProgram(recipe);
     const program = selectedProgram === "ctf" || selectedProgram === "lmctf" ? "baseq2" : selectedProgram;
     let product: Q2ProductRuntime;
-    if (content.includes(":rerelease:")) {
+    // MG2/N64 campaign content only exists in the rerelease source tree, so
+    // its entities/monsters/players composition is the rerelease one even
+    // when the selected product edition (movement/combat/timing) is classic.
+    if (content.includes(":rerelease:") || program === "mg2" || program === "n64") {
       if (program !== "baseq2" && program !== "xatrix" && program !== "rogue" && program !== "mg2" && program !== "n64") throw new Error(`Unsupported Q2 rerelease program ${program}`);
       const rereleaseHooks: Q2RereleaseHooks = {
         lightStyle: style => this.events.lightStyle(style),
@@ -3138,6 +3168,9 @@ export class SharedSimulation implements Simulation {
   private registerCombat(): undefined {
     const id = this.recipe.combat.provider;
     const armor = nativeVictimArmor(request => this.victimArmorContext(request));
+    if (this.foreignTag) this.combat.damageOperation.register({ provider: "q2:tag", id: "q2:tag/damage", order: 0, kind: "transform",
+      transform: request => this.tagOwner === null || request.target.equals(this.tagOwner) || request.attack.attacker?.equals(this.tagOwner) === true
+        ? request : { ...request, amount: Math.trunc(request.amount * 3 / 4) } });
     if (providerFamily(id) === "q1") this.combat.register(createQ1CombatPolicy({ id, armor, sourceEffects: {
       beforeQuad: (request, amount, target, attacker) => {
         const game = this.q1CombatSource();
@@ -4544,6 +4577,7 @@ export class SharedSimulation implements Simulation {
       if (this.source.kind === "q2" && this.source.product.rerelease?.players.intermissionFadeUntil != null) {
         continue;
       }
+      if (run && settlement.kind !== "active") { this.tickHordeWave(); this.tickTag(); }
       if (run && !preparesQ1Clients && settlement.kind !== "active") botCommands = this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000);
       for (const received of [...(commandTurn ? input.commands : []), ...botCommands]) {
         let command = paused ? { ...received, command: { ...received.command, buttons: received.command.buttons & ~1 } } : received;
@@ -4983,6 +5017,196 @@ export class SharedSimulation implements Simulation {
     throw new Error("Actor has no native source UI");
   }
   playerUi(actor: ActorId): PlayerUi { return this.slotProjection(actor, null).ui; }
+
+  /** Q3 horde: admit escalating bot waves; a wave clears when every admitted
+   * bot has been fragged at least once, then survivors retire and the next
+   * wave arrives after a short intermission. Other families run horde in
+   * their source compositions; Q3 has no monsters, so bots are the horde. */
+  private tickHordeWave(): void {
+    const source = this.source;
+    if (this.recipe.match.provider !== "q3:horde" || source.kind !== "q3") return;
+    const players = this.players();
+    const bots = players.filter(actor => this.botServices.isBot(actor));
+    const native = (actor: ActorId) => source.game.records.nativeByActor(actor);
+    const humansAlive = players.some(actor => !this.botServices.isBot(actor)
+      && (native(actor)?.health ?? this.combat.read(actor)?.health ?? 0) > 0);
+    if (!humansAlive) return;
+    if (this.hordeWave === 0) {
+      if (this.timeSeconds >= this.hordeNextWaveAt) {
+        this.hordeWave = this.hordePendingWave;
+        this.hordeFragged.clear();
+        this.requestHordeBot(players.length);
+      }
+      return;
+    }
+    // Register wave bots with a death baseline; Q3's PERS_KILLED is the
+    // native per-client death counter, reliable across respawns.
+    for (const bot of bots) {
+      const deaths = native(bot)?.client?.ps.persistant.get(PersistentIndex.PERS_KILLED) ?? 0;
+      const entry = this.hordeFragged.get(bot);
+      if (entry === undefined) this.hordeFragged.set(bot, { deaths, fragged: false });
+      else if (deaths > entry.deaths) entry.fragged = true;
+    }
+    const admitted = [...this.hordeFragged.keys()].filter(actor => this.actors.isLive(actor));
+    const humans = players.length - bots.length;
+    const target = Math.min(1 + this.hordeWave, 8, Math.max(1, this.options.maxClients - humans));
+    if (admitted.length < target) { this.requestHordeBot(players.length); return; }
+    if (!admitted.every(actor => this.hordeFragged.get(actor)?.fragged === true)) return;
+    // Wave cleared: retire survivors through the bot transport (which frees
+    // their session client slots for the next wave) and schedule it.
+    for (const bot of admitted) if (!this.botServices.tryDisconnectBot(bot)) this.disconnectPlayer(bot);
+    this.hordeFragged.clear();
+    this.hordePendingWave = this.hordeWave >= 15 ? 1 : this.hordeWave + 1;
+    this.hordeWave = 0;
+    this.hordeNextWaveAt = this.timeSeconds + 5;
+  }
+
+  /** Bot admission is queued through the source console, so retry at most
+   * once per second until the player count shows the request landed. */
+  private requestHordeBot(playerCount: number): void {
+    if (playerCount === this.hordeAdmissionPlayers && this.timeSeconds - this.hordeAdmissionAt < 1) return;
+    if (this.botServices.tryAddBot()) {
+      this.hordeAdmissionAt = this.timeSeconds;
+      this.hordeAdmissionPlayers = playerCount;
+    }
+  }
+
+  /** Tag runs natively in the Q2 composition on Q2 worlds; on foreign
+   * worlds the shared runtime mirrors the Rogue rules over unified actors. */
+  private get foreignTag(): boolean {
+    return this.recipe.match.provider === "q2:tag" && this.options.mode === "deathmatch"
+      && providerFamily(this.recipe.map.entities.provider) !== "q2";
+  }
+
+  private tickTag(): void {
+    if (!this.foreignTag) return;
+    const players = this.players();
+    if (this.tagToken === null && this.tagOwner === null) this.spawnTagToken(null);
+    if (this.tagToken !== null && this.tagDroppedAt !== null && this.timeSeconds - this.tagDroppedAt >= 30) {
+      // An untouched token returns to the spawn farthest from every player.
+      const spot = this.farthestDeathmatchSpawn(), body = this.bodies.read(this.tagToken.id);
+      if (spot !== null && body !== null) this.bodies.write(this.tagToken, { ...body, origin: spot, velocity: zero });
+      this.tagDroppedAt = this.timeSeconds;
+    }
+    const tagOwner = this.tagOwner;
+    if (tagOwner !== null && !players.some(actor => actor.equals(tagOwner))) {
+      this.tagOwner = null; this.tagCount = 0; this.spawnTagToken(null);
+    }
+    for (const actor of players) {
+      const health = this.combat.read(actor)?.health ?? 0, previous = this.tagHealth.get(actor);
+      this.tagHealth.set(actor, health);
+      if (previous === undefined || previous <= 0 || health > 0) continue;
+      const owned = this.actors.resolveOwned(actor);
+      const attacker = owned === null ? null : this.lastAttack.get(owned)?.attacker ?? null;
+      const killer = attacker !== null && !attacker.equals(actor) && players.some(player => player.equals(attacker)) ? attacker : null;
+      if (this.tagOwner !== null && actor.equals(this.tagOwner)) {
+        this.takeTagInventory(actor);
+        if (killer !== null) this.addTagScore(killer, 4);
+        if (killer !== null && (this.combat.read(killer)?.health ?? 0) > 0) {
+          this.tagOwner = killer; this.tagCount = 0;
+          this.giveTagInventory(killer); this.tagBonus(killer);
+        } else {
+          this.tagOwner = null; this.tagCount = 0; this.spawnTagToken(actor);
+        }
+      } else if (killer !== null && this.tagOwner !== null && killer.equals(this.tagOwner)) {
+        this.addTagScore(killer, 2);
+        if (++this.tagCount === 5) { this.tagCount = 0; this.grantTagQuad(killer); }
+      }
+    }
+  }
+
+  private addTagScore(actor: ActorId, amount: number): void {
+    const match = this.primaryMatchPlayer(actor);
+    if (match !== null) match.setScore(match.score() + amount);
+  }
+
+  private giveTagInventory(actor: ActorId): void {
+    const owned = this.actors.resolveOwned(actor);
+    if (owned !== null) this.inventory.give(owned, "q2:dm_tag_token", 1);
+  }
+
+  private takeTagInventory(actor: ActorId): void {
+    const owned = this.actors.resolveOwned(actor);
+    if (owned !== null) this.inventory.consume(owned, "q2:dm_tag_token", 1);
+  }
+
+  /** Native Tag heals the new owner and touches a body-armor pickup. */
+  private tagBonus(actor: ActorId): void {
+    const owned = this.actors.resolveOwned(actor), combat = this.combat.read(actor);
+    if (owned === null || combat === null) return;
+    if (combat.health < 100) this.combat.setHealth(owned, Math.min(100, combat.health + 200));
+    const regular = combat.armor.regular;
+    if (regular.kind === "none") {
+      const family = providerFamily(this.recipe.map.entities.provider);
+      this.combat.setArmor(owned, { ...combat.armor, regular: family === "q1"
+        ? { kind: "q1", points: 100, absorption: 0.3, item: "q1:item_armor1" }
+        : { kind: "q3", points: 100, protection: Math.fround(0.66) } });
+    } else if (regular.points < 100) this.combat.setArmor(owned, { ...combat.armor, regular: { ...regular, points: 100 } });
+  }
+
+  private grantTagQuad(actor: ActorId): void {
+    const source = this.source;
+    if (source.kind === "q3") {
+      const client = source.game.records.nativeByActor(actor)?.client;
+      if (client != null) client.ps.powerups.set(Powerup.PW_QUAD, source.game.level.time + 30000);
+    } else if (source.kind === "q1") source.game.player(actor)?.powerups.set("quad", source.game.time + 30);
+  }
+
+  /** Deathmatch spawn origins come from the retained map entity lump:
+   * spawn entities are not shared actors in every family's world. */
+  private tagSpawnOrigins(): readonly Vec3[] {
+    if (this.tagSpawns !== null) return this.tagSpawns;
+    const origins: Vec3[] = [], fallback: Vec3[] = [];
+    for (const entity of parseEntities(this.options.world.entities)) {
+      const classname = entity.get("classname");
+      if (classname !== "info_player_deathmatch" && classname !== "info_player_start") continue;
+      const parts = (entity.get("origin") ?? "").split(/\s+/).map(Number);
+      const [x, y, z] = parts;
+      if (parts.length !== 3 || x === undefined || y === undefined || z === undefined || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+      (classname === "info_player_deathmatch" ? origins : fallback).push({ x, y, z });
+    }
+    this.tagSpawns = origins.length !== 0 ? origins : fallback;
+    return this.tagSpawns;
+  }
+
+  private farthestDeathmatchSpawn(): Vec3 | null {
+    const playerBodies = this.players().flatMap(actor => { const body = this.bodies.read(actor); return body === null ? [] : [body.origin]; });
+    let best: Vec3 | null = null, bestDistance = -1;
+    for (const spot of this.tagSpawnOrigins()) {
+      let nearest = Infinity;
+      for (const origin of playerBodies) nearest = Math.min(nearest, Math.hypot(spot.x - origin.x, spot.y - origin.y, spot.z - origin.z));
+      if (nearest > bestDistance) { bestDistance = nearest; best = spot; }
+    }
+    return best === null ? null : { x: best.x, y: best.y, z: best.z + 24 };
+  }
+
+  private spawnTagToken(from: ActorId | null): void {
+    const origin = from !== null ? this.bodies.read(from)?.origin : this.farthestDeathmatchSpawn();
+    if (origin === null || origin === undefined) return;
+    const actor = this.actors.allocate(this.recipe.match.provider, "q2:dm_tag_token");
+    const bounds = { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 15 } };
+    this.bodies.create(actor, { origin: { x: origin.x, y: origin.y, z: origin.z + 16 }, velocity: zero, angles: zero, bounds, ground: null });
+    this.physics.setSolid(actor, "trigger", null, providerFamily(this.recipe.map.entities.provider));
+    this.callbacks.bind(actor, { think: null, touch: contact => this.tagTokenTouched(contact), use: null, pain: null, die: null });
+    this.detachedModels.set(actor, { content: this.recipe.match.content, path: "models/items/tagtoken/tris.md2" });
+    this.bodies.link(actor);
+    this.tagToken = actor;
+    this.tagDroppedAt = this.timeSeconds;
+  }
+
+  private tagTokenTouched(contact: TouchContact): undefined {
+    const token = this.tagToken;
+    if (token === null || !contact.self.id.equals(token.id)) return undefined;
+    // The native token is untouchable for a second after it drops.
+    if (this.timeSeconds - (this.tagDroppedAt ?? 0) < 1) return undefined;
+    const player = contact.other;
+    if (this.player(player) === null || (this.combat.read(player)?.health ?? 0) <= 0) return undefined;
+    this.tagToken = null; this.tagDroppedAt = null;
+    this.actors.release(token);
+    this.tagOwner = player; this.tagCount = 0;
+    this.giveTagInventory(player); this.tagBonus(player);
+    return undefined;
+  }
   weaponSlot(actor: ActorId): WeaponSlotProjection {
     return this.slotProjection(actor, this.primaryPresentations().find(model => model.viewWeapon && sameActor(model.actor, actor)) ?? null);
   }
@@ -5949,7 +6173,14 @@ export class SharedSimulation implements Simulation {
       const q2Entity = this.q2Characters.get(player.actor)?.entity ?? (player.character === "q2" && this.source.kind === "q2" ? this.source.game.entity(player.actor.id) : null);
       const q2Gibbed = this.q2Characters.get(player.actor)?.state.gibbed ?? (player.character === "q2" && this.source.kind === "q2" && this.source.players.states.get(player.actor.id)?.gibbed === true);
       const q1Player = this.source.kind === "q1" ? this.source.game.player(player.actor.id) : null;
-      const colors = player.character === "q1" && this.source.kind === "q1" ? this.source.composition.clients.get(player.actor.id) : null;
+      const sourceColors = player.character === "q1" && this.source.kind === "q1" ? this.source.composition.clients.get(player.actor.id) : null;
+      // Foreign Q1 characters have no Q1 client record: fall back to the
+      // launch appearance (bots wear the default translation) so the skin
+      // is never rendered with untranslated palette ramps.
+      const colors = player.character !== "q1" ? null
+        : sourceColors !== null && sourceColors !== undefined ? { shirt: sourceColors.shirt, pants: sourceColors.pants }
+        : this.botServices.isBot(player.actor.id) ? { shirt: 0, pants: 0 }
+        : { shirt: this.options.playerColors?.top ?? 0, pants: this.options.playerColors?.bottom ?? 0 };
       const visual = q1Player === null ? { alpha: 1, scale: 1 } : this.q1VisualFields(q1Player.alpha, q1Player.scale);
       const pose = this.interpolatedPose(player.actor.id, body.origin, body.angles, fraction);
       result.push({ actor: player.actor.id, content: player.characterAppearance.content, family: player.character,

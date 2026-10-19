@@ -13,7 +13,7 @@ import type { Q2RereleaseCampaignState } from "../../q2/rerelease/entities.ts";
 
 export type Q2ClassicProgram = "baseq2" | "xatrix" | "rogue";
 export type Q2RereleaseProgram = Q2ClassicProgram | "mg2" | "n64";
-export type Q2MatchSelection = { readonly kind: "ctf" } | { readonly kind: "lmctf"; readonly travel?: LmctfTravel } | { readonly kind: "standard" } | { readonly kind: "tag" }
+export type Q2MatchSelection = { readonly kind: "ctf" } | { readonly kind: "lmctf"; readonly travel?: LmctfTravel } | { readonly kind: "standard" } | { readonly kind: "tag" } | { readonly kind: "horde" }
   | { readonly kind: "deathball"; readonly team1Skin: string; readonly team2Skin: string; readonly goalLimit: number };
 export type Q2CompositionEvent =
   | { readonly kind: "ctf"; readonly event: import("../../q2/multiplayer/ctf/types.ts").Q2CtfEvent }

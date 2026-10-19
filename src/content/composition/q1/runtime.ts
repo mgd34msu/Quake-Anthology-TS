@@ -31,6 +31,7 @@ export class Q1SourceComposition {
   readonly addon: Q1AddonContext | null;
   readonly ctf: Q1Ctf | null;
   readonly horde: Q1Horde | null;
+  private readonly hordeAddon: Q1AddonContext | null;
   constructor(readonly game: Q1Foundation, readonly selection: Q1SourceSelection, readonly services: Q1CompositionServices) {
     this.clients = new Q1SourceClients(game, selection.program, services);
     if (game.options.edition === "rerelease" && (selection.program === "id1" || selection.program === "hipnotic" || selection.program === "rogue")) {
@@ -50,6 +51,12 @@ export class Q1SourceComposition {
     const addonServices = { emit: (event: import("../../q1/addons/context.ts").Q1AddonEvent) => services.emit({ kind: "addon", event }),
       cheatArsenal: (actor: ActorId, category: "weapons" | "ammo") => services.cheatArsenal?.(actor, category) ?? false,
       isMonster: (actor: ActorId) => this.isMonster(actor), cvar: (name: string) => services.cvar(name), setCvar: (name: string, value: string) => services.setCvar(name, value) };
+    const hordeServices = {
+      deadFlag: (actor: ActorId) => services.selectedPlayer(actor).deadFlag, noTarget: (actor: ActorId) => this.noTarget(actor),
+      isBot: (actor: ActorId) => services.selectedPlayer(actor).isBot, addScore: (actor: ActorId, delta: number) => this.clients.addScore(actor, delta),
+      respawnTeammate: (actor: ActorId) => this.respawnAt(actor, null, this.newTravel()), restartSession: (map: string, flags: number) => services.restartSession(map, flags),
+    };
+    this.hordeAddon = null;
     if (selection.program === "hipnotic" || selection.program === "rogue") {
       this.packs = registerQ1MissionPack(game, this.base, selection.program, {
         cheatArsenal: addonServices.cheatArsenal,
@@ -65,12 +72,17 @@ export class Q1SourceComposition {
       this.ctf = registerCTF(this.addon, this.ctfServices(), services.sharedGrapple ?? null); this.horde = null;
     } else if (selection.program === "dopa" || selection.program === "mg1" || selection.program === "mg3") {
       this.packs = null; this.addon = registerQ1CampaignAddons(this.base, selection.program, addonServices); this.ctf = null;
-      this.horde = selection.program === "mg1" || selection.program === "dopa" ? registerQ1Horde(this.addon, {
-        deadFlag: actor => services.selectedPlayer(actor).deadFlag, noTarget: actor => this.noTarget(actor),
-        isBot: actor => services.selectedPlayer(actor).isBot, addScore: (actor, delta) => this.clients.addScore(actor, delta),
-        respawnTeammate: actor => this.respawnAt(actor, null, this.newTravel()), restartSession: (map, flags) => services.restartSession(map, flags),
-      }) : null;
+      this.horde = selection.program === "mg1" || selection.program === "dopa" ? registerQ1Horde(this.addon, hordeServices) : null;
     } else { this.packs = null; this.addon = null; this.ctf = null; this.horde = null; }
+    if (this.horde === null && selection.horde === true) {
+      // Horde is a match mode, not a campaign: authored horde maps must work
+      // on every Q1 program (including custom games). MG3 already registered
+      // the MG1 monster roster; other programs pull the MG1 campaign addons
+      // in alongside their own so horde squads and loot can spawn.
+      this.hordeAddon = selection.program === "mg3" ? new Q1AddonContext(this.base, "mg1", addonServices)
+        : registerQ1CampaignAddons(this.base, "mg1", addonServices);
+      this.horde = registerQ1Horde(this.hordeAddon, hordeServices);
+    }
     if (this.addon?.program === "mg3") {
       const addon = this.addon;
       game.registerDamageSourceEffects("q1:mg3:buddha", { lethalHealth: (request, health) => addon.playerNumber(request.target, "buddha") !== 0
@@ -126,6 +138,7 @@ export class Q1SourceComposition {
   /** Called once after game.beginFrame and before source player prethink. */
   preFrame(elapsedSeconds: number): undefined {
     this.addon?.frame(elapsedSeconds);
+    if (this.hordeAddon !== null && this.hordeAddon !== this.addon) this.hordeAddon.frame(elapsedSeconds);
     if (this.game.options.deathmatch !== 0) this.base.levelRules.checkLimits(this.game.time, [...this.clients.records.values()].map(client => client.frags), this.services.cvar("timelimit"), this.services.cvar("fraglimit"));
     return undefined;
   }

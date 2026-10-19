@@ -51,6 +51,10 @@ export type StartupNativePreset = Omit<StartupSelectionChoice, "edition"> & {
   readonly edition: string;
   readonly difficulties: readonly StartupSelectionChoice[];
   readonly defaultSkill: string;
+  /** Product this variant launches when id is a mode variant (`<product>:<rules>`). */
+  readonly productId?: string;
+  readonly rules?: MatchRules;
+  readonly mode?: "singleplayer" | "coop" | "deathmatch";
 };
 export interface StartupLaunch { readonly options: ApplicationOptions; readonly recipe: ExecutableRecipe; }
 export interface StartupCharacterPreview {
@@ -67,7 +71,7 @@ export interface StartupHosting {
   readonly q1Protocol: Q1ProtocolIdentity | null;
 }
 const choice = (id: string, label = id, unavailable: string | null = null): StartupSelectionChoice => ({ id, label, unavailable });
-const q1ColorNames = ["White", "Brown", "Slate", "Olive", "Red", "Ochre", "Rust", "Peach", "Mauve", "Rose", "Khaki", "Teal", "Yellow", "Blue"] as const;
+const q1ColorNames: readonly string[] = ["White", "Brown", "Slate", "Olive", "Red", "Ochre", "Rust", "Peach", "Mauve", "Rose", "Khaki", "Teal", "Yellow", "Blue"];
 const monsterNames: Readonly<Record<string, string>> = { monster_army: "Grunt", monster_demon1: "Fiend", monster_wizard: "Scrag", monster_shalrath: "Vore", monster_tarbaby: "Spawn" };
 function monsterLabel(classname: string): string {
   return monsterNames[classname] ?? classname.replace("monster_", "").split("_").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
@@ -345,7 +349,7 @@ export class StartupSelectionModel {
     return null;
   }
   presets(): readonly StartupNativePreset[] {
-    return this.catalog.products.filter(product => product.availability.kind === "installed"
+    const campaigns = this.catalog.products.filter(product => product.availability.kind === "installed"
       && expectedProducts.some(expected => expected.id === product.expectation.id)
       && (product.expectation.edition === "classic" || product.expectation.edition === "rerelease")
       && product.expectation.campaign !== "ctf" && product.expectation.campaign !== "lmctf").map(product => {
@@ -356,6 +360,22 @@ export class StartupSelectionModel {
       return { ...productChoice(product), family, edition, difficulties, defaultSkill: family === "q3" ? "2" : "1",
         unavailable: null };
     });
+    // Mode presets: every supported mode is a first-class launch, not only a
+    // custom-builder rules tweak.
+    const modes: StartupNativePreset[] = [];
+    for (const preset of campaigns) {
+      const product = this.catalog.product(preset.id), { family, campaign } = product.expectation;
+      if (family === "q1" && (campaign === "mg1" || campaign === "dopa"))
+        modes.push({ ...preset, id: `${preset.id}:horde`, label: `${preset.label} — Horde`, productId: preset.id, rules: "horde", mode: "singleplayer" });
+      if (family === "q3") {
+        modes.push({ ...preset, id: `${preset.id}:horde`, label: `${preset.label} — Horde`, productId: preset.id, rules: "horde", mode: "singleplayer" });
+        modes.push({ ...preset, id: `${preset.id}:ctf`, label: `${preset.label} — Capture the Flag`, productId: preset.id, rules: "ctf", mode: "deathmatch" });
+      }
+      modes.push({ ...preset, id: `${preset.id}:tag`, label: `${preset.label} — Tag`, productId: preset.id, rules: "tag", mode: "deathmatch" });
+      if (family === "q2")
+        modes.push({ ...preset, id: `${preset.id}:deathball`, label: `${preset.label} — DeathBall`, productId: preset.id, rules: "deathball", mode: "deathmatch" });
+    }
+    return [...campaigns, ...modes];
   }
   async resolvePreset(id: string, difficulty?: number, arenaMap?: string): Promise<StartupLaunch> {
     const selected = this.presets().find(preset => preset.id === id);
@@ -363,14 +383,30 @@ export class StartupSelectionModel {
     if (selected.unavailable !== null) throw new Error(selected.unavailable);
     const level = difficulty ?? Number(selected.defaultSkill);
     if (!selected.difficulties.some(choice => Number(choice.id) === level)) throw new Error("Invalid preset difficulty");
-    const product = this.catalog.require(id), family = product.expectation.family;
+    const productId = selected.productId ?? id;
+    const product = this.catalog.require(productId), family = product.expectation.family;
     const teamArenaSkirmish = product.expectation.campaign === "missionpack" && (level === 1 || level === 2 || level === 3 || level === 4 || level === 5)
       ? planTeamArenaSkirmish(this.teamArenaCampaign ?? (() => { throw new Error("Team Arena metadata is not prepared"); })(), level, undefined, this.selectedTeams) : undefined;
     const selectedArena = arenaMap === undefined ? undefined : this.arenaSelection?.rows.find(row => row.arena.map === arenaMap);
-    if (arenaMap !== undefined && (id !== "q3-baseq3" || selectedArena?.available !== true)) throw new Error("That arena is not unlocked in this profile.");
-    const preferred = selectedArena?.arena.map ?? teamArenaSkirmish?.map ?? (family === "q3" ? await this.q3TrainingMap(product)
-      : this.authoredDefaultMaps.get(id) ?? product.expectation.mapWitness ?? (family === "q1" ? "maps/start.bsp" : null));
-    const map = this.playableMaps.get(id)?.find(map => map.id.toLowerCase() === preferred?.toLowerCase());
+    if (arenaMap !== undefined && (productId !== "q3-baseq3" || selectedArena?.available !== true)) throw new Error("That arena is not unlocked in this profile.");
+    const playable = this.playableMaps.get(productId) ?? [];
+    // Mode maps are discovered from authored entities (horde_manager,
+    // dm_dball_*), never guessed from filenames alone.
+    const authoredFor = (rules: MatchRules): StartupSelectionChoice | undefined => {
+      const metadata = new Map(this.catalog.mapsFor(product.id).map(map => [map.path.toLowerCase(), map]));
+      return playable.find(candidate => {
+        const map = metadata.get(candidate.id.toLowerCase());
+        const classnames = map === undefined ? undefined : this.mapClassnames.get(`${map.source}:${map.memberIndex}`);
+        return classnames !== undefined && matchMapUnavailable({ ...product.expectation, mode: selected.mode ?? "singleplayer", rules }, classnames) === null;
+      });
+    };
+    const modeMap = selected.rules === "horde" ? authoredFor("horde") ?? playable.find(map => /horde/i.test(map.id))
+      : selected.rules === "deathball" ? authoredFor("deathball") ?? playable.find(map => /dball/i.test(map.id))
+      : selected.rules === "tag" ? playable.find(map => /(^|\/)(q2dm|rdm|dm)[^/]*\.bsp$/i.test(map.id))
+      : selected.rules === "ctf" ? authoredFor("ctf") ?? playable.find(map => /ctf[^/]*\.bsp$/i.test(map.id)) : undefined;
+    const preferred = modeMap?.id ?? selectedArena?.arena.map ?? teamArenaSkirmish?.map ?? (family === "q3" ? await this.q3TrainingMap(product)
+      : this.authoredDefaultMaps.get(productId) ?? product.expectation.mapWitness ?? (family === "q1" ? "maps/start.bsp" : null));
+    const map = playable.find(map => map.id.toLowerCase() === preferred?.toLowerCase());
     if (map === undefined || map.unavailable !== null) throw new Error(`${selected.label}: ${map?.unavailable ?? "authored campaign start map is unavailable"}`);
     const characterModel = teamArenaSkirmish?.playerModel ?? (family === "q1" ? "player" : family === "q2" ? "male" : "sarge");
     const model = this.modelsFor(product).find(model => model.id === characterModel);
@@ -385,8 +421,8 @@ export class StartupSelectionModel {
     const options = this.applySelectedServerProfile({ ...preferences, ...this.display,
       ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}), renderer,
       ...(teamArenaSkirmish === undefined ? {} : { teamArenaSkirmish }),
-      product: id, map: map.id, movement: family, movementProduct: product.expectation.id, character: family, characterModel, skill, ...bot,
-      mode: "singleplayer", rules: "standard", seats: 1, dedicated: false, network: { kind: "offline" } });
+      product: productId, map: map.id, movement: family, movementProduct: product.expectation.id, character: family, characterModel, skill, ...bot,
+      mode: selected.mode ?? "singleplayer", rules: selected.rules ?? "standard", seats: 1, dedicated: false, network: { kind: "offline" } });
     const movement: ProviderReference = { provider: `${family}:movement`, content: product.id };
     const character: ProviderReference = { provider: `${family}:character`, content: product.id };
     const preset = applicationPreset(this.catalog, options, { movement, character });
@@ -668,9 +704,10 @@ export class StartupSelectionModel {
       ...(placement === "disabled" ? [] : [row("grappleStyle", "Hook style", styles.map(style => choice(style.id, style.title, style.unavailable)), style)]),
       row("grenades", "Offhand grenades", [choice("disabled", "Off"), choice("enabled", "On", grenadeSource === null ? "Requires Quake II grenade assets" : null)], grenades),
       row("mode", "Game mode", [choice("singleplayer", "Single player"), choice("coop", "Cooperative"), choice("deathmatch", "Deathmatch")]),
-      row("rules", "Match rules", [choice("standard", "Standard"), ...(["tag", "deathball", "horde"] satisfies readonly MatchRules[]).map(rule => choice(rule, rule === "tag" ? "Tag" : rule === "deathball" ? "DeathBall" : "Horde", matchModeUnavailable({ ...sourceProgramProduct(this.catalog, this.product("product").id).expectation, mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer", rules: rule }))), ...["ctf", "lmctf"].map(rule => choice(rule, rule === "ctf" ? "Q2 Capture the Flag" : "Loki's Minions CTF",
-        this.product("product").expectation.family !== "q2" || this.product("product").expectation.edition !== "classic" ? "Requires a classic Quake II campaign"
-          : this.values.mode !== "deathmatch" ? "Requires deathmatch mode" : unavailable(this.catalog.product(`q2-classic-${rule}`))))]),
+      row("rules", "Match rules", [choice("standard", "Standard"), ...(["tag", "deathball", "horde"] satisfies readonly MatchRules[]).map(rule => choice(rule, rule === "tag" ? "Tag" : rule === "deathball" ? "DeathBall" : "Horde", matchModeUnavailable({ ...sourceProgramProduct(this.catalog, this.product("product").id).expectation, mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer", rules: rule }))), ...["ctf", "lmctf"].map(rule => choice(rule, rule === "ctf" ? "Capture the Flag" : "Loki's Minions CTF",
+        rule === "ctf" && this.product("product").expectation.family === "q3" ? (this.values.mode !== "deathmatch" ? "Requires deathmatch mode" : null)
+        : this.product("product").expectation.family !== "q2" ? "Requires a Quake II campaign"
+          : this.values.mode !== "deathmatch" ? "Requires deathmatch mode" : unavailable(this.catalog.product(`q2-${this.product("product").expectation.edition === "rerelease" ? "rerelease" : "classic"}-${rule}`))))]),
       row("skill", "Difficulty", [choice("0", "Easy"), choice("1", "Normal"), choice("2", "Hard"), choice("3", "Nightmare")]),
       row("seats", "Local players", [1, 2, 3, 4].map(value => choice(String(value)))),
       row("renderer", "Renderer", [choice("gl", "OpenGL"), choice("cpu", "Software")])];

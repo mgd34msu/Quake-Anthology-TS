@@ -88,11 +88,41 @@ async function orderForContent(catalog: InstalledCatalog, plan: ResolvedMountPla
   return [...order];
 }
 
+const KNOWN_PROVIDER_FAMILIES: ReadonlySet<string> = new Set(["q1", "q2", "q3"]);
+/** Match providers are family-bound even in the unified engine: their
+ * entities, scoring and spawns only exist in that family's source world. */
+const FAMILY_BOUND_MATCH: Readonly<Record<string, string>> = {
+  "q1:horde": "q1", "q1:ctf": "q1", "q2:ctf": "q2", "q2:lmctf": "q2", "q2:deathball": "q2", "q2:horde": "q2", "q3:horde": "q3", "q3:ctf": "q3",
+};
+
+/** Family-by-role cross-check: every selected provider must name a known
+ * family, and family-bound roles (match rules) must run on a world of that
+ * family. Other roles deliberately cross families in the unified engine. */
+export function validateLaunchRoles(launch: SelectedLaunch, catalog: InstalledCatalog): void {
+  const roles: readonly (readonly [string, ProviderReference])[] = [
+    ["map entities", launch.map.entities], ["movement", launch.movement], ["character", launch.character.definition],
+    ["engine behavior", launch.engineBehavior], ["combat", launch.combat], ["inventory", launch.inventory],
+    ["match", launch.match], ["transition", launch.transition], ["hud", launch.presentation.hud],
+    ["effects", launch.presentation.effects], ["audio", launch.presentation.audio],
+  ];
+  for (const [role, reference] of roles) {
+    const family = reference.provider.split(":")[0] ?? "";
+    if (!KNOWN_PROVIDER_FAMILIES.has(family)) throw new Error(`Launch ${role} provider ${reference.provider} has no known family`);
+  }
+  const boundFamily = FAMILY_BOUND_MATCH[launch.match.provider];
+  if (boundFamily !== undefined) {
+    const worldFamily = catalog.product(launch.map.entities.content).expectation.family;
+    if (worldFamily !== boundFamily)
+      throw new Error(`Launch match provider ${launch.match.provider} requires a ${boundFamily} world, but map entities are ${worldFamily}`);
+  }
+}
+
 export async function prepareLaunchMountPlan(options: ResolveLaunchOptions): Promise<{ readonly selected: SelectedLaunch; readonly plan: ResolvedMountPlan }> {
   const choice = selectLaunch(options.choice, options.preset, options.id);
   const selected = { ...choice, weapons: choice.weapons.map(weapon => canonicalWeaponSource(choice.map.entities, weapon, options.catalog)) };
   validateEquipment(selected.equipment, options.catalog);
   validateMonsters(selected.enemies, options.catalog);
+  validateLaunchRoles(selected, options.catalog);
   const required = requiredContent(selected);
   for (const content of required) options.catalog.require(content);
   const executionRoles = new Set<string>();

@@ -237,6 +237,7 @@ export class SourceBotDirector {
   shutdownClient(client: number, restart: boolean): void { this.catalog.shutdownClient(client, restart); }
   removeQueuedBegin(client: number): void { this.catalog.removeQueuedBegin(client); }
   consoleCommand(argv: readonly string[]): void { this.catalog.consoleCommand(argv); }
+  addMatchBot(): boolean { return this.catalog.addMatchBot(); }
   testAas(origin: import("../../contracts/math.ts").Vec3): void { this.ai.testAas(origin); }
   interbreedEndMatch(): void { this.ai.interbreedEndMatch(); }
   roster(): readonly SourceBotRosterEntry[] {

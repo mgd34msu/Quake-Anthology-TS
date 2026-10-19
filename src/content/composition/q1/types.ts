@@ -12,6 +12,8 @@ export type Q1SourceProgram = "id1" | "hipnotic" | "rogue" | "dopa" | "mg1" | "m
 export interface Q1SourceSelection {
   readonly program: Q1SourceProgram;
   readonly campaign: Q1CampaignBinding;
+  /** Horde match selected: register the horde addon on any program. */
+  readonly horde?: boolean;
   readonly registered: boolean;
   readonly officialCampaign: boolean;
 }

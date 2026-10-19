@@ -3,8 +3,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Application } from '../../../src/app/bootstrap/application.ts';
+import { applicationPreset } from '../../../src/app/bootstrap/content.ts';
 import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
+import { discoverInstalledContent, presetChoice, resolveLaunch } from '../../../src/content/catalog/index.ts';
 import { encodePng } from '../../../src/formats/images/png.ts';
+import { testCorpusRoot } from '../../support/corpus.ts';
 
 test('Q1 source colors feed each player model and survive source save restore', async () => {
   const root = await mkdtemp(join(tmpdir(), 'q1-player-colors-'));
@@ -25,3 +28,22 @@ test('Q1 source colors feed each player model and survive source save restore', 
     const pixels=app.captureNextFrame();await app.step(1);await Bun.write('/tmp/q1-player-colors.png',encodePng(640,480,await pixels));
   }finally{await app.close();await rm(root,{recursive:true,force:true});}
 },30000);
+
+test('foreign Q1 character in a Q3 world carries the launch shirt and pants colors', async () => {
+  const parsed = parseApplicationCommand(['--content-root',testCorpusRoot(),'--game','q3-baseq3','--map','q3dm1','--movement','q1',
+    '--character','q1','--mode','singleplayer','--renderer','cpu','--hidden','--width','320','--height','240']);
+  if(parsed.kind!=='run')throw Error('Missing launch');
+  const catalog = await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, discoverMods: false });
+  const preset = applicationPreset(catalog, parsed.options);
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id),
+    weapons: { kind: 'selected', value: [{ provider: 'q1:official', content: catalog.require('q1-classic-id1').id }] } } });
+  const app = await Application.open({...parsed.options,characterTopColor:4,characterBottomColor:13},{print:()=>undefined},recipe);
+  try {
+    for(let index=0;index<12;index++)await app.step(50);
+    const local=app.localPlayers[0];if(local===undefined)throw Error('Missing local player');
+    const body=app.simulation.presentations().find(model=>model.actor.equals(local.actor)&&!model.viewWeapon&&model.path==='progs/player.mdl');
+    expect(body).toBeDefined();
+    expect(body?.playerColors).toEqual({top:4,bottom:13});
+    expect(app.simulation.presentations().filter(model=>model.viewWeapon).every(model=>model.playerColors===undefined)).toBe(true);
+  }finally{await app.close();}
+},120000);

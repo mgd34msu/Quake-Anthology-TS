@@ -133,11 +133,16 @@ export function applicationSourceSelection(catalog: InstalledCatalog, options: P
   const source: ProviderReference = { provider: `${family}:official`, content: product.id };
   const program = sourceProgramProduct(catalog, product.id).expectation;
   const rerelease = program.edition === "rerelease";
-  const rules = options.rules ?? (family === "q2" && !rerelease && (program.campaign === "ctf" || program.campaign === "lmctf") ? program.campaign : "standard");
-  if ((rules === "ctf" || rules === "lmctf") && (family !== "q2" || rerelease)) throw new Error(`${rules} requires a classic Quake II game provider`);
-  if ((rules === "tag" || rules === "deathball") && (family !== "q2" || !rerelease && program.campaign !== "rogue")) throw new Error("Tag and DeathBall require Ground Zero or Quake II rerelease");
-  if (rules === "horde" && (family !== "q1" || !rerelease || program.campaign !== "mg1" && program.campaign !== "dopa")) throw new Error("Horde requires Quake rerelease MG1 or DOPA");
-  const match: ProviderReference = rules === "standard" ? source : rules === "ctf" || rules === "lmctf" ? { provider: `q2:${rules}`, content: catalog.require(`q2-classic-${rules}`).id } : { provider: `${family}:${rules}`, content: product.id };
+  const rules = options.rules ?? (family === "q2" && (program.campaign === "ctf" || program.campaign === "lmctf") ? program.campaign : "standard");
+  if (rules === "lmctf" && family !== "q2") throw new Error("lmctf requires a Quake II game provider");
+  if (rules === "ctf" && family !== "q2" && family !== "q3") throw new Error("ctf requires a Quake II or Quake III game provider");
+  if (rules === "deathball" && family !== "q2") throw new Error("DeathBall requires a Quake II game provider");
+  if (rules === "horde" && family !== "q1" && family !== "q2" && family !== "q3") throw new Error("Horde requires a Quake, Quake II or Quake III game provider");
+  // Tag/DeathBall ship their tokens/models in Ground Zero content, so the
+  // match role mounts the same-edition Rogue product on any Q2 program.
+  const match: ProviderReference = rules === "standard" ? source : rules === "ctf" && family === "q3" ? { provider: "q3:ctf", content: product.id } : rules === "ctf" || rules === "lmctf" ? { provider: `q2:${rules}`, content: catalog.require(`q2-${rerelease ? "rerelease" : "classic"}-${rules}`).id }
+    : rules === "tag" || rules === "deathball" ? { provider: `q2:${rules}`, content: catalog.require(`q2-${rerelease ? "rerelease" : "classic"}-rogue`).id }
+    : { provider: `${family}:${rules}`, content: product.id };
   return { source, match, rules };
 }
 
@@ -393,7 +398,7 @@ export function applicationOptionsForRecipe(options: ApplicationOptions, content
   return { ...options, product: content.catalog.product(recipe.map.entities.content).expectation.id,
     map: recipe.map.geometry.requestedPath, mapProduct: content.catalog.product(recipe.map.geometryContent).expectation.id, movement: family(recipe.movement), movementProduct: quakeworldMovement ? "q1-quakeworld" : content.catalog.product(recipe.movement.content).expectation.id, character,
     characterModel: recipe.character.appearance.provider.slice(prefix.length),
-    rules: recipe.match.provider === "q2:ctf" ? "ctf" : recipe.match.provider === "q2:lmctf" ? "lmctf" : recipe.match.provider === "q2:tag" ? "tag" : recipe.match.provider === "q2:deathball" ? "deathball" : recipe.match.provider === "q1:horde" ? "horde" : "standard" };
+    rules: recipe.match.provider === "q2:ctf" || recipe.match.provider === "q3:ctf" ? "ctf" : recipe.match.provider === "q2:lmctf" ? "lmctf" : recipe.match.provider === "q2:tag" ? "tag" : recipe.match.provider === "q2:deathball" ? "deathball" : recipe.match.provider.endsWith(":horde") ? "horde" : "standard" };
 }
 
 export async function resolveApplicationTravel(content: LoadedApplicationContent, path: string): Promise<ExecutableRecipe> {

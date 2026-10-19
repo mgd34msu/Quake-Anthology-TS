@@ -6,6 +6,7 @@ export function sourceQ2MatchSelection(provider: string, cvars: CvarRegistry, tr
   if (provider === "q2:lmctf") return { kind: "lmctf", ...(travel === undefined ? {} : { travel }) };
   if (provider === "q2:ctf") return { kind: "ctf" };
   if (provider === "q2:tag") return { kind: "tag" };
+  if (provider === "q2:horde") return { kind: "horde" };
   if (provider === "q2:deathball") return { kind: "deathball", get team1Skin() { return cvars.variableString("dball_team1_skin"); },
     get team2Skin() { return cvars.variableString("dball_team2_skin"); }, get goalLimit() { return cvars.variableValue("goallimit"); } };
   return { kind: "standard" };
