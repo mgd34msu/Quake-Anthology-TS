@@ -6476,13 +6476,17 @@ export class SharedSimulation implements Simulation {
     for (const player of this.playerStates.values()) this.grapple?.release(player.actor.id);
     const landmark = this.levelChange?.landmark ?? null;
     const landmarkPlayer = landmark === null ? null : this.player(landmark.player);
-    return { spawnPoint, source: source.kind === "quakec" ? source.game.captureTravel() : source.kind === "q1" ? { kind: "q1", flags: this.q1Campaign.flags, skill: this.q1Campaign.skill }
+    const sourceTravel: SimulationTravel["source"] = source.kind === "quakec" ? source.game.captureTravel() : source.kind === "q1" ? { kind: "q1", flags: this.q1Campaign.flags, skill: this.q1Campaign.skill }
       : { kind: "q2", serverFlags: this.levelChange?.serverFlags ?? source.game.counters.serverFlags,
         ...(source.product.match.source instanceof Q2Lmctf ? { lmctf: source.product.match.source.captureTravel() } : {}),
         ...(source.product.rerelease === null ? {} : { rerelease: structuredClone(source.product.rerelease.entities.campaign) }),
         landmark: landmark === null || landmarkPlayer === null ? null : { clientSlot: landmarkPlayer.client.slot, name: landmark.name,
-          relativeOrigin: landmark.relativeOrigin, relativeVelocity: landmark.relativeVelocity, relativeViewAngles: landmark.relativeViewAngles } },
-      players: [...this.playerStates.values()].map(player => {
+          relativeOrigin: landmark.relativeOrigin, relativeVelocity: landmark.relativeVelocity, relativeViewAngles: landmark.relativeViewAngles } };
+    // Native QuakeWorld travel carries its clients in the source record;
+    // shared movement players must not be duplicated alongside them.
+    const nativeQuakeWorld = sourceTravel.kind === "quakeworld";
+    return { spawnPoint, source: sourceTravel,
+      players: nativeQuakeWorld ? [] : [...this.playerStates.values()].map(player => {
         const handGrenades = this.q1Restart ? undefined : this.handGrenades?.travel(player.actor.id);
         const projection = this.weaponSlots.has(player.actor.id) && !this.q1Restart ? this.slotProjection(player.actor.id, null) : null;
         const target = projection?.pending ?? projection?.active;
