@@ -56,11 +56,17 @@ test("external reads and writes retain copies and callback order, including save
     linked: () => { calls.push("linked"); return undefined; },
   });
   const first = bodies.read(actor.id), second = bodies.read(actor.id);
-  expect(first).toEqual(second); expect(first).not.toBe(second); expect(first).not.toBe(external);
+  // Unchanged external state reuses the retained immutable snapshot; it is
+  // still a frozen copy, never the external object itself.
+  expect(first).toEqual(second); expect(first).toBe(second); expect(first).not.toBe(external);
+  external = { ...state(), origin: { x: 99, y: 2, z: 3 } };
+  const changed = bodies.read(actor.id);
+  expect(changed).not.toBe(first); expect(changed?.origin.x).toBe(99); expect(first?.origin.x).toBe(-0);
+  external = state(); bodies.read(actor.id);
   const input = state(); bodies.write(actor, input);
   expect(external).not.toBe(input); expect(Object.isFrozen(external.origin)).toBe(true);
   bodies.link(actor);
-  expect(calls).toEqual(["read", "read", "write", "read", "bounds", "linked", "onLink"]);
+  expect(calls).toEqual(["read", "read", "read", "read", "write", "read", "bounds", "linked", "onLink"]);
   const saved = bodies.linkState(actor.id);
   if (saved === null) throw Error("Link missing");
   calls.length = 0; bodies.restoreLinkState(actor, saved);
