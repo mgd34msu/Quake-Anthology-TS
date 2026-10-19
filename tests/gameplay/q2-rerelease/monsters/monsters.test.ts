@@ -391,7 +391,7 @@ test("Rerelease medic revives the same actor and preserves health and commander 
     expect(revived?.state.baseHealth).toBe(370); expect(revived?.state.healthScaling).toBe(2);
     expect(scene.inventory.count(actor, "q2:monster-power")).toBe(480);
     const armor = scene.combat.read(actor)?.armor;
-    expect(armor?.regular.kind === "q2" ? armor.powered : null).toEqual({ kind: "shield", cells: 480 });
+    expect(armor?.powered).toEqual({ kind: "shield", cells: 480 });
     expect(revived?.entity.enemy).toBe(scene.player.id);
     expect(scene.source.get(patient.entity).healer).toBeNull();
     expect(medic.entity.enemy).toBe(scene.player.id);

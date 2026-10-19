@@ -189,7 +189,8 @@ test.skipIf(!existsSync(archivePath))("retail Q3 map, selected player admission,
   damage(runtime.combat, player, runtime.pool.at(1022), runtime.pool.at(1022), null, null, 1000, 0, 17);
   expect(deaths).toBe(1);
   expect(client.ps.persistant.get(PersistentIndex.PERS_KILLED)).toBe(1);
-  expect(physics.bodies.read(actor.id)?.bounds).toEqual(selectedBounds);
+  // Selected width/depth survive; the dead posture lowers max z to -8.
+  expect(physics.bodies.read(actor.id)?.bounds).toEqual({ ...selectedBounds, max: { ...selectedBounds.max, z: -8 } });
   expect(runtime.sourceState().clients[0]?.actor).toEqual(actor.id);
   runtime.endFrame();
   expect(events.some(event => event.kind === "entity-event" && event.state.otherEntityNum === player.s.number)).toBe(true);
