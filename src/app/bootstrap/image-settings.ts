@@ -48,6 +48,9 @@ export class ApplicationImageSettings {
   get persistedEntries(): readonly { readonly name: string; readonly value: string }[] { return this.persisted; }
   private appliedValues: readonly { readonly name: string; readonly value: string }[] = [];
   private releaseCandidateFovValidation: (() => void) | null = null;
+  private printSink: (text: string) => unknown;
+  /** Route settings diagnostics through the adopting graphical owner (host + seat consoles). */
+  bindPrint(sink: (text: string) => unknown): void { this.printSink = sink; }
   bindViewSettings(view: ApplicationViewSettings): () => void {
     const staged = this.releaseCandidateFovValidation !== null;
     this.releaseCandidateFovValidation?.();
@@ -68,6 +71,7 @@ export class ApplicationImageSettings {
     return { settings, validatePublication: transfer.validatePublication, publish: transfer.publish };
   }
   private constructor(private readonly options: ImageSettingsOptions) {
+    this.printSink = options.print;
     this.persistenceEnabled = !options.deferPersistence;
     this.store = new ConfigStore(join(options.userContentRoot ?? defaultUserContentRoot(), "settings"));
     this.cvars = new CvarRegistry(options);
@@ -176,7 +180,7 @@ export class ApplicationImageSettings {
     if (Number.isFinite(width) && width > 0) this.appliedDebugLineWidth = width;
     else {
       this.cvars.set("gl_debug_linewidth", String(this.appliedDebugLineWidth), true);
-      this.options.print("Debug line width must be a positive finite number.\n");
+      this.printSink("Debug line width must be a positive finite number.\n");
     }
     return this.appliedDebugLineWidth;
   }
@@ -195,7 +199,7 @@ export class ApplicationImageSettings {
   private applyDisplay(renderer: NativeRenderer): void {
     if (renderer.outputGamma !== this.gamma) {
       try { renderer.setOutputGamma(this.gamma); }
-      catch (error) { this.cvars.set("r_gamma", String(renderer.outputGamma), true); this.options.print(`Brightness rejected: ${String(error)}\n`); }
+      catch (error) { this.cvars.set("r_gamma", String(renderer.outputGamma), true); this.printSink(`Brightness rejected: ${String(error)}\n`); }
     }
     const window = renderer.window;
     const signature = (): string => ["r_customwidth", "r_customheight", "r_fullscreen", "r_swapInterval"].map(name => this.cvars.variableString(name)).join("/");
@@ -220,7 +224,7 @@ export class ApplicationImageSettings {
           if (interval !== 0 && interval !== 1) throw new RangeError("Vertical sync must be on or off");
           if (renderer.swapInterval !== interval) renderer.setSwapInterval(interval);
         }
-      } catch (error) { this.options.print(`Display settings rejected: ${String(error)}\n`); }
+      } catch (error) { this.printSink(`Display settings rejected: ${String(error)}\n`); }
     }
     if (!window.fullscreen) {
       const size = window.logicalSize;
@@ -251,7 +255,7 @@ export class ApplicationImageSettings {
     } catch (error) {
       for (const binding of bindings) binding.discard(); images?.discard();
       for (const value of this.appliedValues) this.cvars.set(value.name, value.value, true);
-      this.options.print(`Image settings rejected: ${error instanceof Error ? error.message : String(error)}\n`);
+      this.printSink(`Image settings rejected: ${error instanceof Error ? error.message : String(error)}\n`);
       return;
     }
     for (const binding of bindings) binding.commit(); sky?.();

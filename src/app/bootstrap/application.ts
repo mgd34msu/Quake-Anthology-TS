@@ -868,7 +868,7 @@ export class Application {
         application.configurationScripts = profileConfiguration?.scripts ?? startup?.scripts
           ?? (initialSave === undefined ? null : Application.sourceScripts(content, options, inputConfig));
         application.profileConfiguration = profileConfiguration;
-        application.imageSettings = borrowedImages?.settings ?? startup?.image ?? null;
+        application.adoptImageSettings(borrowedImages?.settings ?? startup?.image ?? null);
         if (initialSave !== undefined) {
           application.campaignUnit.restore(initialSave);
           application.teamArenaOverrides = readTeamArenaOverrides(initialSave, [...localSeats.values()].map(seat => ({ seat: seat.id.index, client: seat.client.id.slot })));
@@ -2065,6 +2065,10 @@ export class Application {
   }
 
   releaseSettings(): void { this.tools?.beforeWorldChange(); this.releaseViewCvars?.(); this.releaseViewCvars = null; }
+  private adoptImageSettings(settings: ApplicationImageSettings | null): void {
+    this.imageSettings = settings;
+    settings?.bindPrint(text => { this.host.print(text); for (const local of this.graphical?.input.locals ?? []) local.console.print(text); });
+  }
 
   retire(): Promise<void> { return this.close(); }
 
@@ -2101,7 +2105,7 @@ export class Application {
       client.sourceProfile.current = this.content.recipe.map.entities;
       this.releaseSettings();
       images.publish();
-      this.imageSettings = client.imageSettings;
+      this.adoptImageSettings(client.imageSettings);
       graphical.input.publishSharedCvars(client.imageSettings.cvars);
       graphical.audio.bindVolumeCvars(client.imageSettings.cvars);
       graphical.audio.bindOutputCvars(client.imageSettings.cvars);
