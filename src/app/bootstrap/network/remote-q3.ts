@@ -178,7 +178,9 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
     return { ...source, serverTime: this.clock.time, angles: [source.angles.x & 65535, source.angles.y & 65535, source.angles.z & 65535] };
   }
   private publish(time: number): void {
-    const snapshot = this.current, player = this.player; if (snapshot === null || player === null) return;
+    // Snapshots can arrive while the gamestate map (or its downloads) is
+    // still loading; there is nothing to present until the world exists.
+    const snapshot = this.current, player = this.player; if (snapshot === null || player === null || !this.world.ready) return;
     const recipe = this.world.content.recipe, ps = snapshot.playerState;
     const bodies = snapshot.entities.filter(entity => entity.number !== ps.clientNum).map(entity => ({ actor: this.actorAt(entity.number), body: { origin: entity.pos.base, angles: entity.apos.base, velocity: entity.pos.delta, bounds, ground: null } }));
     bodies.push({ actor: player.actor, body: { origin: ps.origin, angles: ps.viewangles, velocity: ps.velocity, bounds, ground: null } });

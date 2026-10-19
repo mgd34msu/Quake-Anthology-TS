@@ -1052,12 +1052,15 @@ export class RemoteApplication {
     const options = { ...roots, product: prepared.product.expectation.id, remoteContent: prepared.selection,
       ...(prepared.q3Product === null ? {} : { q3Product: prepared.q3Product }) };
     if (options.product !== roots.product) {
-      if (this.primaryPeer !== null) {
+      if (this.primaryPeer !== null || this.pendingAdvance === null) {
+        // No source frame is in flight (or a peer drives frames), so the
+        // admission can publish immediately instead of suspending to a
+        // frame boundary that does not exist.
         await this.publishPeerConfiguration({ content: prepared, options, assertCurrent, phase: "requested", suspension: null });
         assertCurrent();
         return prepared;
       }
-      if (this.peerAdmission !== null || this.pendingAdvance === null) { prepared.mounts.close(); throw new Error("Peer directory admission has no active source frame"); }
+      if (this.peerAdmission !== null) { prepared.mounts.close(); throw new Error("Peer directory admission has no active source frame"); }
       let resume = (): void => {}, cancel = (_error: Error): void => {};
       const admitted = new Promise<void>((resolve, reject) => { resume = resolve; cancel = reject; });
       const request: PeerDirectoryAdmission = { content: prepared, options, assertCurrent, phase: "requested", suspension: { resume, cancel } };

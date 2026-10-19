@@ -12,6 +12,7 @@ export class RemoteWorldContent {
         this.collisionSettings = settings;
         this.queries?.bindCollisionSettings(settings);
     }
+    get ready(): boolean { return this.loaded !== null; }
     get content(): LoadedApplicationContent {
         if (this.loaded === null) throw new Error('Remote server has not supplied a world');
         return this.loaded;
