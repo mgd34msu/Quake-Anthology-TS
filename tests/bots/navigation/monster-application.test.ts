@@ -28,7 +28,8 @@ const corpus = testCorpusRoot();
 test.skipIf(!existsSync(join(corpus, "q1/rerelease/mg3/pak0.pak")))("retail MG3 application installs monster navigation before think and restores an active path", async () => {
   const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-mg3", "--map", "dm1", "--dedicated", "--mode", "singleplayer"]);
   if (launch.kind !== "run") throw new Error("Expected MG3 application options");
-  const application = await Application.open(launch.options, { print: () => undefined }), directory = await mkdtemp(join(tmpdir(), "mg3-navigation-"));
+  const directory = await mkdtemp(join(tmpdir(), "mg3-navigation-"));
+  const application = await Application.open(launch.options, { print: () => undefined, saveDirectory: directory });
   try {
     const source = application.simulation.q1Source();
     if (source === null || source.composition.addon === null) throw new Error("MG3 source was not installed");
@@ -76,7 +77,7 @@ test.skipIf(!existsSync(join(corpus, "q1/rerelease/mg3/pak0.pak")))("retail MG3 
   } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
 }, 30000);
 
-async function openSelectedId1(map: string, wizardClassname = "monster_wizard", edition: "classic" | "rerelease" = "classic") {
+async function openSelectedId1(map: string, wizardClassname = "monster_wizard", edition: "classic" | "rerelease" = "classic", saveDirectory?: string) {
   const command = parseApplicationCommand(["--content-root", corpus, "--game", `q1-${edition}-id1`, "--map", map, "--dedicated", "--mode", "singleplayer"]);
   if (command.kind !== "run") throw new Error("Expected Q1 application options");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false }), preset = applicationPreset(catalog, command.options);
@@ -87,7 +88,7 @@ async function openSelectedId1(map: string, wizardClassname = "monster_wizard", 
     kind: "replace", default: { source, classname: "monster_army" },
     byClassname: Object.fromEntries(Object.keys(selectedSource.creatures).map(classname => [classname, { source, classname: classname === "monster_wizard" ? wizardClassname : classname }])),
   } } } });
-  return Application.open(command.options, { print: () => undefined }, recipe);
+  return Application.open(command.options, { print: () => undefined, ...(saveDirectory === undefined ? {} : { saveDirectory }) }, recipe);
 }
 function selectedId1(application: Application) {
   const checkpoint = simulationProviderCheckpoint(application.simulation.checkpoint(), "world:simulation");
@@ -98,7 +99,8 @@ function selectedId1(application: Application) {
 }
 
 test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m2 selected Q1 ogre attacks through shared physics and restores a live grenade", async () => {
-  const application = await openSelectedId1("e1m2"), directory = await mkdtemp(join(tmpdir(), "q1-selected-roster-"));
+  const directory = await mkdtemp(join(tmpdir(), "q1-selected-roster-"));
+  const application = await openSelectedId1("e1m2", "monster_wizard", "classic", directory);
   try {
     const classic = q1MonsterSources.find(source => source.edition === "classic");
     if (classic === undefined) throw new Error("Missing classic Q1 source");
@@ -211,7 +213,8 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m3 preserves
 
 
 test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")))("retail rerelease e1m2 selected ogre restores grenade damage and authored kill credit", async () => {
-  const application = await openSelectedId1("e1m2", "monster_wizard", "rerelease"), directory = await mkdtemp(join(tmpdir(), "q1-rerelease-ogre-"));
+  const directory = await mkdtemp(join(tmpdir(), "q1-rerelease-ogre-"));
+  const application = await openSelectedId1("e1m2", "monster_wizard", "rerelease", directory);
   function continuation() {
     return JSON.stringify({ selected: selectedId1(application), bodies: application.simulation.checkpoint().bodies },
       (key: string, value: unknown) => key === "generation" ? 0 : value instanceof Uint8Array ? decodeCheckpointValue(value) : value);
@@ -301,8 +304,8 @@ test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")))("retail rere
 
 test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")))("retail e2m3 selected fish swim, bite and restore in authored water in both editions", async () => {
   for (const edition of ["classic", "rerelease"]) {
-    const application = await openSelectedId1("e2m3", "monster_wizard", edition === "classic" ? "classic" : "rerelease");
     const directory = await mkdtemp(join(tmpdir(), "q1-selected-fish-"));
+    const application = await openSelectedId1("e2m3", "monster_wizard", edition === "classic" ? "classic" : "rerelease", directory);
     try {
       const map = application.simulation.q1Source();
       if (map === null) throw new Error("Missing Q1 map source");
@@ -363,7 +366,8 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m2 mixes nat
       ? { kind: "replace", default: { kind: "map-defined" }, byClassname: { monster_army: definition } }
       : { kind: "replace", default: definition, byClassname: Object.fromEntries(Object.keys(registered.creatures).filter(name => name !== "monster_army").map((name): readonly [string, MonsterSelectionTarget] => [name, { kind: "map-defined" }])) };
     const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });
-    const application = await Application.open(command.options, { print: () => undefined }, recipe), directory = await mkdtemp(join(tmpdir(), "native-selected-roster-"));
+    const directory = await mkdtemp(join(tmpdir(), "native-selected-roster-"));
+    const application = await Application.open(command.options, { print: () => undefined, saveDirectory: directory }, recipe);
     try {
       const client = application.session.createClient(0), human = application.simulation.admitPlayer(client.id);
       for (let frame = 0; frame < 5; frame++) await application.step(100);
@@ -397,7 +401,7 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m2 mixes nat
       expect(restored.game.entity(restoredSelected.id)).toBeNull(); expect(restored.game.totalMonsters).toBe(total);
       for (let frame = 0; frame < 3; frame++) await application.step(100);
       expect(continuation()).toEqual(expected);
-      const player = application.simulation.actors.atSource(recipe.map.entities.provider, human.actor.slot);
+      const player = application.simulation.actors.resolveSaved(human.actor);
       if (player === null) throw new Error("Missing restored player");
       const kills = restored.game.killedMonsters;
       for (const victim of [restoredNative.actor, restoredSelected]) {
@@ -444,8 +448,8 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK1.PAK")))("retail e1m7 keeps the
 test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("native Q1 client visibility preserves source eye PVS through a fresh application save", async () => {
   const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--map", "e1m2", "--dedicated", "--mode", "singleplayer"]);
   if (command.kind !== "run") throw new Error("Expected native Q1 launch");
-  const application = await Application.open(command.options, { print: () => undefined });
   const directory = await mkdtemp(join(tmpdir(), "q1-client-pvs-"));
+  const application = await Application.open(command.options, { print: () => undefined, saveDirectory: directory });
   try {
     const simulation = application.simulation, source = simulation.q1Source();
     if (source === null) throw new Error("Missing native Q1 source");
@@ -459,16 +463,23 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("native Q1 client visi
     const eye = monster.eye(); if (eye === null) throw new Error("Missing source monster eye");
     const playerBody = simulation.bodies.read(player.id); if (playerBody === null) throw new Error("Missing player body");
     // Player-only pose: establish a visible cached client eye beside the authored ogre.
-    simulation.bodies.write(player, { ...playerBody, origin: { ...eye, z: eye.z - 22 } }); simulation.bodies.link(player);
+    // Beside, not on, the eye: an exactly overlapping pose is crushed by physics.
+    simulation.bodies.write(player, { ...playerBody, origin: { x: eye.x + 48, y: eye.y, z: eye.z - 22 } }); simulation.bodies.link(player);
     await application.step(100);
     expect(source.game.host.checkClient(monster.entity.actor)).toEqual(player.id);
     const scene = simulation.scene, observerEye = monster.eye(); if (observerEye === null) throw new Error("Missing current monster eye");
     const cluster = (point: import("../../../src/contracts/math.ts").Vec3) => scene.leafCluster(scene.pointLeaf(point));
-    const hidden = [...source.game.entities.values()].map(entity => source.game.body(entity).origin)
+    // A monster/item origin on authored ground, not the player-start pad:
+    // restoring there would step the player onto its teleporter trigger.
+    const hidden = [...source.game.entities.values()]
+      .filter(entity => entity.classname.startsWith("monster_") || entity.classname.startsWith("item_") || entity.classname.startsWith("weapon_"))
+      .map(entity => source.game.body(entity).origin)
       .find(point => cluster(point) >= 0 && !scene.clusterVisible(cluster(point), cluster(observerEye), "pvs"));
     if (hidden === undefined) throw new Error("No actual map position hidden from the authored ogre");
     const currentBody = simulation.bodies.read(player.id); if (currentBody === null) throw new Error("Missing current player body");
-    simulation.bodies.write(player, { ...currentBody, origin: { ...hidden, z: hidden.z - 22 }, velocity: { x: 0, y: 0, z: 0 } }); simulation.bodies.link(player);
+    // Teleport through movement state, not a raw body write: a restored
+    // player respawns from its movement origin on the first restored frame.
+    source.composition.services.teleport(player.id, { ...hidden, z: hidden.z - 22 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, simulation.timeSeconds);
     expect(source.game.host.checkClient(monster.entity.actor)).toEqual(player.id);
     const image = simulation.checkpoint(), checkpoint = simulationProviderCheckpoint(image, "world:simulation");
     expect(checkpoint.version).toBe(11);

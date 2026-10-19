@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
-import type { ApplicationBots } from "../../../src/app/bootstrap/simulation/bots.ts";
+import { ApplicationBots, openApplicationBotLog, resumeApplicationBotLog } from "../../../src/app/bootstrap/simulation/bots.ts";
+import { loadMountedBotAssetFiles } from "../../../src/bots/behavior/assets.ts";
 import { createApplicationBotNavigation } from "../../../src/app/bootstrap/simulation/navigation.ts";
 import { BotMoveFlag, BotMoveResult, BotMoveResultFlag } from "../../../src/bots/behavior/q3/movement-state.ts";
 import { botInputToUserCommand } from "../../../src/bots/behavior/q3/ai-input.ts";
@@ -25,14 +26,22 @@ for (const initiallyRaised of [false, true]) retail(`authored Q2 lift ${initiall
   if (launch.kind !== "run") throw new Error("Expected mover launch");
   const application = await Application.open(launch.options, { print: () => undefined });
   try {
-    const captured: ApplicationBots[] = [], services = application.simulation.botServices, attach = services.attach.bind(services);
-    services.attach = (director, transport) => { captured.push(transport); attach(director, transport); };
-    application.queueCommand("addbot", ["Ranger", "5"], null); await application.step(100);
-    const transport = captured[0], bot = transport?.director.roster()[0];
-    if (transport === undefined || bot === undefined) throw new Error("Missing bot");
     const world = application.simulation, source = world.q2Source();
     if (source === null) throw new Error("Missing Q2 world");
     const navigation = await createApplicationBotNavigation({ content: application.content, simulation: world });
+    // This test drives the shared Q3 library's route execution directly, so
+    // construct that transport explicitly instead of relying on the
+    // application's per-world transport selection (rerelease for Q2).
+    const configuration = world.q2ServerCvars();
+    if (configuration === null) throw new Error("Missing Q2 bot configuration");
+    const transport = new ApplicationBots({ session: application.session, simulation: world,
+      files: await loadMountedBotAssetFiles(await application.content.forContent(application.content.catalog.product("q3-baseq3").id), application.content.catalog),
+      navigation, leafCount: application.content.world.leaves.length, configuration, automaticFrame: true,
+      print: () => undefined, insertConsoleCommand: text => { const [name = "", ...args] = text.trim().split(/\s+/); if (name !== "") application.queueCommand(name, args, null); },
+      openLog: openApplicationBotLog, resumeLog: resumeApplicationBotLog });
+    transport.consoleCommand(["addbot", "Ranger", "5"]); await application.step(100);
+    const bot = transport.director.roster()[0];
+    if (bot === undefined) throw new Error("Missing bot");
     const runtime = navigation.forClient(bot.sourceClient), edge = runtime.graph.edges.find(edge => edge.mode === "mover" && edge.id === 1020);
     if (edge === undefined || edge.entity === null || edge.entity.model === null) throw new Error("Missing authored lift edge");
     const asset = runtime.graph.asset;

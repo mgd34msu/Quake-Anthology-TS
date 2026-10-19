@@ -22,7 +22,8 @@ export function saveUnavailable(state: SaveEligibility, purpose: SavePurpose): s
   if (state.authority !== "offline") return "Save/load unavailable during a network game.";
   if (state.family !== "q3" && state.mode === "deathmatch" && state.matchSave !== true) return "Cannot save a deathmatch game.";
   if (state.family !== "q3" && state.intermission && state.matchSave !== true) return "Cannot save during intermission.";
-  if (state.playerHealth.length === 0) return "No active player to save.";
+  // Server-administration saves persist world state even with no players in it.
+  if (state.playerHealth.length === 0 && state.matchSave !== true) return "No active player to save.";
   if (state.family !== "q3" && state.matchSave !== true && state.playerHealth.some(health => !Number.isFinite(health) || health <= 0)) return "Cannot save with a dead player.";
   return null;
 }
