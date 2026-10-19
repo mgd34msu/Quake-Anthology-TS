@@ -59,7 +59,7 @@ test("selected arsenal uses original ammo layout while retaining native health, 
     .toEqual(q2NativeHudOperations(source, 640, 480).filter(op => op.kind === "picture" && ["i_health", "i_combatarmor"].includes(op.name)));
   expect(q2NativeHudOperations(source, 640, 480, undefined, undefined, { ammunition: { count: null, icon: null } }).some(op => op.kind === "arsenal-picture")).toBe(false);
   expect(q2NativeHudOperations(source, 640, 480, undefined, "layout-overlay", selected)).toEqual([]);
-  expect(q2NativeHudOperations({ ...source, configstrings: new Map() }, 640, 480, undefined, undefined, selected)).toEqual([]);
+  expect(q2NativeHudOperations({ ...source, configstrings: new Map<number, string>() }, 640, 480, undefined, undefined, selected)).toEqual([]);
   expect(source.stats[3]).toBe(50);
 });
 
@@ -70,7 +70,7 @@ import { q2LocalizedText } from "../../../src/app/bootstrap/q2-localization.ts";
 
 function rerelease(): NativeQ2HudFrame {
   return { ...frame(), protocol: { kind: "q2-rerelease", version: 1038 }, stats: Array.from({ length: 64 }, () => 0),
-    configstrings: new Map(), frameTimeMilliseconds: 50 };
+    configstrings: new Map<number, string>(), frameTimeMilliseconds: 50 };
 }
 function environment(): NativeQ2HudEnvironment {
   const catalog = new LocalizationCatalog(createIdentityOwner("native-hud").seat(0), "q2-rerelease");

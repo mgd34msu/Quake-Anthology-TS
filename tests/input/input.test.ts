@@ -321,7 +321,8 @@ describe("seat input", () => {
   test("q1 move-up bindings also set the jump button", () => {
     const owner = createIdentityOwner("usercmd-moveup"), seat = owner.seat(0);
     const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
-    for (const frame of [{ kind: "q1-netquake", acknowledgedServerTimeSeconds: 1 }, { kind: "q1-quakeworld" }] as const) {
+    const frames: readonly UserCommandFrame[] = [{ kind: "q1-netquake", acknowledgedServerTimeSeconds: 1 }, { kind: "q1-quakeworld" }];
+    for (const frame of frames) {
       const commands = new CommandBuffer({ dialect: frame.kind, context });
       const input = new SeatInput({ seat, dialect: frame.kind, context, commands, uiEvent: () => false });
       input.commandButton("move-up", "space", true, 10);

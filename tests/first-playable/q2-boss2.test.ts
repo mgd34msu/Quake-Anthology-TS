@@ -5,6 +5,7 @@ import { loadApplicationContent } from "../../src/app/bootstrap/content.ts";
 import { createSimulation } from "../../src/app/bootstrap/simulation/index.ts";
 import { adaptTraceResult } from "../../src/world/collision/contents.ts";
 import type { TraceResult } from "../../src/contracts/scene.ts";
+import type { UserCommand } from "../../src/contracts/protocol.ts";
 import { corpusHasFile, testCorpusRoot } from "../support/corpus.ts";
 
 const corpus = corpusHasFile("q2/baseq2/pak0.pak");
@@ -48,8 +49,8 @@ test.skipIf(!corpus)("Jorg presents the outer shell attached to the rider on bos
   } finally { simulation.close(); await content.close(); }
 });
 
-const movements = ["q1", "qw", "q2", "q2-rerelease-baseq2", "q3"] as const;
-type Movement = (typeof movements)[number];
+type Movement = "q1" | "qw" | "q2" | "q2-rerelease-baseq2" | "q3";
+const movements: readonly Movement[] = ["q1", "qw", "q2", "q2-rerelease-baseq2", "q3"];
 
 async function bootMovement(movement: Movement) {
   const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "boss2", "--movement", movement, "--dedicated", "--content-root", testCorpusRoot()]);
@@ -64,7 +65,7 @@ async function bootMovement(movement: Movement) {
   let sequence = 0, timeMs = 0, serverTime = 0;
   const step = (forwardMove = 0, yaw = 0, pitch = 0) => {
     timeMs += 25;
-    const cmd = kind === "q1-netquake"
+    const cmd: UserCommand = kind === "q1-netquake"
       ? { kind, acknowledgedServerTimeSeconds: serverTime, viewAngles: { x: pitch, y: yaw, z: 0 }, forwardMove, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 }
       : kind === "q1-quakeworld"
         ? { kind, milliseconds: 25, angles: { x: pitch, y: yaw, z: 0 }, forwardMove, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 }
@@ -73,7 +74,7 @@ async function bootMovement(movement: Movement) {
           : kind === "q2-rerelease"
             ? { kind, milliseconds: 25, angles: { x: pitch, y: yaw, z: 0 }, forwardMove, sideMove: 0, buttons: 0, serverFrame: sequence }
             : { kind, serverTimeMilliseconds: timeMs, angleWords: [Math.trunc(pitch * 65536 / 360), Math.trunc(yaw * 65536 / 360), 0], forwardMove: forwardMove > 0 ? 127 : 0, rightMove: 0, upMove: 0, buttons: 0, weapon: 0 };
-    simulation.step({ elapsedMilliseconds: 25, commands: [{ actor: admission.actor, source: { kind: "local-seat", client, seat }, sequence: sequence++, command: cmd as never }] });
+    simulation.step({ elapsedMilliseconds: 25, commands: [{ actor: admission.actor, source: { kind: "local-seat", client, seat }, sequence: sequence++, command: cmd }] });
     simulation.drainPresentationEvents();
     const frameTime = simulation.currentOutput().snapshot.frame.time;
     serverTime = frameTime.kind === "seconds" ? frameTime.value : frameTime.value / 1000;
