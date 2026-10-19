@@ -13,7 +13,7 @@ test('Q1 source colors feed each player model and survive source save restore', 
   const root = await mkdtemp(join(tmpdir(), 'q1-player-colors-'));
   const selected = parseApplicationCommand(['--game','q1-rerelease-id1','--map','e1m1','--movement','q1','--character','q1','--seats','2','--renderer','cpu','--width','640','--height','480','--hidden']);
   if(selected.kind!=='run')throw Error('Missing options');
-  const app=await Application.open({...selected.options,userContentRoot:root},{print:()=>undefined});
+  const app=await Application.open({...selected.options,userContentRoot:root},{print:()=>undefined,saveDirectory:root});
   try {
     const first=app.localPlayers[0],second=app.localPlayers[1];if(first===undefined||second===undefined)throw Error('Missing players');
     const source = app.simulation.q1Source(); if (source === null) throw Error('Missing Q1 source');

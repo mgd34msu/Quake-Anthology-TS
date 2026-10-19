@@ -2681,6 +2681,7 @@ export class Application {
     let nextScripts: ConsoleScriptFiles | null = null;
     let retiredScripts: ConsoleScriptFiles | null = null;
     let committed = false, nativeCommitted = false;
+    let postPublicationError: { readonly error: unknown } | null = null;
     let guestTransition: Q3GuestMapTransition | null = null;
     let guestNetworkPublished = false;
     const guestRejectedClients = new Map<ClientId, string>();
@@ -3164,7 +3165,9 @@ export class Application {
         this.enableStartupPersistence();
         if (nextLocalGuest !== null) { const guestCommands = nextLocalGuest.pendingCommands.drainAll(); if (guestCommands.length !== 0) this.requestedCommands.admitAll(guestCommands); }
         if (options.dedicated) this.dedicatedCommands = this.sourceCommands;
-        if (save !== undefined) this.requestRestoredScores();
+        // The scoreboard refresh is a post-publication notification: its failure is reported
+        // to the caller without discarding the successfully published world.
+        if (save !== undefined) { try { this.requestRestoredScores(); } catch (error) { postPublicationError = { error }; } }
       } finally {
         await retirePrevious(replacement.retired);
         await retire("configuration retirement", () => retiredScripts?.close());
@@ -3228,6 +3231,7 @@ export class Application {
       if (errors.length > 1) throw new AggregateError(errors, "World preparation failed");
       throw error;
     }
+    if (postPublicationError !== null) throw postPublicationError.error;
   }
 
   async changeLevel(map: string, spawnPoint = ""): Promise<void> {

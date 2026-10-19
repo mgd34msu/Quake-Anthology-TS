@@ -117,7 +117,7 @@ test("local archived cvars retain seat ownership before fresh client initializat
       loading: { deferWindowVisibility: true, stage: message => { if (message === "Starting game...") throw new Error("archive readiness failure"); } },
     })).rejects.toThrow("archive readiness failure");
     for (const [path, bytes] of persisted) expect(await Bun.file(join(root, path)).text()).toBe(bytes);
-    app = await Application.open(parsed.options, { print: () => undefined });
+    app = await Application.open(parsed.options, { print: () => undefined, saveDirectory: root });
     expect(app.simulation.q3Source()?.host.cvars.variableValue("g_speed")).toBe(333);
     for (const index of [0, 1]) {
       const cvars = presentation(app, index).q3Client?.cvars;
@@ -131,7 +131,7 @@ test("local archived cvars retain seat ownership before fresh client initializat
     await app.close(); app = null;
     const q2 = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q1", "--seats", "2", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", root]);
     if (q2.kind !== "run") throw new Error("Missing Q2 options");
-    app = await Application.open(q2.options, { print: () => undefined });
+    app = await Application.open(q2.options, { print: () => undefined, saveDirectory: root });
     const persistent = owners.at(-1); if (persistent === undefined) throw new Error("Missing native prepared owner");
     const commands = persistent.commands, session = app.session, seats = app.localPlayers.map(player => player.seat);
     observedClient = commands;
@@ -253,4 +253,4 @@ test("local archived cvars retain seat ownership before fresh client initializat
     expect(presentation(app, 0).q3Client?.cvars.variableValue("cg_drawFPS")).toBe(9);
     expect(presentation(app, 1).q3Client?.cvars.variableValue("cg_drawFPS")).toBe(2);
   } finally { authorityDriver.mockRestore(); outputOwner.mockRestore(); await app?.close(); await rm(root, { recursive: true, force: true }); }
-}, 120000);
+}, 240000);

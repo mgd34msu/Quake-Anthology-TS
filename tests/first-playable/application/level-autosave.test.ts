@@ -150,7 +150,7 @@ test("graphical saves retain key releases and failed preparation retains the liv
     await app.step(50);
     const owner = owners[0]; if (owner === undefined) throw new Error("Missing input owner");
     expect(owner.locals[0]?.input.button("forward").active).toBe(true);
-    const save = join(root, "held.sav");
+    const save = join(root, "saves", "held.sav");
     const pending = app.saveGame(save);
     key(false);
     await pending;

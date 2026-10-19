@@ -251,7 +251,7 @@ test('dedicated offline LRCTF Application restores guest bytes and human identit
   const launch = { ...options(root), network: { kind: 'offline' } } satisfies Parameters<typeof Application.open>[0];
   const clock = spyOn(performance, 'now').mockReturnValue(1000);
   async function open() {
-    const app = await Application.open(launch, { print: () => undefined });
+    const app = await Application.open(launch, { print: () => undefined, saveDirectory: root });
     try {
       const guest = app.simulation.q3Guest();
       if (guest === null) throw new Error('Missing guest');
