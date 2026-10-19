@@ -191,11 +191,14 @@ describe("installed content catalog", () => {
     expect(() => validate(unknown)).toThrow("no known family");
   });
 
-  test.skipIf(!existsSync(corpusRoot))("discovers the supplied 36 products and reads campaign progs under selected classic behavior", async () => {
+  test.skipIf(!existsSync(corpusRoot))("discovers the supplied 39 products and reads campaign progs under selected classic behavior", async () => {
     const catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
     expect(catalog.products).toHaveLength(40);
-    expect(catalog.products.filter(product => product.availability.kind === "installed")).toHaveLength(36);
-    expect(catalog.product("q1-rerelease-quake64").availability.kind).toBe("missing");
+    expect(catalog.products.filter(product => product.availability.kind === "installed")).toHaveLength(39);
+    // Quake 64 sits in the classic tree of the corpus; the sibling-tree
+    // fallback installs its rerelease-rooted products from that copy.
+    expect(catalog.product("q1-rerelease-quake64").availability.kind).toBe("installed");
+    expect(catalog.product("q1-rerelease-quake64").addonContent?.root).toEndWith("q1/q64");
     expect(catalog.mapsFor("q1-quakeworld").some(map => map.path === "maps/start.bsp")).toBe(true);
     const native = preset(catalog.product("q1-rerelease-mg1").id);
     const classic: ProviderReference = { provider: "q1:classic", content: catalog.product("q1-classic-id1").id };

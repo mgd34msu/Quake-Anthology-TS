@@ -25,6 +25,7 @@ export interface ApplicationOptions {
   readonly serverProfilePath?: string;
   readonly corpusRoot: string;
   readonly userContentRoot?: string;
+  readonly addonContentRoots?: readonly import("../../content/roots.ts").NightdiveAddonRoot[];
   readonly product: string;
   readonly mapProduct?: string;
   readonly map: string;

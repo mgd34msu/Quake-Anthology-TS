@@ -20,14 +20,24 @@ export function worldMusicTrack(world: ReadonlyMap<string, string> | undefined, 
   return music !== "" ? music : world?.get("sounds") ?? "";
 }
 
+/**
+ * A fallback borrows the alternate edition's own soundtrack; a product
+ * installed only through a sibling-tree or Steam add-on copy of the selected
+ * edition's files has no soundtrack of its own to lend.
+ */
+function ownTreeInstalled(catalog: InstalledCatalog, expectationId: string | undefined): ContentId | null {
+  const product = catalog.products.find(candidate => candidate.expectation.id === expectationId && candidate.availability.kind === "installed"
+    && (candidate.looseRoot !== null || candidate.userContent !== null));
+  return product?.id ?? null;
+}
+
 /** Only the official original campaigns share numbered soundtracks across Q1 editions. */
 export function q1MusicFallback(content: ContentId, catalog: InstalledCatalog): ContentId | null {
   const pairs = [["q1-classic-id1", "q1-rerelease-id1"], ["q1-classic-hipnotic", "q1-rerelease-hipnotic"], ["q1-classic-rogue", "q1-rerelease-rogue"]];
   const selected = catalog.product(content);
   const pair = pairs.find(ids => ids.includes(selected.expectation.id));
   const alternate = pair?.find(id => id !== selected.expectation.id);
-  const product = catalog.products.find(candidate => candidate.expectation.id === alternate && candidate.availability.kind === "installed");
-  return product?.id ?? null;
+  return ownTreeInstalled(catalog, alternate);
 }
 
 /** Supplement a classic Q2 install only when its own music files do not satisfy a cue. */
@@ -36,8 +46,7 @@ export function musicFallback(content: ContentId, catalog: InstalledCatalog): Co
   if (paired !== null) return paired;
   const selected = catalog.product(content);
   if (selected.expectation.family !== "q2" || selected.expectation.edition !== "classic") return null;
-  const product = catalog.products.find(candidate => candidate.expectation.id === "q2-rerelease-baseq2" && candidate.availability.kind === "installed");
-  return product?.id ?? null;
+  return ownTreeInstalled(catalog, "q2-rerelease-baseq2");
 }
 
 /** One world soundtrack owns the shared engine's intro/loop stream. */

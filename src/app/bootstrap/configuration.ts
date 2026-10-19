@@ -19,7 +19,7 @@ import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { EngineSession, SessionSeat } from "../../world/session/index.ts";
 import { CvarFlag, CvarRegistry, type CvarArchiveEntry } from "../../core/cvars/index.ts";
 import { ConfigStore } from "../../settings/config.ts";
-import { defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
+import { defaultAddonContentRoots, defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
 import { serverDefinitionsForSelection } from "../../settings/server/index.ts";
 import { PreparedStartup, allowSeatConfigurationCommand, type PreparedClientCommands, type PreparedSeatConfiguration } from "./prepared-startup.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
@@ -302,7 +302,7 @@ export async function prepareProfileConfiguration(args: {
 
 export async function openInitialConfigurationContent(options: ApplicationOptions, recipe?: ExecutableRecipe, installedCatalog?: InstalledCatalog): Promise<ApplicationConfigurationContent> {
   let catalog = installedCatalog ?? await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(),
-    discoverMods: applicationDiscoversMods(options, recipe) });
+    addonContentRoots: options.addonContentRoots ?? defaultAddonContentRoots(), discoverMods: applicationDiscoversMods(options, recipe) });
   const product = await prepareQ3ApplicationProduct(catalog, recipe?.map.entities.content ?? options.product, options);
   catalog = product.catalog;
   if (product.q3Product !== null) options = { ...options, q3Product: product.q3Product };

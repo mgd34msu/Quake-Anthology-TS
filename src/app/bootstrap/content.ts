@@ -12,7 +12,7 @@ import { mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { findContentPath } from "../../content/mounts/paths.ts";
 import { userProductDirectory } from "../../content/user-data.ts";
-import { defaultUserContentRoot } from "../../content/user-data.ts";
+import { defaultAddonContentRoots, defaultUserContentRoot } from "../../content/user-data.ts";
 import { prepareQuakeCSource, preparedQuakeCWeaponStage, preparedQuakeCDamageScaling, type PreparedQuakeCSource } from "./simulation/quakec-source.ts";
 import { assertQ3GuestRecipe, prepareQ3Game } from "./simulation/q3/guest-artifact.ts";
 import type { PreparedQ3Game } from "./simulation/q3/guest-artifact.ts";
@@ -428,7 +428,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
       throw new Error("Remote content context requires its matching remote client product");
   }
   let catalog = installedCatalog ?? await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: applicationDiscoversMods(options, restoredRecipe),
-    ...(remote === undefined ? {} : { remoteContent: remote }) });
+    addonContentRoots: options.addonContentRoots ?? defaultAddonContentRoots(), ...(remote === undefined ? {} : { remoteContent: remote }) });
   const product = await prepareQ3ApplicationProduct(catalog, restoredRecipe?.map.entities.content ?? options.product, options);
   catalog = product.catalog;
   if (product.q3Product !== null) options = { ...options, q3Product: product.q3Product };

@@ -75,21 +75,56 @@ export function hasGameAnchor(root: string): boolean {
   return FAMILIES.some(family => anchoredGameRoot(root, family) !== null);
 }
 
-/** Default Steam `steamapps/common` directories, including extra libraries. */
-export function steamCommonDirectories(home: string = homedir()): string[] {
-  const steamRoots = [resolve(home, ".local/share/Steam"), resolve(home, ".steam/steam"),
+function steamRootDirectories(home: string): string[] {
+  return [resolve(home, ".local/share/Steam"), resolve(home, ".steam/steam"),
     resolve(home, ".var/app/com.valvesoftware.Steam/.local/share/Steam")];
-  const libraries = new Set<string>();
-  for (const steamRoot of steamRoots) {
-    libraries.add(resolve(steamRoot, "steamapps/common"));
+}
+
+/** Every Steam library's `steamapps` directory, main roots first, then extra libraries. */
+function steamAppsDirectories(home: string): string[] {
+  const apps = new Set<string>();
+  for (const steamRoot of steamRootDirectories(home)) {
+    apps.add(resolve(steamRoot, "steamapps"));
     try {
       for (const match of readFileSync(resolve(steamRoot, "steamapps/libraryfolders.vdf"), "utf8").matchAll(/"path"\s+"([^"]+)"/g)) {
         const library = match[1];
-        if (library !== undefined) libraries.add(resolve(library.replaceAll("\\\\", "/"), "steamapps/common"));
+        if (library !== undefined) apps.add(resolve(library.replaceAll("\\\\", "/"), "steamapps"));
       }
     } catch { /* This Steam root is not installed. */ }
   }
-  return [...libraries].filter(isDirectory);
+  return [...apps];
+}
+
+/** Default Steam `steamapps/common` directories, including extra libraries. */
+export function steamCommonDirectories(home: string = homedir()): string[] {
+  return steamAppsDirectories(home).map(apps => resolve(apps, "common")).filter(isDirectory);
+}
+
+export interface NightdiveAddonRoot {
+  readonly family: GameFamily;
+  /** Directory whose children are add-on game directories (plus `addons.json`). */
+  readonly root: string;
+}
+
+/**
+ * Add-ons the Nightdive rereleases download in-game. Under Steam/Proton they
+ * land in the title's compatdata Saved Games; a native install uses the
+ * profile's Saved Games. Steam is the lowest search tier, matching
+ * `steamCommonDirectories`, so a local copy of the same add-on wins.
+ */
+export function nightdiveAddonDirectories(home: string = homedir()): NightdiveAddonRoot[] {
+  const found: NightdiveAddonRoot[] = [];
+  const add = (family: GameFamily, root: string): void => {
+    const absolute = resolve(root);
+    if (isDirectory(absolute) && !found.some(existing => existing.root === absolute)) found.push({ family, root: absolute });
+  };
+  for (const apps of steamAppsDirectories(home)) {
+    add("q1", resolve(apps, "compatdata/2310/pfx/drive_c/users/steamuser/Saved Games/Nightdive Studios/Quake"));
+    add("q2", resolve(apps, "compatdata/2320/pfx/drive_c/users/steamuser/Saved Games/Nightdive Studios/Quake II"));
+  }
+  add("q1", resolve(home, "Saved Games/Nightdive Studios/Quake"));
+  add("q2", resolve(home, "Saved Games/Nightdive Studios/Quake II"));
+  return found;
 }
 
 export interface ContentRootSearch {

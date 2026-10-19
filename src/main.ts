@@ -43,7 +43,8 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
     }
     if (command.kind === "list-content") {
       const { discoverInstalledContent } = await import("./content/catalog/index.ts");
-      const catalog = await discoverInstalledContent({ corpusRoot: command.corpusRoot });
+      const { defaultAddonContentRoots, defaultUserContentRoot } = await import("./content/user-data.ts");
+      const catalog = await discoverInstalledContent({ corpusRoot: command.corpusRoot, userContentRoot: defaultUserContentRoot(), addonContentRoots: defaultAddonContentRoots() });
       for (const product of catalog.products) process.stdout.write(`${product.expectation.id}\t${product.availability.kind}\t${product.expectation.title}\n`);
       return 0;
     }

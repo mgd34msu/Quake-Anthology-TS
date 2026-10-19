@@ -115,6 +115,35 @@ export async function managedAddonHidden(root: string, directory: string): Promi
   catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return false; throw error; }
 }
 
+export interface NightdiveAddon {
+  readonly id: string;
+  readonly gameDirectory: string;
+  readonly title: string;
+}
+
+/**
+ * The `addons.json` a Nightdive rerelease keeps beside its downloaded
+ * add-ons. It catalogs every offered add-on, downloaded or not, so it names
+ * and titles game directories; presence on disk decides installation.
+ */
+export function parseNightdiveAddons(value: unknown): readonly NightdiveAddon[] {
+  if (!isRecord(value) || !isUnknownArray(value["addons"])) return [];
+  const result: NightdiveAddon[] = [];
+  for (const row of value["addons"]) {
+    if (!isRecord(row)) continue;
+    const gameDirectory = row["gamedir"], id = row["id"], name = row["name"];
+    if (typeof gameDirectory !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._+-]*$/.test(gameDirectory)) continue;
+    result.push({ id: typeof id === "string" && id !== "" ? id : gameDirectory, gameDirectory,
+      title: typeof name === "string" && name.trim() !== "" ? name : gameDirectory });
+  }
+  return result;
+}
+
+export async function readNightdiveAddons(root: string): Promise<readonly NightdiveAddon[]> {
+  try { return parseNightdiveAddons(JSON.parse(await readFile(join(root, "addons.json"), "utf8")) as unknown); }
+  catch { return []; }
+}
+
 export async function managedAddonTitle(root: string, contentDirectory: string): Promise<string | null> {
   if (!/^qd_[a-f0-9]{20}_[a-f0-9]{20}$/.test(contentDirectory.split("/").at(-1) ?? "")) return null;
   const value: unknown = JSON.parse(await readFile(join(root, contentDirectory, ".quaddicted.json"), "utf8"));

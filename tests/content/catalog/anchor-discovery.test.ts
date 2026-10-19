@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { discoverInstalledContent, expectedProducts } from "../../../src/content/catalog/index.ts";
-import { gameRootIn, resolveDefaultContentRoot } from "../../../src/content/roots.ts";
+import { gameRootIn, nightdiveAddonDirectories, resolveDefaultContentRoot } from "../../../src/content/roots.ts";
 
 function pakWith(entries: readonly string[]): Uint8Array {
   const dataLength = entries.length, directoryOffset = 12 + dataLength;
@@ -121,6 +121,73 @@ describe("anchor content discovery", () => {
       expect(parseApplicationCommand(["--steam", "--list-content"], search)).toEqual({ kind: "list-content", corpusRoot: resolve(steamCommon) });
       expect(parseApplicationCommand(["--content-root", join(root, "elsewhere"), "--list-content"], search))
         .toEqual({ kind: "list-content", corpusRoot: join(root, "elsewhere") });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  test("steam nightdive add-ons install authored and manifest products below local copies", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "quake-nightdive-addons-"));
+    try {
+      const home = join(root, "home");
+      const saved = join(home, ".local/share/Steam/steamapps/compatdata/2310/pfx/drive_c/users/steamuser/Saved Games/Nightdive Studios/Quake");
+      for (const [path, bytes] of [
+        ["games/Quake/Id1/PAK0.PAK", pakWith(["progs.dat"])],
+        ["games/Quake/Id1/PAK1.PAK", pakWith(["progs.dat"])],
+        ["games/Quake/rerelease/id1/pak0.pak", pakWith(["progs.dat"])],
+      ] as const) {
+        await mkdir(join(root, path, ".."), { recursive: true });
+        await writeFile(join(root, path), bytes);
+      }
+      await mkdir(join(saved, "q64"), { recursive: true });
+      await mkdir(join(saved, "honey"), { recursive: true });
+      await writeFile(join(saved, "q64/pak0.pak"), pakWith(["progs.dat", "maps/start.bsp"]));
+      await writeFile(join(saved, "honey/pak0.pak"), pakWith(["progs.dat", "maps/start.bsp"]));
+      await writeFile(join(saved, "addons.json"), JSON.stringify({ addons: [
+        { id: "q64", gamedir: "q64", name: "Quake 64" },
+        { id: "honey", gamedir: "honey", name: "Honey" },
+        { id: "absent", gamedir: "absent", name: "Not Downloaded" },
+      ] }));
+      expect(nightdiveAddonDirectories(home)).toEqual([{ family: "q1", root: resolve(saved) }]);
+      const catalog = await discoverInstalledContent({ corpusRoot: join(root, "games"), addonContentRoots: nightdiveAddonDirectories(home) });
+      for (const id of ["q1-classic-quake64", "q1-rerelease-quake64"]) {
+        const product = catalog.require(id);
+        expect(product.looseRoot).toBeNull();
+        expect(product.addonContent?.root).toBe(resolve(saved, "q64"));
+      }
+      const honey = catalog.require("q1-rerelease-honey");
+      expect(honey.expectation.title).toBe("Honey");
+      expect(honey.expectation.requiredPrograms).toEqual(["progs.dat"]);
+      expect(catalog.products.some(product => product.expectation.campaign === "absent")).toBe(false);
+      const mounts = await catalog.mountsFor(catalog.require("q1-rerelease-quake64").id);
+      expect(mounts.flatMap(mount => mount.kind === "archive" ? [mount.archivePath] : [])).toContain(resolve(saved, "q64/pak0.pak"));
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  test("a game directory in either edition tree satisfies products rooted in the other", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "quake-sibling-tree-"));
+    try {
+      for (const [path, bytes] of [
+        ["Quake/Id1/PAK0.PAK", pakWith(["progs.dat"])],
+        ["Quake/Id1/PAK1.PAK", pakWith(["progs.dat"])],
+        ["Quake/rerelease/id1/pak0.pak", pakWith(["progs.dat"])],
+        ["Quake/q64/pak0.pak", pakWith(["progs.dat", "maps/start.bsp"])],
+      ] as const) {
+        await mkdir(join(root, path, ".."), { recursive: true });
+        await writeFile(join(root, path), bytes);
+      }
+      const catalog = await discoverInstalledContent({ corpusRoot: root });
+      const rerelease = catalog.require("q1-rerelease-quake64");
+      expect(rerelease.looseRoot).toBeNull();
+      expect(rerelease.addonContent?.root).toBe(resolve(root, "Quake/q64"));
+      // An exact-tree copy stands alone; the sibling fallback is not layered.
+      await mkdir(join(root, "Quake/rerelease/q64"), { recursive: true });
+      await writeFile(join(root, "Quake/rerelease/q64/pak0.pak"), pakWith(["progs.dat", "maps/start.bsp"]));
+      const exact = await discoverInstalledContent({ corpusRoot: root });
+      const product = exact.require("q1-rerelease-quake64");
+      expect(product.looseRoot).toBe(resolve(root, "Quake/rerelease/q64"));
+      expect(product.addonContent).toBeNull();
+      const archives = (await exact.mountsFor(product.id)).flatMap(mount => mount.kind === "archive" ? [mount.archivePath] : []);
+      expect(archives).toContain(resolve(root, "Quake/rerelease/q64/pak0.pak"));
+      expect(archives).not.toContain(resolve(root, "Quake/q64/pak0.pak"));
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 });
