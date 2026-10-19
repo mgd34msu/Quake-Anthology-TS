@@ -125,7 +125,8 @@ export function createQcPresentationBindings(world: QcPresentationWorld, service
   install("makestatic", vm => {
     const words = vm.entities.fromReference(vm.argInt(0));
     const path = vm.strings.get(words.int(vm.fieldOffset("model")));
-    const resource = path === "" ? null : services.lookup("model", path);
+    // Inline brush models are engine-known at map load; spawn assigns them without precache_model.
+    const resource = path === "" ? null : services.lookup("model", path) ?? (path.startsWith("*") ? services.precache("model", path) : null);
     if (path !== "" && resource === null) return vm.fail(`makestatic model was not precached: ${path}`);
     const remove = world.host.get("remove");
     if (remove === undefined) return vm.fail("makestatic requires source entity removal");

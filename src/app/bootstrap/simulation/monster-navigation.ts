@@ -25,7 +25,9 @@ export async function preloadApplicationMonsterNavigation(content: LoadedApplica
     mapBytes: await content.mounts.read(content.recipe.map.geometry) });
   return { install(simulation, movement) {
     const source = simulation.q1Source();
-    if (source === null) throw new Error("MG3 navigation requires the Q1 source world");
+    // MG3 monster classes exist only in the Q1 source program; other hosts (e.g. QuakeWorld
+    // deathmatch on mg3 maps) spawn no MG3 monsters, so there is nothing to navigate.
+    if (source === null) return undefined;
     const graphs = new Map<string, NavigationGraph>(), actors = new WeakMap<OwnedActor, { readonly key: string; readonly runtime: NavigationRuntime }>();
     const selected = movementProfile({ ...simulation.recipe, movement: simulation.recipe.map.entities });
     if (selected.kind !== "q1-netquake" && selected.kind !== "q1-quakeworld") throw new Error("MG3 monsters require Q1 source movement");
