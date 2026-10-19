@@ -5,7 +5,17 @@ import type { ControllerDevice, ControllerEvent, ControllerSelection } from "../
 const runtime = SdlControllers.runtime;
 // SDL2-compat's SDL2 int-success callback is forwarded to SDL3 bool without conversion.
 // https://github.com/libsdl-org/sdl2-compat/blob/release-2.32.70/src/sdl2_compat.c
-const virtualCallbackMismatch = runtime.version === "2.32.70";
+const versionAtLeast = (version: string, floor: string): boolean => {
+  const actual = version.split(".").map(Number), required = floor.split(".").map(Number);
+  for (let index = 0; index < Math.max(actual.length, required.length); index++) {
+    const difference = (actual[index] ?? 0) - (required[index] ?? 0);
+    if (difference !== 0) return difference > 0;
+  }
+  return true;
+};
+// The mismatch is present in 2.32.70 and still in 2.32.72; the paired
+// failure-behavior test below fails loudly once SDL fixes the callback.
+const virtualCallbackMismatch = versionAtLeast(runtime.version, "2.32.70");
 
 function device(controllers: SdlControllers, instance: number): ControllerDevice {
   const result = controllers.devices.find(candidate => candidate.instance === instance);

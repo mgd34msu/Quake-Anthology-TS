@@ -45,7 +45,7 @@ test("dummy SDL exercises partial startup failures and repeated cleanup", async 
   expect(output).toContain("0 fail");
 }, 30_000);
 
-test("private Xvfb exercises real CPU presentation, OpenGL and pushed events", async () => {
+test.skipIf(Bun.which("Xvfb") === null)("private Xvfb exercises real CPU presentation, OpenGL and pushed events", async () => {
   const xvfb = Bun.spawn(["Xvfb", "-displayfd", "1", "-screen", "0", "800x600x24", "-nolisten", "tcp", "-noreset"], {
     env: isolatedEnvironment(), stdout: "pipe", stderr: "pipe",
   });
