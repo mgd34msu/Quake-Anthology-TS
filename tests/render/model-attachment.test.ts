@@ -52,7 +52,9 @@ test("Q2 blaster uses the held mesh and reference grip instead of its first-pers
   expect(held.path).toBe("players/male/w_blaster.md2"); expect(held.referenceFrame).toBe(0);
   const placement = alignModelAttachment(held.grip, Q3_WEAPON_HAND_GRIP);
   closePoint(modelWorldPoint(placement, held.grip.origin), Q3_WEAPON_HAND_GRIP.origin);
-  expect(q2HeldWeapon("models/weapons/v_shotg/tris.md2")).toBeNull();
+  const shotgun = q2HeldWeapon("models/weapons/v_shotg/tris.md2");
+  expect(shotgun?.path).toBe("players/male/w_shotgun.md2"); expect(shotgun?.grip).toBe(held.grip);
+  expect(q2HeldWeapon("models/weapons/v_unknown/tris.md2")).toBeNull();
 });
 
 
