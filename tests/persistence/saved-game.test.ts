@@ -22,9 +22,12 @@ test("malformed shared headers do not fall back to native formats", () => {
   expect(() => decodeSavedGame(encodeQ1Save({ ...save(5), entities: [] }))).toThrow("world");
 });
 
-test("actual installed Quake source saves identify format and preserve extensions", async () => {
-  const path = join(testCorpusRoot(), "q1/id1/autosave/start.sav");
-  if (!await Bun.file(path).exists()) throw new Error("Missing installed Quake save fixture");
+// The fixture is a save written by id's engine into the installed
+// rerelease id1/autosave directory; it only exists after playing there.
+const installedSavePath = join(testCorpusRoot(), "q1/id1/autosave/start.sav");
+const hasInstalledSave = await Bun.file(installedSavePath).exists();
+test.skipIf(!hasInstalledSave)("actual installed Quake source saves identify format and preserve extensions", async () => {
+  const path = installedSavePath;
   const first = decodeSavedGame(await Bun.file(path).bytes());
   if (first.kind !== "q1-source") throw new Error("Expected source save");
   const second = decodeSavedGame(encodeQ1Save(first.data));

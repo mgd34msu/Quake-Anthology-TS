@@ -49,6 +49,7 @@ test("actual LRCTF shared guest restores disk state into fresh clients without g
     const sink = { configstring: (index: number, value: string) => { output.push(`config:${index}:${value}`); },
       sendServerCommand: (slot: number, text: string) => { output.push(`command:${slot}:${text}`); },
       dropClient: async (slot: number, reason: string) => { output.push(`drop:${slot}:${reason}`); } };
+    guest.state.cvars.set("bot_enable", "0", true);
     if (image === undefined) await guest.initialize(sink); else guest.completeRestore(sink);
     commands().execute();
     const userCommand = (): WireUserCommand => ({ serverTime: milliseconds, angles: [0, 0, 0], buttons: 1, weapon: 2,

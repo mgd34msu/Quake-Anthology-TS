@@ -39,6 +39,7 @@ test("actual local LRCTF uses shared admission and delivers each local command b
     closeGuest = () => guest.shutdown();
     buffer = new CommandBuffer({ dialect: "q3", cvars: guest.state.cvars,
       context: { session: identity.session, origin: { kind: "server-console" } }, print: () => undefined });
+    guest.state.cvars.set("bot_enable", "0", true);
     await guest.initialize({ configstring: () => undefined, sendServerCommand: () => undefined, dropClient: async () => undefined });
     commands().execute();
     expect(guest.state.cvars.variableString("dedicated")).toBe("0");
@@ -68,7 +69,7 @@ test("actual local LRCTF uses shared admission and delivers each local command b
       expect(calls).toEqual(Array.from({ length: 12 }, () => ["think", "frame"]).flat());
       const state = guest.game.data.copyPlayerState(0);
       expect(Math.hypot(state.origin.x - start.x, state.origin.y - start.y, state.origin.z - start.z)).toBeGreaterThan(1);
-      expect(simulation.playerView(player.actor)).toEqual({ origin: state.origin, angles: state.viewAngles, viewHeight: state.viewHeight });
+      expect(simulation.playerView(player.actor)).toEqual({ origin: state.origin, angles: state.viewAngles, viewHeight: state.viewHeight, kickAngles: { x: 0, y: 0, z: 0 } });
       expect(simulation.movementPlayer(player.actor)).toBeNull();
       const actors = simulation.actors.checkpoint();
       expect(authority.snapshot(player).player).toEqual(fromQ3PlayerState(state, "baseq3"));

@@ -40,6 +40,7 @@ test("actual LRCTF full map lifecycle writes connected sessions before retiremen
       context: { session: identity.session, origin: { kind: "server-console" } }, print: () => undefined });
     const output: string[] = [];
     const init = spyOn(guest.game, "initializeAsync"), connects = spyOn(guest.game, "clientConnectAsync"), disconnects = spyOn(guest.game, "clientDisconnectAsync"), shutdown = spyOn(guest.game, "shutdownAsync");
+    guest.state.cvars.set("bot_enable", "0", true);
     await guest.initialize({ configstring: (slot, value) => { output.push(`cs:${slot}:${value}`); }, sendServerCommand: (slot, text) => { output.push(`cmd:${slot}:${text}`); }, dropClient: async slot => { throw new Error(`Unexpected drop ${slot}`); } },
       transition === undefined ? { kind: "new" } : { kind: "map-change", clients: transition.clients });
     expect(init).toHaveBeenCalledWith(0, 7, false);
