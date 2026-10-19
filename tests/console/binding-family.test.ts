@@ -33,7 +33,7 @@ for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelea
       }
       run("unbind UNKNOWN_KEY"); expect(output.at(-1)).toBe("Unknown key UNKNOWN_KEY\n");
       run("unbind MOUSE2", { session: identity.session, origin: { kind: "server-console" } });
-      expect(output.at(-1)).toBe("unbind requires a local seat.\n"); expect(input.binding(rightMouse)?.kind).toBe("command");
+      expect(output.at(-1)).toBe("unbind requires a local binding owner.\n"); expect(input.binding(rightMouse)?.kind).toBe("command");
       const saved = archivedBindings(input); expect(saved).toContain('bind "MOUSE2" "record  first; record   second"');
       run("unbindall"); expect(input.bindings).toEqual([]); expect(other.binding({ kind: "key", code: 113 })).toEqual({ kind: "command", text: "record other" });
       input = new SeatInput({ seat, dialect, context, commands, uiEvent: () => false });
