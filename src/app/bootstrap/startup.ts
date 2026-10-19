@@ -197,7 +197,7 @@ export class StartupApplication {
       completed: async () => undefined,
     });
     this.preferences = new FrontendPreferences(() => movementDialect(model.options), new ConfigStore(join(saveDirectory, "..", "settings")));
-    this.preferences.onChange = () => { if (!this.closed) void this.persistPreferences().catch(error => this.print(`Could not save controls: ${error instanceof Error ? error.message : String(error)}\n`)); };
+    this.preferences.onChange = () => { if (!this.closed) void this.persistPreferences().catch((error: unknown) => this.print(`Could not save controls: ${error instanceof Error ? error.message : String(error)}\n`)); };
     this.saves = new StartupSaves(model.catalog, saveDirectory);
     this.addons = new AddonLibrary({ edition: model.catalog.products.some(product => product.expectation.id === "q1-classic-id1" && product.availability.kind === "installed") ? "classic" : "rerelease", root: model.options.userContentRoot ?? defaultUserContentRoot(),
       changed: async () => { await model.refreshCatalog(); this.saves = new StartupSaves(model.catalog, saveDirectory); this.refreshSaves = true; },

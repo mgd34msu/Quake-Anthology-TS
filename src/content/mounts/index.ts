@@ -37,9 +37,11 @@ function loadDiskDigests(): Promise<Map<string, DigestFingerprint>> {
     try {
       const parsed: unknown = JSON.parse(await readFile(digestCacheFile(), "utf8"));
       if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-        for (const [path, value] of Object.entries(parsed)) {
+        for (const path of Object.keys(parsed)) {
+          const value: unknown = Reflect.get(parsed, path);
           if (typeof value !== "object" || value === null) continue;
-          const { size, mtimeMs, ctimeMs, ino, digest } = value as Record<string, unknown>;
+          const size: unknown = Reflect.get(value, "size"), mtimeMs: unknown = Reflect.get(value, "mtimeMs"),
+            ctimeMs: unknown = Reflect.get(value, "ctimeMs"), ino: unknown = Reflect.get(value, "ino"), digest: unknown = Reflect.get(value, "digest");
           if (typeof size === "number" && typeof mtimeMs === "number" && typeof ctimeMs === "number"
             && typeof ino === "number" && typeof digest === "string") entries.set(path, { size, mtimeMs, ctimeMs, ino, digest });
         }

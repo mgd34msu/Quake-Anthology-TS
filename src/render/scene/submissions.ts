@@ -1,4 +1,5 @@
-import type { BatchLighting, DrawBatch, RenderOperation, RenderState, TextureBinding } from "../../contracts/render.ts";
+import type { BatchLighting, DrawBatch, MultitextureVertex, RenderOperation, RenderState, RenderVertex, TextureBinding } from "../../contracts/render.ts";
+import type { Vec3 } from "../../contracts/math.ts";
 import type { CompiledMaterial } from "../../materials/compile.ts";
 import type { RegisteredSceneMaterial, SceneMaterialRegistrations, ShaderRegistration } from "./material-registrations.ts";
 import { packSourceDrawSort, sortDrawSurfs } from "./source-sort.ts";
@@ -171,52 +172,79 @@ function mergeable(a: DrawBatch, b: DrawBatch): boolean {
   }
   return true;
 }
-function mergedLighting(a: BatchLighting, b: BatchLighting): BatchLighting {
-  if (a.kind === "q2-world" && b.kind === "q2-world")
-    return { ...a, worldPositions: [...a.worldPositions, ...b.worldPositions], normals: [...a.normals, ...b.normals] };
-  if (a.kind === "q2-model-shadow" && b.kind === "q2-model-shadow")
-    return { ...a, worldPositions: [...a.worldPositions, ...b.worldPositions] };
-  return a;
+type Q2WorldLighting = Extract<BatchLighting, { kind: "q2-world" }>;
+type Q2ShadowLighting = Extract<BatchLighting, { kind: "q2-model-shadow" }>;
+type LightingBuilder =
+  | { readonly kind: "other"; readonly lighting: BatchLighting }
+  | { readonly kind: "q2-world"; readonly template: Q2WorldLighting; readonly worldPositions: Vec3[]; readonly normals: Vec3[] }
+  | { readonly kind: "q2-model-shadow"; readonly template: Q2ShadowLighting; readonly worldPositions: Vec3[] };
+type BatchBuilder =
+  | { readonly texturing: "single"; readonly template: Extract<DrawBatch, { texturing: "single" }>; readonly vertices: RenderVertex[]; readonly indices: number[]; readonly lighting: LightingBuilder }
+  | { readonly texturing: "pair"; readonly template: Extract<DrawBatch, { texturing: "pair" }>; readonly vertices: MultitextureVertex[]; readonly indices: number[]; readonly lighting: LightingBuilder };
+
+function lightingBuilder(lighting: BatchLighting): LightingBuilder {
+  if (lighting.kind === "q2-world") return { kind: "q2-world", template: lighting, worldPositions: [...lighting.worldPositions], normals: [...lighting.normals] };
+  if (lighting.kind === "q2-model-shadow") return { kind: "q2-model-shadow", template: lighting, worldPositions: [...lighting.worldPositions] };
+  return { kind: "other", lighting };
 }
-function mergeBatch(a: DrawBatch, b: DrawBatch): DrawBatch {
-  const offset = a.vertices.length;
-  return { ...a, lighting: mergedLighting(a.lighting, b.lighting),
-    vertices: [...a.vertices, ...b.vertices] as never,
-    indices: [...a.indices, ...b.indices.map(index => index + offset)] } as DrawBatch;
+function extendLighting(builder: LightingBuilder, lighting: BatchLighting): void {
+  if (builder.kind === "q2-world" && lighting.kind === "q2-world") {
+    builder.worldPositions.push(...lighting.worldPositions);
+    builder.normals.push(...lighting.normals);
+  } else if (builder.kind === "q2-model-shadow" && lighting.kind === "q2-model-shadow") builder.worldPositions.push(...lighting.worldPositions);
+}
+function builtLighting(builder: LightingBuilder): BatchLighting {
+  if (builder.kind === "q2-world") return { ...builder.template, worldPositions: builder.worldPositions, normals: builder.normals };
+  if (builder.kind === "q2-model-shadow") return { ...builder.template, worldPositions: builder.worldPositions };
+  return builder.lighting;
+}
+function startBuilder(template: DrawBatch): BatchBuilder {
+  const lighting = lightingBuilder(template.lighting);
+  return template.texturing === "single"
+    ? { texturing: "single", template, vertices: [...template.vertices], indices: [...template.indices], lighting }
+    : { texturing: "pair", template, vertices: [...template.vertices], indices: [...template.indices], lighting };
+}
+function extendBuilder(builder: BatchBuilder, batch: DrawBatch): void {
+  const offset = builder.vertices.length;
+  if (builder.texturing === "single" && batch.texturing === "single") builder.vertices.push(...batch.vertices);
+  else if (builder.texturing === "pair" && batch.texturing === "pair") builder.vertices.push(...batch.vertices);
+  for (const index of batch.indices) builder.indices.push(index + offset);
+  extendLighting(builder.lighting, batch.lighting);
+}
+function finishBuilder(builder: BatchBuilder): DrawBatch {
+  const lighting = builtLighting(builder.lighting);
+  return builder.texturing === "single"
+    ? { ...builder.template, lighting, vertices: builder.vertices, indices: builder.indices }
+    : { ...builder.template, lighting, vertices: builder.vertices, indices: builder.indices };
 }
 /**
  * Adjacent draws with identical state render identically when concatenated
  * (primitive order is preserved), so merge them: static world surfaces share
  * materials heavily, and each unmerged batch pays full pack + bind costs.
+ * Merged runs accumulate into a builder's fresh arrays instead of re-copying
+ * the accumulated geometry on every merge.
  */
 export function mergeDrawOperations(input: readonly RenderOperation[]): readonly RenderOperation[] {
   const result: RenderOperation[] = [];
   let pending: DrawBatch[] = [];
-  const owned = new WeakSet<DrawBatch>();
-  const flush = (): void => { if (pending.length !== 0) { result.push({ kind: "draw", batches: pending }); pending = []; } };
+  let builder: BatchBuilder | null = null;
+  const flushBuilder = (): void => { if (builder !== null) { pending.push(finishBuilder(builder)); builder = null; } };
+  const flush = (): void => { flushBuilder(); if (pending.length !== 0) { result.push({ kind: "draw", batches: pending }); pending = []; } };
   for (const operation of input) {
     if (operation.kind !== "draw") { flush(); result.push(operation); continue; }
     for (const batch of operation.batches) {
+      if (builder !== null) {
+        if (mergeable(builder.template, batch)) { extendBuilder(builder, batch); continue; }
+        flushBuilder();
+      }
       const last = pending[pending.length - 1];
-      if (last === undefined || !mergeable(last, batch)) { pending.push(batch); continue; }
-      if (!owned.has(last)) {
-        const merged = mergeBatch(last, batch);
-        owned.add(merged);
-        pending[pending.length - 1] = merged;
+      if (last !== undefined && mergeable(last, batch)) {
+        pending.pop();
+        builder = startBuilder(last);
+        extendBuilder(builder, batch);
         continue;
       }
-      // `last` was built by this pass; extend its fresh arrays in place
-      // instead of re-copying the accumulated geometry on every merge.
-      const offset = last.vertices.length;
-      const vertices = last.vertices as DrawBatch["vertices"][number][], indices = last.indices as number[];
-      for (const vertex of batch.vertices) vertices.push(vertex as never);
-      for (const index of batch.indices) indices.push(index + offset);
-      if (last.lighting.kind === "q2-world" && batch.lighting.kind === "q2-world") {
-        (last.lighting.worldPositions as { x: number; y: number; z: number }[]).push(...batch.lighting.worldPositions);
-        (last.lighting.normals as { x: number; y: number; z: number }[]).push(...batch.lighting.normals);
-      } else if (last.lighting.kind === "q2-model-shadow" && batch.lighting.kind === "q2-model-shadow") {
-        (last.lighting.worldPositions as { x: number; y: number; z: number }[]).push(...batch.lighting.worldPositions);
-      }
+      pending.push(batch);
     }
   }
   flush();

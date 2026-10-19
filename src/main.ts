@@ -1,6 +1,6 @@
 import { appendFileSync, constants, copyFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { version } from "../package.json";
+import { version } from "./version.ts";
 import { LlmSettingsService } from "./llm/settings.ts";
 import { applicationHelp, parseApplicationCommand } from "./app/bootstrap/options.ts";
 import { defaultUserContentRoot } from "./content/user-data.ts";

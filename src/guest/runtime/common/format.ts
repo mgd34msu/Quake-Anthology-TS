@@ -39,7 +39,8 @@ interface Conversion {
 type Token = { readonly kind: "literal"; readonly text: string } | Conversion;
 interface ParsedFormat { readonly tokens: readonly Token[]; readonly positional: boolean; readonly references: readonly Reference[]; }
 const parsedFormats: Record<GuestFormatRequest["dialect"], Record<4 | 8, Map<string, ParsedFormat>>> = {
-  windows: { 4: new Map(), 8: new Map() }, "system-v": { 4: new Map(), 8: new Map() },
+  windows: { 4: new Map<string, ParsedFormat>(), 8: new Map<string, ParsedFormat>() },
+  "system-v": { 4: new Map<string, ParsedFormat>(), 8: new Map<string, ParsedFormat>() },
 };
 function retainedFormat(text: string, request: GuestFormatRequest): ParsedFormat {
   const formats = parsedFormats[request.dialect][request.memory.pointerBytes];

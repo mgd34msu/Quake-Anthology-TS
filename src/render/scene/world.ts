@@ -160,19 +160,18 @@ export class WorldScene {
   /** Prepared legacy batches for static world surfaces in world-space mode. */
   private readonly legacyBatchCache = new Map<WorldSurface, { readonly key: string; readonly operations: readonly SceneOperation[] }>();
   /** Modulated fragment-light lists are identical for every surface in a view; build once per lights array. */
-  private readonly fragmentLightsCache = new WeakMap<readonly unknown[], { all: unknown; shadowOnly: unknown }>();
+  private readonly fragmentLightsCache = new WeakMap<readonly Q2FragmentLight[], { all: readonly Q2FragmentLight[] | null; shadowOnly: readonly Q2FragmentLight[] | null }>();
 
-  private fragmentLights(lights: readonly import("../../contracts/render.ts").Q2FragmentLight[], shadowOnly: boolean): readonly import("../../contracts/render.ts").Q2FragmentLight[] {
-    let entry = this.fragmentLightsCache.get(lights);
-    if (entry === undefined) { entry = { all: null, shadowOnly: null }; this.fragmentLightsCache.set(lights, entry as { all: unknown; shadowOnly: unknown }); }
-    const slot = entry as { all: unknown; shadowOnly: unknown };
+  private fragmentLights(lights: readonly Q2FragmentLight[], shadowOnly: boolean): readonly Q2FragmentLight[] {
+    let slot = this.fragmentLightsCache.get(lights);
+    if (slot === undefined) { slot = { all: null, shadowOnly: null }; this.fragmentLightsCache.set(lights, slot); }
     const modulate = this.options.q2LightModulate ?? 1;
     if (shadowOnly) {
       slot.shadowOnly ??= lights.filter(light => light.cone !== null || light.shadow.kind !== "none").map(light => ({ ...light, scale: light.scale * modulate }));
-      return slot.shadowOnly as readonly import("../../contracts/render.ts").Q2FragmentLight[];
+      return slot.shadowOnly;
     }
     slot.all ??= lights.map(light => ({ ...light, scale: light.scale * modulate }));
-    return slot.all as readonly import("../../contracts/render.ts").Q2FragmentLight[];
+    return slot.all;
   }
 
   private worldArrays(geometry: MaterialGeometry, model?: ModelTransform): { readonly worldPositions: readonly Vec3[]; readonly normals: readonly Vec3[] } {
@@ -627,7 +626,7 @@ export class WorldScene {
         ...this.worldArrays(surface.geometry, model), pass: "texture", lights: this.fragmentLights(fragmentLighting.lights, material.kind === "q1"), atlas: fragmentLighting.atlas } }),
       ...(surface.lightmap === null ? {} : { translucentLightmap: surface.lightmap.direct }), cull: context.deformView.mirror !== (model !== undefined && modelScale(model) < 0) ? "back" : "front", depthRange: context.depthRange, project });
     const operations = [sequenceDrawGroup(material.alpha * context.entityRGBA.w / 255 < 1 ? "translucent" : "opaque",
-      worldSpace ? batches.map(batch => ({ ...batch, space: "world" as const })) : batches)];
+      worldSpace ? batches.map((batch): DrawBatch => ({ ...batch, space: "world" })) : batches)];
     if (cacheable) this.legacyBatchCache.set(surface, { key: cacheKey, operations });
     return operations;
   }

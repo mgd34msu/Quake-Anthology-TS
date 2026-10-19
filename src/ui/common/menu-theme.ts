@@ -10,7 +10,8 @@ export const menuTitleFont: ResourceId = "resource:engine-menu:title";
  * control text render at the same size. Dense label/value pages (the custom
  * game builder) use the single field size for labels and values alike.
  */
-export const menuText = {
+export const menuText: { readonly mainTitle: number; readonly title: number; readonly section: number;
+  readonly label: number; readonly body: number; readonly field: number; readonly small: number } = {
   mainTitle: 5.4,
   title: 3.6,
   section: 1.55,
@@ -18,7 +19,7 @@ export const menuText = {
   body: 2.3,
   field: 1.9,
   small: 1.35,
-} as const;
+};
 export function menuSkin(font: ResourceId): UiSkin {
   return { font, titleFont: menuTitleFont, titleScale: menuText.title, fontScale: menuText.body, lineHeight: 24,
     background: null, panel: null, focus: null, button: null,
@@ -33,7 +34,7 @@ export function menuBackdrop(context: UiDrawContext): UiDrawCommand {
     texCoords: [{ x: cropX, y: cropY }, { x: 1 - cropX, y: 1 - cropY }], color: { x: 1, y: 1, z: 1, w: 1 } };
 }
 /** The one menu box in 640x480 UI space; the controller draws its panel on the same rect. */
-export const menuPanelRect = { x: 32, y: 24, width: 576, height: 432 } as const;
+export const menuPanelRect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } = { x: 32, y: 24, width: 576, height: 432 };
 export function menuPanel(context: UiDrawContext, narrow = false): UiDrawCommand {
   return transformUi({ kind: "fill", rect: { x: 32, y: 24, width: narrow ? 272 : 576, height: 432 },
     color: { x: 0.025, y: 0.035, z: 0.045, w: narrow ? 0.86 : 0.96 } }, fitUi(context.binding.safeArea));

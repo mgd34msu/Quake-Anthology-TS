@@ -37,7 +37,7 @@ export class RereleasePublicEdict {
   // Decoders consume these views synchronously and return only independent values.
   private snapshot(address: GuestAddress, byteLength: number): DataView {
     let buffers = snapshotBuffers.get(this.memory);
-    if (buffers === undefined) { buffers = new Map(); snapshotBuffers.set(this.memory, buffers); }
+    if (buffers === undefined) { buffers = new Map<number, { readonly bytes: Uint8Array; readonly view: DataView }>(); snapshotBuffers.set(this.memory, buffers); }
     let buffer = buffers.get(byteLength);
     if (buffer === undefined) {
       const bytes = new Uint8Array(byteLength);

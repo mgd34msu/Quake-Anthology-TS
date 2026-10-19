@@ -172,7 +172,7 @@ async function q3Shaders(mounts: MountedContent): Promise<ReadonlyMap<string, Sh
   if (cached !== undefined) return cached;
   const pending = (async (): Promise<ReadonlyMap<string, ShaderDefinition>> => {
     const definitions = new Map<string, ShaderDefinition>();
-    const files = await mounts.listFiles("scripts", ".shader").catch(() => [] as readonly string[]);
+    const files = await mounts.listFiles("scripts", ".shader").catch((): readonly string[] => []);
     for (const file of files) {
       const opened = await mounts.open(`scripts/${file.replaceAll("\\", "/")}`);
       if (opened === null) continue;

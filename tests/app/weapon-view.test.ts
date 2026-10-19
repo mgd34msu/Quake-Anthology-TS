@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { anchoredViewWeapon, anchoredViewWeaponAxis, type ViewWeaponEntity } from "../../src/app/bootstrap/weapon-view.ts";
+import type { Axis } from "../../src/contracts/math.ts";
 
-const axis = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }] as const;
+const axis: Axis = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }];
 
 function entity(): ViewWeaponEntity & { readonly name: string } {
   return { name: "gun", transform: { origin: { x: 104, y: 198, z: 302 }, axis: [...axis], scale: { x: 1, y: 1, z: 1 } },
@@ -23,9 +24,9 @@ test("view weapon follows the rendered eye while preserving its authored offset"
 test("view weapon axis follows a ninety-degree camera turn while preserving its local tilt", () => {
   // Anchor eye faces +x; final camera faces +y. A gun pitched toward anchor
   // up must keep that pitch relative to the new forward.
-  const anchor = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }] as const;
-  const camera = [{ x: 0, y: 1, z: 0 }, { x: -1, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }] as const;
-  const gun = [{ x: 0, y: 0, z: 1 }, { x: 0, y: 1, z: 0 }, { x: -1, y: 0, z: 0 }] as const;
+  const anchor: Axis = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }];
+  const camera: Axis = [{ x: 0, y: 1, z: 0 }, { x: -1, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }];
+  const gun: Axis = [{ x: 0, y: 0, z: 1 }, { x: 0, y: 1, z: 0 }, { x: -1, y: 0, z: 0 }];
   expect(anchoredViewWeaponAxis([...gun], [...anchor], [...camera])).toEqual([
     { x: 0, y: 0, z: 1 }, { x: -1, y: 0, z: 0 }, { x: 0, y: -1, z: 0 }]);
 });

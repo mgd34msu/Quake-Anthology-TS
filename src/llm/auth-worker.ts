@@ -3,12 +3,15 @@ import { parentPort, workerData } from "node:worker_threads";
 /** Loopback OAuth callback served off the game thread, so a blocked frame loop cannot starve it. */
 function fields(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Invalid subscription callback worker data.");
-  return Object.fromEntries(Object.entries(value));
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) { const entry: unknown = Reflect.get(value, key); result[key] = entry; }
+  return result;
 }
 
 if (parentPort === null) throw new Error("Subscription callback worker requires a parent port.");
 const port = parentPort;
-const data = fields(workerData);
+const rawWorkerData: unknown = workerData;
+const data = fields(rawWorkerData);
 const requestedPort = data["port"], expectedState = data["state"];
 if (typeof requestedPort !== "number" || !Number.isInteger(requestedPort) || requestedPort < 0 || requestedPort > 65535
   || typeof expectedState !== "string" || expectedState === "") throw new Error("Invalid subscription callback worker data.");

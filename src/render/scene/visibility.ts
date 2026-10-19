@@ -44,7 +44,7 @@ function q2Pvs(map: Extract<DecodedWorld, { readonly kind: "q2-bsp" }>, cluster:
   const visibility = map.visibility;
   if (visibility === null || cluster < 0) return null;
   let cache = q2PvsCache.get(map);
-  if (cache === undefined) { cache = new Map(); q2PvsCache.set(map, cache); }
+  if (cache === undefined) { cache = new Map<number, Uint8Array>(); q2PvsCache.set(map, cache); }
   const hit = cache.get(cluster);
   if (hit !== undefined) return hit;
   const bytes = visibility.compressed, entry = at(visibility.clusters, cluster);
@@ -99,7 +99,7 @@ function remainingFrustumPlanes(bounds: Bounds, planes: readonly Plane[], bits: 
 const q1PvsCache = new WeakMap<DecodedWorld, Map<number, Uint8Array>>();
 function q1Pvs(map: Extract<DecodedWorld, { readonly kind: "q1-bsp" }>, leaf: number): Uint8Array {
   let cache = q1PvsCache.get(map);
-  if (cache === undefined) { cache = new Map(); q1PvsCache.set(map, cache); }
+  if (cache === undefined) { cache = new Map<number, Uint8Array>(); q1PvsCache.set(map, cache); }
   const hit = cache.get(leaf);
   if (hit !== undefined) return hit;
   const result = q1LeafPvs(map, leaf);

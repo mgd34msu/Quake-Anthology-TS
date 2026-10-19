@@ -160,7 +160,7 @@ export class StartupMenu {
       // with a single edition, e.g. Quake II 64, always use that edition).
       const familyPresets = options.model.presets().filter(preset => preset.family === this.nativeFamily);
       const toggle = familyPresets.some(preset => preset.edition === "classic") && familyPresets.some(preset => preset.edition === "rerelease")
-        ? (["classic", "rerelease"] as const).map((edition, index) => ({
+        ? (["classic", "rerelease"] satisfies readonly ("classic" | "rerelease")[]).map((edition, index) => ({
           ...this.button(`edition-${edition}`, `${this.nativeEdition === edition ? "> " : ""}${edition === "classic" ? "Classic" : "Rerelease"}`, 0, () => { this.nativeEdition = edition; this.status = ""; }, true),
           rect: { x: index === 0 ? 64 : 328, y: 114, width: 248, height: 29 } })) : [];
       const offset = toggle.length === 0 ? 0 : 1;
@@ -303,7 +303,10 @@ export class StartupMenu {
       const list = variants.get(preset.label);
       if (list === undefined) variants.set(preset.label, [preset]); else list.push(preset);
     }
-    return [...variants.values()].map(list => list.find(preset => preset.edition === this.nativeEdition) ?? list[0] as StartupNativePreset);
+    return [...variants.values()].flatMap(list => {
+      const picked = list.find(preset => preset.edition === this.nativeEdition) ?? list[0];
+      return picked === undefined ? [] : [picked];
+    });
   }
   /** Menu display must survive a selected product whose content is not installed. */
   private safeRows(): readonly StartupSelectionRow[] {

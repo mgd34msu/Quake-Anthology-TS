@@ -46,7 +46,7 @@ test("QuakeWorld movement needs only base Quake, not the qw bundle", async () =>
     expect(catalog.product("q1-quakeworld").availability.kind).toBe("missing");
     const parsed = parseApplicationCommand(["--content-root", root, "--menu"]);
     if (parsed.kind !== "menu") throw new Error("Expected startup options");
-    const initial = { ...parsed.options, product: "q1-classic-id1", map: "maps/e1m1.bsp", movement: "q1", character: "q1" } as const;
+    const initial: typeof parsed.options = { ...parsed.options, product: "q1-classic-id1", map: "maps/e1m1.bsp", movement: "q1", character: "q1" };
     const selection = new StartupSelectionModel(catalog, initial);
     await selection.prepareMaps();
     const movementRow = selection.rows().find(row => row.id === "movement");

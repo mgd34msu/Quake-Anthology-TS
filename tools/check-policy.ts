@@ -223,7 +223,7 @@ const glSymbols = new Set([
   "glActiveTexture", "glClientActiveTexture", "glDrawBuffer", "glViewport", "glScissor", "glClearColor", "glClearDepth",
   "glClearStencil", "glClear", "glEnable", "glDisable", "glClipPlane", "glDepthFunc", "glDepthMask", "glColorMask",
   "glStencilFunc", "glStencilOp", "glStencilMask", "glDepthRange", "glPolygonMode", "glShadeModel", "glPolygonOffset",
-  "glLineWidth", "glBlendFunc", "glAlphaFunc", "glCullFace", "glFrontFace", "glMatrixMode", "glLoadIdentity", "glOrtho",
+  "glLineWidth", "glBlendFunc", "glAlphaFunc", "glCullFace", "glFrontFace", "glMatrixMode", "glLoadIdentity", "glLoadMatrixf", "glOrtho",
   "glBegin", "glEnd", "glColor3f", "glColor4f", "glColor4b", "glColor4ub", "glTexCoord2f", "glVertex2f", "glVertex4f",
   "glEnableClientState", "glDisableClientState", "glVertexPointer", "glColorPointer", "glTexCoordPointer", "glDrawElements",
   "glPushClientAttrib", "glPopClientAttrib", "glBindBuffer", "glGenBuffers", "glDeleteBuffers", "glGetPointerv",
@@ -406,8 +406,9 @@ export function auditProgram(program: ts.Program, projectFiles: readonly string[
           report(node, "source-boundary", "Project modules cannot import excluded build output or external source paths.");
         }
         const attribute = ts.isImportDeclaration(node) ? node.attributes?.elements[0] : undefined;
-        const menuFileImport = projectPath === "src/app/bootstrap/menu-art.ts"
-          && ["assets/ui/menu-background.png", "assets/ui/menu-panel.png", "assets/ui/menu-focus.png", "assets/ui/main-menu-background.png"].includes(imported)
+        const menuFileImport = ((projectPath === "src/app/bootstrap/menu-art.ts"
+            && ["assets/ui/menu-background.png", "assets/ui/menu-panel.png", "assets/ui/menu-focus.png", "assets/ui/main-menu-background.png"].includes(imported))
+          || (projectPath === "src/app/bootstrap/splash.ts" && imported === "assets/ui/title.png"))
           && ts.isImportDeclaration(node) && node.attributes?.token === ts.SyntaxKind.WithKeyword
           && node.attributes.elements.length === 1 && attribute?.name.text === "type"
           && ts.isStringLiteral(attribute.value) && attribute.value.text === "file";
@@ -430,7 +431,11 @@ export function auditProgram(program: ts.Program, projectFiles: readonly string[
           report(node, "ffi-binding", "FFI loaders must be called directly with visible system platform descriptors; do not alias or export them.");
         }
       }
-      if (runtime && ((bun && ["spawn", "spawnSync", "$"].includes(name ?? ""))
+      // The splash window lives in its own process (its SDL/event loop must
+      // not block or be blocked by the game loop) and only ever spawns this
+      // executable with --splash-child; that reviewed self-spawn is exempt.
+      const splashSelfSpawn = projectPath === "src/app/bootstrap/splash.ts" && bun && name === "spawn";
+      if (runtime && !splashSelfSpawn && ((bun && ["spawn", "spawnSync", "$"].includes(name ?? ""))
         || (nodeBuiltin && ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "execve", "fork"].includes(name ?? "")))) {
         report(node, "runtime-subprocess", "Runtime modules cannot execute external programs or compiler output; subprocess orchestration belongs in tools/tests.");
       }
