@@ -26,7 +26,7 @@ test('audio menu exposes default and retained named output without claiming fail
   try {
     const store = new ConfigStore(root); expect(await loadAudioSettings(store)).toEqual({});
     await saveAudioSettings(store, state);
-    expect(await loadAudioSettings(new ConfigStore(root))).toEqual({deviceName:'Available',effectsVolume:0.3,musicVolume:0.8,outputFormat:defaultAudioOutputFormat});
+    expect(await loadAudioSettings(new ConfigStore(root))).toEqual({deviceName:'Available',effectsVolume:0.3,musicVolume:0.8,menuTrack:'auto',musicShuffle:false,outputFormat:defaultAudioOutputFormat});
     state.selectedOutput = null; await saveAudioSettings(store, state);
     expect((await loadAudioSettings(store)).deviceName).toBeNull();
   } finally { await rm(root,{recursive:true,force:true}); }
@@ -69,16 +69,17 @@ for (const backend of ['cpu', 'gl']) test(`actual ${backend} audio menu saves de
       for(const down of [true,false])application.input({seat:local.seat.id,kind:'mouse-button',button:1,down,timeMilliseconds:performance.now()});
       await application.step(25);
     };
-    await application.step(25);key(27);await application.step(25);await click(3);await click(1);
+    await application.step(25);key(27);await application.step(25);await click(4);await click(2);
     expect(ui.activeMenu).toBe('menu:settings:audio:0');
     const named=audio.outputDeviceNames()[0];if(named===undefined)throw Error('Dummy output unavailable');
+    await click(0);expect(ui.activeMenu).toBe('menu:settings:audio:output');
     await click(0);expect(audio.selectedOutput).toBe(named);
-    await click(1,400);await click(2,460);
+    await click(4,400);await click(11);await click(1);await click(0,460);
     const expected={deviceName:audio.selectedOutput,effectsVolume:audio.effectsVolume,musicVolume:audio.musicVolume};
     expect(expected.effectsVolume).not.toBe(1);expect(expected.musicVolume).not.toBe(1);
     const pending=application.captureNextFrame();await application.step(25);await Bun.write(`/tmp/audio-menu-${backend}.png`,encodePng(640,480,await pending));
     await application.close();app=null;
-    expect(await loadAudioSettings(new ConfigStore(join(root,'q2/baseq2')))).toEqual(expected);
+    expect(await loadAudioSettings(new ConfigStore(join(root,'q2/baseq2')))).toEqual({ ...expected, menuTrack: 'auto', musicShuffle: false, outputFormat: audio.outputFormat });
     app=await Application.open({...parsed.options,userContentRoot:root},{print:()=>undefined});
     const restored=owners.at(-1);if(restored===undefined)throw Error('Missing restored audio');
     expect({deviceName:restored.selectedOutput,effectsVolume:restored.effectsVolume,musicVolume:restored.musicVolume}).toEqual(expected);
@@ -126,10 +127,10 @@ test('native remote named audio output and volumes survive travel and close', as
     expect(app.content.recipe.map.geometry.requestedPath).toBe('maps/e1m2.bsp');expect(app.networkPhase).toBe('active');
     const current=owners.at(-1);if(current===undefined)throw Error('No travelled audio');
     expect(messages.some(text=>text.includes('Using system default'))).toBe(false);
-    expect(current.selectedOutput).toBe(named);expect(current.effectsVolume).toBe(0.35);expect(current.musicVolume).toBe(0.65);
+    expect(current.selectedOutput).toBe(named);expect(current.effectsVolume).toBeCloseTo(0.35);expect(current.musicVolume).toBeCloseTo(0.65);
     expect(app.localPlayers[0]?.seat).toBe(seat);expect(app.window).toBe(window);expect(app.session.world).toBeNull();
     await app.close();remote=null;
-    expect(await loadAudioSettings(new ConfigStore(join(root,'client/q1/id1')))).toEqual({deviceName:named,effectsVolume:0.35,musicVolume:0.65,outputFormat:defaultAudioOutputFormat});
+    expect(await loadAudioSettings(new ConfigStore(join(root,'client/q1/id1')))).toEqual({deviceName:named,effectsVolume:Math.fround(0.35),musicVolume:Math.fround(0.65),menuTrack:'auto',musicShuffle:false,outputFormat:defaultAudioOutputFormat});
   } finally {
     try { await remote?.close(); } finally {
       try { await serverOwner?.close(); } finally { prepare.mockRestore();opened.mockRestore();closed.mockRestore();await rm(root,{recursive:true,force:true}); }

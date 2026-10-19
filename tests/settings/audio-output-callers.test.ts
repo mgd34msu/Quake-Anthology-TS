@@ -40,7 +40,7 @@ test("frontend gain-only save preserves format and output services save actual s
     await preferences.loadBaseline(store);
     preferences.values = { effectsVolume: 0.3 };
     await preferences.saveAudioBaseline(store);
-    expect(await loadAudioSettings(store)).toEqual({ deviceName: "saved output", outputFormat, effectsVolume: 0.3, musicVolume: 0.25 });
+    expect(await loadAudioSettings(store)).toEqual({ deviceName: "saved output", outputFormat, effectsVolume: 0.3, musicVolume: 0.25, menuTrack: "auto", musicShuffle: false });
     let actual: AudioOutputFormat = outputFormat;
     const bindings = preferences.bindings({ selected: () => null, devices: () => [], select: () => {}, report: () => {},
       format: { read: () => actual, select: value => { actual = value; } } });
@@ -48,7 +48,7 @@ test("frontend gain-only save preserves format and output services save actual s
     if (rate?.kind !== "choice") throw Error("Missing output rate control");
     rate.write("48000");
     await preferences.saveAudioBaseline(store);
-    expect(await loadAudioSettings(store)).toEqual({ deviceName: null, outputFormat: { ...outputFormat, sampleRate: 48000 }, effectsVolume: 0.3, musicVolume: 0.25 });
+    expect(await loadAudioSettings(store)).toEqual({ deviceName: null, outputFormat: { ...outputFormat, sampleRate: 48000 }, effectsVolume: 0.3, musicVolume: 0.25, menuTrack: "auto", musicShuffle: false });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

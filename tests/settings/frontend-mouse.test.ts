@@ -157,7 +157,7 @@ for (const width of [320, 640]) test(`startup Controls at ${width} reaches share
     focus("ui:startup:controls"); key(KeyCode.Enter);
     expect(controller.activeMenu).toBe("menu:settings:input:0");
     const page = menus.get("menu:settings:input:0")?.(); if (page === undefined) throw new Error("Missing Controls menu");
-    expect(page.scroll?.rect.y).toBe(92); expect(page.scroll?.rect.height).toBe(300);
+    expect(page.scroll?.rect.y).toBe(92); expect(page.scroll?.rect.height).toBe(308);
     expect(page.controls.some(row => row.label === "Next page")).toBe(false);
     for (const row of page.controls) {
       expect(row.rect.y).toBeGreaterThanOrEqual(0);

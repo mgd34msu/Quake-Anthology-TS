@@ -71,11 +71,12 @@ test("Q3 profile seeds native match and combat owners before source map construc
 test("LMCTF settings distinguish next-match duration and next-map rune spawning", async () => {
   const parsed = parseApplicationCommand(["--game", "q2-classic-lmctf", "--map", "lmctf09", "--movement", "q2", "--character", "q2", "--dedicated"]);
   if (parsed.kind !== "run") throw new Error("Expected source launch");
+  const directory = await mkdtemp(join(tmpdir(), "lmctf-effective-settings-"));
   const application = await Application.open({ ...parsed.options, serverProfile: { version: 1, overrides: [
     { id: "server:time-limit", value: "2" }, { id: "server:lmctf.fast-switch", value: "1" },
     { id: "server:lmctf.rune.damage", value: "0" }, { id: "server:lmctf.rune.haste", value: "0" },
     { id: "server:lmctf.rune.resist", value: "0" }, { id: "server:lmctf.rune.regen", value: "0" },
-  ] } }, { print: () => undefined });
+  ] } }, { print: () => undefined, saveDirectory: directory });
   try {
     const source = application.simulation.q2Source(), mode = source?.product.match.source;
     if (source === null || source === undefined || !(mode instanceof Q2Lmctf)) throw new Error("Missing LMCTF source");
@@ -93,24 +94,21 @@ test("LMCTF settings distinguish next-match duration and next-map rune spawning"
     await application.changeLevel("maps/lmctf09.bsp");
     const next = application.simulation.q2Source(); if (next === null) throw new Error("Missing new source");
     expect([...next.game.entities.values()].filter(entity => entity.classname.endsWith("_rune")).map(entity => entity.classname)).toEqual(["regen_rune"]);
-    const directory = await mkdtemp(join(tmpdir(), "lmctf-effective-settings-"));
-    try {
-      const path = join(directory, "effective.sav");
-      await application.saveGame(path); await application.loadGame(path);
-      expect(application.simulation.q2ServerCvars()?.find("runes")?.value).toBe("8");
-      expect(application.simulation.q2ServerCvars()?.find("runes")?.latchedValue).toBeUndefined();
-      expect(application.simulation.q2ServerCvars()?.find("timelimit")?.value).toBe("5");
-      expect(application.simulation.q2ServerCvars()?.find("timelimit")?.latchedValue).toBeUndefined();
-    } finally { await rm(directory, { recursive: true, force: true }); }
-  } finally { await application.close(); }
+    const path = join(directory, "effective.sav");
+    await application.saveGame(path); await application.loadGame(path);
+    expect(application.simulation.q2ServerCvars()?.find("runes")?.value).toBe("8");
+    expect(application.simulation.q2ServerCvars()?.find("runes")?.latchedValue).toBeUndefined();
+    expect(application.simulation.q2ServerCvars()?.find("timelimit")?.value).toBe("5");
+    expect(application.simulation.q2ServerCvars()?.find("timelimit")?.latchedValue).toBeUndefined();
+  } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
 }, 30000);
 
 for (const [game, map, ctf] of [["q2-classic-baseq2", "base1", false], ["q2-classic-ctf", "q2ctf1", true]] satisfies readonly (readonly [string, string, boolean])[]) {
   test(`${game} save restores effective limits and flags through the server owner`, async () => {
     const parsed = parseApplicationCommand(["--game", game, "--map", map, "--mode", "deathmatch", "--dedicated"]);
     if (parsed.kind !== "run") throw new Error("Expected source launch");
-    const application = await Application.open(parsed.options, { print: () => undefined });
     const directory = await mkdtemp(join(tmpdir(), "q2-effective-settings-"));
+    const application = await Application.open(parsed.options, { print: () => undefined, saveDirectory: directory });
     try {
       const client = application.session.createClient(0); application.simulation.admitPlayer(client.id);
       writeServerSetting(setting(application, "server:frag-limit"), "7");
@@ -147,7 +145,7 @@ test("failed restore preparation retains commands and clients, while cleanup fai
     const connection = client.connect("loopback");
     application.simulation.admitPlayer(client.id);
     await application.step(100);
-    const saved = join(directory, "restore.sav"), queued = join(directory, "queued.sav");
+    const saved = join(directory, "saves", "restore.sav"), queued = join(directory, "saves", "queued.sav");
     await application.saveGame(saved);
     const original = application.simulation;
     application.queueCommand("save", [queued], null);

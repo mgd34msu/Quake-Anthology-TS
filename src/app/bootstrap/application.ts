@@ -468,7 +468,7 @@ export class Application {
     return saveUnavailable({ authority: this.network === null && this.options.network.kind === "offline" ? "offline" : "server",
       family: this.simulation.q3Source() !== null || this.simulation.q3Guest() !== null ? "q3"
         : this.simulation.q2Source() !== null || native !== null ? "q2" : "q1",
-      mode: this.options.mode, matchSave: this.content.recipe.match.provider === "q2:lmctf", active: !this.closed && (this.campaignMovie === null || this.campaignMovie.componentOwned === true),
+      mode: this.options.mode, matchSave: this.options.dedicated || this.content.recipe.match.provider === "q2:lmctf", active: !this.closed && (this.campaignMovie === null || this.campaignMovie.componentOwned === true),
       intermission: players.some(actor => this.simulation.movementPlayer(actor)?.intermission === true)
         || (this.simulation.q3Source()?.level.intermissionTime ?? 0) !== 0
         || this.simulation.q3Guest()?.state.configstrings.get(22) === "1",

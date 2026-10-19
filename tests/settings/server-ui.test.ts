@@ -30,7 +30,7 @@ for (const renderer of ["cpu", "gl"]) test(`${renderer} host settings mouse edit
       application.input({ seat: player.seat.id, timeMilliseconds: performance.now(), kind: "mouse-button", button: 1, down: false });
     };
     key(KeyCode.Escape); await application.step(25);
-    click(3); click(3); click(0);
+    click(4); click(4); click(0);
     expect(controller.activeMenu).toBe("menu:server:settings");
     click(5); expect(controller.activeMenu).toBe("menu:server:detail");
     click(0, 500); key(KeyCode.Home); key(KeyCode.Delete);
