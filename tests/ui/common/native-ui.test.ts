@@ -56,7 +56,8 @@ test("native settings alter real command input and remain isolated per seat", ()
   };
   const a = make(owner.seat(0)), b = make(owner.seat(1));
   a.input.input({ seat: owner.seat(0), timeMilliseconds: 1000, kind: "key", code: KeyCode.Enter, down: true, repeat: false });
-  a.input.input({ seat: owner.seat(0), timeMilliseconds: 1001, kind: "key", code: KeyCode.Right, down: true, repeat: false });
+  a.input.input({ seat: owner.seat(0), timeMilliseconds: 1001, kind: "key", code: KeyCode.Enter, down: true, repeat: false });
+  a.input.input({ seat: owner.seat(0), timeMilliseconds: 1002, kind: "key", code: KeyCode.Right, down: true, repeat: false });
   expect(a.builder.mouse.tuning.sensitivity).toBeCloseTo(3.1);
   expect(b.builder.mouse.tuning.sensitivity).toBe(3);
   a.controller.closeAll();
@@ -107,7 +108,8 @@ test("private HUD messages, keyed POIs and real wheel selection keep source reci
   const preferences = new SeatUiPreferences(seat); preferences.values = { ...preferences.values, hudScale: 1.5 };
   const commands = drawCommonHud(drawContext(owner, seat, 640), { ...emptyHudData(seat), vitals: [{ label: "Health", value: 100, warning: false, icon: null }] },
     { skin: defaultUiSkin(fontId), preferences: preferences.values, messages, camera: null, localize: text => text });
-  const health = commands.find(command => command.kind === "text" && command.text === "Health 100");
+  const health = commands.find(command => command.kind === "text" && command.text === "100");
+  expect(commands.some(command => command.kind === "text" && command.text === "Health")).toBe(true);
   expect(health?.kind === "text" ? health.origin.y : -1).toBeLessThan(480);
   expect(health?.kind === "text" ? health.origin.x : -1).toBeGreaterThan(640);
 });

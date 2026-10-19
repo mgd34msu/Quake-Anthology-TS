@@ -21,7 +21,7 @@ test("gameplay preferences only expose registered source settings and commit sou
   const cvars = new CvarRegistry({ dialect: "q3", context: { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } } });
   cvars.register("sv_autosave", "1"); cvars.register("name", "Ranger");
   const settings = bindGameplaySettings({ cvars });
-  expect(settings.map(setting => setting.label)).toEqual(["Automatic saves", "Player name"]);
+  expect(settings.map(setting => setting.label)).toEqual(["Autosave on level load", "Player name"]);
   const auto = settings[0]; if (auto?.kind !== "toggle") throw new Error("Expected autosave toggle");
   auto.write(false); expect(cvars.variableValue("sv_autosave")).toBe(0);
   const name = settings[1]; if (name?.kind !== "text-entry") throw new Error("Expected player name");

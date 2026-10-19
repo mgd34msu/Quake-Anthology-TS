@@ -32,7 +32,7 @@ test("settings scroll preserves values, reveals keyboard focus and clips pointer
   move(450, 80); button(true); button(false); expect(values).toEqual(Array.from({ length: 20 }, () => 3));
   move(568, 140); button(true); move(568, 390); button(false);
   expect(labels()).toContain("Slider 19"); expect(labels()).toContain("Field"); expect(labels()).toContain("Back");
-  const commands = draw(); expect(commands.some(command => command.kind === "clip" && command.rect?.y === 92 && command.rect.height === 300)).toBe(true);
+  const commands = draw(); expect(commands.some(command => command.kind === "clip" && command.rect?.y === 92 && command.rect.height === 308)).toBe(true);
   for (let index = 0; index < 20; index++) key(KeyCode.Tab);
   expect(ui.state().focus).toMatchObject({ kind: "menu", control: "ui:test:field" });
   ui.input({ kind: "text", seat, timeMilliseconds: 1000, text: "!" }); expect(field).toBe("original!");
