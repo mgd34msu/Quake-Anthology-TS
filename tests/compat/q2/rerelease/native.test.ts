@@ -334,7 +334,9 @@ test.skipIf(!available)("retail PreInit through ClientThink and active RunFrame 
   // Record the measured allocation without selecting the source-private client layout.
   expect(["item_compass", "item_flashlight", "ammo_cells", "ammo_flechettes", "weapon_blaster"].map(name => guest.callGame("Bot_GetItemID", [guestPointer(core.string(name))]))).toEqual([83, 82, 30, 34, 8].map(value => ({ kind: "int32", value })));
   expect(privateClientLayout.byteLength).toBe(7328);
-  expect(memory.mappings().filter(value => value.label === "Q2 tag 765").map(value => value.byteLength).sort((a, b) => a - b)).toEqual([8192 * 3688, 8 * 7344, 8 * 80 * 12].sort((a, b) => a - b));
+  // Native allocations are page-rounded (CRT routines probe page boundaries).
+  const pageRounded = (bytes: number): number => Math.max(4096, Math.ceil(bytes / 4096) * 4096);
+  expect(memory.mappings().filter(value => value.label === "Q2 tag 765").map(value => value.byteLength).sort((a, b) => a - b)).toEqual([8192 * 3688, 8 * 7344, 8 * 80 * 12].map(pageRounded).sort((a, b) => a - b));
   const ignore = memory.allocate({ byteLength: 8, alignment: 8n });
   memory.writePointer(ignore, table.atSlot(1).address);
   expect(guest.callGame("ClientChooseSlot", [guestPointer(core.string("\\name\\guest")), guestPointer(core.string("test-social")), guestBool(false), guestPointer(ignore), { kind: "uint64", value: 1n }, guestBool(false)])).toEqual(guestPointer(table.atSlot(2).address));
