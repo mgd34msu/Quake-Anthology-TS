@@ -64,7 +64,8 @@ test("remote startup cfg overrides its saved seat before admission and retains t
   const common = ["--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q2", "--character", "q2", "--mode", "coop", "--user-content-root", root];
   const serverOptions = parseApplicationCommand([...common, "--dedicated", "--listen", "0", "--bind", "127.0.0.1"]);
   if (serverOptions.kind !== "run") throw new Error("Missing server options");
-  const opened = spyOn(ApplicationInput, "open"); let server: Application | null = null, client: RemoteApplication | null = null;
+  const opened = [spyOn(ApplicationInput, "open"), spyOn(ApplicationInput, "prepare"), spyOn(ApplicationInput, "prepareForClient")];
+  let server: Application | null = null, client: RemoteApplication | null = null;
   const host = { print: (): undefined => undefined };
   try {
     server = await Application.open(serverOptions.options, host);
@@ -78,8 +79,10 @@ test("remote startup cfg overrides its saved seat before admission and retains t
       await client.step(50); await Bun.sleep(1); await server.step(50); await Bun.sleep(1); await client.step(50);
     }
     expect(client.networkPhase).toBe("active");
-    const result = opened.mock.results.at(-1); if (result?.type !== "return") throw new Error("Missing admitted input");
-    const input = await result.value, local = input.locals[0]; if (local === undefined) throw new Error("Missing remote seat");
+    const admitted = (await Promise.all(opened.flatMap(spy => spy.mock.results.filter(entry => entry.type === "return").map(async entry => await entry.value))))
+      .filter(candidate => candidate.locals.length > 0).at(-1);
+    if (admitted === undefined) throw new Error("Missing admitted input");
+    const input = admitted, local = input.locals[0]; if (local === undefined) throw new Error("Missing remote seat");
     expect(input.inputCvars(local.player.seat.id)).toBe(early.cvars);
     expect(local.builder.mouse.tuning.sensitivity).toBe(3);
     input.commands.append("sensitivity 4\nm_pitch -0\n", { session: local.player.actor.session,
@@ -91,5 +94,5 @@ test("remote startup cfg overrides its saved seat before admission and retains t
     expect((await config.loadSeat("input/seat-1.json"))?.mouse.sensitivity).toBe(4);
     client = await RemoteApplication.open(parsed.options, host);
     expect(client.clientCommands?.inputSettings?.read().sensitivity).toBe(4);
-  } finally { await client?.close(); await server?.close(); opened.mockRestore(); await rm(root, { recursive: true, force: true }); }
+  } finally { await client?.close(); await server?.close(); for (const spy of opened) spy.mockRestore(); await rm(root, { recursive: true, force: true }); }
 }, 60000);
