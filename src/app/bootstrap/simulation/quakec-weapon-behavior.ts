@@ -15,7 +15,7 @@ import { createNumericOperations, Q1_DONOR_PROFILE } from '../../../core/numeric
 import { QcMachine, type QcBuiltin, type QcMachineSnapshot } from '../../../compat/qc/machine.ts';
 import { QcEntityMemory } from '../../../compat/qc/memory.ts';
 import { classicQcEntityLayout } from '../../../compat/qc/profile.ts';
-import { createQcBuiltins, type QcHostBuiltinName } from '../../../compat/qc/builtins.ts';
+import { createQcBuiltins, qcHostKindForProgram, type QcHostBuiltinName } from '../../../compat/qc/builtins.ts';
 import type { QcProgram } from '../../../compat/qc/program.ts';
 
 export interface QcWeaponBehaviorTarget {
@@ -83,7 +83,7 @@ export class QuakeCWeaponBehaviorSource implements WeaponBehaviorSource {
     this.entities = new QcEntityMemory(classicQcEntityLayout(options.program), 8192);
     const host = this.builtins();
     this.machine = new QcMachine({ program: options.program, entities: this.entities, numeric: createNumericOperations(Q1_DONOR_PROFILE),
-      builtins: createQcBuiltins({ kind: options.program.api.kind === 'q1-quakeworld' ? 'quakeworld' : 'netquake', random: { nextInteger: () => this.random.nextInteger(), nextUnit: () => this.random.nextUnit(), checkpoint: () => this.random.checkpoint() },
+      builtins: createQcBuiltins({ kind: qcHostKindForProgram(options.program), random: { nextInteger: () => this.random.nextInteger(), nextUnit: () => this.random.nextUnit(), checkpoint: () => this.random.checkpoint() },
         host, isFreeEntity: slot => this.free.has(slot) }), serverActive: () => true });
     this.global('deathmatch', options.mode === 'deathmatch' ? 1 : 0); this.global('coop', options.mode === 'coop' ? 1 : 0);
   }

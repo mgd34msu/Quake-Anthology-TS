@@ -18,7 +18,7 @@ import { createNumericOperations, nativeAtoi, Q1_DONOR_PROFILE } from "../../cor
 import { quakeWorldInfo } from "../../network/q1/handshake.ts";
 import { savedActorId, readSavedActor } from "../../persistence/save-image.ts";
 import { encodeCheckpointValue, decodeCheckpointValue, SaveReader } from "../../persistence/value.ts";
-import { createQcBuiltins } from "./builtins.ts";
+import { createQcBuiltins, qcHostKindForProgram } from "./builtins.ts";
 import type { QcHostBuiltinName } from "./builtins.ts";
 import { createQcPresentationBindings } from "./presentation-host.ts";
 import type { QcPrecachedResource } from "./presentation-host.ts";
@@ -361,7 +361,7 @@ export class QcModProvider {
       })(), run: (region, execute) => this.combat === null ? execute() : this.combat.damage.inlineBoundary.run(region, execute),
     };
     this.machine = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE), serverActive: () => !this.loading,
-      builtins: createQcBuiltins({ kind: program.api.kind === "q1-quakeworld" ? "quakeworld" : "netquake", random, host,
+      builtins: createQcBuiltins({ kind: qcHostKindForProgram(program), random, host,
         prepareEntities: () => this.prepareEntities(),
         isFreeEntity: slot => { const actor = this.actorsBySlot.get(slot); return actor === undefined || !services.actors.isLive(actor); } }),
       validateEntityAccess: (reference, word, words, kind) => {

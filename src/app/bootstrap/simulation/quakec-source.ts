@@ -67,7 +67,7 @@ import { parseEntities } from "../../../core/common-parse.ts";
 import { CvarRegistry } from "../../../core/cvars/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations, nativeAtoi } from "../../../core/numeric.ts";
 import { QcMachine, QcEntityMemory, loadQcProgram, classicQcEntityLayout, createQcSourceSlotStorage, QcWorldHost,
-  createQcBuiltins, createQcPresentationBindings, applyQcEntityPairs } from "../../../compat/qc/index.ts";
+  createQcBuiltins, qcHostKindForProgram, createQcPresentationBindings, applyQcEntityPairs } from "../../../compat/qc/index.ts";
 import { qcByteString } from "../../../compat/qc/program.ts";
 import type { QcProgram } from "../../../compat/qc/program.ts";
 import type { QcPrecachedResource, QcMessageDestination, QcRoutedMessage, QcQuakeWorldMessageServices } from "../../../compat/qc/presentation-host.ts";
@@ -277,8 +277,9 @@ export class QuakeCSource {
       model: name => name === "" ? { index: 0, bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } } } : this.models.get(name) ?? null,
       foreignReference: actor => this.borrowed.reference(actor), foreignActor: slot => this.borrowed.actor(slot), admit: (actor, slot) => this.admit(actor, slot) });
     this.cvars = options.sourceRegistry ?? new CvarRegistry({ dialect: prepared.program.api.kind, context: { session: options.actors.session, origin: { kind: "server-console" } }, print: options.print });
-    if (options.sourceRegistry === undefined) for (const [name, value] of Object.entries({ skill: String(options.skill), deathmatch: options.mode === "deathmatch" ? "1" : "0", coop: options.mode === "coop" ? "1" : "0",
-      teamplay: "0", sv_cheats: "0", sv_aim: binding.kind === "quakeworld" ? "2" : "0.93", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1" })) this.cvars.register(name, value);
+    for (const [name, value] of Object.entries({ skill: String(options.skill), deathmatch: options.mode === "deathmatch" ? "1" : "0", coop: options.mode === "coop" ? "1" : "0",
+      teamplay: "0", sv_cheats: "0", sv_aim: binding.kind === "quakeworld" ? "2" : "0.93", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1",
+      maxclients: String(options.maxClients), campaign: "0" })) if (this.cvars.find(name) === undefined) this.cvars.register(name, value);
     this.clients = new QcClientHost(this.worldHost, { scene: options.scene, maxClients: this.reservedClientSlots, serverTime: () => this.currentTime });
     const qw: QcQuakeWorldMessageServices | undefined = binding.kind === "quakeworld" ? {
       loading: () => this.spawning, client: actor => this.isReservedClient(actor), phs: () => this.cvars.variableValue("sv_phs") !== 0,
@@ -316,6 +317,7 @@ export class QuakeCSource {
     if (this.cvars.find("developer") === undefined) this.cvars.register("developer", "0");
     host.set("dprint", vm => { if (this.cvars.variableValue("developer") !== 0) options.print(vm.varString(0)); });
     host.set("cvar", vm => { vm.returnFloat(this.cvars.variableValue(vm.argString(0))); });
+    host.set("setcolor", vm => { vm.entities.fromReference(vm.argInt(0)).setFloat(vm.fieldOffset("colormap"), Math.trunc(vm.argFloat(1))); });
     host.set("setspawnparms", vm => {
       const slot = this.entities.slot(vm.argInt(0)), actor = this.slots.at(slot), client = this.clientIdentities.get(slot);
       const parameters = this.spawnParameters.get(slot);
@@ -399,7 +401,7 @@ export class QuakeCSource {
     if (remove === undefined) throw new Error("Missing QC remove builtin");
     host.set("remove", vm => { if (this.borrowed.actor(this.entities.slot(vm.argInt(0))) !== null) throw new Error("Original QC cannot remove a borrowed actor"); return remove(vm); });
     this.machine = new QcMachine({ program: prepared.program, entities: this.entities, numeric: createNumericOperations(Q1_DONOR_PROFILE),
-      builtins: createQcBuiltins({ kind: binding.kind, random: options.random, host, isFreeEntity: this.worldHost.isFreeEntity }), serverActive: () => !this.spawning,
+      builtins: createQcBuiltins({ kind: qcHostKindForProgram(prepared.program), random: options.random, host, isFreeEntity: this.worldHost.isFreeEntity }), serverActive: () => !this.spawning,
       functionBoundary: this.weaponStage?.composeFunctions(functions) ?? functions,
       observeCall: call => { pickups.validate(); return damage.observeCall(call); },
       inlineBoundary: this.weaponStage?.composeRegions(regions) ?? regions, validateEntityAccess: (reference, word, words, kind) => { pickups.validate(); this.borrowed.access(reference, word, words, kind); },

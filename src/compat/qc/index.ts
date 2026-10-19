@@ -4,7 +4,7 @@ export { QcEntityMemory, QcStrings, QcWords } from "./memory.ts";
 export type { QcEntityLayout } from "./memory.ts";
 export { QcMachine, QcRuntimeError } from "./machine.ts";
 export type { QcBuiltin, QcBuiltinRegistry, QcCallSite, QcFunctionBoundary, QcEntityStoreObservation, QcMachineOptions, QcMachineSnapshot } from "./machine.ts";
-export { createQcBuiltins, qcHostRequirements } from "./builtins.ts";
+export { createQcBuiltins, qcHostKindForProgram, qcHostRequirements } from "./builtins.ts";
 export type { QcBuiltinRequirement, QcBuiltinServices, QcHostBuiltinName, QcHostKind } from "./builtins.ts";
 export { applyQcEntityPairs, applyQcGlobalPairs, parseQcValue, saveQcEntityPairs, saveQcGlobalPairs } from "./save.ts";
 export type { QcEntityParseResult, QcTextPair } from "./save.ts";

@@ -21,5 +21,11 @@ export function selectQ1SaveProduct(catalog: InstalledCatalog, save: Q1SaveData,
   const contextual = candidates.filter(product => product.expectation.id === directory);
   if (contextual.length === 1 && contextual[0] !== undefined) return contextual[0];
   if (candidates.length === 1 && candidates[0] !== undefined) return candidates[0];
+  // Version 6 is the KEX-lineage header; when editions still tie, the
+  // rerelease product is the save's native home.
+  if (save.format.version === 6) {
+    const rerelease = candidates.filter(product => product.expectation.edition === "rerelease");
+    if (rerelease.length === 1 && rerelease[0] !== undefined) return rerelease[0];
+  }
   throw new Error(candidates.length === 0 ? "Required source save game content is not installed." : "Select the source game for this save; its original format does not identify the program.");
 }

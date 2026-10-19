@@ -14,7 +14,7 @@ import { matchMapUnavailable, matchModeUnavailable, type MatchRules } from "./ma
 import type { BindingCapabilities } from "../../ui/settings/action-catalog.ts";
 import { baseWeaponBindingItems } from "../../input/weapon-bindings.ts";
 import type { WeaponBindingItem } from "../../input/weapon-bindings.ts";
-import { defaultUserContentRoot } from "../../content/user-data.ts";
+import { defaultAddonContentRoots, defaultUserContentRoot } from "../../content/user-data.ts";
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -191,7 +191,7 @@ export class StartupSelectionModel {
     refresh: () => {
       if (this.refreshingMods) return;
       this.refreshingMods = true; this.modStatus = "Reading installed mods...";
-      discoverInstalledContent({ corpusRoot: this.catalog.corpusRoot, generation: this.catalog.generation + 1,
+      discoverInstalledContent({ corpusRoot: this.catalog.corpusRoot, generation: this.catalog.generation + 1, addonContentRoots: this.catalog.addonContentRoots,
         ...(this.catalog.userContentRoot === null ? {} : { userContentRoot: this.catalog.userContentRoot }), discoverMods: true })
         .then(async catalog => { await this.prepareMods(catalog); await this.prepareHookStyles(catalog); this.currentCatalog = catalog; this.modStatus = ""; })
         .catch((error: unknown) => { this.modStatus = error instanceof Error ? error.message : String(error); })
@@ -232,7 +232,7 @@ export class StartupSelectionModel {
     this.selectedModels.set(this.values.character, initial.characterModel);
   }
   async refreshCatalog(): Promise<void> {
-    const catalog = await discoverInstalledContent({ corpusRoot: this.catalog.corpusRoot, generation: this.catalog.generation + 1, ...(this.catalog.userContentRoot === null ? {} : { userContentRoot: this.catalog.userContentRoot }), discoverMods: true });
+    const catalog = await discoverInstalledContent({ corpusRoot: this.catalog.corpusRoot, generation: this.catalog.generation + 1, addonContentRoots: this.catalog.addonContentRoots, ...(this.catalog.userContentRoot === null ? {} : { userContentRoot: this.catalog.userContentRoot }), discoverMods: true });
     const initialProduct = catalog.products.find(product => product.expectation.id === this.initial.product && product.availability.kind === "installed")
       ?? catalog.products.find(product => product.availability.kind === "installed");
     if (initialProduct === undefined) throw new Error("No installed game content remains");
@@ -853,7 +853,7 @@ export class StartupSelectionModel {
   }
 }
 export async function createStartupSelection(options: ApplicationOptions): Promise<StartupSelectionModel> {
-  const model = new StartupSelectionModel(await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: true }), options);
+  const model = new StartupSelectionModel(await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), addonContentRoots: options.addonContentRoots ?? defaultAddonContentRoots(), discoverMods: true }), options);
   startupStamp("discover-installed-content");
   await model.prepareMaps();
   return model;

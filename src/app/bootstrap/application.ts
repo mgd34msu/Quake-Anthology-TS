@@ -92,7 +92,8 @@ import { UserFileStore } from "../../platform/files/writable.ts";
 import { setImmediate } from "node:timers/promises";
 import type { LlmCommandRequester } from "../../console/llm.ts";
 import type { LlmSettingsUi } from "../../ui/settings/llm.ts";
-import { StartupSaves } from "./startup-saves.ts";
+import { StartupSaves, resolveExternalSavePath } from "./startup-saves.ts";
+import { nightdiveAddonDirectories } from "../../content/roots.ts";
 import type { SavedGameMenuService } from "../../ui/saves/menu.ts";
 import { ApplicationViewSettings } from "./view-settings.ts";
 import { loadAudioSettings, saveAudioSettings } from "./audio-settings.ts";
@@ -245,6 +246,8 @@ export interface ApplicationHost {
   readonly rankings?: { readonly provider: RankingServiceProvider; readonly gameKey: string };
   readonly llm?: LlmSettingsUi & LlmCommandRequester;
   readonly saveDirectory?: string;
+  /** Read-only save roots from other engines (Nightdive/Steam Saved Games). */
+  readonly externalSaveDirectories?: readonly string[];
   readonly loading?: { readonly deferWindowVisibility: boolean; readonly nextFrame?: () => Promise<void>; stage(message: string): void };
   print(text: string): undefined;
 }
@@ -461,6 +464,7 @@ export class Application {
   private lastOutput: { readonly simulation: SharedSimulation; readonly output: SimulationOutput } | null = null;
   private campaignUnit = new CampaignUnit();
   private get saveDirectory(): string { return this.host.saveDirectory ?? join(homedir(), ".local", "share", "quake-typescript", "saves"); }
+  private get externalSaveDirectories(): readonly string[] { return this.host.externalSaveDirectories ?? nightdiveAddonDirectories().map(root => root.root); }
   private saveUnavailable(purpose: SavePurpose): string | null {
     const players = this.options.dedicated ? this.simulation.players() : this.localPlayers.map(player => player.actor);
     const native = this.simulation.q2Native();
@@ -492,7 +496,7 @@ export class Application {
   }
 
   private saveMenu(simulation: SharedSimulation, options: ApplicationOptions): SavedGameMenuService {
-    const saves = this.savedGames ??= new StartupSaves(this.content.catalog, this.saveDirectory);
+    const saves = this.savedGames ??= new StartupSaves(this.content.catalog, this.saveDirectory, this.externalSaveDirectories);
     const queue = (run: () => Promise<void>): Promise<void> => new Promise((resolve, reject) => {
       if (this.closed || this.saveOperation !== null) { reject(new Error("Another save operation is in progress.")); return; }
       this.saveOperation = { run, resolve, reject };
@@ -4216,7 +4220,8 @@ export class Application {
         else if (command.name === "map_restart") await this.requestRestart(command.arguments_);
         else if (command.name === "load") {
           const { name, sourceProduct } = parseLoadRequest(command.arguments_);
-          const path = saveCommandPath(this.saveDirectory, name);
+          let path = saveCommandPath(this.saveDirectory, name);
+          if (!(await Bun.file(path).exists())) path = await resolveExternalSavePath(this.externalSaveDirectories, name) ?? path;
           if (this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
           this.pendingSave = { path, ...(sourceProduct === undefined ? {} : { sourceProduct }) };
         }

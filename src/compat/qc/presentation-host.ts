@@ -111,16 +111,30 @@ export function createQcPresentationBindings(world: QcPresentationWorld, service
   };
   const finaleFinished = services.finaleFinished;
   if (finaleFinished !== undefined) install("ex_finaleFinished", vm => { vm.returnFloat(Number(finaleFinished())); });
+  // No client in this engine advertises KEX player EX flags.
+  install("ex_CheckPlayerEXFlags", vm => { vm.returnFloat(0); });
+  // Debug draws have no renderer consumer, QC bot steering is owned by the
+  // TypeScript bot layer, and prompts have no UI surface: bound inert so
+  // rerelease gamecode flow never faults on the call.
+  for (const name of ["ex_draw_point", "ex_draw_line", "ex_draw_arrow", "ex_draw_ray", "ex_draw_circle",
+    "ex_draw_bounds", "ex_draw_worldtext", "ex_draw_sphere", "ex_draw_cylinder", "ex_prompt", "ex_clearprompt"] satisfies readonly QcHostBuiltinName[])
+    install(name, () => undefined);
+  for (const name of ["ex_bot_movetopoint", "ex_bot_followentity", "ex_walkpathtogoal", "ex_promptchoice"] satisfies readonly QcHostBuiltinName[])
+    install(name, vm => { vm.returnFloat(0); });
   const qw = world.options.program.api.kind === "q1-quakeworld" ? services.qw : undefined;
   if (world.options.program.api.kind === "q1-quakeworld" && qw === undefined) throw new Error("QuakeWorld presentation requires routed message services");
-  install("bprint", vm => {
+  const bprintBuiltin: QcBuiltin = vm => {
     if (services.broadcastPrint !== undefined) return services.broadcastPrint(vm.varString(qw === undefined ? 0 : 1), qw === undefined ? 2 : Math.trunc(vm.argFloat(0)));
     if (qw === undefined) { const text = vm.varString(0); services.print(text); if (services.printBroadcastsToClients !== true) services.nq?.route([{ kind: "print", text }], { kind: "broadcast", reliable: true }); }
     else {
       const text = vm.varString(1); services.print(text);
       if (services.printBroadcastsToClients !== true) qw.route([{ message: { kind: "print", level: Math.trunc(vm.argFloat(0)), text }, actor: null }], { kind: "broadcast", reliable: true });
     }
-  });
+  };
+  install("bprint", bprintBuiltin);
+  // Rerelease gamecode prints through the named ex_* family; routing and
+  // localization downstream are the same channels as the classic prints.
+  install("ex_bprint", bprintBuiltin);
   install("localcmd", vm => { emit({ kind: "server-command", text: vm.argString(0) }); });
   install("makestatic", vm => {
     const words = vm.entities.fromReference(vm.argInt(0));
@@ -138,20 +152,21 @@ export function createQcPresentationBindings(world: QcPresentationWorld, service
   });
   const message = services.message;
   if (message !== undefined || qw !== undefined) {
-    for (const name of ["sprint", "centerprint", "stuffcmd"] satisfies readonly QcHostBuiltinName[]) install(name, vm => {
+    for (const name of ["sprint", "centerprint", "stuffcmd", "ex_sprint", "ex_centerprint"] satisfies readonly QcHostBuiltinName[]) install(name, vm => {
+      const center = name === "centerprint" || name === "ex_centerprint";
       const actor = world.actor(vm.entities.slot(vm.argInt(0))), text = vm.varString(qw !== undefined && name === "sprint" ? 2 : 1);
       if (qw !== undefined) {
         if (!qw.client(actor.id)) { services.print(`tried to ${name} to a non-client\n`); return; }
-        return qw.route([{ message: name === "sprint" ? { kind: "print", level: Math.trunc(vm.argFloat(1)), text }
-          : name === "centerprint" ? { kind: "center-print", text } : { kind: "stufftext", text }, actor: actor.id }], { kind: "client", actor: actor.id, reliable: true });
+        return qw.route([{ message: name === "sprint" || name === "ex_sprint" ? { kind: "print", level: name === "sprint" ? Math.trunc(vm.argFloat(1)) : 2, text }
+          : center ? { kind: "center-print", text } : { kind: "stufftext", text }, actor: actor.id }], { kind: "client", actor: actor.id, reliable: true });
       }
       if (services.nq !== undefined) {
         if (!services.nq.client(actor.id)) return vm.fail("Client message addressed a non-client");
-        return services.nq.route([{ kind: name === "sprint" ? "print" : name === "centerprint" ? "center-print" : "stufftext", text }], { kind: "client", actor: actor.id, reliable: true });
+        return services.nq.route([{ kind: name === "sprint" || name === "ex_sprint" ? "print" : center ? "center-print" : "stufftext", text }], { kind: "client", actor: actor.id, reliable: true });
       }
       if (message === undefined) return vm.fail("Missing client message service");
-      message(name === "sprint" ? { kind: "print", level: 2, text }
-        : name === "centerprint" ? { kind: "center-print", text } : { kind: "command-text", text }, actor.id);
+      message(name === "sprint" || name === "ex_sprint" ? { kind: "print", level: 2, text }
+        : center ? { kind: "center-print", text } : { kind: "command-text", text }, actor.id);
     });
   }
   for (const kind of ["sound", "model"] satisfies readonly ("sound" | "model")[]) {
@@ -203,6 +218,20 @@ export function createQcPresentationBindings(world: QcPresentationWorld, service
         index: resource.index, origin: center, volume, attenuation }], { kind: "broadcast", reliable: false });
     }
     emit({ kind: "sound", actor: actor.id, path, channel: sourceChannel, volume: volume / 255, attenuation });
+  });
+  install("ex_localsound", vm => {
+    const path = vm.argString(1), resource = services.lookup("sound", path);
+    const actor = world.actor(vm.entities.slot(vm.argInt(0)));
+    if (resource !== null) register(resource);
+    if (qw !== undefined || services.nq?.native() === true) {
+      if (resource === null) { services.print(`SV_StartSound: ${path} not precacheed\n`); return; }
+      const words = vm.entities.fromReference(vm.argInt(0)), origin = words.vector(vm.fieldOffset("origin"));
+      if (qw !== undefined) return qw.route([{ message: { kind: "sound", entity: vm.entities.slot(vm.argInt(0)), channel: 0,
+        index: resource.index, origin, volume: 255, attenuation: 0 }, actor: actor.id }], { kind: "client", actor: actor.id, reliable: true });
+      return services.nq?.route([{ kind: "sound", entity: vm.entities.slot(vm.argInt(0)), channel: 0,
+        index: resource.index, origin, volume: 255, attenuation: 0 }], { kind: "client", actor: actor.id, reliable: true });
+    }
+    emit({ kind: "sound", actor: actor.id, path, channel: "auto", volume: 1, attenuation: 0 });
   });
   install("ambientsound", vm => {
     const path = vm.argString(1), resource = services.lookup("sound", path);

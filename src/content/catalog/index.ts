@@ -360,7 +360,7 @@ export class InstalledCatalog {
   readonly #byId = new Map<string, CatalogProduct>();
   readonly #digests = new Map<string, Promise<ContentDigest>>();
 
-  constructor(readonly corpusRoot: string, readonly products: readonly CatalogProduct[], readonly rootArchives: readonly CatalogArchive[], readonly generation: number, readonly userContentRoot: string | null = null) {
+  constructor(readonly corpusRoot: string, readonly products: readonly CatalogProduct[], readonly rootArchives: readonly CatalogArchive[], readonly generation: number, readonly userContentRoot: string | null = null, readonly addonContentRoots: readonly NightdiveAddonRoot[] = []) {
     for (const product of products) {
       if (this.#byId.has(product.id) || this.#byId.has(product.expectation.id)) throw new RangeError(`Duplicate catalog identity: ${product.id}`);
       this.#byId.set(product.id, product);
@@ -639,5 +639,5 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
     if (base === undefined || base.availability.kind !== "installed") return { ...product, availability: { kind: "missing", requirements: [`base product ${product.expectation.baseProduct}`] } };
     return product;
   });
-  return new InstalledCatalog(corpusRoot, checked, [...rootArchives.values()], generation, userContentRoot);
+  return new InstalledCatalog(corpusRoot, checked, [...rootArchives.values()], generation, userContentRoot, options.addonContentRoots ?? []);
 }

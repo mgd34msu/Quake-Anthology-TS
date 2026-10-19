@@ -114,7 +114,7 @@ export async function prepareConfiguredApplicationRecipe(catalog: InstalledCatal
   const requests = [...options.mods ?? [], ...options.weaponBehavior === undefined ? [] : [options.weaponBehavior]];
   if (requests.length === 0) return { catalog, recipe };
   if (requests.some(request => !catalog.products.some(product => product.expectation.id === request.product || product.id === request.product)))
-    catalog = await discoverInstalledContent({ corpusRoot: catalog.corpusRoot, generation: catalog.generation, discoverMods: true,
+    catalog = await discoverInstalledContent({ corpusRoot: catalog.corpusRoot, generation: catalog.generation, discoverMods: true, addonContentRoots: catalog.addonContentRoots,
       ...(catalog.userContentRoot === null ? {} : { userContentRoot: catalog.userContentRoot }) });
   return { catalog, recipe: applyApplicationMods(recipe, await applicationModChoices(catalog), requests) };
 }

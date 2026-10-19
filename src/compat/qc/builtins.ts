@@ -3,6 +3,7 @@ import type { Vec3 } from "../../contracts/math.ts";
 import type { RandomSource } from "../../contracts/numeric.ts";
 import { nativeAtof } from "../../core/numeric.ts";
 import type { QcBuiltin, QcBuiltinRegistry, QcMachine } from "./machine.ts";
+import type { QcProgram } from "./program.ts";
 
 export type QcHostKind = "netquake" | "quakeworld" | "rerelease";
 export type QcHostBuiltinName =
@@ -47,6 +48,15 @@ const rereleaseNames: readonly QcHostBuiltinName[] = [
   "ex_draw_worldtext", "ex_draw_sphere", "ex_draw_cylinder", "ex_bot_movetopoint", "ex_bot_followentity",
   "ex_CheckPlayerEXFlags", "ex_walkpathtogoal", "ex_prompt", "ex_promptchoice", "ex_clearprompt",
 ];
+/**
+ * Host kind for a loaded program. Rerelease gamecode shares the NetQuake
+ * ABI; its signature is the named `ex_*` builtin family (retail detection:
+ * `ex_centerprint` declared, `centerprint` absent as a numbered builtin).
+ */
+export function qcHostKindForProgram(program: Pick<QcProgram, "api" | "functions">): QcHostKind {
+  if (program.api.kind === "q1-quakeworld") return "quakeworld";
+  return program.functions.some(fn => fn.namedBuiltin && fn.name === "ex_centerprint") ? "rerelease" : "netquake";
+}
 export function qcHostRequirements(kind: QcHostKind): readonly QcBuiltinRequirement[] {
   const requirements = hostNumbers.filter(([number]) => kind !== "quakeworld" || number !== 48)
     .map(([number, name]) => ({ number, name }));

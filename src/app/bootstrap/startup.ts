@@ -83,7 +83,8 @@ import { createStartupSelection } from "./startup-selection.ts";
 import type { StartupSelectionModel, StartupLaunch } from "./startup-selection.ts";
 import { FrontendPreferences } from "./frontend-preferences.ts";
 import { movementDialect } from "./input.ts";
-import { StartupSaves } from "./startup-saves.ts";
+import { StartupSaves, resolveExternalSavePath } from "./startup-saves.ts";
+import { nightdiveAddonDirectories } from "../../content/roots.ts";
 import { savedSimulationSettings, savedBotCheckpoint } from "./simulation/index.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
 import { bindNativeVideoSettings, bindRendererSettings } from "../../ui/settings/services.ts";
@@ -198,9 +199,9 @@ export class StartupApplication {
     });
     this.preferences = new FrontendPreferences(() => movementDialect(model.options), new ConfigStore(join(saveDirectory, "..", "settings")));
     this.preferences.onChange = () => { if (!this.closed) void this.persistPreferences().catch((error: unknown) => this.print(`Could not save controls: ${error instanceof Error ? error.message : String(error)}\n`)); };
-    this.saves = new StartupSaves(model.catalog, saveDirectory);
+    this.saves = new StartupSaves(model.catalog, saveDirectory, host.externalSaveDirectories ?? nightdiveAddonDirectories().map(root => root.root));
     this.addons = new AddonLibrary({ edition: model.catalog.products.some(product => product.expectation.id === "q1-classic-id1" && product.availability.kind === "installed") ? "classic" : "rerelease", root: model.options.userContentRoot ?? defaultUserContentRoot(),
-      changed: async () => { await model.refreshCatalog(); this.saves = new StartupSaves(model.catalog, saveDirectory); this.refreshSaves = true; },
+      changed: async () => { await model.refreshCatalog(); this.saves = new StartupSaves(model.catalog, saveDirectory, host.externalSaveDirectories ?? nightdiveAddonDirectories().map(root => root.root)); this.refreshSaves = true; },
       launch: (product, map) => { model.select("product", product); if (map !== null) model.select("map", "maps/" + map.replace(/\.bsp$/, "") + ".bsp"); this.pending = { kind: "play" }; },
     });
   }
@@ -1185,7 +1186,10 @@ export class StartupApplication {
         const selected = action.kind === "lobby-host" ? { ...action.selection, image: undefined } : action.kind === "initial" ? { options: action.options, recipe: undefined, image: undefined }
           : action.kind === "preset" ? { ...await this.model.resolvePreset(action.id, action.skill, action.arenaMap), image: undefined }
           : action.kind === "play" ? { ...await this.model.resolve(), image: undefined } : await (async () => {
-          const saved = await prepareApplicationSave(this.model.options, this.model.catalog, action.path, action.sourceProduct);
+          let loadPath = action.path;
+          if (!(await Bun.file(loadPath).exists()))
+            loadPath = await resolveExternalSavePath(this.saves.externalDirectories, loadPath.split("/").at(-1)?.replace(/\.sav$/i, "") ?? "") ?? loadPath;
+          const saved = await prepareApplicationSave(this.model.options, this.model.catalog, loadPath, action.sourceProduct);
           const image = saved.image, settings = savedSimulationSettings(image);
           const bots = savedBotCheckpoint(image);
           const seats = settings.clientSlots.filter(slot => !bots?.transport.connections.some(connection => connection.client.slot === slot)).length;
@@ -1201,7 +1205,7 @@ export class StartupApplication {
             if (this.lobbySource === null || this.client?.source.current !== this.lobbySource) return;
             await this.lobby.complete(); this.pending = { kind: "frontend" };
           },
-        } } : {}), saveDirectory: this.saves.directory, loading: { deferWindowVisibility: true, nextFrame: async () => {
+        } } : {}), saveDirectory: this.saves.directory, externalSaveDirectories: this.saves.externalDirectories, loading: { deferWindowVisibility: true, nextFrame: async () => {
           await nextFrame(); if (this.stopping) throw new Error("Startup cancelled");
         },
           stage: message => loading?.menu.setStatus(message, true) } }, selected.recipe, this.preferences.values, selected.image);
