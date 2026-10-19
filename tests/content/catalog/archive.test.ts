@@ -96,7 +96,7 @@ const witnesses = [
   { file: "q1/id1/PAK0.PAK", member: "quake.rc", ordinal: 268, byteLength: 293, entries: 339 },
   { file: "q2/rerelease/baseq2/pak0.pak", member: "default.cfg", ordinal: 0, byteLength: 3213, entries: 14663 },
   { file: "q3a/baseq3/pak0.pk3", member: "default.cfg", ordinal: 11, byteLength: 1737, entries: 3539 },
-  { file: "q1/rerelease/QuakeEX.kpf", member: "exdefault.cfg", ordinal: 466, byteLength: 1819, entries: 497 },
+  { file: "q1/rerelease/QuakeEX.kpf", member: "exdefault.cfg", ordinal: 596, byteLength: 1819, entries: 627 },
 ];
 
 for (const witness of witnesses) {

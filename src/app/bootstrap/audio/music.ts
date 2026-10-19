@@ -60,7 +60,12 @@ export class ApplicationMusic {
   }
 
   select(source: MusicSource, bank: SoundBank, fallback: OpenMusicTrack | null = null): void {
-    if (this.current?.source.content === source.content && this.current.bank === bank) return;
+    if (this.current?.source.content === source.content && this.current.bank === bank) {
+      // Same soundtrack already selected: keep playback state, but a later
+      // selection may supply (or withdraw) the alternate-edition fallback.
+      this.current = { ...this.current, source, fallback };
+      return;
+    }
     this.stop();
     const player = new MusicPlayer(this.engine.sampleRate, source.family, this.volumeMode, this.controls);
     player.setVolume(this.gain);

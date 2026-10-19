@@ -121,7 +121,7 @@ const q2ExpansionWeaponPaths: Readonly<Record<string, readonly string[]>> = {
 
 export function q2RegisteredWeaponResources(weapons: Pick<Q2Weapons, "registeredDefinitions">, rerelease: boolean): readonly string[] {
   return [...new Set([...q2BaseWeaponPaths(rerelease),
-    ...(!rerelease && weapons.registeredDefinitions().some(weapon => weapon.name === "proxlauncher") ? ["models/weapons/v_proxyl/skin.pcx"] : []),
+    ...(!rerelease && weapons.registeredDefinitions().some(weapon => weapon.name === "proxlauncher") ? ["models/weapons/v_plaunch/proxskin.pcx"] : []),
     ...weapons.registeredDefinitions().flatMap(weapon => [weapon.viewModel, weapon.worldModel,
     ...(q2ExpansionWeaponPaths[weapon.name] ?? []).filter(path => rerelease || path !== "sound/weapons/sawslice.wav"), ...weapon.name === "tesla" && !rerelease ? ["models/weapons/v_tesla2/tris.md2"] : [],
     ...weapon.name === "heatbeam" && !rerelease ? ["models/weapons/v_beamer2/tris.md2"] : []]),

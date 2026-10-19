@@ -10,7 +10,7 @@ test("LMCTF referee match survives a saved pending map transition in one applica
   const parsed = parseApplicationCommand(["--game", "q2-classic-lmctf", "--map", "lmctf09", "--movement", "q2", "--character", "q2", "--dedicated"]);
   if (parsed.kind !== "run") throw new Error("Expected launch options");
   const directory = await mkdtemp(join(tmpdir(), "lmctf-match-"));
-  const application = await Application.open(parsed.options, { print: () => undefined });
+  const application = await Application.open(parsed.options, { print: () => undefined, saveDirectory: directory });
   try {
     const source = application.simulation.q2Source();
     if (source === null || !(source.product.match.source instanceof Q2Lmctf)) throw new Error("Expected LMCTF source");
