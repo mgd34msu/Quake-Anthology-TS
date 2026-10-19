@@ -1033,7 +1033,10 @@ export class BotBrain {
       }
 
       const geom = evaluateSightGeometry(self.eye, this.state.aim.pitch, this.state.aim.yaw, ent.center, ent.invisible, senses, weapons);
-      const clear = geom.withinInvisRange && world.traceLine(self.eye, ent.center).fraction >= 1;
+      // The center sits inside the target's own box, so the trace legitimately
+      // stops on the target itself; that is a clear line, not an obstruction.
+      const sightTrace = world.traceLine(self.eye, ent.center);
+      const clear = geom.withinInvisRange && (sightTrace.fraction >= 1 || sightTrace.hitId === ent.id);
 
       let audible = false;
       for (const s of sounds) {

@@ -54,7 +54,11 @@ export function createRereleaseBotWorld(options: RereleaseWorldOptions, actor: A
         if (item === ui.activeWeapon) currentWeapon = weapon.number;
         const ammoName = weapon.ammoName;
         const match = ui.inventory.find(entry => normalized(entry.item) === normalized(ammoName));
-        if (ammoName !== "") ammo[ammoName] = match?.count ?? 0;
+        // Selected arsenals carry ammo on the weapon entry (and in the
+        // shared inventory under foreign ids), not in the source inventory
+        // projection, which lists the map game's own empty ammo slots.
+        const carried = item === null ? 0 : ui.items.find(entry => entry.id === item)?.count ?? 0;
+        if (ammoName !== "") ammo[ammoName] = Math.max(match?.count ?? 0, carried);
       }
       return { id: options.identify(actor), origin: body.origin, velocity: body.velocity, viewAngles: movement.viewAngles,
         eye: { ...body.origin, z: body.origin.z + movement.viewHeight }, health: ui.health,

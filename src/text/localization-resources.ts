@@ -5,9 +5,12 @@ type LocalizationReader = (path: string) => Promise<Uint8Array | null>;
 type LocalizationProfile = LocalizationTable["profile"];
 /** English fills missing entries; selected language and its mod overlay take precedence. */
 async function loadResources<T extends LocalizationTable>(catalog: T, language: string, read: LocalizationReader): Promise<T> {
+  // Sequential on purpose: readers may record what they loaded (bot asset
+  // provenance hashes insertion order), so load order must be deterministic.
   for (const name of language === "english" ? ["english"] : ["english", language]) {
-    const [base, mod] = await Promise.all([read(`localization/loc_${name}.txt`), read(`localization/loc_${name}_mod.txt`)]);
+    const base = await read(`localization/loc_${name}.txt`);
     if (base !== null) catalog.merge(base);
+    const mod = await read(`localization/loc_${name}_mod.txt`);
     if (mod !== null) catalog.merge(mod);
   }
   return catalog;

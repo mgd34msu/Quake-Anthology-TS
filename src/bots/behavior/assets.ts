@@ -73,10 +73,10 @@ export async function loadMountedBotAssetFiles(mounts: MountedContent,
   const archives = new Map([...catalog.rootArchives, ...catalog.products.flatMap(product => product.archives)].map(archive => [archive.path, archive]));
   const paths: string[] = [];
   const loose = async (root: string, directory: string): Promise<void> => {
-    const entries = await readdir(resolve(root, directory), { withFileTypes: true }).catch((error: unknown) => {
+    const entries = (await readdir(resolve(root, directory), { withFileTypes: true }).catch((error: unknown) => {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
       throw error;
-    });
+    })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
     for (const entry of entries) {
       const path = `${directory}/${entry.name}`;
       if (entry.isDirectory()) await loose(root, path);

@@ -60,6 +60,21 @@ test("kex q2 server saves decode comment, map and game directory", () => {
 });
 
 const steamRoots = nightdiveAddonDirectories(homedir());
+const realQ1Root = steamRoots.find(root => root.family === "q1")?.root;
+const realQ1SavePath = realQ1Root === undefined ? "" : join(realQ1Root, "s1.sav");
+test.skipIf(realQ1Root === undefined || !existsSync(realQ1SavePath))("the installed steam q1 save decodes and roundtrips its world records", async () => {
+  const { decodeSavedGame } = await import("../../src/persistence/saved-game.ts");
+  const first = decodeSavedGame(await Bun.file(realQ1SavePath).bytes());
+  if (first.kind !== "q1-source") throw new Error("Expected a KEX Q1 source save");
+  expect(first.data.format.version).toBe(6);
+  expect(first.data.entities.length).toBeGreaterThan(2);
+  const second = decodeSavedGame(encodeQ1Save(first.data));
+  if (second.kind !== "q1-source") throw new Error("Roundtrip lost the source format");
+  expect(second.data.entities).toEqual(first.data.entities);
+  expect(second.data.globals).toEqual(first.data.globals);
+  expect(second.data.map).toBe(first.data.map);
+  expect(Math.abs(second.data.time - first.data.time)).toBeLessThan(0.001);
+});
 const realQ2Save = steamRoots.find(root => root.family === "q2")?.root;
 const realQ2SavePath = realQ2Save === undefined ? "" : join(realQ2Save, "baseq2/save/save0.pak.gz");
 test.skipIf(realQ2Save === undefined || !existsSync(realQ2SavePath))("the installed steam q2 save identifies its map and game", async () => {

@@ -2912,6 +2912,16 @@ export class Application {
       }
       if (save === undefined) nextBots = await this.createBots(content, simulation, {
         clients: botClients, restart: initialSourceMilliseconds !== 0, commands: { insert: text => guestCommands().insert(text) } });
+      // Bot settings live in the source registry, whose travel archive only
+      // carries archived variables; carry the bot namespace explicitly, as
+      // the Q2 snapshot path does for the whole registry.
+      if (save === undefined && previousBots !== null && nextBots !== null)
+        for (const variable of previousBots.configuration.snapshots()) {
+          if (!variable.name.startsWith("bot_")) continue;
+          const value = variable.latchedValue ?? variable.value;
+          if (nextBots.configuration.find(variable.name) === undefined) nextBots.configuration.register(variable.name, value);
+          else nextBots.configuration.set(variable.name, value, true);
+        }
       else if (savedBots !== null && savedClients !== null) nextBots = await this.createBots(content, simulation, {
         commands: { insert: text => guestCommands().insert(text) }, restore: { image: savedBots, resolveClient: savedClients.resolveBotClient } });
       if (previous !== null) {

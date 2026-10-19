@@ -68,7 +68,9 @@ export class ApplicationRereleaseBots implements ApplicationBotService {
     const { simulation } = this.options;
     if (saved.client.isClosed || this.connections.has(saved.client.id.slot)) throw new Error("Native bot client is closed or already admitted");
     const existing = simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(saved.client.id));
-    const actor = restoredActor ?? simulation.actors.resolveOwned(existing ?? simulation.admitPlayer(saved.client.id).actor);
+    // Fresh admission goes through prepareBotClient so source bot identity
+    // (e.g. Q2 SVF_BOT) is applied exactly as for the shared transport.
+    const actor = restoredActor ?? (existing === undefined ? simulation.prepareBotClient(saved.client.id) : simulation.actors.resolveOwned(existing));
     if (actor === null) throw new Error("Native bot admission has no shared actor");
     const player = simulation.movementPlayer(actor.id);
     if (player === null) throw new Error("Native bot admission lost selected movement");
@@ -108,9 +110,11 @@ export class ApplicationRereleaseBots implements ApplicationBotService {
     return connection;
   }
   private add(name: string, skill = this.defaultSkill()): void {
+    // A session client need not currently be a simulation player (e.g. a
+    // disconnected human), so session occupancy decides free slots.
     const occupied = new Set(this.options.simulation.clientIdentities().map(id => id.slot));
     for (let slot = 0; slot < this.options.simulation.options.maxClients; slot++) {
-      if (occupied.has(slot)) continue;
+      if (occupied.has(slot) || this.options.session.clientAt(slot) !== null) continue;
       const client = this.options.session.createClient(slot);
       try { this.connect({ client, reliable: new ServerReliableCommands() }, name, skill); }
       catch (error) {

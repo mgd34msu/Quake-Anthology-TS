@@ -70,7 +70,10 @@ export function resolveStartupRules(options: ApplicationOptions, cvars: CvarRegi
     ? cvars.variableValue("g_gametype") === 2 ? "singleplayer" : "deathmatch"
     : cvars.variableValue("deathmatch") !== 0 ? "deathmatch" : cvars.variableValue("coop") !== 0 ? "coop" : "singleplayer";
   const capacityName = cvars.dialect === "q3" ? "sv_maxclients" : "maxclients";
-  const requested = applyExplicit && options.explicitRules?.capacity ? defaultCapacity : cvars.variableValue(capacityName);
+  // A restored source may not carry the capacity cvar at all; absence means
+  // the caller's capacity (the previous world's on travel), never one client.
+  const requested = applyExplicit && options.explicitRules?.capacity ? defaultCapacity
+    : cvars.variableValue(capacityName) > 0 ? cvars.variableValue(capacityName) : defaultCapacity;
   const nativeCapacity = (cvars.dialect === "q2-classic" || cvars.dialect === "q2-rerelease") && requested <= 1
     ? mode === "deathmatch" ? 8 : mode === "coop" ? 4 : requested : requested;
   const maxClients = Math.max(options.dedicated ? 1 : options.seats, Math.trunc(nativeCapacity));

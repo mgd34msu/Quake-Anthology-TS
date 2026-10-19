@@ -155,3 +155,37 @@ test("Q2 source bot exports preserve existing inventory authority and named use/
   expect(Bot_PickedUpItem(host, 1, 9)).toBe(true);
   expect(inventory).toEqual([0, 1, 1]);
 });
+
+test.skipIf(!existsSync(q2))("a sight trace stopping on the target's own box still counts as seeing it", async () => {
+  const knowledge = Bot_LoadKnowledge(await retailFiles(q2));
+  const grenade = knowledge.weaponByName("ammo_grenades");
+  if (grenade === undefined) throw new Error("Retail Q2 hand grenade missing");
+  let now = 0;
+  const self: BotSelfT = { id: 1, origin: zero, velocity: zero, viewAngles: zero, eye: { x: 0, y: 0, z: 22 }, health: 100,
+    armor: 0, items: grenade.number, ammo: { ammo_grenades: 20 }, currentWeapon: grenade.number, onGround: true,
+    waterLevel: 0, team: 1, dead: false, hasProtection: false };
+  const enemy: BotEntityT = { id: 2, kind: BotEntityKind.Player, classname: "player", origin: { x: 256, y: 0, z: 0 },
+    center: { x: 256, y: 0, z: 22 }, head: { x: 256, y: 0, z: 22 }, feet: { x: 256, y: 0, z: -24 }, velocity: zero,
+    health: 100, team: 2, dead: false, invisible: false, waterLevel: 0, isBot: false, spawnflags: 0, hasHealth: true, hasTargetname: false };
+  const attacksWith = (hitId: number): boolean => {
+    now = 0;
+    // The center is inside the enemy box, so world traces end on the enemy
+    // itself at a fraction below 1, exactly like the live binding.
+    const world: BotWorldT = { time: () => now, frameTime: () => 0.05, self: () => self,
+      traceLine: (_start, end) => ({ fraction: 0.8, endpos: end, startsolid: false, hitId }),
+      traceBox: (_start, _mins, _maxs, end) => ({ fraction: 1, endpos: end, startsolid: false, hitId: -1 }),
+      pointContents: () => 0, entities: () => [enemy], hearing: () => [], nav: () => null };
+    const behavior = new RereleaseBotBehavior({ definition: "retail-q2-sight", source: "q2-rerelease", knowledge, skill: "nightmare", seed: 7,
+      gameMode: { gameType: "dm", weaponStay: false }, maxHealth: 100, runSpeed: 300, walkSpeed: 150,
+      movement: { gravity: 800, jumpVelocity: 270, jumpAirSeconds: 0.675, maximumLandingRise: 40, startAbove: 56,
+        bodyMins: { x: -16, y: -16, z: -6 }, bodyMaxs: { x: 16, y: 16, z: 32 } }, callbacks: { time: () => now,
+        preThink: () => {}, postThink: () => {}, chat: () => {}, selectWeapon() {}, weaponImpulse: () => 0, humanTeammateNear: () => false } });
+    for (let frame = 0; frame < 60; frame++) {
+      now = frame * 0.05;
+      if ((behavior.think(world).buttons & BOT_BUTTON_ATTACK) !== 0) return true;
+    }
+    return false;
+  };
+  expect(attacksWith(enemy.id)).toBe(true);
+  expect(attacksWith(-1)).toBe(false);
+});
