@@ -12,7 +12,7 @@ export function matchModeUnavailable(selection: MatchModeSelection): string | nu
   const { family, mode, rules } = selection;
   if (rules === "standard") return null;
   if (rules === "horde") return family === "q3" ? null : mode === "deathmatch" ? "Horde requires single player or cooperative mode" : null;
-  if (rules === "tag") return family !== "q2" ? "Tag requires a Quake II source game" : mode !== "deathmatch" ? "Tag requires deathmatch mode" : null;
+  if (rules === "tag") return mode !== "deathmatch" ? "Tag requires deathmatch mode" : null;
   if (rules === "ctf" && (family === "q3" || family === "q1")) return mode !== "deathmatch" ? "Capture the Flag requires deathmatch mode" : null;
   if (family !== "q2") return "These match rules require a Quake II source game";
   if (mode !== "deathmatch") return "These match rules require deathmatch mode";
