@@ -100,3 +100,23 @@ test("reads authored brush planes and decoupled lightmap projection", () => {
     axes: [{ x: 0.25, y: 0, z: 0 }, { x: 0, y: -0.125, z: 0 }], offset: { x: 4, y: 8 },
   });
 });
+
+test("an external .lit describing a different map is ignored, not fatal", () => {
+  const lumps: Uint8Array[] = Array.from({ length: 15 }, () => new Uint8Array());
+  lumps[8] = new Uint8Array([10, 20, 30, 40]);
+  const writer = new BinaryWriter(124 + lumps.reduce((sum, lump) => sum + lump.length, 0));
+  writer.i32(29);
+  let offset = 124;
+  for (const lump of lumps) { writer.i32(offset); writer.i32(lump.length); offset += lump.length; }
+  for (const lump of lumps) writer.bytes(lump);
+  const bytes = writer.finish();
+  const lit = (samples: number): Uint8Array => {
+    const out = new BinaryWriter(8 + samples * 3);
+    out.bytes(new TextEncoder().encode("QLIT")); out.u32(1); out.bytes(new Uint8Array(samples * 3).fill(7));
+    return out.finish();
+  };
+  // One RGB sample cannot describe four BSP lighting samples (e.g. another
+  // game directory's same-named .lit riding the shared search path).
+  expect(readQ1Bsp(bytes, { lit: lit(1) }).lighting).toEqual({ kind: "luminance8", samples: new Uint8Array([10, 20, 30, 40]) });
+  expect(readQ1Bsp(bytes, { lit: lit(4) }).lighting).toEqual({ kind: "rgb8", source: "lit", samples: new Uint8Array(12).fill(7) });
+});

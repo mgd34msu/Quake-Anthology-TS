@@ -50,7 +50,13 @@ export function readQ1Lit(data: Uint8Array, sampleCount: number | null = null): 
 function selectLighting(monochrome: Uint8Array, rgb: Uint8Array | null, lit: Uint8Array | undefined, packed?: Uint8Array): BspLighting {
   if (packed !== undefined && packed.length % 2 !== 0) throw new BinaryError("Quake64 lighting", 0, "incomplete packed RGB sample");
   const sampleCount = packed === undefined ? monochrome.length : packed.length / 2;
-  if (lit !== undefined) return { kind: "rgb8", source: "lit", samples: readQ1Lit(lit, sampleCount > 0 ? sampleCount : null) };
+  // An external .lit rides the shared search path, so a same-named file from
+  // another game directory can accompany this BSP. Source engines ignore a
+  // .lit that does not describe this map instead of refusing to load it.
+  if (lit !== undefined) {
+    try { return { kind: "rgb8", source: "lit", samples: readQ1Lit(lit, sampleCount > 0 ? sampleCount : null) }; }
+    catch { /* fall through to the BSP's own lighting */ }
+  }
   if (rgb !== null) {
     if (rgb.length % 3 !== 0 || sampleCount > 0 && rgb.length !== sampleCount * 3) {
       throw new BinaryError("BSPX RGBLIGHTING", 0, "RGB sample count differs from BSP lighting");
