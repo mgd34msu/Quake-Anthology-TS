@@ -1233,6 +1233,9 @@ export class StartupApplication {
       this.graphics?.menu.setStatus(this.status);
       if (error instanceof ClientSourcePublicationError || this.client?.source.current !== previous) { this.stopping = true; throw error; }
       if (propagateFailure) throw error;
+      // The borrowed launch may already have taken game focus (and relative
+      // mouse capture) for its seats; hand the frontend its menu focus back.
+      if (this.graphics !== null && this.client !== null) this.activateFrontend();
     }
   }
 
