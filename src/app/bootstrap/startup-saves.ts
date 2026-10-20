@@ -40,6 +40,8 @@ export interface StartupSaveList { readonly rows: readonly StartupSaveRow[]; rea
 export class StartupSaves {
   private current: StartupSaveList = { rows: [], error: null };
   private paths = new Map<string, string>();
+  /** Parsed row details keyed by file identity; refresh runs on every menu open and save. */
+  private readonly rowCache = new Map<string, { readonly mtimeMs: number; readonly size: number; readonly row: StartupSaveRow }>();
   constructor(private readonly catalog: InstalledCatalog, readonly directory: string, readonly externalDirectories: readonly string[] = []) {}
   get list(): StartupSaveList { return this.current; }
   path(id: string): string {
@@ -84,6 +86,15 @@ export class StartupSaves {
         seen.add(path); files.push({ path, id: `external/${index}/${relative(root, path)}` });
       });
     for (const { path, id } of files) {
+      const identity = await stat(path).catch(() => null);
+      const cached = identity === null ? undefined : this.rowCache.get(path);
+      if (cached !== undefined && identity !== null && cached.mtimeMs === identity.mtimeMs && cached.size === identity.size) {
+        paths.set(id, path); rows.push({ ...cached.row, id }); continue;
+      }
+      const remember = (row: StartupSaveRow): StartupSaveRow => {
+        if (identity !== null) this.rowCache.set(path, { mtimeMs: identity.mtimeMs, size: identity.size, row });
+        return row;
+      };
       if (path.toLowerCase().endsWith(".pak.gz")) {
         let label = basename(path).replace(/\.pak\.gz$/i, ""), map = "Unknown map", game = "Quake II (rerelease)", savedAtMilliseconds = 0;
         let unavailable: string | null = "Retail Quake II saves are identified here but cannot be restored by this engine yet.";
@@ -97,7 +108,7 @@ export class StartupSaves {
             && basename(candidate.expectation.contentDirectory).toLowerCase() === (info.gameDirectory ?? "").toLowerCase());
           if (product !== undefined) game = `${product.expectation.title} (${product.expectation.edition})`;
         } catch (cause) { unavailable = cause instanceof Error ? cause.message : "This saved game is unreadable or uses an unsupported save version."; }
-        paths.set(id, path); rows.push({ id, label, map, game, savedAtMilliseconds, unavailable });
+        paths.set(id, path); rows.push(remember({ id, label, map, game, savedAtMilliseconds, unavailable }));
         continue;
       }
       const name = basename(path).replace(/\.sav$/i, "");
@@ -115,7 +126,7 @@ export class StartupSaves {
       } catch (cause) {
         unavailable = cause instanceof Error ? cause.message : "This saved game is unreadable or uses an unsupported save version.";
       }
-      paths.set(id, path); rows.push({ id, label, map, game, savedAtMilliseconds, unavailable });
+      paths.set(id, path); rows.push(remember({ id, label, map, game, savedAtMilliseconds, unavailable }));
     }
     rows.sort((left, right) => right.savedAtMilliseconds - left.savedAtMilliseconds || left.id.localeCompare(right.id));
     this.paths = paths; this.current = { rows, error };

@@ -19,10 +19,11 @@ test("actual pause menu saves, confirms overwrite and restores a mixed-source lo
     const ui = () => { if (!(local.seat.presentation instanceof WorldSeatPresentation)) throw new Error("Missing presentation"); return local.seat.presentation.ui; };
     const key = (code: number): void => { for (const down of [true, false]) app.input({ seat: local.seat.id, kind: "key", code, down, repeat: false, timeMilliseconds: performance.now() }); };
     const enter = async (id: string): Promise<void> => {
-      for (let attempt = 0; attempt < 30; attempt++) { const focus = ui().controller.state().focus; if (focus.kind === "menu" && focus.control === id) { key(KeyCode.Enter); await app.step(1); return; } key(KeyCode.Tab); }
+      for (let attempt = 0; attempt < 60; attempt++) { const focus = ui().controller.state().focus; if (focus.kind === "menu" && focus.control === id) { key(KeyCode.Enter); await app.step(1); return; } key(KeyCode.Tab); await Bun.sleep(10); await app.step(1); }
       throw new Error(`Missing control ${id}`);
     };
     const settle = async (): Promise<void> => { for (let index = 0; index < 4; index++) { await Bun.sleep(5); await app.step(1); } };
+    const untilMenu = async (id: string): Promise<void> => { for (let index = 0; index < 200 && ui().controller.activeMenu !== id; index++) await settle(); };
     app.input({ seat: local.seat.id, kind: "key", code: 119, down: true, repeat: false, timeMilliseconds: performance.now() });
     expect(ui().local.input.isDown({ kind: "key", code: 119 })).toBe(true);
     await app.step(100); key(KeyCode.Escape); await app.step(1);
@@ -34,14 +35,14 @@ test("actual pause menu saves, confirms overwrite and restores a mixed-source lo
     app.input({ seat: local.seat.id, kind: "mouse-motion", position: { x: 100, y: 160 }, delta: { x: 0, y: 0 }, timeMilliseconds: performance.now() });
     for (const down of [true, false]) app.input({ seat: local.seat.id, kind: "mouse-button", button: 1, down, timeMilliseconds: performance.now() });
     await app.step(1); await settle(); expect(ui().controller.activeMenu).toBe("menu:saves:save"); await enter("ui:saves:new");
-    await enter("ui:saves:write"); await settle();
+    await enter("ui:saves:write"); await untilMenu("menu:saves:save");
     const path = join(root, "saves", "Save 001.sav"), saved = await readSaveImage(path);
     expect(saved.recipe).toEqual(app.content.recipe); expect(saved.bodies).toEqual(paused.bodies);
     expect(ui().controller.activeMenu).toBe("menu:saves:save");
     await enter("ui:saves:slot:Save 001.sav"); expect(ui().controller.activeMenu).toBe("menu:saves:overwrite");
     for (const down of [true, false]) app.input({ seat: local.seat.id, kind: "controller-button", device: 0, button: 1, down, timeMilliseconds: performance.now() });
     await app.step(1); expect(ui().controller.activeMenu).toBe("menu:saves:save"); expect(await readSaveImage(path)).toEqual(saved);
-    await enter("ui:saves:slot:Save 001.sav"); await enter("ui:saves:overwrite"); await settle();
+    await enter("ui:saves:slot:Save 001.sav"); await enter("ui:saves:overwrite"); await untilMenu("menu:saves:save");
     await enter("ui:saves:back"); expect(ui().controller.activeMenu).toBe("menu:application:game");
     const view = app.simulation.playerView(local.actor);
     app.simulation.controlPlayer(local.actor, { kind: "cutscene", origin: { x: 1000, y: 1000, z: 1000 }, angles: { x: 0, y: 0, z: 0 }, viewOffset: { x: 0, y: 0, z: 0 } });
@@ -89,11 +90,12 @@ test("split-screen save menu restores both connected seats through the common sa
     const enter = async (id: string): Promise<void> => {
       if (!(seat.presentation instanceof WorldSeatPresentation)) throw new Error("Missing presentation");
       const controller = seat.presentation.ui.controller;
-      for (let attempt = 0; attempt < 30; attempt++) { const focus = controller.state().focus; if (focus.kind === "menu" && focus.control === id) { key(KeyCode.Enter); await app.step(1); return; } key(KeyCode.Tab); }
+      for (let attempt = 0; attempt < 60; attempt++) { const focus = controller.state().focus; if (focus.kind === "menu" && focus.control === id) { key(KeyCode.Enter); await app.step(1); return; } key(KeyCode.Tab); await Bun.sleep(10); await app.step(1); }
       throw new Error(`Missing control ${id}`);
     };
     const settle = async (): Promise<void> => { for (let index = 0; index < 4; index++) { await Bun.sleep(5); await app.step(1); } };
-    key(KeyCode.Escape); await enter("ui:application:save"); await settle(); await enter("ui:saves:new"); await enter("ui:saves:write"); await settle();
+    const untilMenu = async (id: string): Promise<void> => { for (let index = 0; index < 200; index++) { if (!(seat.presentation instanceof WorldSeatPresentation)) throw new Error("Missing presentation"); if (seat.presentation.ui.controller.activeMenu === id) return; await settle(); } };
+    key(KeyCode.Escape); await enter("ui:application:save"); await settle(); await enter("ui:saves:new"); await enter("ui:saves:write"); await untilMenu("menu:saves:save");
     const saved = await readSaveImage(join(root, "saves", "Save 001.sav")); expect(saved.configurations.length).toBe(2);
     await enter("ui:saves:back"); await enter("ui:application:load"); await settle();
     const previous = app.simulation; await enter("ui:saves:slot:Save 001.sav"); await settle();

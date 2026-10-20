@@ -39,7 +39,7 @@ for (const product of ["q2-rerelease-baseq2", "q2-classic-baseq2"]) test(`${prod
     menu.select("grapple", "offhand"); menu.select("grappleStyle", "q2-lmctf"); menu.select("grenades", "enabled");
     const seat = startup.inputSeat;
     if (seat === null) throw new Error("Missing startup input seat");
-    for (const [x, y] of [[100, 130], [100, 232], [452, 429]]) {
+    for (const [x, y] of [[100, 130], [100, 232], [452, 429]] as const) {
       startup.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x, y }, delta: { x: 0, y: 0 } });
       startup.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });
       startup.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
