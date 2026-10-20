@@ -317,8 +317,10 @@ export class SharedSimulation implements Simulation {
   /** Runtime LMCTF state (match provider q2:lmctf on a foreign world; Q2
    * worlds keep the native composition module). Mirrors Loki's Minions CTF
    * over unified actors like foreign Tag: two flags, auto-balanced teams,
-   * captures, dropped-flag return, and the five runes. Haste's refire rate
-   * has no foreign weapon hook yet; the rune still spawns and can be held. */
+   * captures, dropped-flag return, and the five runes. Haste reaches each
+   * arsenal through its own haste input (Q3 weapon environment, Q2 weapon
+   * input, Q1 halved weapon delays); original QC/QVM binaries keep their
+   * own internal timing. */
   private lmctfTeams = new Map<ActorId, 1 | 2>();
   private lmctfFlags = new Map<1 | 2, { actor: OwnedActor | null; home: Vec3; carrier: ActorId | null; droppedAt: number | null }>();
   private lmctfRunes = new Map<string, { actor: OwnedActor | null; holder: ActorId | null }>();
@@ -755,6 +757,7 @@ export class SharedSimulation implements Simulation {
       native: (entry, nextFrame) => this.createNativeWeaponBehavior(entry, nextFrame) });
     try {
     this.source = this.createSource(loading);
+    if (this.foreignLmctf && this.source.kind === "q1") this.source.game.registerWeaponRules(this.lmctfQ1HasteRules());
     if (this.source.kind === "q2-native") this.source.game.services.setPlayerVelocityWriter((actor, velocity) => {
       if (this.playerClient(actor.id) === null) throw new Error("Native movement write requires an admitted player");
       this.nativeEquipmentVelocity.set(actor.id, velocity); return undefined;
@@ -1578,14 +1581,14 @@ export class SharedSimulation implements Simulation {
         if (client == null) throw new Error("Primary Q3 equipment lost its client");
         return q3WeaponDamageFactor(client, this.source.game.quadDamageFactor(), client.ps.product);
       }, firingDelay: (actor, milliseconds, persistent) => {
-        if (this.source.kind === "quakec") return q3WeaponDelay(milliseconds, persistent, false);
+        if (this.source.kind === "quakec") return q3WeaponDelay(milliseconds, persistent, this.lmctfHaste(actor));
         if (this.source.kind === "q2-native") return q3WeaponDelay(this.selectedWeaponDelay(actor, milliseconds / 1000) * 1000, persistent, false);
         if (this.source.kind === "q3-qvm") return persistent === Powerup.PW_SCOUT || persistent === Powerup.PW_AMMOREGEN
           ? q3WeaponDelay(milliseconds, persistent, false) : this.requireQvmWeapons().weaponDelay(actor, milliseconds);
         if (this.source.kind !== "q3") throw new Error("Primary Q3 equipment lost its source");
         const client = this.source.game.records.nativeByActor(actor)?.client;
         if (client == null) throw new Error("Primary Q3 equipment lost its client");
-        return q3WeaponDelay(milliseconds, client.persistantPowerup?.item?.tag ?? 0, client.ps.powerups.get(Powerup.PW_HASTE) !== 0);
+        return q3WeaponDelay(milliseconds, client.persistantPowerup?.item?.tag ?? 0, client.ps.powerups.get(Powerup.PW_HASTE) !== 0 || this.lmctfHaste(actor));
       } } : undefined;
     const source = new Q3SelectedSource({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
       ...(this.source.kind === "quakec" ? { sourceDamageModifier: this.qcDamageModifier() } : {}),
@@ -2029,6 +2032,7 @@ export class SharedSimulation implements Simulation {
     if (this.source.kind === "q3" || this.source.kind === "q3-qvm") game.registerWeaponRules({ id: "composition:q3-cadence",
       attackDelay: (_game, player, delay) => this.selectedWeaponDelay(player.actor.id, delay),
       frameDelay: (_game, player, delay) => this.selectedWeaponDelay(player.actor.id, delay) });
+    if (this.foreignLmctf) game.registerWeaponRules(this.lmctfQ1HasteRules());
     if (product === "mg3") this.q1CharacterAdjuncts.add(game);
     this.selectedWeaponSource = { kind: "q1", game, random, missionWeapons };
     const baseProfile: PickupSupplyProfile = product === "hipnotic"
@@ -2355,7 +2359,7 @@ export class SharedSimulation implements Simulation {
       return { attack: this.grapple?.held(actor) ?? false, latchedAttack: false, holster: false, angles: view.angles,
         ducked: (this.bodies.read(actor)?.bounds.max.z ?? 32) < 32, spectator: !this.equipmentPlayerAvailable(actor), notarget: false, hand: "right", animatePlayer: false,
         quadUntil: (q3?.powerups[Powerup.PW_QUAD] ?? 0) / 1000, doubleUntil: 0, quadFireUntil: 0,
-        haste: (q3?.powerups[Powerup.PW_HASTE] ?? 0) > this.timeSeconds * 1000, noStackDouble: false,
+        haste: (q3?.powerups[Powerup.PW_HASTE] ?? 0) > this.timeSeconds * 1000 || this.lmctfHaste(actor), noStackDouble: false,
         instantSwitch: false, quickSwitch: false, infiniteAmmo: false, playersCollide: true, gravity: this.physics.gravity, weaponThunk: false } satisfies import("../../../content/q2/foundation/weapons/types.ts").Q2WeaponInput;
     }
     const player = this.requirePlayer(actor), native = this.q2WeaponInput(player), input = source.kind === "q2" ? source.product.weaponInput(actor, native) : native;
@@ -4004,6 +4008,9 @@ export class SharedSimulation implements Simulation {
   private weaponStep(input: WeaponStepInput): WeaponStepResult {
     const player = this.playerStates.get(input.actor);
     if (player === undefined) throw new Error("Weapon input has no admitted player");
+    // Foreign LMCTF haste marks the weapon-stage environment only; movement
+    // keeps its own environment, so the rune never speeds locomotion.
+    if (!input.environment.haste && this.lmctfHaste(input.actor.id)) input = { ...input, environment: { ...input.environment, haste: true } };
     if (this.selectedArsenal !== null) {
       if (this.selectedArsenal.family === "q1") {
         const client = this.source.kind === "q1" ? this.source.composition.clients.require(player.actor.id) : null;
@@ -4090,7 +4097,7 @@ export class SharedSimulation implements Simulation {
       quadUntil: this.source.kind === "q2" ? this.source.items.playerPowerups(player.actor.id).quadUntil : this.source.kind === "q1"
         ? this.source.game.player(player.actor.id)?.powerups.get("quad") ?? 0 : this.source.kind === "quakec" ? this.source.game.clientPowerupExpires(player.actor.id, "quad") : this.source.kind === "q3"
           ? (this.source.game.records.nativeByActor(player.actor.id)?.client?.ps.powerups.get(Powerup.PW_QUAD) ?? 0) / 1000 : 0,
-      doubleUntil: 0, quadFireUntil: 0, haste: false,
+      doubleUntil: 0, quadFireUntil: 0, haste: this.lmctfHaste(player.actor.id),
       noStackDouble: this.q2ServerRegistry?.dialect === "q2-rerelease" && this.q2ServerRegistry.variableValue("g_dm_no_stack_double") !== 0,
       instantSwitch: this.q2ServerRegistry?.dialect === "q2-rerelease" && this.q2ServerRegistry.variableValue("g_instant_weapon_switch") !== 0,
       quickSwitch: false, infiniteAmmo: false, playersCollide: true, gravity: this.physics.gravity, weaponThunk: false } satisfies import("../../../content/q2/foundation/weapons/types.ts").Q2WeaponInput;
@@ -5270,6 +5277,18 @@ export class SharedSimulation implements Simulation {
   private lmctfRuneHeld(actor: ActorId): string | null {
     for (const [kind, rune] of this.lmctfRunes) if (rune.holder?.equals(actor) === true) return kind;
     return null;
+  }
+
+  private lmctfHaste(actor: ActorId): boolean {
+    return this.foreignLmctf && this.lmctfRuneHeld(actor) === "haste";
+  }
+
+  /** Native LMCTF runs the weapon cycle twice per frame under haste; the Q1
+   * arsenal expresses the same doubling as halved attack/frame delays. */
+  private lmctfQ1HasteRules(): import("../../../content/q1/foundation/extensions.ts").Q1WeaponRules {
+    return { id: "q2:lmctf/haste",
+      attackDelay: (_game, player, delay) => this.lmctfHaste(player.actor.id) ? delay / 2 : delay,
+      frameDelay: (_game, player, delay) => this.lmctfHaste(player.actor.id) ? delay / 2 : delay };
   }
 
   /** Flag bases and rune spots come from the retained entity lump, like Tag spawns. */
