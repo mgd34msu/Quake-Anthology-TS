@@ -154,6 +154,22 @@ test("actual MG1 horde and campaign maps register their authored source behavior
   }
 });
 
+test("actual MG1 horde wave state survives a saved admission round trip", async () => {
+  const level = await map("mg1", "horde1"), world = sourceWorld(level, "mg1", undefined, true);
+  world.admit("Sarge", 4); world.advance(14);
+  const manager = world.source.horde?.manager; if (manager === null || manager === undefined) throw new Error("Missing horde manager");
+  const wave = manager.number("wave"); expect(wave).toBeGreaterThanOrEqual(1);
+  const checkpoint = world.capture(), restored = sourceWorld(level, "mg1", checkpoint, true);
+  try {
+    const restoredManager = restored.source.horde?.manager; if (restoredManager === null || restoredManager === undefined) throw new Error("Missing restored horde manager");
+    expect(restoredManager.number("wave")).toBe(wave);
+    expect(restored.game.capture()).toEqual(decodeQ1FoundationCheckpoint(checkpoint.source));
+    restored.advance(20);
+    expect(restoredManager.number("wave")).toBeGreaterThanOrEqual(wave);
+  } finally { restored.actors.close(); }
+  world.actors.close();
+});
+
 test("horde match registers on non-MG1 Q1 programs with an authored horde map", async () => {
   const programs: readonly Q1SourceProgram[] = ["id1", "hipnotic", "mg3"];
   for (const program of programs) {
