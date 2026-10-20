@@ -200,15 +200,22 @@ function clipPolygon(vertices: readonly CpuVertex[], extraPlane: Vec4 | null): r
       texCoord2: vertex.texCoord2,
     }));
   }
-  for (const plane of extraPlane === null ? CLIP_PLANES : [...CLIP_PLANES, extraPlane]) {
-    const last = polygon[polygon.length - 1];
-    if (last === undefined) return polygon;
-    if (polygon.every((vertex) => planeDistance(vertex, plane) >= 0)) continue;
+  const distances: number[] = [];
+  const clipPlane = (plane: ClipPlane): void => {
+    distances.length = 0;
+    let clipped = false;
+    for (const vertex of polygon) {
+      const distance = planeDistance(vertex, plane);
+      distances.push(distance);
+      if (distance < 0) clipped = true;
+    }
+    if (!clipped) return;
     const output: CpuVertex[] = [];
-    let previous = last;
-    let previousDistance = planeDistance(previous, plane);
-    for (const current of polygon) {
-      const distance = planeDistance(current, plane);
+    let previous = polygon[polygon.length - 1];
+    if (previous === undefined) return;
+    let previousDistance = distances[distances.length - 1] ?? 0;
+    for (const [index, current] of polygon.entries()) {
+      const distance = distances[index] ?? 0;
       if ((distance >= 0) !== (previousDistance >= 0)) {
         output.push(intersect(previous, current, previousDistance, distance, plane));
       }
@@ -217,10 +224,12 @@ function clipPolygon(vertices: readonly CpuVertex[], extraPlane: Vec4 | null): r
       previousDistance = distance;
     }
     polygon = output;
-  }
+  };
+  for (const plane of CLIP_PLANES) { if (polygon.length === 0) return polygon; clipPlane(plane); }
+  if (extraPlane !== null && polygon.length !== 0) clipPlane(extraPlane);
   // All six planes permit w=0 only at the homogeneous origin. It has no
   // projected area; remove it before division instead of inventing an epsilon plane.
-  return polygon.filter((vertex) => vertex.position.w > 0);
+  return polygon.some((vertex) => vertex.position.w <= 0) ? polygon.filter((vertex) => vertex.position.w > 0) : polygon;
 }
 
 function subpixel(value: number, scale: number): number {
