@@ -589,7 +589,7 @@ class OnePassRows {
       const destination = this.rowPointer(plane, row * 8 + y, which) + column * 8;
       if (destination < 0 || destination + 8 > plane.pixels.length) this.input.fail("IDCT write outside source sample allocation");
       for (let x = 0; x < 8; x++) {
-        plane.pixels[destination + x] = idctSample(at(block, y * 8 + x));
+        plane.pixels[destination + x] = idctSample(block[y * 8 + x] ?? 0);
         plane.initialized[destination + x] = 1;
       }
     }
@@ -599,7 +599,7 @@ class OnePassRows {
     const offset = this.rowPointer(plane, row) + column;
     if (offset < 0 || offset >= plane.pixels.length) this.input.fail("upsampling read outside source sample allocation");
     if (plane.initialized[offset] !== 1) this.input.fail("upsampling reads an uninitialized source sample");
-    return at(plane.pixels, offset);
+    return plane.pixels[offset] ?? 0;
   }
 
   private emitGroup(group: number): void {
