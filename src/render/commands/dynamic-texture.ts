@@ -14,7 +14,11 @@ export function createTextureResolver(apply: (operation: ImageResourceOperation)
 
 export function resolveDrawTextures(batch: DrawBatch, apply: (operation: ImageResourceOperation) => void): DrawBatch {
   const resolve = createTextureResolver(apply), texture = resolve(batch.texture);
-  return batch.texturing === "pair"
-    ? { ...batch, texture, secondTexture: { ...batch.secondTexture, binding: resolve(batch.secondTexture.binding) } }
-    : { ...batch, texture };
+  if (batch.texturing !== "pair") return texture === batch.texture ? batch : { ...batch, texture };
+  const binding = resolve(batch.secondTexture.binding);
+  // Unchanged batches keep their identity so backends can retain packed
+  // geometry for the static surfaces that reuse the same batch object.
+  return texture === batch.texture && binding === batch.secondTexture.binding
+    ? batch
+    : { ...batch, texture, secondTexture: { ...batch.secondTexture, binding } };
 }

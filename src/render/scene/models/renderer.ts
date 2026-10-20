@@ -52,6 +52,16 @@ for (const [index, normal] of ALIAS_NORMALS.entries()) {
   if (zs === undefined) { zs = new Map<number, number>(); ys.set(normal.y, zs); }
   zs.set(normal.z, index);
 }
+/** Decoded frame normals are immutable per-vertex objects; resolve the
+ * table index once per object instead of three Map walks per vertex. */
+const normalIndexByObject = new WeakMap<Vec3, number>();
+function aliasNormalIndex(normal: Vec3): number {
+  const cached = normalIndexByObject.get(normal);
+  if (cached !== undefined) return cached;
+  const index = normalIndices.get(normal.x)?.get(normal.y)?.get(normal.z) ?? -1;
+  normalIndexByObject.set(normal, index);
+  return index;
+}
 
 function frames<T>(value: TimedFrames<T>): readonly T[] { return value.kind === "single" ? [value.frame] : value.frames.map(item => item.frame); }
 function materialKey(entity: ModelResource, image: ModelImageSelection, options: ModelSourceOptions): string {
@@ -215,6 +225,7 @@ export class SceneModelRenderer {
       let light: Vec3 | undefined, entityLighting: EntityLighting | undefined;
       let basis: { readonly yaw: number; readonly row: number; direction: Vec3 | null } | undefined;
       const vertexLights = this.provider.family === "q2" ? new Map<Vec3, Vec3>() : null;
+      const indexedLights: (Vec3 | undefined)[] = [];
       const illuminate: ModelVertexLighting = (normal, _position, corner) => {
         if (this.provider.family === "q3") return unit;
         let previousNormalIndex: number | undefined;
@@ -230,6 +241,14 @@ export class SceneModelRenderer {
           const color = previous === undefined || entity.pose.kind !== "frame" ? current
             : add3(scale3(current, 1 - entity.pose.backLerp), scale3(diffuseColor(previous, lighting), entity.pose.backLerp));
           return scale3(color, 1 / 255);
+        }
+        // Q2 shade depends only on the table index once the entity light
+        // and basis row are fixed, so indexed results are shared by every
+        // vertex object carrying that table normal.
+        const normalIndex = aliasNormalIndex(normal);
+        if (normalIndex >= 0) {
+          const indexed = indexedLights[normalIndex];
+          if (indexed !== undefined) return indexed;
         }
         const cached = vertexLights?.get(normal);
         if (cached !== undefined) return cached;
@@ -265,8 +284,7 @@ export class SceneModelRenderer {
           basis = { yaw, row, direction: null };
         }
         const { row } = basis;
-        const index = normalIndices.get(normal.x)?.get(normal.y)?.get(normal.z);
-        let shade = index === undefined ? null : r_avertexnormal_dots[row * 256 + index] ?? null;
+        let shade = normalIndex < 0 ? null : r_avertexnormal_dots[row * 256 + normalIndex] ?? null;
         if (previousNormalIndex !== undefined && entity.pose.kind === "frame" && shade !== null) {
           const oldShade = r_avertexnormal_dots[row * 256 + previousNormalIndex] ?? shade;
           shade = shade * (1 - entity.pose.backLerp) + oldShade * entity.pose.backLerp;
@@ -278,7 +296,10 @@ export class SceneModelRenderer {
         }
         const result = scale3(light, shade);
         // Q1 old-pose normals vary by triangle corner. Q2 uses only the current normal.
-        vertexLights?.set(normal, result);
+        if (vertexLights !== null) {
+          if (normalIndex >= 0) indexedLights[normalIndex] = result;
+          else vertexLights.set(normal, result);
+        }
         return result;
       };
       preparedLights.set(entity, illuminate);
