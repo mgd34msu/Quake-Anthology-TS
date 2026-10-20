@@ -191,7 +191,10 @@ export function teamArenaSourceCvars(setup: TeamArenaSkirmish, baseline: readonl
 }
 
 export function teamArenaClientCvars(setup: TeamArenaSkirmish, baseline: readonly { readonly name: string; readonly value: string }[]): TeamArenaSkirmish["clientCvars"] {
-  return [{ name: "ui_drawTimer", value: baseline.find(setting => setting.name.toLowerCase() === "cg_drawtimer")?.value ?? "0" }, ...setup.clientCvars];
+  // ui_drawTimer is the saved pre-skirmish preference; once captured it wins over the effective cg_drawTimer.
+  const saved = baseline.find(setting => setting.name.toLowerCase() === "ui_drawtimer")?.value
+    ?? baseline.find(setting => setting.name.toLowerCase() === "cg_drawtimer")?.value ?? "0";
+  return [{ name: "ui_drawTimer", value: saved }, ...setup.clientCvars];
 }
 
 /** One preparation can apply at a world-action boundary and again after its continuation. */

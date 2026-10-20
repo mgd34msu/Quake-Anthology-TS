@@ -101,7 +101,7 @@ test.skipIf(!existsSync(join(corpus, "q3a/missionpack/pak0.pk3")))("native Team 
     expect(source.host.cvars.variableValue("ui_maxClients")).toBe(12);
     expect(source.level.warmupTime).toBeGreaterThan(0);
     console.log(`Team Arena authored roster ready at source time ${source.level.time}ms`);
-    const savedRoster = roster(), path = join(directory, "warmup.sav");
+    const savedRoster = roster(), path = join(directory, "saves", "warmup.sav");
     await app.saveGame(path);
     const image = await readSaveImage(path);
     if (!(human.seat.presentation instanceof WorldSeatPresentation) || human.seat.presentation.q3Client === null) throw new Error("Missing timer preference owner");

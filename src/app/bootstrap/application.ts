@@ -2239,10 +2239,11 @@ export class Application {
     if (cvars.dialect === "q3") applyQ3ProxyModel(cvars, options.character);
     if (userinfo === null && options.teamArenaSkirmish !== undefined && selectedIdentity) {
       const setup = options.teamArenaSkirmish;
-      if (seat.id.index === 0) simulation.q3Source()?.host.cvars.set("ui_drawTimer", String(cvars.variableValue("cg_drawTimer")), true);
+      const settings = teamArenaClientCvars(setup, cvars.snapshots());
+      if (seat.id.index === 0) simulation.q3Source()?.host.cvars.set("ui_drawTimer", settings.find(setting => setting.name === "ui_drawTimer")?.value ?? "0", true);
       for (const name of ["model", "team_model"]) cvars.set(name, setup.playerModel, true);
       for (const name of ["headmodel", "team_headmodel"]) cvars.set(name, setup.playerHeadModel, true);
-      for (const setting of teamArenaClientCvars(setup, cvars.snapshots())) cvars.set(setting.name, setting.value, true);
+      for (const setting of settings) cvars.set(setting.name, setting.value, true);
     }
     this.publishedUserinfo.set(cvars, playerUserinfo(cvars));
     return cvars;
