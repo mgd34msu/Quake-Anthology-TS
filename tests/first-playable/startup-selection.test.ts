@@ -64,7 +64,12 @@ test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3") || !corpusHasFile("q2/baseq2/p
   expect((await model.resolve()).recipe.match.provider).toBe("q2:ctf");
   model.select("product", "q2-classic-baseq2");
   model.select("mode", "singleplayer");
-  expect(model.options.rules).toBe("standard");
+  // PvP mods are modes of their own: CTF stays selected (it is not a
+  // deathmatch variant to be reset) and the session follows the rules.
+  expect(model.options.rules).toBe("ctf");
+  expect(model.options.mode).toBe("deathmatch");
+  await expect(model.resolve()).rejects.toThrow("CTF map is missing");
+  model.select("rules", "standard");
   expect((await model.resolve()).recipe.match.provider).toBe("q2:official");
   expect(model.rows().find(row => row.id === "weapons")?.value).toBe("q3-baseq3");
   for (const [product, appearance] of [["q1-classic-id1", "player"], ["q2-classic-baseq2", "male"], ["q3-baseq3", "sarge"]]) {

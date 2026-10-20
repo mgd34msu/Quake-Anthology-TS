@@ -54,3 +54,16 @@ test("generic CTF rules run the ThreeWave program on an id1 world", async () => 
     expect(readString(readObject(readObject(source, "composition"), "selection"), "program")).toBe("ctf");
   } finally { await app.close(); }
 }, 120000);
+
+test("CTF rules establish their own session without a deathmatch selection", async () => {
+  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q1-classic-id1", "--map-game", "q1-classic-ctf", "--map", "ctf1",
+    "--movement", "q1", "--character", "q1", "--rules", "ctf", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
+  if (parsed.kind !== "run") throw new Error("Missing launch");
+  expect(parsed.options.mode).toBe("deathmatch");
+  const app = await Application.open(parsed.options, { print: () => undefined });
+  try {
+    const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
+    for (let index = 0; index < 10; index++) await app.step(50);
+    expect(app.simulation.playerUi(local.actor).health).toBe(100);
+  } finally { await app.close(); }
+}, 120000);

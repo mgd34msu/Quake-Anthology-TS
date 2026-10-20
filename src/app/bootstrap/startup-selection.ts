@@ -705,11 +705,11 @@ export class StartupSelectionModel {
       row("grenades", "Offhand grenades", [choice("disabled", "Off"), choice("enabled", "On", grenadeSource === null ? "Requires Quake II grenade assets" : null)], grenades),
       row("mode", "Game mode", [choice("singleplayer", "Single player"), choice("coop", "Cooperative"), choice("deathmatch", "Deathmatch")]),
       row("rules", "Match rules", [choice("standard", "Standard"), ...(["tag", "deathball", "horde"] satisfies readonly MatchRules[]).map(rule => choice(rule, rule === "tag" ? "Tag" : rule === "deathball" ? "DeathBall" : "Horde", matchModeUnavailable({ ...sourceProgramProduct(this.catalog, this.product("product").id).expectation, mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer", rules: rule }))), ...["ctf", "lmctf"].map(rule => choice(rule, rule === "ctf" ? "Capture the Flag" : "Loki's Minions CTF",
-        rule === "ctf" && this.product("product").expectation.family === "q3" ? (this.values.mode !== "deathmatch" ? "Requires deathmatch mode" : null)
+        rule === "ctf" && this.product("product").expectation.family === "q3" ? null
         : rule === "ctf" && this.product("product").expectation.family === "q1" ? (this.product("product").expectation.edition === "quakeworld" ? "Requires a classic or rerelease Quake campaign"
-          : this.values.mode !== "deathmatch" ? "Requires deathmatch mode" : unavailable(this.catalog.product(`q1-${this.product("product").expectation.edition === "rerelease" ? "rerelease" : "classic"}-ctf`)))
+          : unavailable(this.catalog.product(`q1-${this.product("product").expectation.edition === "rerelease" ? "rerelease" : "classic"}-ctf`)))
         : this.product("product").expectation.family !== "q2" ? "Requires a Quake II campaign"
-          : this.values.mode !== "deathmatch" ? "Requires deathmatch mode" : unavailable(this.catalog.product(`q2-${this.product("product").expectation.edition === "rerelease" ? "rerelease" : "classic"}-${rule}`))))]),
+          : unavailable(this.catalog.product(`q2-${this.product("product").expectation.edition === "rerelease" ? "rerelease" : "classic"}-${rule}`))))]),
       row("skill", "Difficulty", [choice("0", "Easy"), choice("1", "Normal"), choice("2", "Hard"), choice("3", "Nightmare")]),
       row("seats", "Local players", [1, 2, 3, 4].map(value => choice(String(value)))),
       row("renderer", "Renderer", [choice("gl", "OpenGL"), choice("cpu", "Software")])];
@@ -756,7 +756,9 @@ export class StartupSelectionModel {
     this.displayOverridesConsumed = true;
   }
   get options(): ApplicationOptions {
-    const mode = this.values.mode, renderer = this.values.renderer, rules = this.values.rules, skill = Number(this.values.skill);
+    const rules = this.values.rules, renderer = this.values.renderer, skill = Number(this.values.skill);
+    // PvP mods are modes of their own; the session follows the selected rules.
+    const mode = rules === "ctf" || rules === "lmctf" || rules === "tag" || rules === "deathball" ? "deathmatch" : this.values.mode;
     if (mode !== "singleplayer" && mode !== "coop" && mode !== "deathmatch" || renderer !== "gl" && renderer !== "cpu"
       || rules !== "standard" && rules !== "ctf" && rules !== "lmctf" && rules !== "tag" && rules !== "deathball" && rules !== "horde" || skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid startup settings");
     const { q1Protocol, weaponBehavior: _initialWeaponBehavior, mods: _initialMods, ...initial } = this.initial;

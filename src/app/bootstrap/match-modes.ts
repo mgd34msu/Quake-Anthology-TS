@@ -12,11 +12,11 @@ export function matchModeUnavailable(selection: MatchModeSelection): string | nu
   const { family, mode, rules } = selection;
   if (rules === "standard") return null;
   if (rules === "horde") return family === "q3" ? null : mode === "deathmatch" ? "Horde requires single player or cooperative mode" : null;
-  if (rules === "tag") return mode !== "deathmatch" ? "Tag requires deathmatch mode" : null;
-  if (rules === "ctf" && (family === "q3" || family === "q1")) return mode !== "deathmatch" ? "Capture the Flag requires deathmatch mode" : null;
+  // CTF, LMCTF, Tag and DeathBall are PvP modes of their own; none of them
+  // needs a separate deathmatch selection (deathmatch is its own mode).
+  if (rules === "tag") return null;
+  if (rules === "ctf" && (family === "q3" || family === "q1")) return null;
   if (family !== "q2") return "These match rules require a Quake II source game";
-  if (mode !== "deathmatch") return "These match rules require deathmatch mode";
-  if (rules === "ctf" || rules === "lmctf") return null;
   return null;
 }
 /** Geometry is never guessed: source-specific objectives must be authored or explicitly placed. */

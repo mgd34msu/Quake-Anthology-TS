@@ -303,6 +303,10 @@ export function parseApplicationCommand(argv: readonly string[], search: Content
   if (options.q1Protocol !== undefined && options.product === "q1-quakeworld") throw new Error("--q1-protocol selects NetQuake; QuakeWorld uses native protocol 28");
   if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: (options.network.kind === "native-server" || options.network.kind === "unified-server") && (options.product.startsWith("q3-") || options.product === "q1-quakeworld") ? "deathmatch" : "coop" };
   if (options.seats > 1 && options.mode === "singleplayer") options = { ...options, mode: "coop" };
+  // CTF, LMCTF, Tag and DeathBall are PvP modes of their own, not deathmatch
+  // variants: selecting one establishes the session type by itself.
+  if (options.rules === "ctf" || options.rules === "lmctf" || options.rules === "tag" || options.rules === "deathball")
+    options = { ...options, mode: "deathmatch" };
   if (menu && (options.dedicated || options.network.kind !== "offline")) throw new Error("--menu requires a local, non-dedicated application");
   return { kind: menu || !explicitLaunch ? "menu" : "run", options };
 }
