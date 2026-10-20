@@ -58,7 +58,8 @@ export class DepthAtlasTarget {
         if (!(worst < 3.4028235677973366e38))
           throw new RangeError("OpenGL depth atlas vertices must be finite float32");
         const vertexCount = draw.positions.length / 4;
-        for (const index of draw.indices) {
+        for (let offset = 0; offset < draw.indices.length; offset++) {
+          const index = draw.indices[offset] ?? -1;
           if (!(index >= 0) || index >= vertexCount || (index | 0) !== index) throw new RangeError("OpenGL depth atlas vertex index is invalid");
         }
       }
@@ -127,7 +128,8 @@ export class DepthAtlasTarget {
             const base = vertexCount;
             positions.set(draw.positions, base * 4);
             vertexCount += drawVertices;
-            for (const index of draw.indices) indices[indexCount++] = base + index;
+            const drawIndices = draw.indices;
+            for (let index = 0; index < drawIndices.length; index++) indices[indexCount++] = base + (drawIndices[index] ?? 0);
           } else {
             flush();
             for (let triangle = 0; triangle < draw.indices.length; triangle += 3) {

@@ -79,7 +79,8 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
   if (vertices.length > 0x1fffffff) throw new RangeError("OpenGL vertex allocation is too large");
   if (batch.primitive === "lines" && (!Number.isFinite(Math.fround(batch.lineWidth)) || batch.lineWidth <= 0))
     throw new RangeError("OpenGL line width must be positive and finite");
-  for (const index of indices) {
+  for (let offset = 0; offset < indices.length; offset++) {
+    const index = indices[offset] ?? -1;
     if (!(index >= 0) || index >= vertices.length || (index | 0) !== index)
       throw new RangeError("OpenGL vertex index is outside its allocation");
   }
