@@ -70,6 +70,13 @@ test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")) || !exi
     const radians = body.angles.y * Math.PI / 180;
     original.bodies.write(player, { ...playerBody, origin: { x: body.origin.x + 250 * Math.cos(radians), y: body.origin.y + 250 * Math.sin(radians), z: body.origin.z } });
     original.bodies.link(player); original.combat.setHealth(player, 1000);
+    // Let the teleported player land first; a rocket aimed at the falling
+    // player buries itself in the floor short of the settled one.
+    for (let frame = 0; frame < 50; frame++) {
+      const settled = original.bodies.read(player.id);
+      if (settled !== null && settled.ground !== null && settled.velocity.z === 0) break;
+      original.step({ elapsedMilliseconds: 25, commands: [] });
+    }
     // Enter the ordinary source attack; its animation fires through the shared engine.
     context.entity.enemy = player.id; context.attack();
     let rocket = selected(original).entities.entities.find(entity => entity.values.classname === "rocket" && entity.links.owner?.slot === owner.id.slot);

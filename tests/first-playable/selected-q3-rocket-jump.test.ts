@@ -6,6 +6,7 @@ import { createSimulation } from "../../src/app/bootstrap/simulation/index.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { DamageOutcome, DamageRequest } from "../../src/contracts/gameplay.ts";
 import type { BodyState } from "../../src/contracts/world.ts";
+import { EntityEvent } from "../../src/movement/q3/constants.ts";
 
 for (const movement of ["q1", "q2"]) test(`selected Q3 rockets propel a jumping ${movement} player away from the explosion in a Q1 world`, async () => {
   const parsed = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "start", "--movement", movement, "--character", "q2", "--dedicated"]);
@@ -50,9 +51,12 @@ for (const movement of ["q1", "q2"]) test(`selected Q3 rockets propel a jumping 
     expect(hits).toHaveLength(1);
     const hit = hits[0];
     if (hit === undefined) throw new Error("Missing rocket splash");
-    const fire = simulation.drainPresentationEvents().find(value => value.kind === "q3-ballistics" && value.event.kind === "fire");
-    if (fire?.kind !== "q3-ballistics" || hit.outcome.kind !== "committed") throw new Error("Missing source fire/damage result");
-    expect(fire.event.end.z - fire.event.origin.z).toBeLessThan(-0.99);
+    const fires = simulation.drainPresentationEvents().filter(value => value.kind === "q3-source" && value.event.kind === "entity-event"
+      && (value.event.state.event & ~0x300) === EntityEvent.EV_FIRE_WEAPON && value.event.actor.equals(admission.actor));
+    if (fires.length !== 1 || hit.outcome.kind !== "committed") throw new Error("Missing source fire/damage result");
+    const fire = fires[0];
+    if (fire?.kind !== "q3-source" || fire.event.kind !== "entity-event") throw new Error("Missing source fire event");
+    expect(fire.event.state.weapon).toBe(5); // WP_ROCKET_LAUNCHER
     expect(hit.before.velocity.z).toBeGreaterThan(0);
     expect(hit.projectile?.origin).toEqual(hit.request.point);
     expect(hit.request.point.z).toBeLessThan(hit.before.origin.z);

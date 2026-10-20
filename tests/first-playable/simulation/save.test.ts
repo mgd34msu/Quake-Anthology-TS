@@ -75,7 +75,7 @@ for (const preset of ["q2-q1-q3", "q1-q2"]) test(`fresh shared ${preset} restore
         restored.controlPlayer(actor, { kind: "cutscene", origin, angles, viewOffset: { x: 0, y: 0, z: 0 } });
         restored.step({ elapsedMilliseconds: 100, commands: [{ actor, sequence: 100, source: { kind: "bot", provider: content.recipe.map.entities.provider },
           command: { kind: "q2-classic", milliseconds: 100, angleShorts: [0, 0, 0], forwardMove: 300, sideMove: 0, upMove: 200, buttons: 1, impulse: 0, lightLevel: 0 } }] });
-        expect(restored.playerView(actor)).toEqual({ origin, angles, viewHeight: 0, fieldOfView: 90 });
+        expect(restored.playerView(actor)).toEqual({ origin, angles, viewHeight: 0, fieldOfView: 90, kickAngles: { x: 0, y: 0, z: 0 } });
         expect(restored.scene.spatial.get(actor)).toBeNull();
         expect(restored.presentations().some(value => sameActor(value.actor, actor))).toBe(false);
       }
@@ -95,7 +95,8 @@ test("rerelease save preserves host elapsed time independently of source schedul
     original.admitPlayer(client);
     for (let frame = 0; frame < 10; frame++) original.step({ elapsedMilliseconds: 50, commands: [] });
     const image = decodeSaveImage(encodeSaveImage(original.checkpoint()));
-    expect(image.frame.time).toEqual({ kind: "milliseconds", value: 250 });
+    // 500ms of host time is twenty 25ms source frames; the map clock starts one interval ahead.
+    expect(image.frame.time).toEqual({ kind: "milliseconds", value: 525 });
     expect(savedSimulationSettings(image).hostMilliseconds).toBe(500);
     const restored = createSimulation({ ...runtimeOptions, restore: image, restoredClients: [client] });
     try {
@@ -111,7 +112,7 @@ test("rerelease save preserves host elapsed time independently of source schedul
         expect(resumed.bodies.map(value => ({ ...value.body, ground: value.body.ground?.slot ?? null })))
           .toEqual(continuous.bodies.map(value => ({ ...value.body, ground: value.body.ground?.slot ?? null })));
       }
-      expect(restored.checkpoint().frame.time).toEqual({ kind: "milliseconds", value: 325 });
+      expect(restored.checkpoint().frame.time).toEqual({ kind: "milliseconds", value: 600 });
     } finally { restored.close(); }
   } finally { original.close(); await content.close(); }
 });

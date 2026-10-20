@@ -46,7 +46,7 @@ test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")) || !existsSyn
             Q1Creatures.prototype.registerSpecies = function (this: Q1Creatures, species) { if (this.game.provider === monsterSource.provider)
                 captured.game = this.game; return register.call(this, species); };
             const app = await (async () => { try {
-                return weapon.family === "native" ? await Application.open({ ...command.options, map: "maps/e1m6.bsp" }, { print: () => undefined }) : await Application.open(command.options, { print: () => undefined }, recipe);
+                return weapon.family === "native" ? await Application.open({ ...command.options, map: "maps/e1m6.bsp" }, { print: () => undefined, saveDirectory: directory }) : await Application.open(command.options, { print: () => undefined, saveDirectory: directory }, recipe);
             }
             finally {
                 Q1Creatures.prototype.registerSpecies = register;
@@ -109,7 +109,7 @@ test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")) || !existsSyn
                 for (let frame = 0; frame < 35; frame++) {
                     const output = sim.step({ elapsedMilliseconds: 50, commands: [{ actor: player.id, source: { kind: "remote-client", client: client.id }, sequence: frame,
                                 command: { kind: "q1-netquake", acknowledgedServerTimeSeconds: sim.timeSeconds, viewAngles: { x: splash ? 30 : 0, y: yaw, z: 0 }, forwardMove: 0, sideMove: 0, upMove: 0, buttons: frame < 5 ? 0 : 1, impulse: 0 },
-                                arsenal: { provider: weapon.provider, weapon: weapon.weapon, useHoldable: false } }] });
+                                arsenal: { provider: sim.recipe.weapons[0]?.provider ?? weapon.provider, weapon: weapon.weapon, useHoldable: false } }] });
                     for (const event of output.events)
                         if (event.payload.kind === "damage" && event.payload.outcome.kind === "committed")
                             events.push(event.payload.outcome);
@@ -127,7 +127,7 @@ test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")) || !existsSyn
                     expect(adjusted.target).toBe(incoming.target);
                     expect(adjusted.delivery).toBe(incoming.delivery);
                     expect(adjusted.attack.weapon).toBe(weapon.weapon);
-                    expect(adjusted.attack.weaponProvider).toBe(weapon.provider);
+                    expect(adjusted.attack.weaponProvider).toBe(sim.recipe.weapons[0]?.provider ?? weapon.provider);
                     expect(adjusted.amount).toBe(scale === 1 ? incoming.amount : Math.fround(incoming.amount * scale));
                     expect(adjusted.knockback).toBe(scale === 1 ? incoming.knockback : Math.fround(incoming.knockback * scale));
                     expect(outcome.decision.appliedDamage).toBe(Math.ceil(adjusted.amount));

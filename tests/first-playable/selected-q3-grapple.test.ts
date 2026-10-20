@@ -39,17 +39,26 @@ for (const movement of ["q1", "qw", "q2", "q2-rerelease-baseq2", "q3"]) test(`st
     const kind = player.profile.kind;
     simulation.inventory.configure(player.actor, { item: "q3:weapon/grapple", count: 1, capacity: 1 });
     expect(simulation.requestWeapon(actor, { provider: player.arsenal.provider, item: "q3:weapon/grapple" })).toBe(true);
-    let sequence = 0, hook: ActorId | null = null, attached = false, cable = false, launches = 0;
+    let sequence = 0, hook: ActorId | null = null, attached = false, cable = false, launches = 0, hookOrigin: Vec3 | null = null, hookStable = 0;
     let aim: Vec3 = { x: 0, y: 90, z: 0 };
+    const hookModel = "models/ammo/rocket/rocket.md3"; // missileModel(WP_GRAPPLING_HOOK)
     const step = (buttons: number) => {
       simulation.step({ elapsedMilliseconds: 25, commands: [{ actor, source: { kind: "local-seat", client, seat }, sequence: sequence++,
         command: command(kind, Math.round(simulation.timeSeconds * 1000) + 25, buttons, aim) }] });
-      for (const source of simulation.drainPresentationEvents()) if (source.kind === "q3-ballistics" && source.event.weapon === 10) {
-        const event = source.event;
-        if (event.kind === "fire") launches++;
-        if (event.kind === "projectile") hook = event.actor;
-        if (event.kind === "impact") attached = true;
-        if (event.kind === "trail" && Math.hypot(event.end.x - event.origin.x, event.end.y - event.origin.y, event.end.z - event.origin.z) >= 64) cable = true;
+      simulation.drainPresentationEvents();
+      const model = simulation.presentations().find(candidate => candidate.path === hookModel && !candidate.viewWeapon);
+      if (model !== undefined) {
+        if (hook === null || !hook.equals(model.actor)) { launches++; hookOrigin = null; hookStable = 0; }
+        hook = model.actor;
+        const hookBody = simulation.bodies.read(hook), playerBody = simulation.bodies.read(actor);
+        if (hookBody !== null && playerBody !== null) {
+          // The selected source steps at 50ms, so flight origins repeat once;
+          // three identical readings span a full source turn of no motion.
+          if (hookOrigin !== null && hookOrigin.x === hookBody.origin.x && hookOrigin.y === hookBody.origin.y && hookOrigin.z === hookBody.origin.z) hookStable++;
+          else { hookOrigin = { ...hookBody.origin }; hookStable = 0; }
+          if (hookStable >= 2) attached = true;
+          if (attached && Math.hypot(hookBody.origin.x - playerBody.origin.x, hookBody.origin.y - playerBody.origin.y, hookBody.origin.z - playerBody.origin.z) >= 64) cable = true;
+        }
       }
     };
     for (let frame = 0; frame < 24; frame++) step(0);
@@ -75,10 +84,12 @@ for (const movement of ["q1", "qw", "q2", "q2-rerelease-baseq2", "q3"]) test(`st
       simulation.close(); simulation = createSimulation({ ...options, restore: saved, restoredClients: [client] });
       const restored = simulation.players()[0]; if (restored === undefined) throw new Error("Missing restored player");
       actor = restored;
+      // The restored hook is the same logical projectile under a fresh actor identity.
+      hook = simulation.presentations().find(candidate => candidate.path === "models/ammo/rocket/rocket.md3" && !candidate.viewWeapon)?.actor ?? null;
       step(1); expect(launches).toBe(1);
-      expect(simulation.actors.ownedBy("q3:official").some(entity => simulation.actors.observe(entity.id)?.definition === "q3:projectile")).toBe(true);
+      expect(simulation.presentations().some(candidate => candidate.path === "models/ammo/rocket/rocket.md3" && !candidate.viewWeapon)).toBe(true);
     }
     step(0);
-    expect(simulation.actors.ownedBy("q3:official").filter(entity => simulation.actors.observe(entity.id)?.definition === "q3:projectile")).toHaveLength(0);
+    expect(simulation.presentations().filter(candidate => candidate.path === "models/ammo/rocket/rocket.md3" && !candidate.viewWeapon)).toHaveLength(0);
   } finally { simulation.close(); await content.close(); }
 }, 30000);

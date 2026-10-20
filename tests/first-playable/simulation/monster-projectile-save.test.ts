@@ -53,10 +53,24 @@ test.skipIf(!existsSync(join(corpus, "q2/baseq2/pak0.pak")))("selected Q2 soldie
     const radians = body.angles.y * Math.PI / 180;
     original.bodies.write(player, { ...playerBody, origin: { x: body.origin.x + 300 * Math.cos(radians), y: body.origin.y + 300 * Math.sin(radians), z: body.origin.z } });
     original.bodies.link(player); original.combat.setHealth(player, 10000);
-    let bolt = selected(original).entities.entities.find(entity => entity.values.classname === "bolt" && entity.links.owner?.slot === soldier.actor.slot);
+    // Let the teleported player land first; a bolt aimed at the falling
+    // player passes over the settled one and can never score the hit.
+    for (let frame = 0; frame < 50; frame++) {
+      const settled = original.bodies.read(player.id);
+      if (settled !== null && settled.ground !== null && settled.velocity.z === 0) break;
+      original.step({ elapsedMilliseconds: 100, commands: [] });
+    }
+    // The soldier closed distance while the player fell; at point-blank range
+    // a bolt lives less than one checkpoint sample. Restore authored range.
+    const soldierBody = original.bodies.read(owner.id);
+    if (soldierBody === null) throw new Error("Missing soldier body");
+    original.bodies.write(owner, { ...soldierBody, origin: body.origin, velocity: { x: 0, y: 0, z: 0 } });
+    original.bodies.link(owner);
+    const stale = new Set(selected(original).entities.entities.filter(entity => entity.values.classname === "bolt").map(entity => `${entity.actor.slot}:${entity.actor.generation}`));
+    let bolt = selected(original).entities.entities.find(entity => entity.values.classname === "bolt" && entity.links.owner?.slot === soldier.actor.slot && !stale.has(`${entity.actor.slot}:${entity.actor.generation}`));
     for (let frame = 0; frame < 100 && bolt === undefined; frame++) {
       original.step({ elapsedMilliseconds: 100, commands: [] });
-      bolt = selected(original).entities.entities.find(entity => entity.values.classname === "bolt" && entity.links.owner?.slot === soldier.actor.slot);
+      bolt = selected(original).entities.entities.find(entity => entity.values.classname === "bolt" && entity.links.owner?.slot === soldier.actor.slot && !stale.has(`${entity.actor.slot}:${entity.actor.generation}`));
     }
     if (bolt === undefined) throw new Error("Selected soldier did not fire a live blaster bolt");
     expect(bolt.links.owner).toEqual(soldier.actor);

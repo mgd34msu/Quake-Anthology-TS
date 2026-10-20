@@ -73,6 +73,13 @@ test.skipIf(!existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("retail mine1 se
     const radians = body.angles.y * Math.PI / 180;
     original.bodies.write(player, { ...playerBody, origin: { x: body.origin.x + 200 * Math.cos(radians), y: body.origin.y + 200 * Math.sin(radians), z: body.origin.z } });
     original.bodies.link(player); original.combat.setHealth(player, 10000);
+    // Let the teleported player land first; a jump aimed at the falling
+    // player overshoots the settled one and degenerates into a melee swipe.
+    for (let frame = 0; frame < 50; frame++) {
+      const settled = original.bodies.read(player.id);
+      if (settled !== null && settled.ground !== null && settled.velocity.z === 0) break;
+      original.step({ elapsedMilliseconds: 100, commands: [] });
+    }
     const context = captured.monsters?.context(owner.id);
     if (context == null) throw new Error("Selected authored mutant source missing");
     context.attack();
@@ -100,9 +107,10 @@ test.skipIf(!existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("retail mine1 se
           if (event.payload.kind !== "damage" || event.payload.outcome.kind !== "committed") continue;
           const request = event.payload.outcome.decision.request;
           if (!request.attack.inflictor?.equals(restoredMutant.id)) continue;
+          // Melee swipes after landing deal 10-14; only the jump touch deals 40+.
+          if (request.amount < 40) continue;
           expect(request.attack.attacker?.equals(restoredMutant.id)).toBe(true);
           expect(request.target.equals(restoredPlayer)).toBe(true);
-          expect(request.amount).toBeGreaterThanOrEqual(40);
           hits++;
         }
         expect(continuation(restored)).toEqual(continuation(original));

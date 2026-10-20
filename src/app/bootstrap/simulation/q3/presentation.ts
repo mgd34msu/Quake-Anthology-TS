@@ -66,7 +66,7 @@ export function q3PoolModels(pool: EntityPool, product: Product, time: number, c
     const entity = pool.at(slot), state = entity.s;
     if (!entity.inuse || entity.client !== null || !entity.r.linked || (entity.r.svFlags & ServerEntityFlags.NOCLIENT) !== 0 || (state.eFlags & 0x80) !== 0) continue;
     const paths = state.eType === EntityType.ET_ITEM ? itemAt(product, state.modelindex).worldModels
-      : state.eType === EntityType.ET_MISSILE ? [missileModel(state.weapon)]
+      : state.eType === EntityType.ET_MISSILE || state.eType === EntityType.ET_GRAPPLE ? [missileModel(state.weapon)]
         : entity.r.model.kind === "inline" ? ["*" + entity.r.model.index]
           : state.modelindex > 0 ? [strings.get(32 + state.modelindex)] : [];
     for (const path of paths) if (path !== null && path !== "") presentations.push({ actor: entity.actor.id,

@@ -11,6 +11,7 @@ import { readSelectedMonstersCheckpoint } from "../../../src/app/bootstrap/simul
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { SaveImage } from "../../../src/contracts/session.ts";
 import { decodeCheckpointValue, SaveReader } from "../../../src/persistence/value.ts";
+import { EntityEvent } from "../../../src/movement/q3/constants.ts";
 
 function monsters(image: SaveImage) {
   const state = image.providers.find(entry => entry.schema === "world:simulation");
@@ -72,18 +73,34 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")) || !existsSync(join(cor
     if (movement === null) throw new Error("Missing grenade owner");
     original.inventory.give(movement.actor, "q3:weapon/grenadelauncher", 1);
     original.inventory.give(movement.actor, "q3:ammo/grenadelauncher", 20);
-    let grenade = original.actors.observations().find(actor => actor.definition === "q3:projectile");
+    const grenadeModel = "models/ammo/grenade1.md3";
+    let grenade = original.presentations().find(model => model.path === grenadeModel), launches = 0;
     for (let sequence = 1; sequence <= 20 && grenade === undefined; sequence++) {
       original.step({ elapsedMilliseconds: 100, commands: [{ actor: player, source: { kind: "remote-client", client }, sequence,
         command: { kind: "q2-classic", milliseconds: 100, angleShorts: [57344, 0, 0], forwardMove: 0, sideMove: 0, upMove: 0, buttons: sequence === 1 ? 0 : 1, impulse: 0, lightLevel: 0 },
         arsenal: { provider: "q3:official", weapon: "q3:weapon/grenadelauncher", useHoldable: false },
       }] });
-      grenade = original.actors.observations().find(actor => actor.definition === "q3:projectile");
+      for (const source of original.drainPresentationEvents())
+        if (source.kind === "q3-source" && source.event.kind === "entity-event" && (source.event.state.event & ~0x300) === EntityEvent.EV_FIRE_WEAPON) launches++;
+      grenade = original.presentations().find(model => model.path === grenadeModel);
     }
     if (grenade === undefined) throw new Error("Selected Q3 grenade was not launched");
-    original.drainPresentationEvents();
-    original.step({ elapsedMilliseconds: 100, commands: [] });
-    const moves = original.drainPresentationEvents().filter(event => event.kind === "q3-ballistics" && event.event.kind === "projectile" && event.event.actor.equals(grenade.id));
-    expect(moves).toHaveLength(1);
+    expect(launches).toBe(1);
+    // Each host step advances the selected source exactly one turn: per-step
+    // displacement never exceeds one 100ms interval of flight (bounces can
+    // make a single step's net displacement small, so sample three steps).
+    let previous = grenade.origin, travelled = 0;
+    for (let turn = 0; turn < 3; turn++) {
+      const body = original.bodies.read(grenade.actor);
+      if (body === null) throw new Error("Launched Q3 grenade lost its body");
+      const speed = Math.hypot(body.velocity.x, body.velocity.y, body.velocity.z);
+      original.step({ elapsedMilliseconds: 100, commands: [] });
+      const moved = original.presentations().find(model => model.path === grenadeModel && model.actor.equals(grenade.actor));
+      if (moved === undefined) throw new Error("Selected Q3 grenade vanished within one turn");
+      const displacement = Math.hypot(moved.origin.x - previous.x, moved.origin.y - previous.y, moved.origin.z - previous.z);
+      expect(displacement).toBeLessThanOrEqual(speed * 0.1 + 45); // one 100ms turn plus gravity drop
+      travelled += displacement; previous = moved.origin;
+    }
+    expect(travelled).toBeGreaterThan(30);
   } finally { original.close(); await content.close(); }
 }, 60000);

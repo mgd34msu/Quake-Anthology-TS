@@ -954,9 +954,14 @@ export class SharedSimulation implements Simulation {
     const source = this.source;
     if (source.kind === "quakec" && source.game.kind === "netquake") return {
       read: () => source.game.clientPunchAngles(actor), write: angles => source.game.setClientPunchAngles(actor, angles) };
-    // Recoil is owned by the weapon source; a selected Q1 arsenal wins over the map game.
-    const player = this.q1WeaponSource()?.game.player(actor) ?? (source.kind === "q1" ? source.game.player(actor) : null);
-    return player == null ? null : { read: () => player.punchAngles, write: angles => { player.punchAngles = angles; } };
+    // The map game and a selected Q1 arsenal each keep (and checkpoint) their own
+    // player record; the unified punch mirrors into every live record.
+    const players = [...new Set([source.kind === "q1" ? source.game.player(actor) : null,
+      this.q1WeaponSource()?.game.player(actor) ?? null].filter(player => player !== null))];
+    return players.length === 0 ? null : {
+      read: () => players[0]!.punchAngles,
+      write: angles => { for (const player of players) player.punchAngles = angles; },
+    };
   }
   private emitQ1Addon(content: ContentId, event: Q1AddonEvent, time: SourceTime): undefined {
     if (event.kind === "punch-angle") this.q1Punch.write(event.player, event.angles);
@@ -2104,7 +2109,14 @@ export class SharedSimulation implements Simulation {
       touchTriggers: actor => this.physics.touchTriggers(actor),
       keyConsumed: actor => { if (this.source.kind === "q2") { const entity = this.source.game.entity(actor); if (entity !== null) this.source.players.consumedKey(entity, this.source.game); } return undefined; },
       setSolid: (actor, solid, model) => this.physics.setSolid(actor, solid, model, "q2"),
-      setMotion: motion => this.physics.setMotion(motion), setAreaPortal: (portal, open) => { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); return undefined; },
+      setMotion: motion => { this.physics.setMotion(motion);
+        // A Q1-movement player's corpse is integrated by its movement provider,
+        // so the source death motion must project onto the NetQuake movetype
+        // (mirrors the foreign-character host in attachQ2Character).
+        const player = this.player(motion.actor.id);
+        if (player !== null && player.state.kind === "q1-netquake" && (motion.kind === "bounce" || motion.kind === "toss" || motion.kind === "new-toss"))
+          player.state = { ...player.state, moveType: motion.kind === "bounce" ? 10 : 6 };
+        return undefined; }, setAreaPortal: (portal, open) => { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); return undefined; },
       emit: event => { if (event.kind === "model") this.sourceModels.set(event.actor, event); return this.events.emit(content, { kind: "q2", event }, this.source.kind === "q2" && source.content === this.recipe.map.entities.content ? this.sourceFrame.time : { kind: "seconds", value: runtime.now() }); },
       transition: intent => {
         if (authority === "primary-world" && !this.checkingQ2Rules && this.source.kind === "q2" && intent.kind === "campaign-level") {
