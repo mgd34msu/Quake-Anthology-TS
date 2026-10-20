@@ -64,7 +64,7 @@ import type { ClientDownloadProgress, ClientDownloadPermission } from "./network
 import { ApplicationCapture, applicationCaptureRoot, inputCaptureServices } from "./capture.ts";
 import type { ClientBootstrap, ClientRecordingFeed } from "./client-bootstrap.ts";
 import type { SessionConnection } from "../../world/session/session.ts";
-import type { CommandCvarRouting, CommandHandler } from "../../core/commands/index.ts";
+import type { CommandBuffer, CommandCvarRouting, CommandHandler } from "../../core/commands/index.ts";
 import type { CommandDocumentation } from "../../core/commands/documentation.ts";
 import { consoleConfigRoot, ConsoleScriptFiles, sourceScriptReader } from "./config-scripts.ts";
 import { CvarFlag, CvarRegistry } from "../../core/cvars/index.ts";
@@ -162,6 +162,11 @@ export interface RemoteApplicationHost extends ApplicationHost {
 }
 export interface RemoteDemoApplicationHost extends RemoteApplicationHost { readonly serverBrowser: StartupServerBrowser; }
 type RemoteCommandOwner = ApplicationInputCommandOwner & { readonly scripts: ConsoleScriptFiles };
+/** The published owner keeps one identity across travel; its fields are repointed in place. */
+interface MutableRemoteCommandOwner {
+  movement?: CvarRegistry; fallback?: CvarRegistry; scripts: ConsoleScriptFiles;
+  cvars: CvarRegistry; commands: CommandBuffer; routing: CommandCvarRouting; inputSettings?: MouseSettings;
+}
 type RemoteOwnership = { readonly kind: "owned" } | { readonly kind: "borrowed"; readonly client: ClientBootstrap };
 interface RemoteConfiguration {
   readonly prepared: PreparedStartup;
@@ -209,7 +214,7 @@ type RemoteSource = { readonly kind: "live"; readonly network: LiveNetwork; read
 export class RemoteApplication {
   get serverBrowser(): StartupServerBrowser { return this.browser.browser; }
   private initialComponents: RemoteComponentView | null = null;
-  private clientCommandOwner: RemoteCommandOwner | null;
+  private clientCommandOwner: MutableRemoteCommandOwner | null;
   get clientCommands(): RemoteCommandOwner | null { return this.clientCommandOwner; }
   readonly viewSettings = new ApplicationViewSettings(value => {
     this.presentation?.q3Client?.cvars.set("cg_fov", String(value));
@@ -417,10 +422,10 @@ export class RemoteApplication {
       this.initialRemote = remote;
       this.initialSource = launch.kind === "live" ? { kind: "live", transport: launch.transport, network: new Q2ClientNetwork({ transport: launch.transport, remote: launch.address, host: remote, qport: this.initialQport = this.allocateQport() }) } : this.recordedSource(launch, remote);
     }
-    if (this.clientCommands !== null) {
+    if (this.clientCommandOwner !== null) {
       const inputSettings = configuration.profile.seats.find(seat => seat.id.equals(this.seatId))?.mouse;
       if (inputSettings === undefined) throw new Error("Remote configuration has no primary input owner");
-      this.clientCommandOwner = { ...this.clientCommands, inputSettings };
+      this.clientCommandOwner.inputSettings = inputSettings;
     }
     if (ownership.kind === "owned") {
       this.sourceConnection = client.connect("remote");
@@ -800,7 +805,7 @@ export class RemoteApplication {
   }
 
   private publishConfiguration(configuration = this.configuration): void {
-    const owner = this.clientCommands;
+    const owner = this.clientCommandOwner;
     if (owner === null) throw new Error("Remote configuration has no command owner");
     const { prepared, profile, images } = configuration;
     profile.program.validatePublication(); images.validatePublication(); configuration.validateSource();
@@ -839,7 +844,8 @@ export class RemoteApplication {
     this.keys.publish(this.keyProfile, configuration.source);
     const mouse = prepared.seats.find(seat => seat.id.equals(this.seatId))?.mouse;
     if (mouse === undefined) throw new Error("Remote publication lost its mouse owner");
-    this.clientCommandOwner = { ...owner, cvars: configuration.source, movement: profile.options.network.kind === "unified-client" ? profile.movement : configuration.source, fallback: configuration.source, routing: configuration.routing, scripts: profile.scripts, inputSettings: mouse };
+    owner.cvars = configuration.source; owner.movement = profile.options.network.kind === "unified-client" ? profile.movement : configuration.source;
+    owner.fallback = configuration.source; owner.routing = configuration.routing; owner.scripts = profile.scripts; owner.inputSettings = mouse;
     this.inputConfig = configuration.settings; this.clientConfig = configuration.settings;
     this.configurationPublished = true;
   }
@@ -1255,7 +1261,7 @@ export class RemoteApplication {
       this.q3InitialViewPending = false;
     }
     if (player === null || (connection === undefined && remote.output === null) || frontend === null || this.presentation !== null) return;
-    const owner = this.clientCommands;
+    const owner = this.clientCommandOwner;
     if (owner === null || owner.inputSettings === undefined) throw new Error("Remote input has no retained command and mouse owner");
     const previous = this.controls, previousCapture = this.capture;
     let retiredScripts: ConsoleScriptFiles | null = null;
@@ -1413,7 +1419,7 @@ export class RemoteApplication {
         if (candidateCinematic !== null) { this.activateCinematic(candidateCinematic); candidateCinematic = null; }
         applyAudioOutputSettings(this.imageSettings.cvars, frontend.audio);
         retiredScripts = borrowed === null ? owner.scripts : borrowed.configuration.current.scripts;
-        this.clientCommandOwner = { ...owner, scripts };
+        owner.scripts = scripts;
         if (borrowed !== null) borrowed.configuration.current = { scripts, options: this.options };
         candidateScripts = null;
         if (remote.output !== null) this.publishRemote(remote.output);
@@ -1892,15 +1898,15 @@ export class RemoteApplication {
         visible: context => previousRouting.visible(context).map(owner => owner === previousSource ? cvars : owner),
       };
       this.configuration = { ...this.configuration, seat: replacement.seat, source: cvars, routing };
-      const owner = this.clientCommands;
+      const owner = this.clientCommandOwner;
       const mouse = this.configuration.prepared.seats.find(seat => seat.id.equals(replacement.seat.id))?.mouse;
       if (owner === null || mouse === undefined) throw new Error("Promoted player lost its command owner");
-      this.clientCommandOwner = { ...owner, cvars, routing, inputSettings: mouse };
+      owner.cvars = cvars; owner.routing = routing; owner.inputSettings = mouse;
       this.configuration.prepared.adopt(routing, (name, args, source) => {
         let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
         return this.queueCommand(name, args, origin.kind === "local-seat" ? origin.seat : null, source);
       }, { source: cvars, movement: this.configuration.prepared.movement, fallback: cvars, scripts: owner.scripts, read: this.configuration.profile.read });
-      controls.adoptClientSource(this.clientCommandOwner);
+      controls.adoptClientSource(owner);
       this.keys.publish(this.keyProfile, cvars);
     }
     this.configuration = { ...this.configuration, seats: this.configuration.seats.filter(candidate => candidate !== seat) };
