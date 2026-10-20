@@ -113,10 +113,12 @@ export class Q2SelectedArsenal implements SelectedArsenal {
   }
   pickupWeapons(actor: OwnedActor, items: readonly ItemId[], selection: PickupSelection): undefined {
     if (selection === "never") return;
-    for (const item of items) {
-      const current = this.pendingWeapon(actor.id) ?? this.read(actor.id).activeWeapon;
-      if (selection === "always" || this.pickupOrder.indexOf(item) > (current === null ? -1 : this.pickupOrder.indexOf(current))) this.select(actor.id, item);
-    }
+    // A multi-destination grant selects its best weapon once, not each in turn.
+    const best = items.reduce<ItemId | null>((chosen, item) =>
+      chosen === null || this.pickupOrder.indexOf(item) > this.pickupOrder.indexOf(chosen) ? item : chosen, null);
+    if (best === null) return;
+    const current = this.pendingWeapon(actor.id) ?? this.read(actor.id).activeWeapon;
+    if (selection === "always" || this.pickupOrder.indexOf(best) > (current === null ? -1 : this.pickupOrder.indexOf(current))) this.select(actor.id, best);
   }
   step(input: WeaponStepInput, intent: ArsenalIntent | undefined): WeaponStepResult {
     if (intent !== undefined && intent.provider !== this.provider) throw new Error("Arsenal intent belongs to another provider");

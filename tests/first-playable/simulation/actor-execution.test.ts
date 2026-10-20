@@ -10,6 +10,7 @@ import { simulationProviderCheckpoint } from "../../../src/app/bootstrap/simulat
 import { encodeSaveImage, decodeSaveImage } from "../../../src/persistence/index.ts";
 import { SaveReader, decodeCheckpointValue } from "../../../src/persistence/value.ts";
 import type { Q2Edition } from "../../../src/content/q2/foundation/host.ts";
+import { q2WeaponRecoil } from "../../../src/content/q2/foundation/weapons/presentation.ts";
 import { expect, test } from "bun:test";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -357,9 +358,11 @@ for (const mapEdition of armorEditions) test(`base1 ${mapEdition} map runs the o
     for (let frame = 20; frame < 30; frame++) {
       step(simulation, actor, client, frame, true);
       const weapon = map.players.context(nativePlayer, map.game).weaponState(), actual = selected.weapons.states.get(actor);
-      expect(weapon?.kickAngles).toEqual(actual?.kickAngles);
-      expect(weapon?.kickOrigin).toEqual(actual?.kickOrigin);
-      if (weapon !== null && Math.hypot(weapon.kickAngles.x, weapon.kickAngles.y, weapon.kickAngles.z) > 0) observedKick = true;
+      const projected = actual === undefined ? null : q2WeaponRecoil(actual, weaponEdition, selected.game.host.now());
+      expect(weapon?.kickAngles).toEqual(projected?.kickAngles);
+      expect(weapon?.kickOrigin).toEqual(projected?.kickOrigin);
+      // Classic kick is a one-frame impulse at kickTime; post-step reads see it decayed, so detect it on the raw state.
+      if (actual !== undefined && Math.hypot(actual.kickAngles.x, actual.kickAngles.y, actual.kickAngles.z) > 0) observedKick = true;
     }
     expect(observedKick).toBe(true);
     expect(simulation.inventory.count(actor, 'q2:ammo_shells')).toBeLessThan(shells + 10);
