@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Q2 rerelease gl_shadowmap.ts depth passes, using already projected caster geometry.
 import type { DepthAtlasDraw, DepthAtlasPass } from "../../contracts/render.ts";
-import type { Vec4 } from "../../contracts/math.ts";
 import type { loadGl } from "../../platform/gl.ts";
 import { loadGlFramebuffers } from "../../platform/gl-framebuffers.ts";
 import type { SdlRenderContext } from "../../platform/sdl-render-context.ts";
@@ -106,14 +105,10 @@ export class DepthAtlasTarget {
         gl.glScissor(rect.x, rect.y, rect.width, rect.height);
         if (pass.clearDepth !== null) { gl.glClearDepth(pass.clearDepth); gl.glClear(0x100); }
         let previous: DepthAtlasDraw | null = null, vertexCount = 0, indexCount = 0;
+        const positions = this.positions, indices = this.indices, vertexCapacity = positions.length / 4, indexCapacity = indices.length;
         const flush = (): void => {
-          if (indexCount !== 0) gl.glDrawElements(4, indexCount, 0x1405, this.indices);
+          if (indexCount !== 0) gl.glDrawElements(4, indexCount, 0x1405, indices);
           vertexCount = 0; indexCount = 0;
-        };
-        const append = (position: Vec4): void => {
-          const offset = vertexCount++ * 4;
-          this.positions[offset] = position.x; this.positions[offset + 1] = position.y;
-          this.positions[offset + 2] = position.z; this.positions[offset + 3] = position.w;
         };
         for (const draw of pass.draws) {
           const same = previous !== null && previous.cull === draw.cull && (previous.polygonOffset === null ? draw.polygonOffset === null
@@ -127,19 +122,26 @@ export class DepthAtlasTarget {
             else { gl.glEnable(0x8037); gl.glPolygonOffset(draw.polygonOffset.factor, draw.polygonOffset.units); }
             previous = draw;
           }
-          if (draw.positions.length <= this.positions.length / 4 && draw.indices.length <= this.indices.length) {
-            if (vertexCount + draw.positions.length > this.positions.length / 4 || indexCount + draw.indices.length > this.indices.length) flush();
+          if (draw.positions.length <= vertexCapacity && draw.indices.length <= indexCapacity) {
+            if (vertexCount + draw.positions.length > vertexCapacity || indexCount + draw.indices.length > indexCapacity) flush();
             const base = vertexCount;
-            for (const position of draw.positions) append(position);
-            for (const index of draw.indices) this.indices[indexCount++] = base + index;
+            for (const position of draw.positions) {
+              const offset = vertexCount++ * 4;
+              positions[offset] = position.x; positions[offset + 1] = position.y;
+              positions[offset + 2] = position.z; positions[offset + 3] = position.w;
+            }
+            for (const index of draw.indices) indices[indexCount++] = base + index;
           } else {
             flush();
             for (let triangle = 0; triangle < draw.indices.length; triangle += 3) {
-              if (vertexCount + 3 > this.positions.length / 4 || indexCount + 3 > this.indices.length) flush();
+              if (vertexCount + 3 > vertexCapacity || indexCount + 3 > indexCapacity) flush();
               for (let corner = 0; corner < 3; corner++) {
                 const index = draw.indices[triangle + corner], position = index === undefined ? undefined : draw.positions[index];
                 if (position === undefined) throw new Error("OpenGL validated depth vertex disappeared");
-                this.indices[indexCount++] = vertexCount; append(position);
+                indices[indexCount++] = vertexCount;
+                const offset = vertexCount++ * 4;
+                positions[offset] = position.x; positions[offset + 1] = position.y;
+                positions[offset + 2] = position.z; positions[offset + 3] = position.w;
               }
             }
           }
