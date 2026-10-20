@@ -326,6 +326,13 @@ export class SharedSimulation implements Simulation {
   private lmctfRegenAt = new Map<ActorId, number>();
   private lmctfSpots: { readonly flags: ReadonlyMap<string, Vec3>; readonly health: readonly Vec3[] } | null = null;
   private lmctfPrepared = false;
+  /** Runtime DeathBall state (match provider q2:deathball on a foreign
+   * world; Q2 worlds keep the native composition module). */
+  private deathball: OwnedActor | null = null;
+  private deathballTeams = new Map<ActorId, 1 | 2>();
+  private deathballSpots: { readonly ball: Vec3 | null; readonly goals: ReadonlyMap<1 | 2, Vec3> } | null = null;
+  private deathballPrepared = false;
+  private deathballResetAt: number | null = null;
   readonly clock: SourceClock;
   readonly events: SimulationEvents;
   private readonly actorExecutions = new Map<ActorId, ActorExecution>();
@@ -3211,6 +3218,11 @@ export class SharedSimulation implements Simulation {
         }
         return amount === request.amount ? request : { ...request, amount };
       } });
+    if (this.foreignDeathball) this.combat.damageOperation.register({ provider: "q2:deathball", id: "q2:deathball/ball", order: 0, kind: "transform",
+      // Native DeathBall: the ball takes 1 damage from every hit; shared
+      // combat knockback against its 50 mass does the pushing.
+      transform: request => this.deathball !== null && request.target.equals(this.deathball.id) && request.amount !== 1
+        ? { ...request, amount: 1 } : request });
     if (providerFamily(id) === "q1") this.combat.register(createQ1CombatPolicy({ id, armor, sourceEffects: {
       beforeQuad: (request, amount, target, attacker) => {
         const game = this.q1CombatSource();
@@ -4619,7 +4631,7 @@ export class SharedSimulation implements Simulation {
       if (this.source.kind === "q2" && this.source.product.rerelease?.players.intermissionFadeUntil != null) {
         continue;
       }
-      if (run && settlement.kind !== "active") { this.tickHordeWave(); this.tickTag(); this.tickLmctf(); }
+      if (run && settlement.kind !== "active") { this.tickHordeWave(); this.tickTag(); this.tickLmctf(); this.tickDeathball(); }
       if (run && !preparesQ1Clients && settlement.kind !== "active") botCommands = this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000);
       for (const received of [...(commandTurn ? input.commands : []), ...botCommands]) {
         let command = paused ? { ...received, command: { ...received.command, buttons: received.command.buttons & ~1 } } : received;
@@ -5460,6 +5472,122 @@ export class SharedSimulation implements Simulation {
         rune.holder = null;
         if (origin !== undefined && origin !== null) this.spawnLmctfRune(kind, origin);
       }
+    }
+  }
+
+
+  private get foreignDeathball(): boolean {
+    return this.recipe.match.provider === "q2:deathball" && this.options.mode === "deathmatch"
+      && providerFamily(this.recipe.map.entities.provider) !== "q2";
+  }
+
+  /** DeathBall origins come from the retained entity lump; authored goals are
+   * brushes, so foreign play uses their origins with a proximity radius and
+   * synthesizes both from deathmatch spawns when a map has none. */
+  private deathballOrigins(): { readonly ball: Vec3 | null; readonly goals: ReadonlyMap<1 | 2, Vec3> } {
+    if (this.deathballSpots !== null) return this.deathballSpots;
+    let ball: Vec3 | null = null;
+    const goals: Vec3[] = [], teamStarts = new Map<string, Vec3>();
+    for (const entity of parseEntities(this.options.world.entities)) {
+      const classname = entity.get("classname") ?? "";
+      const parts = (entity.get("origin") ?? "").split(/\s+/).map(Number);
+      const [x, y, z] = parts;
+      if (parts.length !== 3 || x === undefined || y === undefined || z === undefined || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+      if (classname === "dm_dball_ball_start" && ball === null) ball = { x, y, z };
+      else if (classname === "dm_dball_goal") goals.push({ x, y, z });
+      else if ((classname === "dm_dball_team1_start" || classname === "dm_dball_team2_start") && !teamStarts.has(classname)) teamStarts.set(classname, { x, y, z });
+    }
+    const spots = this.tagSpawnOrigins();
+    const assigned = new Map<1 | 2, Vec3>();
+    if (goals.length >= 2) {
+      const [first, second] = goals;
+      if (first !== undefined && second !== undefined) {
+        const team1Start = teamStarts.get("dm_dball_team1_start");
+        const firstIsTeam1 = team1Start === undefined ? first.x <= second.x
+          : Math.hypot(first.x - team1Start.x, first.y - team1Start.y, first.z - team1Start.z)
+            <= Math.hypot(second.x - team1Start.x, second.y - team1Start.y, second.z - team1Start.z);
+        assigned.set(1, firstIsTeam1 ? first : second); assigned.set(2, firstIsTeam1 ? second : first);
+      }
+    } else if (spots.length >= 2) {
+      let a = spots[0] ?? null, b: Vec3 | null = null, best = -1;
+      for (const spot of spots) {
+        if (a === null) break;
+        const distance = Math.hypot(spot.x - a.x, spot.y - a.y, spot.z - a.z);
+        if (distance > best) { best = distance; b = spot; }
+      }
+      if (a !== null && b !== null) {
+        let c: Vec3 | null = null; best = -1;
+        for (const spot of spots) {
+          const distance = Math.hypot(spot.x - b.x, spot.y - b.y, spot.z - b.z);
+          if (distance > best) { best = distance; c = spot; }
+        }
+        if (c !== null) { assigned.set(1, c); assigned.set(2, b); }
+      }
+    }
+    if (ball === null) {
+      // A synthesized ball start must clear both synthesized goals or the
+      // match would score itself at spawn.
+      let best: Vec3 | null = null, bestClearance = -1;
+      for (const spot of spots) {
+        let clearance = Infinity;
+        for (const goal of assigned.values()) clearance = Math.min(clearance, Math.hypot(spot.x - goal.x, spot.y - goal.y, spot.z - goal.z));
+        if (clearance > bestClearance) { bestClearance = clearance; best = spot; }
+      }
+      ball = best ?? this.farthestDeathmatchSpawn();
+    }
+    this.deathballSpots = { ball, goals: assigned };
+    return this.deathballSpots;
+  }
+
+  private spawnDeathball(origin: Vec3): void {
+    const actor = this.actors.allocate(this.recipe.match.provider, "q2:dm_dball_ball");
+    const bounds = { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 15 } };
+    this.bodies.create(actor, { origin: { x: origin.x, y: origin.y, z: origin.z + 16 }, velocity: zero, angles: zero, bounds, ground: null });
+    this.physics.setSolid(actor, "box", null, providerFamily(this.recipe.map.entities.provider));
+    this.physics.setMotion({ actor, velocity: zero, angularVelocity: zero, kind: "toss", gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 3, owner: null });
+    this.combat.create(actor, { health: 50000, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 50, canTakeDamage: true, invulnerable: false, team: null });
+    this.detachedModels.set(actor, { content: this.recipe.match.content, path: "models/objects/dball/tris.md2" });
+    this.bodies.link(actor);
+    this.deathball = actor;
+  }
+
+  private prepareDeathball(): void {
+    this.deathballPrepared = true;
+    const { ball } = this.deathballOrigins();
+    if (ball !== null) this.spawnDeathball(ball);
+  }
+
+  private tickDeathball(): void {
+    if (!this.foreignDeathball) return;
+    if (!this.deathballPrepared) this.prepareDeathball();
+    const players = this.players();
+    for (const actor of players) {
+      if (this.deathballTeams.has(actor)) continue;
+      let red = 0, blue = 0;
+      for (const team of this.deathballTeams.values()) if (team === 1) red++; else blue++;
+      const team: 1 | 2 = blue < red ? 2 : 1;
+      this.deathballTeams.set(actor, team);
+      const owned = this.actors.resolveOwned(actor);
+      if (owned !== null) this.combat.setTraits(owned, { team: team === 1 ? "red" : "blue" });
+    }
+    if (this.deathballResetAt !== null && this.timeSeconds >= this.deathballResetAt) {
+      this.deathballResetAt = null;
+      const { ball: home } = this.deathballOrigins();
+      const ball = this.deathball, body = ball === null ? null : this.bodies.read(ball.id);
+      if (ball !== null && body !== null && home !== null) this.bodies.write(ball, { ...body, origin: { x: home.x, y: home.y, z: home.z + 16 }, velocity: zero });
+    }
+    const ball = this.deathball;
+    if (ball === null || this.deathballResetAt !== null) return;
+    const body = this.bodies.read(ball.id);
+    if (body === null) return;
+    for (const [team, goal] of this.deathballOrigins().goals) {
+      if (Math.hypot(body.origin.x - goal.x, body.origin.y - goal.y, body.origin.z - goal.z) > 64) continue;
+      // Native DeathBall: the whole scoring team gains a point, then the
+      // ball returns to its start after a two second pause.
+      const scoring: 1 | 2 = team === 1 ? 2 : 1;
+      for (const [actor, member] of this.deathballTeams) if (member === scoring) this.addTagScore(actor, 1);
+      this.deathballResetAt = this.timeSeconds + 2;
+      return;
     }
   }
 

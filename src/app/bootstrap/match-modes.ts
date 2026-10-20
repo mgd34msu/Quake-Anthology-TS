@@ -14,7 +14,7 @@ export function matchModeUnavailable(selection: MatchModeSelection): string | nu
   if (rules === "horde") return family === "q3" ? null : mode === "deathmatch" ? "Horde requires single player or cooperative mode" : null;
   // CTF, LMCTF, Tag and DeathBall are PvP modes of their own; none of them
   // needs a separate deathmatch selection (deathmatch is its own mode).
-  if (rules === "tag") return null;
+  if (rules === "tag" || rules === "deathball") return null;
   if ((rules === "ctf" || rules === "lmctf") && (family === "q3" || family === "q1")) return null;
   if (family !== "q2") return "These match rules require a Quake II source game";
   return null;
@@ -23,7 +23,10 @@ export function matchModeUnavailable(selection: MatchModeSelection): string | nu
 export function matchMapUnavailable(selection: MatchModeSelection, classnames: readonly string[]): string | null {
   const unavailable = matchModeUnavailable(selection); if (unavailable !== null) return unavailable;
   const classes = new Set(classnames);
-  if (selection.rules === "deathball") {
+  if (selection.rules === "deathball" && selection.family !== "q2") {
+    // Foreign DeathBall synthesizes the ball and goals from deathmatch spawns.
+    if (!classes.has("info_player_deathmatch")) return "DeathBall map is missing: info_player_deathmatch";
+  } else if (selection.rules === "deathball") {
     const required = ["dm_dball_ball", "dm_dball_ball_start", "dm_dball_goal", "dm_dball_team1_start", "dm_dball_team2_start"];
     const missing = required.filter(name => !classes.has(name));
     if (missing.length !== 0) return `DeathBall map is missing: ${missing.join(", ")}`;

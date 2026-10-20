@@ -138,7 +138,6 @@ export function applicationSourceSelection(catalog: InstalledCatalog, options: P
   const rules = options.rules ?? (family === "q2" && (program.campaign === "ctf" || program.campaign === "lmctf") ? program.campaign
     : family === "q3" && (program.campaign === "ctf" || program.campaign === "lrctf") ? "ctf" : "standard");
   if (rules === "ctf" && family === "q1" && program.edition === "quakeworld") throw new Error("ctf requires a classic or rerelease Quake game provider");
-  if (rules === "deathball" && family !== "q2") throw new Error("DeathBall requires a Quake II game provider");
   if (rules === "horde" && family !== "q1" && family !== "q2" && family !== "q3") throw new Error("Horde requires a Quake, Quake II or Quake III game provider");
   // Tag/DeathBall ship their tokens/models in Ground Zero content, so the
   // match role mounts the same-edition Rogue product on any Q2 program.
