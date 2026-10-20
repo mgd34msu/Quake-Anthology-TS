@@ -82,28 +82,31 @@ function snapshotSourceCells(scratch: readonly SourceStageCell[]): readonly Sour
 function snapshotBatch(batch: DrawBatch, viewProjection: Mat4 | null = null): DrawBatch {
   const state = snapshotState(batch.state);
   const project = (position: Vec4): Vec4 => {
-    if (batch.space !== "world") return { ...position };
+    if (batch.space !== "world") return position;
     if (viewProjection === null) throw new Error("CPU world-space batch requires a view projection");
     return projectPoint(viewProjection, position);
   };
+  // Vertex attribute objects are never mutated downstream (clip/intersect
+  // allocate replacements), and prepare/draw are adjacent, so the snapshot
+  // shares them instead of copying four objects per vertex per frame.
   if (batch.texturing === "pair") return { ...batch, state, indices: [...batch.indices],
-    vertices: batch.vertices.map(vertex => ({ position: project(vertex.position), color: { ...vertex.color }, texCoord: { ...vertex.texCoord }, texCoord2: { ...vertex.texCoord2 } })),
+    vertices: batch.vertices.map(vertex => ({ position: project(vertex.position), color: vertex.color, texCoord: vertex.texCoord, texCoord2: vertex.texCoord2 })),
     texture: { ...batch.texture }, secondTexture: { ...batch.secondTexture, binding: { ...batch.secondTexture.binding } } };
   return { ...batch, state, indices: [...batch.indices], texture: { ...batch.texture },
-    vertices: batch.vertices.map(vertex => ({ position: project(vertex.position), color: { ...vertex.color }, texCoord: { ...vertex.texCoord } })) };
+    vertices: batch.vertices.map(vertex => ({ position: project(vertex.position), color: vertex.color, texCoord: vertex.texCoord })) };
 }
 
 function snapshotSourceBatch(batch: SourceStageData["batch"], state: RenderState): DrawBatch {
   const indices = [...batch.indices];
   if (batch.texturing === "pair") return { texturing: "pair", primitive: "triangles", state, indices, lighting: batch.lighting, ...(batch.fog === undefined ? {} : { fog: batch.fog }),
-    vertices: batch.vertices.map(vertex => ({ position: { ...vertex.position }, color: { ...vertex.color }, texCoord: { ...vertex.texCoord }, texCoord2: { ...vertex.texCoord2 } })),
+    vertices: batch.vertices.map(vertex => ({ position: vertex.position, color: vertex.color, texCoord: vertex.texCoord, texCoord2: vertex.texCoord2 })),
     get texture() { return batch.texture; },
     secondTexture: {
       get binding() { return batch.secondTexture.binding; },
       get environment() { return batch.secondTexture.environment; },
     } };
   return { texturing: "single", primitive: "triangles", state, indices, lighting: batch.lighting, ...(batch.fog === undefined ? {} : { fog: batch.fog }),
-    vertices: batch.vertices.map(vertex => ({ position: { ...vertex.position }, color: { ...vertex.color }, texCoord: { ...vertex.texCoord } })),
+    vertices: batch.vertices.map(vertex => ({ position: vertex.position, color: vertex.color, texCoord: vertex.texCoord })),
     get texture() { return batch.texture; } };
 }
 
