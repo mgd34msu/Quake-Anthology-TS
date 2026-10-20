@@ -4395,7 +4395,7 @@ export class SharedSimulation implements Simulation {
         if (guest.records.player(entry.player.sourceEntity).weapon === this.nativeWeaponRequests.get(entry.player.actor)) this.nativeWeaponRequests.delete(entry.player.actor);
       }
       this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
-      while (this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000 + profile.serverFrameMilliseconds) {
+      while (this.sourceSchedulingMilliseconds >= Math.round(this.timeSeconds * 1000) + profile.serverFrameMilliseconds) {
         this.sourceFrame = this.clock.advance({ kind: "milliseconds", value: profile.serverFrameMilliseconds });
         this.advanceQ1Punch(); this.beginNativeEquipmentFrame();
         this.beginQvmSelectedFrame();
@@ -4444,14 +4444,16 @@ export class SharedSimulation implements Simulation {
       if (!paused) this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
       const profile = providerTiming(this.recipe, this.recipe.map.entities.provider).clock;
       const fixed = profile.kind === "q2-classic" ? 100 : profile.kind === "q2-rerelease" ? profile.frameMilliseconds : profile.kind === "q3" ? profile.serverFrameMilliseconds : null;
-      const mapRun = settlement.kind === "active" || !paused && input.elapsedMilliseconds > 0 && (fixed === null || this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000 + (profile.kind === "q3" ? profile.serverFrameMilliseconds : 0));
+      // Frame clocks accumulate fractional seconds; deadline math is integral.
+      const nowMilliseconds = Math.round(this.timeSeconds * 1000);
+      const mapRun = settlement.kind === "active" || !paused && input.elapsedMilliseconds > 0 && (fixed === null || this.sourceSchedulingMilliseconds >= nowMilliseconds + (profile.kind === "q3" ? profile.serverFrameMilliseconds : 0));
       const elapsed = settlement.kind === "active" ? 0.1 : fixed === null ? Math.min(0.1, Math.max(0.001, input.elapsedMilliseconds / 1000)) : fixed / 1000;
       const selectedQ2 = this.selectedWeaponSource?.kind === "q2" ? this.selectedWeaponSource : null;
-      const mapStartMilliseconds = selectedQ2?.mapMilliseconds ?? this.timeSeconds * 1000;
+      const mapStartMilliseconds = selectedQ2?.mapMilliseconds ?? nowMilliseconds;
       const mapDeadlines = new Set<number>();
       if (settlement.kind === "active") mapDeadlines.add(mapStartMilliseconds);
       else if (mapRun && profile.kind === "q3") {
-        for (let due = this.timeSeconds * 1000 + profile.serverFrameMilliseconds; due <= this.sourceSchedulingMilliseconds; due += profile.serverFrameMilliseconds) mapDeadlines.add(due);
+        for (let due = nowMilliseconds + profile.serverFrameMilliseconds; due <= this.sourceSchedulingMilliseconds; due += profile.serverFrameMilliseconds) mapDeadlines.add(due);
       } else if (mapRun && fixed !== null) {
         // Q2 runs when the current tick is due, one interval ahead of its host clock.
         // Bound shared-host work, not elapsed time: outstanding debt survives this bundle.
@@ -5895,7 +5897,7 @@ export class SharedSimulation implements Simulation {
     const frameMilliseconds = source.edition === "classic" ? 100 : source.game.services.options.frameMilliseconds;
     this.presentationTickMilliseconds = frameMilliseconds;
     this.presentationAhead = false;
-    while (this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000 + frameMilliseconds) {
+    while (this.sourceSchedulingMilliseconds >= Math.round(this.timeSeconds * 1000) + frameMilliseconds) {
       this.capturePresentationSnapshot();
       this.sourceFrame = this.clock.advance(source.edition === "classic" ? { kind: "seconds", value: frameMilliseconds / 1000 } : { kind: "milliseconds", value: frameMilliseconds });
       this.selectedMilliseconds += frameMilliseconds;
