@@ -428,14 +428,14 @@ function floatMultipliers(quantizer: Uint16Array): Float32Array {
 // Round arithmetic as well as assignments, without fused multiply-add.
 function inversePass(values: Float32Array, start: number, step: number, output: Float32Array, outputStart: number, outputStep: number): void {
   const f = Math.fround;
-  const a0 = at(values, start);
-  const a1 = at(values, start + step);
-  const a2 = at(values, start + step * 2);
-  const a3 = at(values, start + step * 3);
-  const a4 = at(values, start + step * 4);
-  const a5 = at(values, start + step * 5);
-  const a6 = at(values, start + step * 6);
-  const a7 = at(values, start + step * 7);
+  const a0 = values[start] ?? 0;
+  const a1 = values[start + step] ?? 0;
+  const a2 = values[start + step * 2] ?? 0;
+  const a3 = values[start + step * 3] ?? 0;
+  const a4 = values[start + step * 4] ?? 0;
+  const a5 = values[start + step * 5] ?? 0;
+  const a6 = values[start + step * 6] ?? 0;
+  const a7 = values[start + step * 7] ?? 0;
   const even10 = f(a0 + a4);
   const even11 = f(a0 - a4);
   const even13 = f(a2 + a6);
@@ -495,22 +495,22 @@ function decodeBlock(entropy: Entropy, scan: ScanComponent, column: number, row:
     } else {
       index += run;
       // jpeg_natural_order has sixteen sentinel entries pointing at 63.
-      const natural = at(naturalOrder, Math.min(index++, 63));
+      const natural = naturalOrder[Math.min(index++, 63)] ?? 63;
       block[natural] = entropy.signed(size);
     }
   }
   if (storage !== null) storage.coefficients.set(block, offset);
   else {
-    for (let index = 0; index < 64; index++) block[index] = at(block, index) * at(scan.multipliers, index);
+    for (let index = 0; index < 64; index++) block[index] = (block[index] ?? 0) * (scan.multipliers[index] ?? 0);
   }
 }
 
 function inverseBlock(block: Float32Array, workspace: Float32Array): void {
   for (let x = 0; x < 8; x++) {
     let dcOnly = true;
-    for (let y = 1; y < 8; y++) dcOnly &&= at(block, y * 8 + x) === 0;
+    for (let y = 1; y < 8; y++) dcOnly &&= block[y * 8 + x] === 0;
     if (dcOnly) {
-      for (let y = 0; y < 8; y++) workspace[y * 8 + x] = at(block, x);
+      for (let y = 0; y < 8; y++) workspace[y * 8 + x] = block[x] ?? 0;
     } else inversePass(block, x, 8, workspace, x, 8);
   }
   for (let y = 0; y < 8; y++) inversePass(workspace, y * 8, 1, block, y * 8, 1);
@@ -521,7 +521,7 @@ function writeBlock(input: Input, component: Component, column: number, row: num
   for (let y = 0; y < 8; y++) {
     const destination = (row * 8 + y) * component.stride + column * 8;
     if (destination + 8 > component.pixels.length) input.fail("block outside component plane");
-    for (let x = 0; x < 8; x++) component.pixels[destination + x] = idctSample(at(block, y * 8 + x));
+    for (let x = 0; x < 8; x++) component.pixels[destination + x] = idctSample(block[y * 8 + x] ?? 0);
   }
 }
 

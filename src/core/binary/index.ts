@@ -12,14 +12,18 @@ export class BinaryError extends Error {
 }
 
 export class BinaryReader {
-  private readonly view: DataView;
+  private view: DataView | null = null;
   private cursor = 0;
 
   constructor(
     private readonly data: Uint8Array,
     readonly source = "<buffer>",
-  ) {
-    this.view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  ) {}
+
+  /** Float reads are the only DataView users; section readers that only
+   * slice or read integers never pay for constructing one. */
+  private floatView(): DataView {
+    return this.view ??= new DataView(this.data.buffer, this.data.byteOffset, this.data.byteLength);
   }
 
   get offset(): number { return this.cursor; }
@@ -46,14 +50,14 @@ export class BinaryReader {
   }
 
   skip(length: number): void { this.take(length); }
-  u8(): number { return this.view.getUint8(this.take(1)); }
-  i8(): number { return this.view.getInt8(this.take(1)); }
-  u16(): number { return this.view.getUint16(this.take(2), true); }
-  i16(): number { return this.view.getInt16(this.take(2), true); }
-  u32(): number { return this.view.getUint32(this.take(4), true); }
-  i32(): number { return this.view.getInt32(this.take(4), true); }
-  f32(): number { return this.view.getFloat32(this.take(4), true); }
-  f64(): number { return this.view.getFloat64(this.take(8), true); }
+  u8(): number { return this.data[this.take(1)] ?? 0; }
+  i8(): number { return (this.data[this.take(1)] ?? 0) << 24 >> 24; }
+  u16(): number { const o = this.take(2); return (this.data[o] ?? 0) | (this.data[o + 1] ?? 0) << 8; }
+  i16(): number { return this.u16() << 16 >> 16; }
+  u32(): number { const o = this.take(4); return ((this.data[o] ?? 0) | (this.data[o + 1] ?? 0) << 8 | (this.data[o + 2] ?? 0) << 16 | (this.data[o + 3] ?? 0) << 24) >>> 0; }
+  i32(): number { const o = this.take(4); return (this.data[o] ?? 0) | (this.data[o + 1] ?? 0) << 8 | (this.data[o + 2] ?? 0) << 16 | (this.data[o + 3] ?? 0) << 24; }
+  f32(): number { return this.floatView().getFloat32(this.take(4), true); }
+  f64(): number { return this.floatView().getFloat64(this.take(8), true); }
 
   finiteF32(): number {
     const offset = this.cursor;
