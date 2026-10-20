@@ -6,6 +6,7 @@ import type { DepthAtlasDraw, DepthAtlasPass, Q2FragmentLight, Q2ShadowAtlas, Q2
 import type { SceneLight } from "../../contracts/scene.ts";
 import type { MaterialGeometry } from "../../materials/geometry.ts";
 import type { SceneImageRegistry } from "./resources.ts";
+import { float32ToBits } from "../../core/numeric.ts";
 
 export const Q2_SHADOW_ATLAS_SIZE = 2048;
 export const Q2_SHADOW_NEAR = 4;
@@ -46,8 +47,12 @@ export function shadowMesh(geometry: MaterialGeometry): ShadowMesh {
   return { positions: geometry.vertices.map(vertex => vertex.position), indices: geometry.indices };
 }
 export function shadowCaster(origin: Vec3, meshes: readonly ShadowMesh[]): ShadowCaster {
-  let radius = 0;
-  for (const mesh of meshes) for (const position of mesh.positions) radius = Math.max(radius, length(difference(position, origin)));
+  let radiusSquared = 0;
+  for (const mesh of meshes) for (const position of mesh.positions) {
+    const dx = position.x - origin.x, dy = position.y - origin.y, dz = position.z - origin.z;
+    radiusSquared = Math.max(radiusSquared, dx * dx + dy * dy + dz * dz);
+  }
+  const radius = Math.sqrt(radiusSquared);
   return { origin, radius: radius > 0 ? radius : 64, meshes };
 }
 
@@ -190,12 +195,10 @@ function depthPass(candidate: Candidate, viewport: Rect, matrix: Mat4, worldDraw
  * caster geometry between frames, so collisions at worst reuse one stale
  * shadow frame — never worth SHA-256 over every vertex every frame.
  */
-const digestBits = new DataView(new ArrayBuffer(4));
 function geometryDigest(meshes: readonly ShadowMesh[]): string {
   let hash = 0x811c9dc5;
   const mix = (value: number): void => {
-    digestBits.setFloat32(0, value);
-    hash = Math.imul(hash ^ digestBits.getUint32(0), 0x01000193);
+    hash = Math.imul(hash ^ float32ToBits(value), 0x01000193);
   };
   for (const mesh of meshes) {
     mix(mesh.positions.length); mix(mesh.indices.length);

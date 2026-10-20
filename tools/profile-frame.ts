@@ -32,7 +32,7 @@ const scenarios: Readonly<Record<string, readonly string[]>> = {
   "q2-classic": ["--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q2", "--character", "q2", "--mode", "singleplayer"],
   "q2-rerelease": ["--game", "q2-rerelease-baseq2", "--map", "base1", "--movement", "q2", "--character", "q2", "--mode", "singleplayer"],
   "q3": ["--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3", "--mode", "deathmatch"],
-  "mixed-q3-weapons": ["--game", "q1-classic-id1", "--map", "e1m1", "--movement", "q1", "--character", "q1", "--weapons", "q3-baseq3", "--mode", "singleplayer"],
+  "mixed-q3-weapons": ["--game", "q1-classic-id1", "--map", "e1m1", "--movement", "q1", "--character", "q3", "--model", "ranger", "--mode", "singleplayer"],
   "custom-q1-ctf": ["--game", "q1-classic-id1", "--map-game", "q1-classic-ctf", "--map", "ctf1", "--movement", "q1", "--character", "q1", "--mode", "deathmatch", "--rules", "ctf"],
 };
 const base = scenarios[scenario];
@@ -43,7 +43,17 @@ const parsed = parseApplicationCommand(["--content-root", corpus, ...base, "--re
   ...(dedicated ? ["--dedicated"] : [])]);
 if (parsed.kind !== "run") throw new Error("Missing launch");
 const bootStart = performance.now();
-const app = await Application.open(parsed.options, { print: () => undefined });
+let launchRecipe: Parameters<typeof Application.open>[2];
+let launchOptions = parsed.options;
+if (scenario === "mixed-q3-weapons" && !dedicated) {
+  const { createStartupSelection } = await import("../src/app/bootstrap/startup-selection.ts");
+  const selection = await createStartupSelection(parsed.options);
+  selection.select("weapons", "q3-baseq3");
+  selection.select("grapple", "disabled"); selection.select("grenades", "disabled");
+  const launch = await selection.resolve();
+  launchOptions = launch.options; launchRecipe = launch.recipe;
+}
+const app = await Application.open(launchOptions, { print: () => undefined }, launchRecipe);
 const bootMs = performance.now() - bootStart;
 try {
   const local = app.localPlayers[0];
