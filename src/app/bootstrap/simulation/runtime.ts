@@ -78,7 +78,7 @@ import { Q3ServerState } from "./q3/server-state.ts";
 import { createSelectedQ2MonsterModules } from "./q2-monster-sources.ts";
 import { WorldTextStore } from "../../../text/world.ts";
 import type { WorldText } from "../../../text/world.ts";
-import { applyServerProfile, bindQ2ServerCvars, captureServerProfile, cvarServerSettingsOwner, registerQ2ServerCvars, restoreQ2ServerCvars, serverDefinitionsForRecipe } from "../../../settings/server/index.ts";
+import { applyServerProfile, bindQ2ServerCvars, captureServerProfile, cvarServerSettingsOwner, registerQ2ServerCvars, restoreQ2ServerCvars, savedQ2ServerCvarsHave, serverDefinitionsForRecipe } from "../../../settings/server/index.ts";
 import { q2SourceDeathmatchFlags, q2RereleaseItemServices } from "../../../settings/server/q2-owner.ts";
 import type { BoundServerSetting, ServerProfile, ServerSettingsOwner } from "../../../settings/server/index.ts";
 import { q3GameCvarDefinitions } from "../../../content/q3/base/settings.ts";
@@ -7075,8 +7075,13 @@ export class SharedSimulation implements Simulation {
     restoreSharedBodyLinks(save, { actors: this.actors, bodies: this.bodies, storage: actor => reconstructed(actor.id) ? "source-reconstructed" : "copied" });
     this.physics.restoreSpatial(reader.field("physics"), reconstructed);
     if (source.kind === "q2" && this.q2ServerRegistry !== null) {
-      if (savedSourceCvars(save) === undefined) this.q2ServerRegistry.set("sv_gravity", String(this.physics.gravity), true);
-      else if (this.q2ServerRegistry.find("sv_gravity") === undefined) this.q2ServerRegistry.register("sv_gravity", String(this.physics.gravity), 0);
+      const saved = savedSourceCvars(save);
+      // The merge in restoreQ2ServerCvars preserves registered defaults, so
+      // presence must be tested against the saved state itself.
+      if (saved === undefined || !savedQ2ServerCvarsHave(this.q2ServerRegistry, saved, "sv_gravity")) {
+        if (this.q2ServerRegistry.find("sv_gravity") === undefined) this.q2ServerRegistry.register("sv_gravity", String(this.physics.gravity), 0);
+        else this.q2ServerRegistry.set("sv_gravity", String(this.physics.gravity), true);
+      }
     }
     for (const think of save.thinks) {
       const actor = this.actors.resolveSaved(think.actor); if (actor === null) throw new Error("Saved think has no restored actor");

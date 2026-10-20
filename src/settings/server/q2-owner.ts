@@ -70,6 +70,12 @@ const rereleaseNumbers: readonly (readonly [string, "coopNumLives" | "deathmatch
   ["g_dm_force_respawn_time", "deathmatchForceRespawnTime", "0", 0],
 ];
 
+export function savedQ2ServerCvarsHave(cvars: CvarRegistry, value: unknown, name: string): boolean {
+  const validated = new CvarRegistry({ dialect: cvars.dialect, context: cvars.context });
+  validated.restoreSaveState(value);
+  return validated.find(name) !== undefined;
+}
+
 export function restoreQ2ServerCvars(cvars: CvarRegistry, value: unknown): void {
   const validated = new CvarRegistry({ dialect: cvars.dialect, context: cvars.context });
   validated.restoreSaveState(value);
