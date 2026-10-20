@@ -3562,7 +3562,9 @@ export class Application {
     this.host.print(message);
     for (const local of this.graphical?.input.locals ?? []) {
       local.console.print(message);
-      local.input.setFocus({ kind: "console" }, this.graphical?.input.now() ?? 0);
+      // Open through the console so its opened state stays in sync with input focus
+      // (a bare setFocus leaves the toggle key re-opening instead of closing).
+      local.console.open();
     }
   }
 
