@@ -177,8 +177,10 @@ function worldMeshVisible(mesh: ShadowMesh, light: Q2FragmentLight, forward: Vec
   return forward === null || dot(delta, forward) + sphere.radius > 0;
 }
 function draw(mesh: ShadowMesh, matrix: Mat4, entity: boolean): DepthAtlasDraw {
-  const [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15] = matrix;
-  const positions: Vec4[] = new Array(mesh.positions.length);
+  const m0 = matrix[0], m1 = matrix[1], m2 = matrix[2], m3 = matrix[3], m4 = matrix[4], m5 = matrix[5], m6 = matrix[6], m7 = matrix[7],
+    m8 = matrix[8], m9 = matrix[9], m10 = matrix[10], m11 = matrix[11], m12 = matrix[12], m13 = matrix[13], m14 = matrix[14], m15 = matrix[15];
+  const positions: Vec4[] = [];
+  positions.length = mesh.positions.length;
   for (let index = 0; index < mesh.positions.length; index++) {
     const position = mesh.positions[index];
     if (position === undefined) continue;
