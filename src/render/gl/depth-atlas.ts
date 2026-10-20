@@ -49,13 +49,15 @@ export class DepthAtlasTarget {
         throw new RangeError("OpenGL depth atlas clear must be in 0..1");
       for (const draw of pass.draws) {
         if (draw.indices.length % 3 !== 0) throw new RangeError("OpenGL depth atlas triangles are incomplete");
-        for (const position of draw.positions) {
-          if (!Number.isFinite(Math.fround(position.x)) || !Number.isFinite(Math.fround(position.y))
-            || !Number.isFinite(Math.fround(position.z)) || !Number.isFinite(Math.fround(position.w)))
-            throw new RangeError("OpenGL depth atlas vertices must be finite float32");
-        }
+        // The running maximum magnitude stays under the float32 overflow
+        // midpoint exactly when every component rounds to a finite float32.
+        let worst = 0;
+        for (const position of draw.positions)
+          worst = Math.max(worst, Math.abs(position.x), Math.abs(position.y), Math.abs(position.z), Math.abs(position.w));
+        if (!(worst < 3.4028235677973366e38))
+          throw new RangeError("OpenGL depth atlas vertices must be finite float32");
         for (const index of draw.indices) {
-          if (!(index >= 0) || index >= draw.positions.length || index % 1 !== 0) throw new RangeError("OpenGL depth atlas vertex index is invalid");
+          if (!(index >= 0) || index >= draw.positions.length || (index | 0) !== index) throw new RangeError("OpenGL depth atlas vertex index is invalid");
         }
       }
     }

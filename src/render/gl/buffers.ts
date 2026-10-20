@@ -80,26 +80,34 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
   if (batch.primitive === "lines" && (!Number.isFinite(Math.fround(batch.lineWidth)) || batch.lineWidth <= 0))
     throw new RangeError("OpenGL line width must be positive and finite");
   for (const index of indices) {
-    if (!(index >= 0) || index >= vertices.length || index % 1 !== 0)
+    if (!(index >= 0) || index >= vertices.length || (index | 0) !== index)
       throw new RangeError("OpenGL vertex index is outside its allocation");
   }
   const arrays = allocate(vertices.length, indices.length, batch.lighting.kind);
   arrays.indices.set(indices);
   if (batch.texturing === "single") arrays.coordinates2.fill(0);
+  // The finite-float32 contract is checked on the source values while they
+  // are packed: the running maximum magnitude stays finite and in range
+  // exactly when every stored float32 would (NaN poisons the maximum).
+  let worst = 0;
+  const positions = arrays.positions, colors = arrays.colors, coordinates = arrays.coordinates;
   let four = 0, two = 0;
   for (const vertex of vertices) {
     const { position, color, texCoord } = vertex;
-    arrays.positions[four] = position.x; arrays.positions[four + 1] = position.y;
-    arrays.positions[four + 2] = position.z; arrays.positions[four + 3] = position.w;
-    arrays.colors[four] = color.x; arrays.colors[four + 1] = color.y;
-    arrays.colors[four + 2] = color.z; arrays.colors[four + 3] = color.w;
-    arrays.coordinates[two] = texCoord.x; arrays.coordinates[two + 1] = texCoord.y;
+    positions[four] = position.x; positions[four + 1] = position.y;
+    positions[four + 2] = position.z; positions[four + 3] = position.w;
+    colors[four] = color.x; colors[four + 1] = color.y;
+    colors[four + 2] = color.z; colors[four + 3] = color.w;
+    coordinates[two] = texCoord.x; coordinates[two + 1] = texCoord.y;
+    worst = Math.max(worst, Math.abs(position.x), Math.abs(position.y), Math.abs(position.z), Math.abs(position.w),
+      Math.abs(color.x), Math.abs(color.y), Math.abs(color.z), Math.abs(color.w), Math.abs(texCoord.x), Math.abs(texCoord.y));
     four += 4; two += 2;
   }
   if (batch.texturing === "pair") {
     let offset = 0;
     for (const vertex of batch.vertices) {
       arrays.coordinates2[offset] = vertex.texCoord2.x; arrays.coordinates2[offset + 1] = vertex.texCoord2.y;
+      worst = Math.max(worst, Math.abs(vertex.texCoord2.x), Math.abs(vertex.texCoord2.y));
       offset += 2;
     }
   }
@@ -108,6 +116,7 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
     let offset = 0;
     for (const position of batch.lighting.worldPositions) {
       arrays.worldPositions[offset] = position.x; arrays.worldPositions[offset + 1] = position.y; arrays.worldPositions[offset + 2] = position.z;
+      worst = Math.max(worst, Math.abs(position.x), Math.abs(position.y), Math.abs(position.z));
       offset += 3;
     }
     if (batch.lighting.kind === "q2-world") {
@@ -115,18 +124,14 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
       offset = 0;
       for (const normal of batch.lighting.normals) {
         arrays.normals[offset] = normal.x; arrays.normals[offset + 1] = normal.y; arrays.normals[offset + 2] = normal.z;
+        worst = Math.max(worst, Math.abs(normal.x), Math.abs(normal.y), Math.abs(normal.z));
         offset += 3;
       }
     }
   }
-  // One pass keeps the finite-float32 contract; the former triple includes()
-  // scan walked every packed array three times per draw.
-  for (const values of [arrays.positions, arrays.colors, arrays.coordinates, arrays.coordinates2, arrays.worldPositions, arrays.normals]) {
-    for (let index = 0; index < values.length; index++) {
-      const value = values[index] ?? 0;
-      if (value !== value || value === Infinity || value === -Infinity)
-        throw new RangeError("OpenGL attributes must be finite float32 values");
-    }
-  }
+  // The bound is the float32 overflow midpoint: magnitudes at or below it
+  // round to a finite float32, exactly matching the stored-value scan.
+  if (!(worst < 3.4028235677973366e38))
+    throw new RangeError("OpenGL attributes must be finite float32 values");
   return arrays;
 }
