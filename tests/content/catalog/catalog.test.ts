@@ -176,17 +176,18 @@ describe("installed content catalog", () => {
     expect(resolved.presentation).toEqual(native.presentation);
   });
 
-  test("family-by-role cross-check rejects family-bound match providers on foreign worlds", () => {
+  test("family-by-role cross-check accepts runtime-layer match providers on foreign worlds", () => {
     const native = preset("q1:rerelease:mg1:installed");
     const catalog = { product: (id: string) => ({ expectation: { family: String(id).split(":")[0] } }) };
     const validate = (launch: ReturnType<typeof selectLaunch>): void => { callFunction(validateLaunchRoles, undefined, launch, catalog); };
     const valid = selectLaunch({ ...presetChoice(native.id), match: { kind: "selected", value: { provider: "q1:horde", content: native.map.entities.content } } }, native);
     expect(() => validate(valid)).not.toThrow();
-    const foreign = selectLaunch({ ...presetChoice(native.id), match: { kind: "selected", value: { provider: "q2:deathball", content: native.map.entities.content } } }, native);
-    expect(() => validate(foreign)).toThrow("requires a q2 world");
-    // Tag runs on any world through the runtime match layer, so it is not family-bound.
-    const tag = selectLaunch({ ...presetChoice(native.id), match: { kind: "selected", value: { provider: "q2:tag", content: native.map.entities.content } } }, native);
-    expect(() => validate(tag)).not.toThrow();
+    // DeathBall, LMCTF, and Tag run on any world through the runtime match
+    // layers, so none of them is family-bound.
+    for (const provider of ["q2:deathball", "q2:lmctf", "q2:tag"]) {
+      const foreign = selectLaunch({ ...presetChoice(native.id), match: { kind: "selected", value: { provider, content: native.map.entities.content } } }, native);
+      expect(() => validate(foreign)).not.toThrow();
+    }
     const unknown = selectLaunch({ ...presetChoice(native.id), movement: { kind: "selected", value: { provider: "doom:movement", content: native.map.entities.content } } }, native);
     expect(() => validate(unknown)).toThrow("no known family");
   });

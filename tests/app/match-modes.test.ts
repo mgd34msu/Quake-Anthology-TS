@@ -15,7 +15,9 @@ test("source mode admission and authored map eligibility reject incompatible mod
   expect(matchModeUnavailable(q2)).toBeNull();
   expect(matchMapUnavailable(q2, ["info_player_deathmatch"])).toContain("dm_dball_ball");
   expect(matchMapUnavailable(q2, ["dm_dball_ball", "dm_dball_ball_start", "dm_dball_goal", "dm_dball_team1_start", "dm_dball_team2_start"])).toBeNull();
-  expect(matchModeUnavailable({ ...q2, mode: "coop" })).toContain("deathmatch");
+  // PvP mods are modes of their own: selecting DeathBall establishes the
+  // match session, so the profile mode field no longer gates admission.
+  expect(matchModeUnavailable({ ...q2, mode: "coop" })).toBeNull();
   expect(matchMapUnavailable({ family: "q1", edition: "rerelease", campaign: "mg1", mode: "coop", rules: "horde" }, ["horde_manager", "info_monster_start"])).toBeNull();
   // Unified modes: horde is a match mode on any Q1 program/edition (authored
   // horde entities in the map remain the real eligibility requirement).
