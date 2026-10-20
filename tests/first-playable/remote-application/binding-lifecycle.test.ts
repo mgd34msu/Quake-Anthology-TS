@@ -109,7 +109,12 @@ test('Q3 remote bindings wait for decoded player state and capture input after a
       expect(ui.controller.activeMenu).toBe('menu:settings:root');
       click(200, 190); await exchange();
       expect(ui.controller.activeMenu).toBe('menu:settings:input:0');
-      click(200, 106); await exchange();
+      // Group submenus precede the direct bindings button; tab to it by id.
+      for (let attempt = 0; attempt < 60 && ui.controller.activeMenu !== 'menu:bindings:0'; attempt++) {
+        const focus = ui.controller.state().focus;
+        if (focus.kind === 'menu' && focus.control === 'ui:input:bindings') key(13); else key(9);
+        await exchange();
+      }
       expect(ui.controller.activeMenu).toBe('menu:bindings:0');
       expect(playerReads).toBeGreaterThan(0);
       await Bun.write('/tmp/quake-q3-binding-lifecycle.png', encodePng(640, 480, remote.readPixels()));
