@@ -16,7 +16,9 @@ export interface ClassicPrimaryWorldProfile extends ClassicCombatProfile {
 }
 export function classicPrimaryWorldProfile(digest: ContentDigest): ClassicPrimaryWorldProfile | null {
   const profile = classicCombatProfile(digest); if (profile === null) return null;
-  return { ...profile, inventoryTable: { count: 48, className: 0, label: 40, flags: 56, ammoFlag: 2, tag: 68,
+  // gitem_t tag sits after the info pointer: offset 68 in the 76-byte record
+  // (with weapmodel), offset 64 in the 72-byte 1998 record (info at 60).
+  return { ...profile, inventoryTable: { count: 48, className: 0, label: 40, flags: 56, ammoFlag: 2, tag: profile.globals.itemBytes - 8,
     capacities: [0x6e4, 0x6e8, 0x6ec, 0x6f0, 0x6f4, 0x6f8, 0x6fc, 0x700],
     unnamed: [{ index: 0, label: "", item: "q2:none" }, { index: 47, label: "Health", item: "q2:item_health" }], emptyIndex: 0, sentinel: true } };
 }

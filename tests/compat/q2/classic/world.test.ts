@@ -230,7 +230,7 @@ test.skipIf(!existsSync(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`) || !existsS
   } finally { current?.world.discard(); await mounts.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-import { xatrixCombatProfile } from "../../../../src/compat/q2/classic/combat-profile.ts";
+import { classicCombatProfile } from "../../../../src/compat/q2/classic/combat-profile.ts";
 import { nativeCombatSignature } from "../../../../src/compat/q2/native-combat-call.ts";
 import { CLASSIC_Q2_ABI } from "../../../../src/compat/q2/classic/layout.ts";
 
@@ -251,19 +251,20 @@ test.skipIf(!existsSync(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`) || !existsS
     const source = running.world.source, host = source.host, memory = source.memory, actor = required(running.world.actor(1)), engine = host.options.services.engine;
     running.cvars.set("skill", "1", true); host.cvars.refresh();
     const view = host.edicts.at(1), client = required(memory.readPointer(memory.offset(view.address, 84n)));
-    memory.writeInt32(memory.offset(view.address, 480n), 100); memory.writeInt32(memory.offset(client, 3728n), 0);
-    memory.writeInt32(memory.offset(client, 744n), 50);
+    const profile = required(classicCombatProfile(memory.module.digest)), armorSlot = BigInt(profile.client.inventory + profile.items.body * 4);
+    memory.writeInt32(memory.offset(view.address, 480n), 100); memory.writeInt32(memory.offset(client, BigInt(profile.client.invincibleFrame)), 0);
+    memory.writeInt32(memory.offset(client, armorSlot), 50);
     const nativeHit = (amount = 10): void => {
     const vectors = memory.allocate({ byteLength: 36, alignment: 4n, label: "original combat comparison" });
-    try { host.invoke(memory.offset(source.imageBase, BigInt(xatrixCombatProfile.entries.damage)), nativeCombatSignature(xatrixCombatProfile.calls.damage, "damage", CLASSIC_Q2_ABI),
+    try { host.invoke(memory.offset(source.imageBase, BigInt(profile.entries.damage)), nativeCombatSignature(profile.calls.damage, "damage", CLASSIC_Q2_ABI),
       [view.address, view.address, view.address, vectors, memory.offset(vectors, 12n), memory.offset(vectors, 24n)].map<import("../../../../src/contracts/execution.ts").GuestCallValue>(value => ({ kind: "pointer", value }))
         .concat([amount, 0, 0, 8].map(value => ({ kind: "int32", value } satisfies import("../../../../src/contracts/execution.ts").GuestCallValue))), view); }
     finally { memory.unmap(vectors, 36); }
     };
     nativeHit();
-    const originalHealth = memory.readInt32(memory.offset(view.address, 480n)), originalArmor = memory.readInt32(memory.offset(client, 744n));
+    const originalHealth = memory.readInt32(memory.offset(view.address, 480n)), originalArmor = memory.readInt32(memory.offset(client, armorSlot));
     expect(originalHealth).toBeLessThan(100); expect(originalArmor).toBeLessThan(50);
-    memory.writeInt32(memory.offset(view.address, 480n), 100); memory.writeInt32(memory.offset(client, 744n), 50);
+    memory.writeInt32(memory.offset(view.address, 480n), 100); memory.writeInt32(memory.offset(client, armorSlot), 50);
     const vector = { x: 0, y: 0, z: 0 };
     const outcome = engine.combat.apply({ target: actor, amount: 10, knockback: 0, direction: vector, point: vector, normal: vector, delivery: "direct",
       attack: { sequence: 1, time: { kind: "milliseconds", value: 100 }, attacker: actor, inflictor: actor, weapon: "q2:weapon_rocketlauncher", weaponProvider: source.memory.module.id,
@@ -272,11 +273,11 @@ test.skipIf(!existsSync(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`) || !existsS
     expect(outcome.kind).toBe("committed");
     if (outcome.kind !== "committed") throw new Error("Original damage did not commit");
     expect(memory.readInt32(memory.offset(view.address, 480n))).toBe(originalHealth);
-    expect(memory.readInt32(memory.offset(client, 744n))).toBe(originalArmor);
+    expect(memory.readInt32(memory.offset(client, armorSlot))).toBe(originalArmor);
     expect(outcome.decision.appliedDamage).toBe(100 - originalHealth); expect(outcome.decision.reaction).toBe("pain");
-    const reset = () => { memory.writeInt32(memory.offset(view.address, 480n), 100); memory.writeInt32(memory.offset(client, 744n), 50); };
+    const reset = () => { memory.writeInt32(memory.offset(view.address, 480n), 100); memory.writeInt32(memory.offset(client, armorSlot), 50); };
     reset(); nativeHit(20);
-    const doubledHealth = memory.readInt32(memory.offset(view.address, 480n)), doubledArmor = memory.readInt32(memory.offset(client, 744n));
+    const doubledHealth = memory.readInt32(memory.offset(view.address, 480n)), doubledArmor = memory.readInt32(memory.offset(client, armorSlot));
     let transformed = 0;
     const enable = () => engine.combat.damageOperation.register({ provider: "test:damage-only", id: "test:double-damage", order: 0, kind: "transform", transform: request => {
       transformed++; return { ...request, amount: request.amount * 2 };
@@ -284,11 +285,11 @@ test.skipIf(!existsSync(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`) || !existsS
     let remove = enable();
     try {
       reset(); nativeHit(); expect(transformed).toBe(1);
-      expect(memory.readInt32(memory.offset(view.address, 480n))).toBe(doubledHealth); expect(memory.readInt32(memory.offset(client, 744n))).toBe(doubledArmor);
+      expect(memory.readInt32(memory.offset(view.address, 480n))).toBe(doubledHealth); expect(memory.readInt32(memory.offset(client, armorSlot))).toBe(doubledArmor);
       remove(); reset(); nativeHit(); expect(transformed).toBe(1);
-      expect(memory.readInt32(memory.offset(view.address, 480n))).toBe(originalHealth); expect(memory.readInt32(memory.offset(client, 744n))).toBe(originalArmor);
+      expect(memory.readInt32(memory.offset(view.address, 480n))).toBe(originalHealth); expect(memory.readInt32(memory.offset(client, armorSlot))).toBe(originalArmor);
       remove = enable(); reset(); nativeHit(); expect(transformed).toBe(2);
-      expect(memory.readInt32(memory.offset(view.address, 480n))).toBe(doubledHealth); expect(memory.readInt32(memory.offset(client, 744n))).toBe(doubledArmor);
+      expect(memory.readInt32(memory.offset(view.address, 480n))).toBe(doubledHealth); expect(memory.readInt32(memory.offset(client, armorSlot))).toBe(doubledArmor);
     } finally { remove(); }
 
   } finally { running.world.close(); running.actors.close(); }
