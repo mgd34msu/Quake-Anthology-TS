@@ -30,14 +30,18 @@ export class CtfState {
   grapplePulling(actor: ActorId): boolean { return this.grapple?.pulling(actor) ?? false; }
   get game() { return this.context.game; }
   get teamplay(): number { return this.context.services.cvar("teamplay"); }
-  get startMap(): boolean { return this.game.mapName === "start"; }
+  // The vote lobby is "start" in the rerelease tree and "ctfstart" in the
+  // classic ThreeWave tree; both carry info_vote_destination spawns.
+  get startMap(): boolean { return this.game.mapName === "start" || this.game.mapName === "ctfstart"; }
   get world(): Q1Actor { const world = this.game.world; if (world === null) throw new Error("CTF map has no world actor"); return world; }
   owner(actor: ActorId): OwnedActor { const owner = this.game.host.actors.resolveOwned(actor); if (owner === null) throw new Error("CTF player is no longer admitted"); return owner; }
   body(actor: ActorId): BodyState { const body = this.game.host.bodies.read(actor); if (body === null) throw new Error("CTF actor has no shared body"); return body; }
   writeBody(actor: ActorId, patch: Partial<BodyState>): undefined { this.game.host.bodies.write(this.owner(actor), { ...this.body(actor), ...patch }); return this.game.host.bodies.link(this.owner(actor)); }
   number(actor: ActorId, name: string): number { return this.context.playerNumber(actor, `ctf.${name}`); }
   set(actor: ActorId, name: string, value: number): undefined { return this.context.setPlayerNumber(actor, `ctf.${name}`, value); }
-  team(actor: ActorId): CtfTeam | null { const value = this.game.host.combat.read(actor)?.team; return value === "red" || value === "blue" ? value : null; }
+  // Bootstrap canonicalizes shared combat teams to team:red/team:blue for
+  // cross-game identity; isolated composition hosts keep the plain forms.
+  team(actor: ActorId): CtfTeam | null { const value = this.game.host.combat.read(actor)?.team; return value === "red" || value === "team:red" ? "red" : value === "blue" || value === "team:blue" ? "blue" : null; }
   lastTeam(actor: ActorId): CtfTeam | null { return numberTeam(this.number(actor, "lastteam")); }
   flag(team: CtfTeam): Q1Actor | null { return [...this.game.entities.values()].find(entity => entity.classname === (team === "red" ? "item_flag_team1" : "item_flag_team2")) ?? null; }
   flagTeam(flag: Q1Actor): CtfTeam { return flag.classname === "item_flag_team1" ? "red" : "blue"; }
