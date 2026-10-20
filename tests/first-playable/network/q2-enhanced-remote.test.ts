@@ -91,13 +91,13 @@ test.skipIf(process.env['QUAKE_Q2_DONOR_ROOT'] === undefined)('normal remote app
 }, 40000);
 
 test('explicit Q2 dialect selection applies to hosting and rejects unsupported native transport claims', () => {
-    for (const [text, version] of [['34', 34], ['35:1904', 35], ['35:1905', 35], ['36:1015', 36], ['36:1026', 36], ['4038', 4038], ['1038', 1038]] satisfies readonly (readonly [string, 34 | 35 | 36 | 4038 | 1038])[]) {
+    for (const [text, version] of [['34', 34], ['35:1904', 35], ['35:1905', 35], ['36:1015', 36], ['36:1026', 36], ['4038', 4038], ['1038', 1038], ['2023', 2023]] satisfies readonly (readonly [string, 34 | 35 | 36 | 4038 | 1038 | 2023])[]) {
         for (const endpoint of [['--connect-q2', '127.0.0.1'], ['--listen-q2', '27910']]) {
             const parsed = parseApplicationCommand([...launch, ...endpoint, '--q2-protocol', text]);
             if (parsed.kind !== 'run') throw new Error('No launch');
             expect(parsed.options.q2Protocol?.version).toBe(version);
         }
     }
-    for (const unsupported of ['36:1016', '36:1027', '35:1903', '2023', '2022'])
+    for (const unsupported of ['36:1016', '36:1027', '35:1903', '2022'])
         expect(() => parseApplicationCommand([...launch, '--connect-q2', '127.0.0.1', '--q2-protocol', unsupported])).toThrow('--q2-protocol');
 });
