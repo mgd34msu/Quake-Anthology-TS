@@ -159,28 +159,33 @@ export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: Wo
     if (item === undefined) break;
     const { child, mask } = item;
     if (child.kind === "node") {
-      const node = at(map.nodes, child.index);
+      const node = map.nodes[child.index];
+      if (node === undefined) throw new RangeError(`World visibility index ${child.index} outside ${map.nodes.length}`);
       const remaining = map.kind === "q3-bsp" ? remainingFrustumPlanes(node.bounds, planes, item.planes)
         : boundsInFrustum(node.bounds, planes) ? item.planes : null;
       if (remaining === null) continue;
+      const plane = map.planes[node.plane];
+      if (plane === undefined) throw new RangeError(`World visibility index ${node.plane} outside ${map.planes.length}`);
       if (map.kind === "q3-bsp") {
-        const masks = splitDlightMask(lights, mask, at(map.planes, node.plane));
+        const masks = splitDlightMask(lights, mask, plane);
         pending.push({ child: node.children[1], mask: masks[1], planes: remaining }, { child: node.children[0], mask: masks[0], planes: remaining });
       }
       else {
-        const plane = at(map.planes, node.plane), front = dot3(camera.origin, plane.normal) >= plane.distance ? 0 : 1;
+        const front = dot3(camera.origin, plane.normal) >= plane.distance ? 0 : 1;
         pending.push({ child: node.children[front === 0 ? 1 : 0], mask, planes: remaining }, { child: node.children[front], mask, planes: remaining });
       }
       continue;
     }
     if (!leafVisible(child.index)) continue;
-    const leaf = at<DecodedWorld["leaves"][number]>(map.leaves, child.index);
+    const leaf = map.leaves[child.index];
+    if (leaf === undefined) throw new RangeError(`World visibility index ${child.index} outside ${map.leaves.length}`);
     if (map.kind === "q3-bsp" ? remainingFrustumPlanes(leaf.bounds, planes, item.planes) === null : !boundsInFrustum(leaf.bounds, planes)) continue;
     leaves.push(child.index);
     const range = "surfaces" in leaf ? leaf.surfaces : leaf.faces;
     const members = map.kind === "q3-bsp" ? map.leafSurfaces : map.leafFaces;
     for (let i = 0; i < range.count; i++) {
-      const surface = at(members, range.first + i);
+      const surface = members[range.first + i];
+      if (surface === undefined) throw new RangeError(`World visibility index ${range.first + i} outside ${members.length}`);
       if (seen.mark(surface)) { surfaces.push(surface); surfaceDlightMasks.set(surface, mask); }
     }
   }
