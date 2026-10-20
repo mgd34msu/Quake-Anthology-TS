@@ -138,7 +138,8 @@ export function applicationSourceSelection(catalog: InstalledCatalog, options: P
   const rules = options.rules ?? (family === "q2" && (program.campaign === "ctf" || program.campaign === "lmctf") ? program.campaign
     : family === "q3" && (program.campaign === "ctf" || program.campaign === "lrctf") ? "ctf" : "standard");
   if (rules === "lmctf" && family !== "q2") throw new Error("lmctf requires a Quake II game provider");
-  if (rules === "ctf" && family !== "q2" && family !== "q3") throw new Error("ctf requires a Quake II or Quake III game provider");
+  if (rules === "ctf" && family === "q1" && program.edition === "quakeworld") throw new Error("ctf requires a classic or rerelease Quake game provider");
+  if (rules === "tag" && family !== "q2") throw new Error("Tag requires a Quake II game provider");
   if (rules === "deathball" && family !== "q2") throw new Error("DeathBall requires a Quake II game provider");
   if (rules === "horde" && family !== "q1" && family !== "q2" && family !== "q3") throw new Error("Horde requires a Quake, Quake II or Quake III game provider");
   // Tag/DeathBall ship their tokens/models in Ground Zero content, so the
@@ -146,7 +147,7 @@ export function applicationSourceSelection(catalog: InstalledCatalog, options: P
   // A discovered Q3 guest mod owns its match through its own qagame; only the
   // built-in Q3 source takes the shared q3:ctf match role.
   const guestMod = family === "q3" && !expectedProducts.some(builtin => builtin.id === program.id);
-  const match: ProviderReference = rules === "standard" || guestMod ? source : rules === "ctf" && family === "q3" ? { provider: "q3:ctf", content: product.id } : rules === "ctf" || rules === "lmctf" ? { provider: `q2:${rules}`, content: catalog.require(`q2-${rerelease ? "rerelease" : "classic"}-${rules}`).id }
+  const match: ProviderReference = rules === "standard" || guestMod ? source : rules === "ctf" && family === "q3" ? { provider: "q3:ctf", content: product.id } : rules === "ctf" && family === "q1" ? { provider: "q1:ctf", content: catalog.require(`q1-${rerelease ? "rerelease" : "classic"}-ctf`).id } : rules === "ctf" || rules === "lmctf" ? { provider: `q2:${rules}`, content: catalog.require(`q2-${rerelease ? "rerelease" : "classic"}-${rules}`).id }
     : rules === "tag" || rules === "deathball" ? { provider: `q2:${rules}`, content: catalog.require(`q2-${rerelease ? "rerelease" : "classic"}-rogue`).id }
     : { provider: `${family}:${rules}`, content: product.id };
   return { source, match, rules };
@@ -245,7 +246,9 @@ function selectedApplicationPreset(catalog: InstalledCatalog, options: Applicati
   const nativeProgram = selectedQuakeCProgram(catalog, options);
   const q2GameLibrary = selectedQ2GameLibrary(catalog, options);
   const { source: provider, match, rules } = applicationSourceSelection(catalog, options);
-  const programProduct = sourceProgramProduct(catalog, product.id);
+  // Generic CTF on a Q1 world runs the same-edition ThreeWave program: the
+  // match role already mounts that product, so execution follows it too.
+  const programProduct = rules === "ctf" && family === "q1" ? catalog.require(match.content) : sourceProgramProduct(catalog, product.id);
   const equipmentSource = nativeProgram === undefined && q2GameLibrary === undefined && !q3Guest && !quakeworld
     ? { ...provider, content: programProduct.id } : provider;
   const playerProducts = applicationPlayerProducts(catalog, options, quakeworld || q3Guest);
@@ -404,7 +407,7 @@ export function applicationOptionsForRecipe(options: ApplicationOptions, content
   return { ...options, product: content.catalog.product(recipe.map.entities.content).expectation.id,
     map: recipe.map.geometry.requestedPath, mapProduct: content.catalog.product(recipe.map.geometryContent).expectation.id, movement: family(recipe.movement), movementProduct: quakeworldMovement ? "q1-quakeworld" : content.catalog.product(recipe.movement.content).expectation.id, character,
     characterModel: recipe.character.appearance.provider.slice(prefix.length),
-    rules: recipe.match.provider === "q2:ctf" || recipe.match.provider === "q3:ctf" ? "ctf" : recipe.match.provider === "q2:lmctf" ? "lmctf" : recipe.match.provider === "q2:tag" ? "tag" : recipe.match.provider === "q2:deathball" ? "deathball" : recipe.match.provider.endsWith(":horde") ? "horde" : "standard" };
+    rules: recipe.match.provider === "q1:ctf" || recipe.match.provider === "q2:ctf" || recipe.match.provider === "q3:ctf" ? "ctf" : recipe.match.provider === "q2:lmctf" ? "lmctf" : recipe.match.provider === "q2:tag" ? "tag" : recipe.match.provider === "q2:deathball" ? "deathball" : recipe.match.provider.endsWith(":horde") ? "horde" : "standard" };
 }
 
 export async function resolveApplicationTravel(content: LoadedApplicationContent, path: string): Promise<ExecutableRecipe> {

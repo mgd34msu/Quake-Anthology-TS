@@ -706,6 +706,8 @@ export class StartupSelectionModel {
       row("mode", "Game mode", [choice("singleplayer", "Single player"), choice("coop", "Cooperative"), choice("deathmatch", "Deathmatch")]),
       row("rules", "Match rules", [choice("standard", "Standard"), ...(["tag", "deathball", "horde"] satisfies readonly MatchRules[]).map(rule => choice(rule, rule === "tag" ? "Tag" : rule === "deathball" ? "DeathBall" : "Horde", matchModeUnavailable({ ...sourceProgramProduct(this.catalog, this.product("product").id).expectation, mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer", rules: rule }))), ...["ctf", "lmctf"].map(rule => choice(rule, rule === "ctf" ? "Capture the Flag" : "Loki's Minions CTF",
         rule === "ctf" && this.product("product").expectation.family === "q3" ? (this.values.mode !== "deathmatch" ? "Requires deathmatch mode" : null)
+        : rule === "ctf" && this.product("product").expectation.family === "q1" ? (this.product("product").expectation.edition === "quakeworld" ? "Requires a classic or rerelease Quake campaign"
+          : this.values.mode !== "deathmatch" ? "Requires deathmatch mode" : unavailable(this.catalog.product(`q1-${this.product("product").expectation.edition === "rerelease" ? "rerelease" : "classic"}-ctf`)))
         : this.product("product").expectation.family !== "q2" ? "Requires a Quake II campaign"
           : this.values.mode !== "deathmatch" ? "Requires deathmatch mode" : unavailable(this.catalog.product(`q2-${this.product("product").expectation.edition === "rerelease" ? "rerelease" : "classic"}-${rule}`))))]),
       row("skill", "Difficulty", [choice("0", "Easy"), choice("1", "Normal"), choice("2", "Hard"), choice("3", "Nightmare")]),

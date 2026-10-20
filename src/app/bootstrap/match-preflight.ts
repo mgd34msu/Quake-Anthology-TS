@@ -24,8 +24,8 @@ export function preflightApplicationMatch(content: Pick<LoadedApplicationContent
     return;
   }
   const provider = content.recipe.match.provider;
-  const rules: MatchRules = provider === "q2:ctf" ? "ctf" : provider === "q2:lmctf" ? "lmctf" : provider === "q2:tag" ? "tag"
-    : provider === "q2:deathball" ? "deathball" : provider === "q1:horde" ? "horde" : "standard";
+  const rules: MatchRules = provider === "q1:ctf" || provider === "q2:ctf" ? "ctf" : provider === "q2:lmctf" ? "lmctf" : provider === "q2:tag" ? "tag"
+    : provider === "q2:deathball" ? "deathball" : provider.endsWith(":horde") ? "horde" : "standard";
   const reason = matchMapUnavailable({ ...source, mode: options.mode, rules },
     parseQ1Entities(content.world.entities).map(entity => q1EntityValue(entity, "classname") ?? ""));
   if (reason !== null) throw new Error(reason);
