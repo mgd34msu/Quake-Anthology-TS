@@ -12,7 +12,7 @@ type TextureEnvironment = TextureBundle["environment"];
 export type ImageInternalFormat = "rgb8" | "rgba8";
 import type { LineTextureDerivative } from "./lines.ts";
 import type { CpuTriangleLighting } from "./lighting.ts";
-import { interpolateWorld, shadeQ2Fragment } from "./lighting.ts";
+import { interpolateWorldInto, shadeQ2Fragment } from "./lighting.ts";
 
 export interface Sample {
   r: number;
@@ -538,6 +538,11 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
     && secondaryTexture.kind === "image" && secondaryTexture.mipmapping === "nearest"
     ? { texture: secondaryTexture, selected: 0, lowerSquared: Infinity, upperSquared: -Infinity } : null;
   let didSample = false;
+  // Per-fragment scratch: shadeQ2Fragment reads fields synchronously and
+  // retains nothing, so these replace four allocations per fragment.
+  const fragmentPosition = { x: 0, y: 0, z: 0 }, fragmentNormal = { x: 0, y: 0, z: 0 };
+  const fragmentVertexColor = { x: 0, y: 0, z: 0, w: 0 };
+  const fragmentTexel: Sample = { r: 1, g: 1, b: 1, a: 1 };
   for (let y = Math.max(minY, firstY); y <= Math.min(maxY, lastY); y++) {
     const sampleY = y + 0.5, rowA = edgeAY * sampleY, rowB = edgeBY * sampleY, rowC = edgeCY * sampleY;
     const attributeRowA = attributeAY * sampleY, attributeRowB = attributeBY * sampleY, attributeRowC = attributeCY * sampleY;
@@ -572,7 +577,8 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
         blue = clamp((ab * wa + bb * wb + cb * wc) * reciprocal);
         alpha = clamp((aa * wa + ba * wb + ca * wc) * reciprocal);
       }
-      const vertexColor = { x: r, y: g, z: blue, w: alpha };
+      fragmentVertexColor.x = r; fragmentVertexColor.y = g; fragmentVertexColor.z = blue; fragmentVertexColor.w = alpha;
+      const vertexColor = fragmentVertexColor;
       let texelR = 1, texelG = 1, texelB = 1, texelA = 1;
       if (textureConsumed && texture.kind !== "incomplete") {
         const u = (au * wa + bu * wb + cu * wc) * reciprocal;
@@ -593,9 +599,10 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
       }
       if (textureConsumed && setup.lighting.parameters.kind !== "vertex") {
         const lighting = setup.lighting, weightsA = aiw * wa * reciprocal, weightsB = biw * wb * reciprocal, weightsC = ciw * wc * reciprocal;
-        const position = interpolateWorld(lighting.positions[0], lighting.positions[1], lighting.positions[2], weightsA, weightsB, weightsC);
-        const normal = interpolateWorld(lighting.normals[0], lighting.normals[1], lighting.normals[2], weightsA, weightsB, weightsC);
-        const result = shadeQ2Fragment(lighting, position, normal, vertexColor, { r: texelR, g: texelG, b: texelB, a: texelA });
+        interpolateWorldInto(fragmentPosition, lighting.positions[0], lighting.positions[1], lighting.positions[2], weightsA, weightsB, weightsC);
+        interpolateWorldInto(fragmentNormal, lighting.normals[0], lighting.normals[1], lighting.normals[2], weightsA, weightsB, weightsC);
+        fragmentTexel.r = texelR; fragmentTexel.g = texelG; fragmentTexel.b = texelB; fragmentTexel.a = texelA;
+        const result = shadeQ2Fragment(lighting, fragmentPosition, fragmentNormal, vertexColor, fragmentTexel);
         r = result.r; g = result.g; blue = result.b; alpha = result.a;
       }
       if (textureConsumed && secondaryEnvironment !== null && secondaryTexture.kind !== "incomplete") {

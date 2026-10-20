@@ -137,3 +137,10 @@ export function shadeQ2Fragment(lighting: CpuLighting, position: Vec3, normal: V
 export function interpolateWorld(a: Vec3, b: Vec3, c: Vec3, wa: number, wb: number, wc: number): Vec3 {
   return { x: a.x * wa + b.x * wb + c.x * wc, y: a.y * wa + b.y * wb + c.y * wc, z: a.z * wa + b.z * wb + c.z * wc };
 }
+
+/** Allocation-free form for the per-fragment kernel; identical arithmetic. */
+export function interpolateWorldInto(out: { x: number; y: number; z: number }, a: Vec3, b: Vec3, c: Vec3, wa: number, wb: number, wc: number): void {
+  out.x = a.x * wa + b.x * wb + c.x * wc;
+  out.y = a.y * wa + b.y * wb + c.y * wc;
+  out.z = a.z * wa + b.z * wb + c.z * wc;
+}
