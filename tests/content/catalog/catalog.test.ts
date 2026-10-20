@@ -184,7 +184,8 @@ describe("installed content catalog", () => {
     expect(() => validate(valid)).not.toThrow();
     // DeathBall, LMCTF, and Tag run on any world through the runtime match
     // layers, so none of them is family-bound.
-    for (const provider of ["q2:deathball", "q2:lmctf", "q2:tag"]) {
+    const foreignProviders: readonly `${string}:${string}`[] = ["q2:deathball", "q2:lmctf", "q2:tag"];
+    for (const provider of foreignProviders) {
       const foreign = selectLaunch({ ...presetChoice(native.id), match: { kind: "selected", value: { provider, content: native.map.entities.content } } }, native);
       expect(() => validate(foreign)).not.toThrow();
     }

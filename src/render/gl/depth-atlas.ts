@@ -19,6 +19,11 @@ export class DepthAtlasTarget {
   private readonly name: number;
   private readonly positions = new Float32Array(65536 * 4);
   private readonly indices = new Uint32Array(196608);
+  /** The scene retains static world draws by identity across rebuilds, so
+   * their float32 packing is paid once instead of on every shadow update.
+   * One-off caster draws (fresh objects each frame) never reach the cache. */
+  private readonly packedPositions = new WeakMap<DepthAtlasDraw, Float32Array>();
+  private readonly seenDraws = new WeakSet<DepthAtlasDraw>();
   private readonly primitiveRestart: boolean;
   private readonly textureCoordinates: number;
 
@@ -126,7 +131,10 @@ export class DepthAtlasTarget {
           if (drawVertices <= vertexCapacity && draw.indices.length <= indexCapacity) {
             if (vertexCount + drawVertices > vertexCapacity || indexCount + draw.indices.length > indexCapacity) flush();
             const base = vertexCount;
-            positions.set(draw.positions, base * 4);
+            let packed = this.packedPositions.get(draw);
+            if (packed === undefined && this.seenDraws.has(draw)) { packed = new Float32Array(draw.positions); this.packedPositions.set(draw, packed); }
+            if (packed === undefined) { this.seenDraws.add(draw); positions.set(draw.positions, base * 4); }
+            else positions.set(packed, base * 4);
             vertexCount += drawVertices;
             const drawIndices = draw.indices;
             for (let index = 0; index < drawIndices.length; index++) indices[indexCount++] = base + (drawIndices[index] ?? 0);
