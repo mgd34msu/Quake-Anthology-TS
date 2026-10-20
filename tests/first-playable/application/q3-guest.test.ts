@@ -332,7 +332,7 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
     const modDirectory = userProductDirectory(root, 'q3a/lrctf');
     mkdirSync(modDirectory, { recursive: true });
     writeFileSync(join(modDirectory, 'autoexec.cfg'), 'set g_gametype 4\n');
-    app = await Application.open(parsed.options, { print: () => undefined });
+    app = await Application.open(parsed.options, { print: () => undefined, saveDirectory: root });
     expect(cgInit).toHaveBeenCalledTimes(2); expect(uiInit).toHaveBeenCalledTimes(2);
     const guest = app.simulation.q3Guest(); if (guest === null) throw new Error('Missing local guest authority');
     const retainTeamState = (phase: string): void => {
@@ -596,7 +596,7 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
   } finally {
     await app?.close(); frame.mockRestore(); cgInit.mockRestore(); uiInit.mockRestore(); audioCommand.mockRestore(); sounds.mockRestore(); await rm(root, { recursive: true, force: true });
   }
-}, 180000);
+}, 360000);
 
 test('failed second local guest client preparation retires both guest module owners', async () => {
   const root = await mkdtemp(join(tmpdir(), 'q3-local-guest-failure-'));

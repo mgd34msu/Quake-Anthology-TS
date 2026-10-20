@@ -74,7 +74,7 @@ test("actual QVM candidate initialization isolates input and shared settings the
   });
   let app: Application | null = null;
   try {
-    app = await Application.open(parsed.options, { print: () => undefined });
+    app = await Application.open(parsed.options, { print: () => undefined, saveDirectory: root });
     await app.step(50);
     const previous = inputs[0], local = previous?.locals[0];
     if (previous === undefined || local === undefined || previous.sharedCvars === null) throw new Error("Missing graphical input owner");

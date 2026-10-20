@@ -2428,7 +2428,9 @@ export class Application {
     const userinfo = guest.state.getUserinfo(player.sourceEntity);
     if (userinfo === undefined) throw new Error("Restored guest is missing local userinfo");
     const cvars = this.createClientCvars(simulation, content, options, seat, userinfo, previous, archive);
-    this.prepareLocalGuestSeat(world, simulation, seat, cvars, userinfo,
+    // Baseline against the locally built string (as initial admission does), not the
+    // gamecode-normalized guest copy, or the first frame sync spuriously resends userinfo.
+    this.prepareLocalGuestSeat(world, simulation, seat, cvars, `${cvars.infoString(CvarFlag.UserInfo)}\\ip\\localhost`,
       world.authority.gameState(player, guest.state.cvars.variableValue("sv_serverid")));
     const command = guest.state.getUserCommand(player.sourceEntity);
     if (command !== undefined) world.seats.get(seat.id)?.state.commands.append(command);
@@ -2886,7 +2888,7 @@ export class Application {
           if (local !== undefined && nextLocalGuest !== null) {
             const seat = local.player.seat, userinfo = restoredGuest.state.getUserinfo(carried.client.slot) ?? carried.userinfo;
             const cvars = this.createClientCvars(nextSimulation, content, options, seat, userinfo, previousClientCvars.get(seat.id));
-            this.prepareLocalGuestSeat(nextLocalGuest, nextSimulation, seat, cvars, userinfo, authority.gameState(admission.player, serverId));
+            this.prepareLocalGuestSeat(nextLocalGuest, nextSimulation, seat, cvars, `${cvars.infoString(CvarFlag.UserInfo)}\\ip\\localhost`, authority.gameState(admission.player, serverId));
             nextClientCvars.set(seat.id, cvars);
           }
           if (this.network === null) await restoredGuest.begin(admission.player, carriedGuestCommands.get(carried.client.slot)

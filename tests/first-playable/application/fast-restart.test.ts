@@ -340,7 +340,7 @@ test("native Q3 initial and restored input uses accepted raw angles, including c
   const selection = new StartupSelectionModel(catalog, parsed.options); await selection.prepareMaps();
   const launch = await selection.resolvePreset("q3-missionpack", 2);
   expect(launch.options.map).toBe("maps/mpteam1.bsp");
-  const app = await Application.open(launch.options, { print: () => undefined }, launch.recipe);
+  const app = await Application.open(launch.options, { print: () => undefined, saveDirectory: root }, launch.recipe);
   try {
     const local = app.localPlayers[0];
     if (local === undefined || !(local.seat.presentation instanceof WorldSeatPresentation)) throw new Error("Missing initial Q3 input");

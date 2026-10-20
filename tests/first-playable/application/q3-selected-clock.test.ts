@@ -5,7 +5,7 @@ import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 
 for (const product of ["q2-rerelease-baseq2", "q2-classic-baseq2"]) test(`${product} menu Play samples fractional elapsed into the selected Q3 presentation clock`, async () => {
-  const root = await mkdtemp("/tmp/quake-q3-clock-"), prints: string[] = [];
+  const root = await mkdtemp("/tmp/quake-q3-sel-"), prints: string[] = [];
   const samples: { elapsed: number; clock: number | null; viewClock: number | null; lastFire: number | null }[] = [];
   let attempts = 0, runs = 0;
   const step = Application.prototype.step, run = Application.prototype.run;
@@ -36,11 +36,11 @@ for (const product of ["q2-rerelease-baseq2", "q2-classic-baseq2"]) test(`${prod
     menu.select("product", product); menu.select("map", "maps/base1.bsp"); menu.select("movement", "q1-quakeworld");
     menu.select("character", "q1-rerelease-id1"); menu.select("model", "player"); menu.select("weapons", "q3-baseq3");
     menu.select("enemies", product === "q2-rerelease-baseq2" ? "q1:monsters/rerelease/id1" : "q1:monsters/classic/id1");
-    menu.select("grapple", "q2-classic-lmctf/offhand"); menu.select("grenades", "q2-classic-baseq2");
+    menu.select("grapple", "offhand"); menu.select("grappleStyle", "q2-lmctf"); menu.select("grenades", "enabled");
     const seat = startup.inputSeat;
     if (seat === null) throw new Error("Missing startup input seat");
-    for (const y of [130, 334]) {
-      startup.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x: 100, y }, delta: { x: 0, y: 0 } });
+    for (const [x, y] of [[100, 130], [100, 232], [452, 429]]) {
+      startup.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x, y }, delta: { x: 0, y: 0 } });
       startup.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });
       startup.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
     }
