@@ -954,7 +954,8 @@ export class SharedSimulation implements Simulation {
     const source = this.source;
     if (source.kind === "quakec" && source.game.kind === "netquake") return {
       read: () => source.game.clientPunchAngles(actor), write: angles => source.game.setClientPunchAngles(actor, angles) };
-    const player = (source.kind === "q1" ? source.game.player(actor) : null) ?? this.q1WeaponSource()?.game.player(actor);
+    // Recoil is owned by the weapon source; a selected Q1 arsenal wins over the map game.
+    const player = this.q1WeaponSource()?.game.player(actor) ?? (source.kind === "q1" ? source.game.player(actor) : null);
     return player == null ? null : { read: () => player.punchAngles, write: angles => { player.punchAngles = angles; } };
   }
   private emitQ1Addon(content: ContentId, event: Q1AddonEvent, time: SourceTime): undefined {

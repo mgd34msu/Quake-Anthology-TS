@@ -81,7 +81,10 @@ export class Q1EntityServices {
   readonly monsterMissions = new Map<ActorId, MonsterMission>();
   authoredPathFollower: ((mover: ActorId) => { readonly targetname: string; readonly enemy: ActorId | null; advance(name: string, goal: ActorId | null, pauseUntil: number): undefined } | null) | null = null;
   readonly players = new Map<OwnedActor, Q1PlayerState>();
-  time = 0;
+  #time = 0;
+  /** QC time is a float; deadlines stored fround'ed must compare against fround'ed time. */
+  get time(): number { return this.#time; }
+  set time(value: number) { this.#time = Math.fround(value); }
   frameSeconds = 0;
   forceRetouch = 0;
   basis: Q1Basis = { forward: ZERO, right: ZERO, up: ZERO };

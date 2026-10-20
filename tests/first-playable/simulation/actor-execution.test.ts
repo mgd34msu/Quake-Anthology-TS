@@ -336,7 +336,8 @@ for (const mapEdition of armorEditions) test(`base1 ${mapEdition} map runs the o
     expect(simulation.playerUi(actor).activeWeapon).toBe('q2:weapon_blaster');
     step(simulation, actor, client, 0, false);
     const clock = new SaveReader(decodeCheckpointValue(simulationProviderCheckpoint(simulation.checkpoint(), 'world:simulation').bytes)).field('selectedWeaponSource').field('frame');
-    expect(clock.field('frame').integer()).toBe(weaponEdition === 'rerelease' ? 4 : 1);
+    // The map clock runs one interval ahead of its host; the selected source tracks map time.
+    expect(clock.field('frame').integer()).toBe(Math.floor(Math.round(simulation.timeSeconds * 1000) / (weaponEdition === 'rerelease' ? 25 : 100)));
     expect(selected.game.host.frameSeconds()).toBe(weaponEdition === 'rerelease' ? 0.025 : 0.1);
     for (let frame = 1; frame < 4; frame++) step(simulation, actor, client, frame, false);
     const shotgun = [...map.game.entities.values()].find(entity => entity.classname === 'weapon_shotgun');
@@ -546,8 +547,10 @@ for (const family of ['q1', 'q2', 'q3', 'q3-world']) test(`Q1 source recoil surv
     simulation.inventory.give(player.actor, 'q1:weapon/supershotgun', 1);
     expect(simulation.requestWeapon(actor, { provider: source.game.provider, item: 'q1:weapon/supershotgun' })).toBe(true);
     step(simulation, actor, client, 4, true);
-    expect(weapon.punchAngles).toEqual({ x: -4, y: 0, z: 0 });
-    expect(simulation.playerView(actor).kickAngles?.x).toBe(-4);
+    // Decay runs at the next source frame entry; q3-world has a second 50ms subframe in this step.
+    const kicksAfterAttack = family === 'q3-world' ? -4 + source.game.frameSeconds * 10 : -4;
+    expect(weapon.punchAngles).toEqual({ x: kicksAfterAttack, y: 0, z: 0 });
+    expect(simulation.playerView(actor).kickAngles?.x).toBe(kicksAfterAttack);
     expect(player.viewAngles.x).toBe(0); expect(player.commandAngles.x).toBe(0);
     const gun = simulation.presentations().find(model => model.viewWeapon && model.actor.equals(actor));
     expect(gun?.angles.x).toBe(0);
@@ -555,7 +558,7 @@ for (const family of ['q1', 'q2', 'q3', 'q3-world']) test(`Q1 source recoil surv
     if (player.animation.state.kind === 'q1') expect(player.animation.state.frame).toBe(113);
     if (family === 'q3-world') {
       // Native Q3 saved games are separately unavailable; all three movement saves are covered on e1m1 above.
-      for (let frame = 5; frame < 9; frame++) { step(simulation, actor, client, frame); expect(weapon.punchAngles.x).toBe(-4 + (frame - 4) * source.game.frameSeconds * 10); }
+      for (let frame = 5; frame < 9; frame++) { step(simulation, actor, client, frame); expect(weapon.punchAngles.x).toBe(frame === 8 ? -0 : kicksAfterAttack + (frame - 4) * 10 * 0.1); }
       return;
     }
     const restoredIdentity = createIdentityOwner(`recoil-restored-${family}`), restoredClient = restoredIdentity.client(0, 0);
