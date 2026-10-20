@@ -137,7 +137,14 @@ void main() {
 const alphaModes: Record<RenderState["alphaTest"], number> = { none: 0, gt0: 1, lt128: 2, ge128: 3 };
 const secondaryModes: Record<TextureBundle["environment"], number> = { modulate: 1, add: 2, replace: 3 };
 function finiteUniforms(values: readonly number[]): void {
-  if (!values.every(value => Number.isFinite(Math.fround(value)))) throw new RangeError("OpenGL lighting uniforms must be finite float32 values");
+  // A value rounds to a finite float32 exactly when its magnitude stays
+  // under the float32 overflow midpoint; NaN poisons the running maximum.
+  let worst = 0;
+  for (let index = 0; index < values.length; index++) {
+    const magnitude = Math.abs(values[index] ?? 0);
+    if (worst === worst && !(magnitude <= worst)) worst = magnitude;
+  }
+  if (!(worst < 3.4028235677973366e38)) throw new RangeError("OpenGL lighting uniforms must be finite float32 values");
 }
 
 export function compileProgram(library: ReturnType<typeof loadGlPrograms>, vertex: string, fragment: string): number {
@@ -287,7 +294,9 @@ void main() { gl_FragColor = vec4(1.0); }
       finiteUniforms([scale]);
       this.scalar((this.locations.u_shade_scale ??= this.uniform("u_shade_scale")), scale);
     }
-    for (const [index, light] of lighting.lights.entries()) {
+    for (let index = 0; index < lighting.lights.length; index++) {
+      const light = lighting.lights[index];
+      if (light === undefined) continue;
       const locations = this.lightLocations[index] ??= {};
       finiteUniforms([light.origin.x, light.origin.y, light.origin.z, light.radius]);
       if (light.radius <= 0) throw new RangeError("Q2 fragment light radius must be positive");
