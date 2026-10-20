@@ -299,9 +299,9 @@ export async function discoverAddonDirectories(roots: readonly NightdiveAddonRoo
  * exact-tree copies are resolved before this fallback layer is consulted.
  */
 async function discoverSiblingDirectories(roots: readonly { readonly gameRoots: GameRoots }[]): Promise<ReadonlyMap<string, AddonDirectory>> {
-  const found = new Map<string, AddonDirectory>();
+  const found = new Map<string, AddonDirectory>(), families: readonly GameFamily[] = ["q1", "q2"];
   for (const { gameRoots } of roots) {
-    for (const family of ["q1", "q2"] as const) {
+    for (const family of families) {
       const gameRoot = gameRoots.get(family) ?? null;
       if (gameRoot === null) continue;
       const canonical = gameFamilyDirectory(family);

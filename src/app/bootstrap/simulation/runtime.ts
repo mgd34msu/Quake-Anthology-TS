@@ -958,8 +958,9 @@ export class SharedSimulation implements Simulation {
     // player record; the unified punch mirrors into every live record.
     const players = [...new Set([source.kind === "q1" ? source.game.player(actor) : null,
       this.q1WeaponSource()?.game.player(actor) ?? null].filter(player => player !== null))];
-    return players.length === 0 ? null : {
-      read: () => players[0]!.punchAngles,
+    const lead = players[0];
+    return lead === undefined ? null : {
+      read: () => lead.punchAngles,
       write: angles => { for (const player of players) player.punchAngles = angles; },
     };
   }

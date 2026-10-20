@@ -91,7 +91,7 @@ retail("Q3 map bots pursue mapped Q2 supplies and fire the actual selected arsen
     world.combat.setHealth(target.actor, 100);
     // The roam may have looted stronger Q2 weapons; drain every other ammo
     // type so the authored shotgun is the arsenal's only stocked choice.
-    for (const ammo of ["q2:ammo_bullets", "q2:ammo_rockets", "q2:ammo_cells", "q2:ammo_grenades", "q2:ammo_slugs", "q2:ammo_flechettes", "q2:ammo_disruptor"] as const)
+    for (const ammo of ["q2:ammo_bullets", "q2:ammo_rockets", "q2:ammo_cells", "q2:ammo_grenades", "q2:ammo_slugs", "q2:ammo_flechettes", "q2:ammo_disruptor"] satisfies readonly import("../../../src/contracts/gameplay.ts").ItemId[])
       world.inventory.consume(bot.actor, ammo, world.inventory.count(bot.actor.id, ammo));
     let shotgunHit = false;
     const hitsBefore = native.client.ps.persistant.get(PersistentIndex.PERS_HITS);
@@ -629,7 +629,7 @@ retail("Q2 map bots collect mapped Q3 weapons and fire through the selected arse
     source.players.teleportPlayer(nativeHuman, source.game, { x: 800, y: -96, z: start.z }, { x: 0, y: 0, z: 0 });
     world.combat.setHealth(nativeHuman.actor, 100);
     // Empty every other ammunition type so this encounter tests the shotgun.
-    for (const ammo of ["q3:ammo/machinegun", "q3:ammo/rocketlauncher", "q3:ammo/lightning", "q3:ammo/railgun", "q3:ammo/plasmagun", "q3:ammo/grenadelauncher", "q3:ammo/bfg"] as const)
+    for (const ammo of ["q3:ammo/machinegun", "q3:ammo/rocketlauncher", "q3:ammo/lightning", "q3:ammo/railgun", "q3:ammo/plasmagun", "q3:ammo/grenadelauncher", "q3:ammo/bfg"] satisfies readonly import("../../../src/contracts/gameplay.ts").ItemId[])
       world.inventory.consume(bot.actor, ammo, world.inventory.count(bot.actor.id, ammo));
     const shells = world.inventory.count(bot.actor.id, "q3:ammo/shotgun");
     let shotgunHit = false;

@@ -539,7 +539,8 @@ export class Q3QvmServerGame {
   }
   private async drainBotCommands(): Promise<void> {
     while (this.pendingBotCommands.length !== 0) {
-      const { slot, argv } = this.pendingBotCommands.shift()!;
+      const pending = this.pendingBotCommands.shift(); if (pending === undefined) break;
+      const { slot, argv } = pending;
       if (!this.botClients.has(slot)) continue;
       await this.game.clientCommandAsync(slot, argv); this.current();
     }

@@ -409,7 +409,8 @@ for (const [game, map] of [["q1-classic-id1", "e1m1"], ["q2-classic-baseq2", "ba
     const markBatch = markDraw.batches[0]; if (markBatch === undefined) throw new Error("Missing mark batch");
     const markAt = worldBatches.findIndex(batch => batch.texture === markBatch.texture
       || batch.texture.kind === "bind-image" && markBatch.texture.kind === "bind-image" && batch.texture.image === markBatch.texture.image);
-    const explosionAt = worldBatches.indexOf(explosionDraw.batches[0]!);
+    const explosionBatch = explosionDraw.batches[0]; if (explosionBatch === undefined) throw new Error("Missing explosion batch");
+    const explosionAt = worldBatches.indexOf(explosionBatch);
     expect(markAt).toBeGreaterThanOrEqual(0);
     expect(explosionAt).toBeGreaterThan(markAt);
   } finally { effects.close(); assets.close(); await content.close(); }

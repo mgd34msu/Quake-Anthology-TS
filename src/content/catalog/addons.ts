@@ -140,7 +140,7 @@ export function parseNightdiveAddons(value: unknown): readonly NightdiveAddon[] 
 }
 
 export async function readNightdiveAddons(root: string): Promise<readonly NightdiveAddon[]> {
-  try { return parseNightdiveAddons(JSON.parse(await readFile(join(root, "addons.json"), "utf8")) as unknown); }
+  try { const parsed: unknown = JSON.parse(await readFile(join(root, "addons.json"), "utf8")); return parseNightdiveAddons(parsed); }
   catch { return []; }
 }
 

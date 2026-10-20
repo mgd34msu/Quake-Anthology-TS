@@ -19,9 +19,10 @@ function lengthString(value: string): Uint8Array {
 }
 
 function kexServerSave(comment: string, map: string, gamename: string): Uint8Array {
+  const stamp = new Uint8Array(8);
   const parts = [new TextEncoder().encode("EVAS"), new Uint8Array([1]), lengthString(comment),
-    new Uint8Array(8), lengthString(map), lengthString("gamename"), lengthString(gamename), lengthString("")];
-  new DataView(parts[3]!.buffer).setUint32(0, 1717012859, true);
+    stamp, lengthString(map), lengthString("gamename"), lengthString(gamename), lengthString("")];
+  new DataView(stamp.buffer).setUint32(0, 1717012859, true);
   const total = parts.reduce((sum, part) => sum + part.length, 0), result = new Uint8Array(total);
   let offset = 0;
   for (const part of parts) { result.set(part, offset); offset += part.length; }

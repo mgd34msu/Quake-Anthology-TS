@@ -133,7 +133,7 @@ describe("anchor content discovery", () => {
         ["games/Quake/Id1/PAK0.PAK", pakWith(["progs.dat"])],
         ["games/Quake/Id1/PAK1.PAK", pakWith(["progs.dat"])],
         ["games/Quake/rerelease/id1/pak0.pak", pakWith(["progs.dat"])],
-      ] as const) {
+      ] satisfies readonly (readonly [string, Uint8Array])[]) {
         await mkdir(join(root, path, ".."), { recursive: true });
         await writeFile(join(root, path), bytes);
       }
@@ -170,7 +170,7 @@ describe("anchor content discovery", () => {
         ["Quake/Id1/PAK1.PAK", pakWith(["progs.dat"])],
         ["Quake/rerelease/id1/pak0.pak", pakWith(["progs.dat"])],
         ["Quake/q64/pak0.pak", pakWith(["progs.dat", "maps/start.bsp"])],
-      ] as const) {
+      ] satisfies readonly (readonly [string, Uint8Array])[]) {
         await mkdir(join(root, path, ".."), { recursive: true });
         await writeFile(join(root, path), bytes);
       }
