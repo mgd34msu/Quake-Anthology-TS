@@ -75,6 +75,7 @@ for (const backend of ["cpu", "gl"]) test(`local ${backend} model controls retai
     const view = simulation.playerView(first.actor), forward = anglesToAxis(view.angles)[0];
     source.game.move(player2, { origin: add3(view.origin, scale3(forward, -240)) });
     source.game.move(soldier, { origin: add3(view.origin, scale3(forward, 64)), angles: { x: 0, y: view.angles.y + 180, z: 0 } });
+    await application.step(100); // settle presentation interpolation at the posed origins
     await capture("distance");
     expect([...actorTextures.get(first.seat.id.index + ":" + soldier.actor.id.slot) ?? []].some(path => path.includes("soldier/md5/"))).toBe(true);
     expect([...actorTextures.get(second.seat.id.index + ":" + soldier.actor.id.slot) ?? []].some(path => path.includes("soldier/skin"))).toBe(true);
@@ -138,16 +139,16 @@ for (const backend of ["cpu", "gl"]) test(`local ${backend} Q1 model menu accept
     await capture("enhanced"); expect(native.replacement?.model.kind).toBe("md5");
     expect([...gunImages].some(name => name.includes("v_shot") && name.endsWith(".lmp"))).toBe(true);
     await command("r_model_distance 1"); await capture("distance-original"); expect(gunImages.has("indexed-native")).toBe(true);
-    key(27); await application.step(1); await activate("ui:application:settings"); await activate("ui:settings:category:video"); await click(10, 450);
-    expect(presentation.ui.controller.activeMenu).toBe("menu:settings:video:1");
+    key(27); await application.step(1); await activate("ui:application:settings"); await activate("ui:settings:category:video");
+    expect(presentation.ui.controller.activeMenu).toBe("menu:settings:video:0");
     focus("ui:settings:r_model_distance"); key(KeyCode.End); key(KeyCode.Backspace);
     for (const character of "source") { text(character); await application.step(1); expect(assets.modelPolicy.distance).toBe(1); }
     key(13); await application.step(1); expect(assets.modelPolicy.distance).toBe("source");
     await capture("page2");
     key(KeyCode.End); for (let i = 0; i < 6; i++) key(KeyCode.Backspace); text("12"); await application.step(1);
     key(27); await application.step(1); expect(assets.modelPolicy.distance).toBe("source");
-    await activate("ui:settings:category:video"); await click(10, 450); await capture("cancelled");
-    await click(10, 150); await activate("ui:settings:r_enhancedmodels"); expect(assets.modelPolicy.q1Enhanced).toBe(false); expect(native.replacement).toBeNull();
+    await activate("ui:settings:category:video"); await capture("cancelled");
+    await activate("ui:settings:r_enhancedmodels"); expect(assets.modelPolicy.q1Enhanced).toBe(false); expect(native.replacement).toBeNull();
     await capture("page1");
     await activate("ui:settings:r_enhancedmodels"); expect(native.replacement?.model.kind).toBe("md5");
     await click(11); await click(11); await click(1); await capture("restored");
