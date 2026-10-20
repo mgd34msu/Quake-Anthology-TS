@@ -169,6 +169,7 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
                 if (kind === 'package') { const archive = await openArchive(staged, path.toLowerCase().endsWith('.pak') ? 'pak' : 'zip'); await archive.close(); }
             } });
         if (result.kind === 'failed') throw result.reason;
+        this.content().mounts.invalidateListings();
         if (result.kind === 'fallback') this.print(`HTTP unavailable: ${path}; ${kind === 'asset' ? 'using native download' : 'continuing with individual files'}\n`);
     }
     private async httpInitial(state: Q2ApplicationGameState): Promise<void> {
@@ -283,9 +284,9 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
         const sky = state.configStrings.get(2);
         if (sky) for (const suffix of SKY_FACE_SUFFIXES) {
             const tga = `env/${sky}${suffix}.tga`, pcx = `env/${sky}${suffix}.pcx`;
-            if (await content.mounts.resolve(tga) === null && await content.mounts.resolve(pcx) === null) {
+            if (!await content.mounts.exists(tga) && !await content.mounts.exists(pcx)) {
                 yield tga;
-                if (await content.mounts.resolve(tga) === null) yield pcx;
+                if (!await content.mounts.exists(tga)) yield pcx;
             }
         }
         for (const texture of readQ2Bsp(world.bytes, map).textureInfo) yield `textures/${texture.name}.wal`;
@@ -296,7 +297,7 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
         const selected = remoteContentSelection('q2-classic-baseq2', state.data.gamedir), owner = this.content();
         if (owner.selection.base !== selected.base || owner.selection.directory !== selected.directory)
             throw new Error('Q2 server game differs from prepared content');
-        if (this.state !== state) { this.close(); this.state = state; if (this.server !== null && this.permission({ transport: 'http', category: 'metadata' })) this.start(this.httpInitial(state)); }
+        if (this.state !== state) { this.close(); this.state = state; owner.mounts.invalidateListings(); if (this.server !== null && this.permission({ transport: 'http', category: 'metadata' })) this.start(this.httpInitial(state)); }
         if (this.httpTask !== null) return 'waiting';
         if (this.httpError !== null) throw this.httpError;
         if (this.paths === null) this.paths = this.resources(state, this.content());
@@ -311,9 +312,9 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
                 if (next.done) return 'ready';
                 const path = next.value;
                 this.validate(path);
-                const installed = await content.mounts.resolve(path);
+                const installed = await content.mounts.exists(path);
                 if (generation !== this.generation) return 'canceled';
-                if (installed !== null || this.refused.has(path)) continue;
+                if (installed || this.refused.has(path)) continue;
                 if (this.http !== null && !this.attempted.has(path) && this.permission({ transport: 'http', category: clientDownloadCategory(path) })) {
                     this.retryPath = path; this.start(this.httpAsset(path)); return 'waiting';
                 }
@@ -350,6 +351,7 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
             // Native zero-length files end with size=0, percent=0.
             if (block.percent === 100 || block.bytes.length === 0 && pending.sink.byteLength === 0) {
                 pending.sink.finish(); this.pending = null;
+                this.content().mounts.invalidateListings();
                 return 'complete';
             }
             if (block.bytes.length === 0) throw new Error('Q2 download made no progress');

@@ -213,15 +213,15 @@ for (const mode of ['native', 'http', 'http-off']) { const httpEnabled = mode ==
         expect((await readdir(join(root, 'sound'))).filter(name => name.startsWith('.download-'))).toHaveLength(0);
         expect(await Bun.file(join(root, 'sound/cancel.wav')).exists()).toBe(false);
         const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-        const resolve = mounts.resolve.bind(mounts);
-        mounts.resolve = async path => { if (path === 'sound/late.wav') { entered.resolve(); await release.promise; } return resolve(path); };
+        const exists = mounts.exists.bind(mounts);
+        mounts.exists = async path => { if (path === 'sound/late.wav') { entered.resolve(); await release.promise; } return exists(path); };
         const late = remote.downloads.prepare(nextState('late.wav'));
         await entered.promise; remote.downloads.close(); release.resolve();
         expect(await late).toBe('canceled');
         expect((await readdir(join(root, 'sound'))).filter(name => name.startsWith('.download-'))).toHaveLength(0);
         expect(await Bun.file(join(root, 'sound/late.wav')).exists()).toBe(false);
         const unsafe = { ...state, configStrings: new Map([[31, String(blockChecksum(map))], [33, mapName], [34, '../escape.md2']]) };
-        await expect(remote.downloads.prepare(unsafe)).rejects.toThrow('contained relative path');
+        await expect(remote.downloads.prepare(unsafe)).rejects.toThrow('relative and stay inside its storage directory');
         remote.downloads.close();
         const checksumEntered = Promise.withResolvers<void>(), checksumRelease = Promise.withResolvers<void>();
         const read = mounts.read.bind(mounts), playerBeforeCancel = remote.player, sceneBeforeCancel = remote.scene;
@@ -376,7 +376,7 @@ test('RemoteApplication selects stock and unknown Q2 directories before precache
         let now = 0;
         for (const next of ['ctf', '+Arena', 'baseq2']) {
             directory = next;
-            const previous = app.content;
+            const previous = next === 'ctf' ? null : app.content;
             if (next !== 'ctf') { await server.poll(now); server.changeWorld(host); }
             for (let tick = 0; tick < 1000; tick++) {
                 now += 50; await server.poll(now); await Bun.sleep(1); await app.step(50); await Bun.sleep(1);

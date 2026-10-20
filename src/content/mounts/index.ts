@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { defaultUserContentRoot } from "../user-data.ts";
 import { createContentDigest, createResourceId } from "../../contracts/content.ts";
@@ -14,6 +15,12 @@ export { findContentPath, normalizeResourcePath } from "./paths.ts";
 
 export function digestBytes(bytes: Uint8Array): ContentDigest {
   return createContentDigest(createHash("sha256").update(bytes).digest("hex"));
+}
+
+function singleCaseInsensitive(entries: readonly Dirent[], part: string, memberPath: string): Dirent | undefined {
+  const matches = entries.filter(entry => entry.name.toLowerCase() === part.toLowerCase());
+  if (matches.length > 1) throw new Error(`Ambiguous content path: ${memberPath}`);
+  return matches[0];
 }
 
 interface DigestFingerprint { readonly size: number; readonly mtimeMs: number; readonly ctimeMs: number; readonly ino: number; readonly digest: string; }
@@ -365,6 +372,75 @@ export class MountedContent {
 
   async resolve(path: string): Promise<ResolvedResourceReference | null> { return (await this.open(path))?.reference ?? null; }
 
+  // Loose existence probes repeat per directory during bulk checks (download
+  // preparation walks hundreds of paths); listings are cached for this
+  // instance only. Writers into loose roots (completed downloads) must call
+  // invalidateListings() so a cached listing never hides a new file.
+  readonly #listings = new Map<string, Promise<readonly Dirent[] | null>>();
+
+  invalidateListings(): void { this.#listings.clear(); }
+
+  #listing(directory: string): Promise<readonly Dirent[] | null> {
+    let pending = this.#listings.get(directory);
+    if (pending === undefined) {
+      pending = readdir(directory, { withFileTypes: true }).catch((error: unknown) => { if (isMissingFile(error)) return null; throw error; });
+      this.#listings.set(directory, pending);
+    }
+    return pending;
+  }
+
+  async #probeLoose(rootPath: string, memberPath: string): Promise<boolean> {
+    const parts = normalizeResourcePath(memberPath).split("/");
+    const exact = (this.options.looseComparison ?? "case-insensitive") === "exact";
+    let current = resolve(rootPath);
+    for (const [index, part] of parts.entries()) {
+      const entries = await this.#listing(current);
+      if (entries === null) return false;
+      const entry = exact ? entries.find(candidate => candidate.name === part)
+        : entries.find(candidate => candidate.name === part) ?? singleCaseInsensitive(entries, part, memberPath);
+      if (entry === undefined) return false;
+      current = resolve(current, entry.name);
+      // Symlinks (and unknown dirent types) keep findContentPath semantics.
+      if (entry.isSymbolicLink() || !entry.isFile() && !entry.isDirectory()) {
+        const found = await findContentPath(rootPath, memberPath, this.options.looseComparison);
+        return found !== null && (await stat(found)).isFile();
+      }
+      if (index === parts.length - 1) return entry.isFile();
+      if (!entry.isDirectory()) return false;
+    }
+    return false;
+  }
+
+  /** Existence in mount order without reading or digesting bytes. */
+  async exists(path: string): Promise<boolean> {
+    this.assertOpen();
+    const plan = this.plan, requestedPath = normalizeResourcePath(path);
+    const probe = async (source: MountedSource, memberPath: string): Promise<boolean> => {
+      if (!this.#allowed(source, memberPath)) return false;
+      if (source.kind === "archive") return source.archive.findEntries(memberPath, "case-insensitive").some(entry => !entry.isDirectory);
+      return this.#probeLoose(source.mount.rootPath, memberPath);
+    };
+    if (this.#userMounts.size !== 0) for (const id of plan.defaultOrder) {
+      if (!this.#userMounts.has(id)) continue;
+      const source = this.#sources.get(id);
+      if (source !== undefined && await probe(source, requestedPath)) return true;
+    }
+    for (const link of this.options.links ?? []) {
+      if (!requestedPath.startsWith(link.sourcePrefix)) continue;
+      const source = this.#sources.get(link.mount);
+      if (source === undefined) throw new Error(`Unknown link mount: ${link.mount}`);
+      return probe(source, normalizeResourcePath(link.targetPrefix + requestedPath.slice(link.sourcePrefix.length)));
+    }
+    const prefix = plan.prefixOrders.find(order => requestedPath.toLowerCase().startsWith(order.prefix.toLowerCase()));
+    for (const id of prefix?.mounts ?? plan.defaultOrder) {
+      const source = this.#sources.get(id);
+      if (source === undefined) throw new Error(`Unknown mounted source: ${id}`);
+      if (this.#userMounts.has(id)) continue;
+      if (await probe(source, requestedPath)) return true;
+    }
+    return false;
+  }
+
   /** Q3 FS_ListFilteredFiles without a filter, in selected mount and archive-directory order. */
   async listFiles(path: string, extension: string): Promise<readonly string[]> {
     this.assertOpen();
@@ -451,6 +527,7 @@ export class MountedContent {
     if (this.#closed) return;
     this.#closed = true;
     this.#openedResources.clear();
+    this.#listings.clear();
     if (this.#ownership.kind === "owned") for (const source of this.#sources.values()) if (source.kind === "archive") source.archive.close();
   }
 
