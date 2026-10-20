@@ -1,7 +1,7 @@
 import { mkdir, readdir, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
-import { readKexQ2SaveInfo } from "../../persistence/kex-q2-save.ts";
+import { kexQ2SaveRestorable, readKexQ2SaveArchive } from "../../persistence/kex-q2-save.ts";
 import { readSavedGame } from "../../persistence/saved-game.ts";
 import { selectQ1SaveProduct } from "../../persistence/q1-selection.ts";
 import { savedSimulationSettings } from "./simulation/index.ts";
@@ -97,16 +97,17 @@ export class StartupSaves {
       };
       if (path.toLowerCase().endsWith(".pak.gz")) {
         let label = basename(path).replace(/\.pak\.gz$/i, ""), map = "Unknown map", game = "Quake II (rerelease)", savedAtMilliseconds = 0;
-        let unavailable: string | null = "Retail Quake II saves are identified here but cannot be restored by this engine yet.";
+        let unavailable: string | null = "Retail Quake II saves with recorded client or level state cannot be restored by this engine yet.";
         try {
           savedAtMilliseconds = (await stat(path)).mtimeMs;
-          const info = await readKexQ2SaveInfo(path);
+          const save = await readKexQ2SaveArchive(path), info = save.info;
           if (info.comment !== "") label = info.comment;
           map = info.mapCommand;
           if (info.timestamp > 0n && info.timestamp < 253402300800n) savedAtMilliseconds = Number(info.timestamp) * 1000;
           const product = this.catalog.products.find(candidate => candidate.expectation.family === "q2" && candidate.expectation.edition === "rerelease"
             && basename(candidate.expectation.contentDirectory).toLowerCase() === (info.gameDirectory ?? "").toLowerCase());
           if (product !== undefined) game = `${product.expectation.title} (${product.expectation.edition})`;
+          if (kexQ2SaveRestorable(save)) unavailable = product === undefined || product.availability.kind !== "installed" ? "Required game content is not installed." : null;
         } catch (cause) { unavailable = cause instanceof Error ? cause.message : "This saved game is unreadable or uses an unsupported save version."; }
         paths.set(id, path); rows.push(remember({ id, label, map, game, savedAtMilliseconds, unavailable }));
         continue;

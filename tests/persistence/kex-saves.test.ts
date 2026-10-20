@@ -108,7 +108,7 @@ test.skipIf(!existsSync(testCorpusRoot()))("external nightdive saves list beside
     const q2 = rows.find(row => row.id.endsWith("save0.pak.gz"));
     expect(q2?.label).toBe("Widow's Lair");
     expect(q2?.map).toBe("rboss");
-    expect(q2?.unavailable).toContain("cannot be restored");
+    expect(q2?.unavailable).toBeNull();
     expect(await resolveExternalSavePath([external], "s1")).toBe(join(external, "s1.sav"));
     expect(await resolveExternalSavePath([external], "s2")).toBe(join(external, "honey/s2.sav"));
     expect(await resolveExternalSavePath([external], "missing")).toBeNull();
