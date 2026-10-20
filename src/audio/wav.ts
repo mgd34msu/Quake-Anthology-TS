@@ -204,8 +204,11 @@ function decodePcm(bytes: Uint8Array, source: string, sourceSignedChunks: boolea
     const riffSize = reader.u32();
     if (riffSize < 4)
         reject(source, 4, `invalid RIFF size ${riffSize}`);
-    const riffEnd = 8 + riffSize;
-    if (riffEnd > reader.length)
+    // Source loaders search the loaded file bytes, not the declared RIFF
+    // extent; retail rips understate or overstate it. Only the strict
+    // inspection decoder holds chunks to the declared bounds.
+    const riffEnd = sourceSignedChunks ? reader.length : 8 + riffSize;
+    if (!sourceSignedChunks && riffEnd > reader.length)
         reject(source, 4, `RIFF size ${riffSize} exceeds ${reader.length}-byte input`);
     expectFourCc(reader, "WAVE");
     let format: WavFormat | null = null;

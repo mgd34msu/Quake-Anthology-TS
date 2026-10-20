@@ -247,6 +247,11 @@ test("Quake signed chunk termination retains complete PCM and earlier cue/LIST l
     expect(decoded.loopStart).toBe(1); expect(decoded.frameCount).toBe(4);
     expect([...decoded.samples]).toEqual([0, 256, 512, 768]);
     expect(() => decodeWav(bytes)).toThrow("exceeds RIFF bounds");
+    // Retail rips also understate the RIFF extent below bytes the file
+    // really carries (qdoom DSBGACT: data ends 12 bytes past it).
+    const understated = bytes.slice(); new DataView(understated.buffer).setUint32(4, 40, true);
+    expect(decodeQuakeWav(understated).frameCount).toBe(6);
+    expect(() => decodeWav(understated)).toThrow("exceeds RIFF bounds");
     const missing = bytes.slice(); missing.set(new TextEncoder().encode("JUNK"), 36);
     expect(() => decodeQuakeWav(missing)).toThrow("missing WAV data");
     const truncated = bytes.slice(); new DataView(truncated.buffer).setUint32(40, 500, true);
