@@ -623,10 +623,15 @@ export class SoftwareRenderer implements RendererBackend {
           for (const pass of operation.passes) {
             target.beginView({ viewport: { ...pass.viewport, y: image.height - pass.viewport.y - pass.viewport.height },
               clipPlane: null, clear: pass.clearDepth === null ? null : { depth: pass.clearDepth, color: null, stencil: false } });
-            for (const draw of pass.draws) target.draw({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single",
-              indices: draw.indices, texture: { kind: "retain-current-texture" },
-              state: { ...CPU_OPAQUE_STATE, cull: draw.cull, polygonOffset: draw.polygonOffset },
-              vertices: draw.positions.map(position => ({ position, texCoord: { x: 0, y: 0 }, color: { x: 1, y: 1, z: 1, w: 1 } })) });
+            for (const draw of pass.draws) {
+              const vertices: { position: { x: number; y: number; z: number; w: number }; texCoord: { x: number; y: number }; color: { x: number; y: number; z: number; w: number } }[] = [];
+              for (let offset = 0; offset < draw.positions.length; offset += 4)
+                vertices.push({ position: { x: draw.positions[offset] ?? 0, y: draw.positions[offset + 1] ?? 0, z: draw.positions[offset + 2] ?? 0, w: draw.positions[offset + 3] ?? 0 },
+                  texCoord: { x: 0, y: 0 }, color: { x: 1, y: 1, z: 1, w: 1 } });
+              target.draw({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single",
+                indices: draw.indices, texture: { kind: "retain-current-texture" },
+                state: { ...CPU_OPAQUE_STATE, cull: draw.cull, polygonOffset: draw.polygonOffset }, vertices });
+            }
           }
           for (let y = 0; y < image.height; y++)
             image.pixels.set(target.depth.subarray((image.height - 1 - y) * image.width, (image.height - y) * image.width), y * image.width);

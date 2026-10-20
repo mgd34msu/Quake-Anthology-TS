@@ -47,20 +47,19 @@ export class DepthAtlasTarget {
       if (pass.clearDepth !== null && (!Number.isFinite(pass.clearDepth) || pass.clearDepth < 0 || pass.clearDepth > 1))
         throw new RangeError("OpenGL depth atlas clear must be in 0..1");
       for (const draw of pass.draws) {
-        if (draw.indices.length % 3 !== 0) throw new RangeError("OpenGL depth atlas triangles are incomplete");
+        if (draw.indices.length % 3 !== 0 || draw.positions.length % 4 !== 0) throw new RangeError("OpenGL depth atlas triangles are incomplete");
         // The running maximum magnitude stays under the float32 overflow
         // midpoint exactly when every component rounds to a finite float32.
         let worst = 0;
-        for (const position of draw.positions) {
-          if (worst === worst && !(Math.abs(position.x) <= worst)) worst = Math.abs(position.x);
-          if (worst === worst && !(Math.abs(position.y) <= worst)) worst = Math.abs(position.y);
-          if (worst === worst && !(Math.abs(position.z) <= worst)) worst = Math.abs(position.z);
-          if (worst === worst && !(Math.abs(position.w) <= worst)) worst = Math.abs(position.w);
+        for (let offset = 0; offset < draw.positions.length; offset++) {
+          const magnitude = Math.abs(draw.positions[offset] ?? 0);
+          if (worst === worst && !(magnitude <= worst)) worst = magnitude;
         }
         if (!(worst < 3.4028235677973366e38))
           throw new RangeError("OpenGL depth atlas vertices must be finite float32");
+        const vertexCount = draw.positions.length / 4;
         for (const index of draw.indices) {
-          if (!(index >= 0) || index >= draw.positions.length || (index | 0) !== index) throw new RangeError("OpenGL depth atlas vertex index is invalid");
+          if (!(index >= 0) || index >= vertexCount || (index | 0) !== index) throw new RangeError("OpenGL depth atlas vertex index is invalid");
         }
       }
     }
@@ -122,26 +121,24 @@ export class DepthAtlasTarget {
             else { gl.glEnable(0x8037); gl.glPolygonOffset(draw.polygonOffset.factor, draw.polygonOffset.units); }
             previous = draw;
           }
-          if (draw.positions.length <= vertexCapacity && draw.indices.length <= indexCapacity) {
-            if (vertexCount + draw.positions.length > vertexCapacity || indexCount + draw.indices.length > indexCapacity) flush();
+          const drawVertices = draw.positions.length / 4;
+          if (drawVertices <= vertexCapacity && draw.indices.length <= indexCapacity) {
+            if (vertexCount + drawVertices > vertexCapacity || indexCount + draw.indices.length > indexCapacity) flush();
             const base = vertexCount;
-            for (const position of draw.positions) {
-              const offset = vertexCount++ * 4;
-              positions[offset] = position.x; positions[offset + 1] = position.y;
-              positions[offset + 2] = position.z; positions[offset + 3] = position.w;
-            }
+            positions.set(draw.positions, base * 4);
+            vertexCount += drawVertices;
             for (const index of draw.indices) indices[indexCount++] = base + index;
           } else {
             flush();
             for (let triangle = 0; triangle < draw.indices.length; triangle += 3) {
               if (vertexCount + 3 > vertexCapacity || indexCount + 3 > indexCapacity) flush();
               for (let corner = 0; corner < 3; corner++) {
-                const index = draw.indices[triangle + corner], position = index === undefined ? undefined : draw.positions[index];
-                if (position === undefined) throw new Error("OpenGL validated depth vertex disappeared");
+                const index = draw.indices[triangle + corner];
+                if (index === undefined) throw new Error("OpenGL validated depth vertex disappeared");
                 indices[indexCount++] = vertexCount;
-                const offset = vertexCount++ * 4;
-                positions[offset] = position.x; positions[offset + 1] = position.y;
-                positions[offset + 2] = position.z; positions[offset + 3] = position.w;
+                const offset = vertexCount++ * 4, source = index * 4;
+                positions[offset] = draw.positions[source] ?? 0; positions[offset + 1] = draw.positions[source + 1] ?? 0;
+                positions[offset + 2] = draw.positions[source + 2] ?? 0; positions[offset + 3] = draw.positions[source + 3] ?? 0;
               }
             }
           }

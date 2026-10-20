@@ -79,7 +79,7 @@ test("all immediate operation families preserve data and replace images", () => 
   const { frontend, encoder, decoder } = setup(), white = image(frontend), v = { x: 0, y: 0, z: 0, w: 1 };
   const operations: RenderOperation[] = [
     { kind: "disable-portal-clip" }, { kind: "depth-range", range: [0, 1] }, { kind: "cull", cull: "back" }, { kind: "polygon-offset", value: { factor: 1, units: 2 } },
-    { kind: "depth-atlas", image: white, passes: [{ viewport: { x: 0, y: 0, width: 1, height: 1 }, clearDepth: 1, draws: [{ positions: [v], indices: [0], cull: "none", polygonOffset: null }] }] },
+    { kind: "depth-atlas", image: white, passes: [{ viewport: { x: 0, y: 0, width: 1, height: 1 }, clearDepth: 1, draws: [{ positions: new Float64Array([0, 0, 0, 1]), indices: [0], cull: "none", polygonOffset: null }] }] },
     { kind: "sky-side", image: white, color: v, strips: [[{ position: v, texCoord: { x: 0, y: 0 } }]] },
     { kind: "shadow-volume", whiteImage: white, positions: [v], indices: [0], mirror: false },
     { kind: "shadow-finish", whiteImage: white, positions: [v, v, v, v] },

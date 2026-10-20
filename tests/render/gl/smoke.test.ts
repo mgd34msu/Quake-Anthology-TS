@@ -116,7 +116,9 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("indexed depth atlas retains 
     if (restart) gl.glEnable(0x8f9d);
     const before = snapshot();
     const depth = (): Float32Array => { const pixels = new Float32Array(256); gl.glGetTexImage(0xde1, 0, 0x1902, 0x1406, pixels); return pixels; };
-    const quad: DepthAtlasDraw = { positions: vertices.map(vertex => ({ ...vertex.position, z: -0.5 })),
+    const quadPositions = new Float64Array(vertices.length * 4);
+    vertices.forEach((vertex, index) => { quadPositions.set([vertex.position.x, vertex.position.y, -0.5, vertex.position.w], index * 4); });
+    const quad: DepthAtlasDraw = { positions: quadPositions,
       indices: [0, 1, 2, 0, 2, 3], cull: "none", polygonOffset: null };
     const pass: DepthAtlasPass = { viewport: { x: 0, y: 0, width: 16, height: 16 }, clearDepth: 1, draws: [quad] };
     target.draw(texture, 16, 16, [{ ...pass, draws: [quad, quad, { ...quad, cull: "back" }, { ...quad, polygonOffset: { factor: 1, units: 2 } }] },
@@ -129,16 +131,19 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("indexed depth atlas retains 
     rejectDraw = true;
     expect(() => target.draw(texture, 16, 16, [pass])).toThrow("depth submission rejected");
     expect(snapshot()).toEqual(before);
-    const largePositions = Array.from({ length: 65536 }, (_, index) => quad.positions[index % 4] ?? { x: 0, y: 0, z: 0, w: 1 });
+    const largePositions = new Float64Array(65536 * 4);
+    for (let index = 0; index < 65536; index++) largePositions.set(quad.positions.subarray(index % 4 * 4, index % 4 * 4 + 4), index * 4);
     calls = 0;
     target.draw(texture, 16, 16, [{ ...pass, draws: [{ ...quad, positions: largePositions }, { ...quad, positions: largePositions }] }]);
     expect(calls).toBe(2); expect(depth().every(value => value === 0.25)).toBe(true);
     calls = 0;
-    target.draw(texture, 16, 16, [{ ...pass, draws: [{ ...quad, positions: [...largePositions, { x: 0, y: 0, z: 0, w: 1 }] }] }]);
+    const plusOne = new Float64Array(largePositions.length + 4);
+    plusOne.set(largePositions); plusOne.set([0, 0, 0, 1], largePositions.length);
+    target.draw(texture, 16, 16, [{ ...pass, draws: [{ ...quad, positions: plusOne }] }]);
     expect(calls).toBe(1); expect(depth().every(value => value === 0.25)).toBe(true);
-    const oversized: DepthAtlasDraw = { ...quad, positions: [
-      { x: -2, y: -2, z: 0, w: 1 }, { x: -2, y: -2, z: 0, w: 1 }, { x: -2, y: -2, z: 0, w: 1 },
-      { x: -1, y: -1, z: -0.5, w: 1 }, { x: 3, y: -1, z: -0.5, w: 1 }, { x: -1, y: 3, z: -0.5, w: 1 }],
+    const oversized: DepthAtlasDraw = { ...quad, positions: new Float64Array([
+      -2, -2, 0, 1, -2, -2, 0, 1, -2, -2, 0, 1,
+      -1, -1, -0.5, 1, 3, -1, -0.5, 1, -1, 3, -0.5, 1]),
       indices: Array.from({ length: 196611 }, (_, index) => index < 196608 ? index % 3 : index % 3 + 3) };
     calls = 0; target.draw(texture, 16, 16, [{ ...pass, draws: [oversized] }]);
     expect(calls).toBe(4); expect(depth().every(value => value === 0.25)).toBe(true);
@@ -223,7 +228,7 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GLSL stages, shadow atlases,
     content: { kind: "depth32f", levels: [{ width: 96, height: 96, pixels: new Float32Array(96 * 96).fill(1) }] },
     sampling: { wrap: "clamp", filter: "nearest" } });
   renderer.drawImmediate({ kind: "depth-atlas", image: atlas, passes: [{ viewport: { x: 0, y: 0, width: 96, height: 96 }, clearDepth: 1,
-    draws: [{ positions: vertices.map(vertex => ({ ...vertex.position, z: -0.5 })), indices: batch.indices, cull: "none", polygonOffset: null }] }] });
+    draws: [{ positions: new Float64Array(vertices.flatMap(vertex => [vertex.position.x, vertex.position.y, -0.5, vertex.position.w])), indices: batch.indices, cull: "none", polygonOffset: null }] }] });
   expect(renderer.readDepthImage(atlas).pixels.every(depth => Math.abs(depth - 0.25) < 0.00001)).toBe(true);
   expect(renderer.readPixels()).toEqual(pixels);
   const matrix: Mat4 = [1 / 256, 0, 0, 0, 0, 1 / 256, 0, 0, 0, 0, 0, 0, 0.5, 0.5, 0.75, 1];

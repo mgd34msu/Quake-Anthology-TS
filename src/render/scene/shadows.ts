@@ -179,14 +179,15 @@ function worldMeshVisible(mesh: ShadowMesh, light: Q2FragmentLight, forward: Vec
 function draw(mesh: ShadowMesh, matrix: Mat4, entity: boolean): DepthAtlasDraw {
   const m0 = matrix[0], m1 = matrix[1], m2 = matrix[2], m3 = matrix[3], m4 = matrix[4], m5 = matrix[5], m6 = matrix[6], m7 = matrix[7],
     m8 = matrix[8], m9 = matrix[9], m10 = matrix[10], m11 = matrix[11], m12 = matrix[12], m13 = matrix[13], m14 = matrix[14], m15 = matrix[15];
-  const positions: Vec4[] = [];
-  positions.length = mesh.positions.length;
+  const positions = new Float64Array(mesh.positions.length * 4);
   for (let index = 0; index < mesh.positions.length; index++) {
     const position = mesh.positions[index];
     if (position === undefined) continue;
-    const { x, y, z } = position;
-    positions[index] = { x: m0 * x + m4 * y + m8 * z + m12, y: m1 * x + m5 * y + m9 * z + m13,
-      z: m2 * x + m6 * y + m10 * z + m14, w: m3 * x + m7 * y + m11 * z + m15 };
+    const { x, y, z } = position, offset = index * 4;
+    positions[offset] = m0 * x + m4 * y + m8 * z + m12;
+    positions[offset + 1] = m1 * x + m5 * y + m9 * z + m13;
+    positions[offset + 2] = m2 * x + m6 * y + m10 * z + m14;
+    positions[offset + 3] = m3 * x + m7 * y + m11 * z + m15;
   }
   return { positions, indices: mesh.indices, cull: "none",
     polygonOffset: entity ? { factor: 1, units: 2 } : { factor: 2, units: 4 } };

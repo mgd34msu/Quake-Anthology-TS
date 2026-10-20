@@ -230,8 +230,7 @@ test("CPU depth atlas occludes Q2 world lights and removes model light shares be
   renderer.draw(batch);
   expect(pixel(renderer)[0]).toBeGreaterThan(60);
   renderer.drawImmediate({ kind: "depth-atlas", image, passes: [{ viewport: { x: 0, y: 0, width: 8, height: 8 },
-    clearDepth: 1, draws: [{ positions: [{ x: -1, y: -1, z: -0.5, w: 1 }, { x: 1, y: -1, z: -0.5, w: 1 },
-      { x: 1, y: 1, z: -0.5, w: 1 }, { x: -1, y: 1, z: -0.5, w: 1 }],
+    clearDepth: 1, draws: [{ positions: new Float64Array([-1, -1, -0.5, 1, 1, -1, -0.5, 1, 1, 1, -0.5, 1, -1, 1, -0.5, 1]),
       indices: [0, 1, 2, 0, 2, 3], cull: "none", polygonOffset: null }] }] });
   renderer.draw(batch);
   expect(pixel(renderer)).toEqual([0, 0, 0, 255]);

@@ -306,7 +306,9 @@ export class WireDecoder {
   private depthPass(value: unknown): DepthAtlasPass {
     const p = record(value);
     return { viewport: rect(p["viewport"]), clearDepth: p["clearDepth"] === null ? null : number(p["clearDepth"]), draws: list(p["draws"]).map(value => {
-      const d = record(value); return { positions: list(d["positions"]).map(vec4), indices: list(d["indices"]).map(integer), cull: cull(d["cull"]), polygonOffset: offset(d["polygonOffset"]) };
+      const d = record(value), positions = d["positions"];
+      if (!(positions instanceof Float64Array)) throw new TypeError("Invalid depth atlas positions");
+      return { positions, indices: list(d["indices"]).map(integer), cull: cull(d["cull"]), polygonOffset: offset(d["polygonOffset"]) };
     }) };
   }
   viewState(value: unknown): RenderViewState {

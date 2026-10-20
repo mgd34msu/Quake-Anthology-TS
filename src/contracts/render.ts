@@ -216,7 +216,8 @@ export type SceneFog = { readonly kind: "none" }
         readonly end: { readonly color: Vec3; readonly distance: number }; readonly density: number; readonly falloff: number } }
   | { readonly kind: "q3"; readonly color: Vec3; readonly depthForOpaque: number; readonly plane: Plane | null };
 export interface DepthAtlasDraw {
-  readonly positions: readonly Vec4[];
+  /** Clip-space x, y, z, w per vertex, already projected by the scene. */
+  readonly positions: Float64Array;
   readonly indices: readonly number[];
   readonly cull: RenderState["cull"];
   readonly polygonOffset: RenderState["polygonOffset"];
