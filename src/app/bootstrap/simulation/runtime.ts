@@ -314,6 +314,18 @@ export class SharedSimulation implements Simulation {
   private tagDroppedAt: number | null = null;
   private tagHealth = new Map<ActorId, number>();
   private tagSpawns: readonly Vec3[] | null = null;
+  /** Runtime LMCTF state (match provider q2:lmctf on a foreign world; Q2
+   * worlds keep the native composition module). Mirrors Loki's Minions CTF
+   * over unified actors like foreign Tag: two flags, auto-balanced teams,
+   * captures, dropped-flag return, and the five runes. Haste's refire rate
+   * has no foreign weapon hook yet; the rune still spawns and can be held. */
+  private lmctfTeams = new Map<ActorId, 1 | 2>();
+  private lmctfFlags = new Map<1 | 2, { actor: OwnedActor | null; home: Vec3; carrier: ActorId | null; droppedAt: number | null }>();
+  private lmctfRunes = new Map<string, { actor: OwnedActor | null; holder: ActorId | null }>();
+  private lmctfHealth = new Map<ActorId, number>();
+  private lmctfRegenAt = new Map<ActorId, number>();
+  private lmctfSpots: { readonly flags: ReadonlyMap<string, Vec3>; readonly health: readonly Vec3[] } | null = null;
+  private lmctfPrepared = false;
   readonly clock: SourceClock;
   readonly events: SimulationEvents;
   private readonly actorExecutions = new Map<ActorId, ActorExecution>();
@@ -3185,6 +3197,20 @@ export class SharedSimulation implements Simulation {
     if (this.foreignTag) this.combat.damageOperation.register({ provider: "q2:tag", id: "q2:tag/damage", order: 0, kind: "transform",
       transform: request => this.tagOwner === null || request.target.equals(this.tagOwner) || request.attack.attacker?.equals(this.tagOwner) === true
         ? request : { ...request, amount: Math.trunc(request.amount * 3 / 4) } });
+    if (this.foreignLmctf) this.combat.damageOperation.register({ provider: "q2:lmctf", id: "q2:lmctf/runes", order: 0, kind: "transform",
+      transform: request => {
+        let amount = request.amount;
+        const attacker = request.attack.attacker ?? null;
+        // Native g_runes: Damage multiplies outgoing by 1.75, Resist divides
+        // incoming by 1.75, Vampire returns half the health damage dealt.
+        if (attacker !== null && this.lmctfRuneHeld(attacker) === "damage") amount = Math.trunc(Math.fround(amount * 1.75));
+        if (this.lmctfRuneHeld(request.target) === "resist") amount = Math.trunc(Math.fround(amount / 1.75));
+        if (attacker !== null && !attacker.equals(request.target) && amount > 0 && this.lmctfRuneHeld(attacker) === "vampire") {
+          const owned = this.actors.resolveOwned(attacker), health = this.combat.read(attacker)?.health;
+          if (owned !== null && health !== undefined) this.combat.setHealth(owned, Math.min(250, health + (amount >> 1)));
+        }
+        return amount === request.amount ? request : { ...request, amount };
+      } });
     if (providerFamily(id) === "q1") this.combat.register(createQ1CombatPolicy({ id, armor, sourceEffects: {
       beforeQuad: (request, amount, target, attacker) => {
         const game = this.q1CombatSource();
@@ -4593,7 +4619,7 @@ export class SharedSimulation implements Simulation {
       if (this.source.kind === "q2" && this.source.product.rerelease?.players.intermissionFadeUntil != null) {
         continue;
       }
-      if (run && settlement.kind !== "active") { this.tickHordeWave(); this.tickTag(); }
+      if (run && settlement.kind !== "active") { this.tickHordeWave(); this.tickTag(); this.tickLmctf(); }
       if (run && !preparesQ1Clients && settlement.kind !== "active") botCommands = this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000);
       for (const received of [...(commandTurn ? input.commands : []), ...botCommands]) {
         let command = paused ? { ...received, command: { ...received.command, buttons: received.command.buttons & ~1 } } : received;
@@ -5223,6 +5249,220 @@ export class SharedSimulation implements Simulation {
     this.giveTagInventory(player); this.tagBonus(player);
     return undefined;
   }
+
+  private get foreignLmctf(): boolean {
+    return this.recipe.match.provider === "q2:lmctf" && this.options.mode === "deathmatch"
+      && providerFamily(this.recipe.map.entities.provider) !== "q2";
+  }
+
+  private lmctfRuneHeld(actor: ActorId): string | null {
+    for (const [kind, rune] of this.lmctfRunes) if (rune.holder?.equals(actor) === true) return kind;
+    return null;
+  }
+
+  /** Flag bases and rune spots come from the retained entity lump, like Tag spawns. */
+  private lmctfOrigins(): { readonly flags: ReadonlyMap<string, Vec3>; readonly health: readonly Vec3[] } {
+    if (this.lmctfSpots !== null) return this.lmctfSpots;
+    const flags = new Map<string, Vec3>(), health: Vec3[] = [];
+    for (const entity of parseEntities(this.options.world.entities)) {
+      const classname = entity.get("classname") ?? "";
+      const parts = (entity.get("origin") ?? "").split(/\s+/).map(Number);
+      const [x, y, z] = parts;
+      if (parts.length !== 3 || x === undefined || y === undefined || z === undefined || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+      if ((classname === "info_flag_red" || classname === "info_flag_blue") && !flags.has(classname)) flags.set(classname, { x, y, z });
+      else if (classname.startsWith("item_health")) health.push({ x, y, z });
+    }
+    this.lmctfSpots = { flags, health };
+    return this.lmctfSpots;
+  }
+
+  private lmctfFlagHome(team: 1 | 2): Vec3 | null {
+    const authored = this.lmctfOrigins().flags.get(team === 1 ? "info_flag_red" : "info_flag_blue");
+    if (authored !== undefined) return authored;
+    // Native LMCTF synthesizes bases from the deathmatch spawns farthest apart.
+    const spots = this.tagSpawnOrigins();
+    const first = spots[0];
+    if (first === undefined) return null;
+    let farthest = first, farthestDistance = -1;
+    for (const spot of spots) {
+      const distance = Math.hypot(spot.x - first.x, spot.y - first.y, spot.z - first.z);
+      if (distance > farthestDistance) { farthestDistance = distance; farthest = spot; }
+    }
+    if (team === 1) return farthest;
+    let other = first, otherDistance = -1;
+    for (const spot of spots) {
+      const distance = Math.hypot(spot.x - farthest.x, spot.y - farthest.y, spot.z - farthest.z);
+      if (distance > otherDistance) { otherDistance = distance; other = spot; }
+    }
+    return other;
+  }
+
+  private spawnLmctfFlag(team: 1 | 2, origin: Vec3): void {
+    const state = this.lmctfFlags.get(team);
+    if (state === undefined) return;
+    const actor = this.actors.allocate(this.recipe.match.provider, team === 1 ? "q2:item_flag_team1" : "q2:item_flag_team2");
+    const bounds = { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 33 } };
+    this.bodies.create(actor, { origin: { x: origin.x, y: origin.y, z: origin.z }, velocity: zero, angles: zero, bounds, ground: null });
+    this.physics.setSolid(actor, "trigger", null, providerFamily(this.recipe.map.entities.provider));
+    this.callbacks.bind(actor, { think: null, touch: contact => this.lmctfFlagTouched(team, contact), use: null, pain: null, die: null });
+    this.detachedModels.set(actor, { content: this.recipe.match.content, path: team === 1 ? "players/male/flag1.md2" : "players/male/flag2.md2" });
+    this.bodies.link(actor);
+    state.actor = actor;
+  }
+
+  private lmctfFlagTouched(team: 1 | 2, contact: TouchContact): undefined {
+    const state = this.lmctfFlags.get(team);
+    if (state === undefined || state.actor === null || !contact.self.id.equals(state.actor.id)) return undefined;
+    const player = contact.other;
+    if (this.player(player) === null || (this.combat.read(player)?.health ?? 0) <= 0) return undefined;
+    const playerTeam = this.lmctfTeams.get(player);
+    if (playerTeam === undefined) return undefined;
+    if (playerTeam === team) {
+      const carried = this.lmctfFlags.get(team === 1 ? 2 : 1);
+      if (carried?.carrier?.equals(player) === true) {
+        // Capture: carrier scores 5, every teammate scores the 10-point team bonus.
+        this.addTagScore(player, 5);
+        for (const [ally, allyTeam] of this.lmctfTeams) if (allyTeam === team) this.addTagScore(ally, 10);
+        this.lmctfTakeFlag(player);
+        carried.carrier = null; carried.droppedAt = null;
+        this.spawnLmctfFlag(team === 1 ? 2 : 1, carried.home);
+      } else if (state.droppedAt !== null) {
+        // Own dropped flag returns home on touch.
+        this.actors.release(state.actor); state.actor = null; state.droppedAt = null;
+        this.spawnLmctfFlag(team, state.home);
+        this.addTagScore(player, 1);
+      }
+      return undefined;
+    }
+    // Enemy pickup.
+    this.actors.release(state.actor); state.actor = null;
+    state.carrier = player; state.droppedAt = null;
+    const owned = this.actors.resolveOwned(player);
+    if (owned !== null) this.inventory.give(owned, "q2:flag", 1);
+    return undefined;
+  }
+
+  private lmctfTakeFlag(actor: ActorId): void {
+    const owned = this.actors.resolveOwned(actor);
+    if (owned !== null) this.inventory.consume(owned, "q2:flag", this.inventory.count(actor, "q2:flag"));
+  }
+
+  private spawnLmctfRune(kind: string, origin: Vec3): void {
+    const state = this.lmctfRunes.get(kind);
+    if (state === undefined) return;
+    const models: Readonly<Record<string, string>> = { damage: "models/ctf/damage/tris.md2", haste: "models/ctf/haste/tris.md2",
+      resist: "models/ctf/resist/tris.md2", regen: "models/ctf/regen/tris.md2", vampire: "models/ctf/resist/tris.md2" };
+    const actor = this.actors.allocate(this.recipe.match.provider, `q2:${kind}_rune`);
+    const bounds = { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 15 } };
+    this.bodies.create(actor, { origin: { x: origin.x, y: origin.y, z: origin.z + 16 }, velocity: zero, angles: zero, bounds, ground: null });
+    this.physics.setSolid(actor, "trigger", null, providerFamily(this.recipe.map.entities.provider));
+    this.callbacks.bind(actor, { think: null, touch: contact => this.lmctfRuneTouched(kind, contact), use: null, pain: null, die: null });
+    this.detachedModels.set(actor, { content: this.recipe.match.content, path: models[kind] ?? "models/ctf/resist/tris.md2" });
+    this.bodies.link(actor);
+    state.actor = actor;
+  }
+
+  private lmctfRuneTouched(kind: string, contact: TouchContact): undefined {
+    const state = this.lmctfRunes.get(kind);
+    if (state === undefined || state.actor === null || !contact.self.id.equals(state.actor.id)) return undefined;
+    const player = contact.other;
+    if (this.player(player) === null || (this.combat.read(player)?.health ?? 0) <= 0 || this.lmctfRuneHeld(player) !== null) return undefined;
+    this.actors.release(state.actor); state.actor = null; state.holder = player;
+    const owned = this.actors.resolveOwned(player);
+    if (owned !== null) this.inventory.give(owned, `q2:${kind}_rune`, 1);
+    return undefined;
+  }
+
+  private prepareLmctf(): void {
+    this.lmctfPrepared = true;
+    for (const team of [1, 2] satisfies readonly (1 | 2)[]) {
+      const home = this.lmctfFlagHome(team);
+      if (home !== null) { this.lmctfFlags.set(team, { actor: null, home, carrier: null, droppedAt: null }); this.spawnLmctfFlag(team, home); }
+    }
+    // Runes scatter over health spots by farthest-point sampling (native
+    // Rune_Spawn uses health edicts); deathmatch spawns are the fallback.
+    const spots = [...this.lmctfOrigins().health];
+    const pool = spots.length !== 0 ? spots : [...this.tagSpawnOrigins()];
+    const chosen: Vec3[] = [];
+    for (const kind of ["damage", "haste", "resist", "regen", "vampire"]) {
+      this.lmctfRunes.set(kind, { actor: null, holder: null });
+      let best: Vec3 | null = null, bestDistance = -1;
+      for (const spot of pool) {
+        if (chosen.some(other => other.x === spot.x && other.y === spot.y && other.z === spot.z)) continue;
+        let nearest = Infinity;
+        for (const other of chosen) nearest = Math.min(nearest, Math.hypot(spot.x - other.x, spot.y - other.y, spot.z - other.z));
+        if (nearest > bestDistance) { bestDistance = nearest; best = spot; }
+      }
+      if (best !== null) { chosen.push(best); this.spawnLmctfRune(kind, best); }
+    }
+  }
+
+  private tickLmctf(): void {
+    if (!this.foreignLmctf) return;
+    if (!this.lmctfPrepared) this.prepareLmctf();
+    const players = this.players();
+    // Auto-balanced team assignment; the shared combat team drives friendly
+    // fire and team presentation on the foreign world.
+    for (const actor of players) {
+      if (this.lmctfTeams.has(actor)) continue;
+      let red = 0, blue = 0;
+      for (const team of this.lmctfTeams.values()) if (team === 1) red++; else blue++;
+      const team: 1 | 2 = blue < red ? 2 : 1;
+      this.lmctfTeams.set(actor, team);
+      const owned = this.actors.resolveOwned(actor);
+      if (owned !== null) this.combat.setTraits(owned, { team: team === 1 ? "red" : "blue" });
+    }
+    for (const [team, flag] of this.lmctfFlags) {
+      if (flag.droppedAt !== null && flag.actor !== null && this.timeSeconds - flag.droppedAt >= 30) {
+        this.actors.release(flag.actor); flag.actor = null; flag.droppedAt = null;
+        this.spawnLmctfFlag(team, flag.home);
+      }
+      const carrier = flag.carrier;
+      if (carrier !== null && !players.some(actor => actor.equals(carrier))) {
+        this.lmctfTakeFlag(carrier); flag.carrier = null;
+        this.spawnLmctfFlag(team, flag.home);
+      }
+    }
+    for (const [kind, rune] of this.lmctfRunes) {
+      const holder = rune.holder;
+      if (holder !== null && !players.some(actor => actor.equals(holder))) {
+        const owned = this.actors.resolveOwned(holder);
+        if (owned !== null) this.inventory.consume(owned, `q2:${kind}_rune`, 1);
+        rune.holder = null;
+      }
+    }
+    for (const actor of players) {
+      // Regen rune: native heart-rate cadence heals toward max health + 25.
+      if (this.lmctfRuneHeld(actor) === "regen") {
+        const combat = this.combat.read(actor), owned = this.actors.resolveOwned(actor);
+        if (combat !== null && owned !== null && combat.health > 0) {
+          const heartRate = Math.min(25, Math.max(5, Math.trunc(combat.health / 5))), frame = Math.round(this.timeSeconds * 10);
+          if (frame >= (this.lmctfRegenAt.get(actor) ?? 0) + heartRate) {
+            this.lmctfRegenAt.set(actor, frame);
+            if (combat.health < 125) this.combat.setHealth(owned, Math.min(125, Math.trunc(combat.health + Math.fround(heartRate / 3))));
+          }
+        }
+      }
+      const health = this.combat.read(actor)?.health ?? 0, previous = this.lmctfHealth.get(actor);
+      this.lmctfHealth.set(actor, health);
+      if (previous === undefined || previous <= 0 || health > 0) continue;
+      // Death drops the carried flag and held rune at the corpse.
+      const origin = this.bodies.read(actor)?.origin;
+      for (const [team, flag] of this.lmctfFlags) {
+        if (flag.carrier?.equals(actor) !== true) continue;
+        this.lmctfTakeFlag(actor); flag.carrier = null; flag.droppedAt = this.timeSeconds;
+        if (origin !== undefined && origin !== null) this.spawnLmctfFlag(team, origin); else this.spawnLmctfFlag(team, flag.home);
+      }
+      for (const [kind, rune] of this.lmctfRunes) {
+        if (rune.holder?.equals(actor) !== true) continue;
+        const owned = this.actors.resolveOwned(actor);
+        if (owned !== null) this.inventory.consume(owned, `q2:${kind}_rune`, 1);
+        rune.holder = null;
+        if (origin !== undefined && origin !== null) this.spawnLmctfRune(kind, origin);
+      }
+    }
+  }
+
   weaponSlot(actor: ActorId): WeaponSlotProjection {
     return this.slotProjection(actor, this.primaryPresentations().find(model => model.viewWeapon && sameActor(model.actor, actor)) ?? null);
   }

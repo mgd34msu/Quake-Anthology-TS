@@ -708,6 +708,7 @@ export class StartupSelectionModel {
         rule === "ctf" && this.product("product").expectation.family === "q3" ? null
         : rule === "ctf" && this.product("product").expectation.family === "q1" ? (this.product("product").expectation.edition === "quakeworld" ? "Requires a classic or rerelease Quake campaign"
           : unavailable(this.catalog.product(`q1-${this.product("product").expectation.edition === "rerelease" ? "rerelease" : "classic"}-ctf`)))
+        : rule === "lmctf" ? unavailable(this.catalog.product(`q2-${sourceProgramProduct(this.catalog, this.product("product").id).expectation.edition === "rerelease" ? "rerelease" : "classic"}-lmctf`))
         : this.product("product").expectation.family !== "q2" ? "Requires a Quake II campaign"
           : unavailable(this.catalog.product(`q2-${this.product("product").expectation.edition === "rerelease" ? "rerelease" : "classic"}-${rule}`))))]),
       row("skill", "Difficulty", [choice("0", "Easy"), choice("1", "Normal"), choice("2", "Hard"), choice("3", "Nightmare")]),

@@ -92,7 +92,7 @@ const KNOWN_PROVIDER_FAMILIES: ReadonlySet<string> = new Set(["q1", "q2", "q3"])
 /** Match providers are family-bound even in the unified engine: their
  * entities, scoring and spawns only exist in that family's source world. */
 const FAMILY_BOUND_MATCH: Readonly<Record<string, string>> = {
-  "q1:horde": "q1", "q1:ctf": "q1", "q2:ctf": "q2", "q2:lmctf": "q2", "q2:deathball": "q2", "q2:horde": "q2", "q3:horde": "q3", "q3:ctf": "q3",
+  "q1:horde": "q1", "q1:ctf": "q1", "q2:ctf": "q2", "q2:deathball": "q2", "q2:horde": "q2", "q3:horde": "q3", "q3:ctf": "q3",
 };
 
 /** Family-by-role cross-check: every selected provider must name a known

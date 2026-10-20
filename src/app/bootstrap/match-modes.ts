@@ -15,7 +15,7 @@ export function matchModeUnavailable(selection: MatchModeSelection): string | nu
   // CTF, LMCTF, Tag and DeathBall are PvP modes of their own; none of them
   // needs a separate deathmatch selection (deathmatch is its own mode).
   if (rules === "tag") return null;
-  if (rules === "ctf" && (family === "q3" || family === "q1")) return null;
+  if ((rules === "ctf" || rules === "lmctf") && (family === "q3" || family === "q1")) return null;
   if (family !== "q2") return "These match rules require a Quake II source game";
   return null;
 }
@@ -30,7 +30,11 @@ export function matchMapUnavailable(selection: MatchModeSelection, classnames: r
   }
   if (selection.rules === "horde" && selection.family !== "q3" && (!classes.has("horde_manager") || ![...classes].some(name => name.startsWith("info_monster_start"))))
     return "Horde requires an authored horde_manager and monster spawn points";
-  if (selection.rules === "ctf" || selection.rules === "lmctf") {
+  if (selection.rules === "lmctf" && selection.family !== "q2") {
+    // Foreign LMCTF synthesizes flag bases from deathmatch spawns, exactly
+    // like native LMCTF does when info_flag_* is absent.
+    if (!classes.has("info_player_deathmatch")) return "LMCTF map is missing: info_player_deathmatch";
+  } else if (selection.rules === "ctf" || selection.rules === "lmctf") {
     const flags = selection.family === "q3" ? ["team_CTF_redflag", "team_CTF_blueflag"] : ["item_flag_team1", "item_flag_team2"];
     const missing = flags.filter(name => !classes.has(name));
     if (missing.length !== 0) return `CTF map is missing: ${missing.join(", ")}`;
