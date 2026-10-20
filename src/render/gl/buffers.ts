@@ -119,11 +119,14 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
       }
     }
   }
-  // Native typed-array scans keep the finite-float32 contract without the
-  // per-element JS validation that used to dominate this function.
+  // One pass keeps the finite-float32 contract; the former triple includes()
+  // scan walked every packed array three times per draw.
   for (const values of [arrays.positions, arrays.colors, arrays.coordinates, arrays.coordinates2, arrays.worldPositions, arrays.normals]) {
-    if (values.includes(Number.NaN) || values.includes(Number.POSITIVE_INFINITY) || values.includes(Number.NEGATIVE_INFINITY))
-      throw new RangeError("OpenGL attributes must be finite float32 values");
+    for (let index = 0; index < values.length; index++) {
+      const value = values[index] ?? 0;
+      if (value !== value || value === Infinity || value === -Infinity)
+        throw new RangeError("OpenGL attributes must be finite float32 values");
+    }
   }
   return arrays;
 }

@@ -20,6 +20,8 @@ import { md5ShadowEnvelope } from "./shadow-bounds.ts";
 import { q2BeamGeometry } from "../particles/legacy.ts";
 import type { ModelGroupContext, ModelImageSelection, ModelPreparationContext, ModelSourceOptions, ModelVertexLighting, PreparedModelEntity, PreparedModelSurface } from "./types.ts";
 
+const ZERO_LIGHTMAP_COORD = { x: 0, y: 0 };
+
 function countFrames(model: DecodedModel): number {
   return model.kind === "brush-model" ? 1 : model.frames.length;
 }
@@ -147,14 +149,14 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
   let vertexLighting: ModelVertexLighting | undefined;
   function localVertex(vertex: ModelVertex, texCoord: Vec2, corner: number, unlit: boolean, vertexColor?: Vec4): MaterialVertex {
     if (context.purpose === "shadow") return { position: vertex.position, normal: vertex.normal, texCoord,
-      lightmapCoord: { x: 0, y: 0 }, color: vertexColor ?? color };
+      lightmapCoord: ZERO_LIGHTMAP_COORD, color: vertexColor ?? color };
     const sampled = context.lightVertex?.(entity, vertex.normal, vertex.position);
     const light = vertexLighting?.(vertex.normal, vertex.position, corner) ?? (flags.kind === "q2"
       ? q2AliasLight(bits, sampled ?? { x: 1, y: 1, z: 1 }, context.timeSeconds, false, options.infrared)
       : sampled ?? { x: 1, y: 1, z: 1 });
     const base = vertexColor ?? color;
     const lit = unlit && shell === null ? base : { x: base.x * light.x, y: base.y * light.y, z: base.z * light.z, w: base.w };
-    return { position: vertex.position, normal: vertex.normal, texCoord, lightmapCoord: { x: 0, y: 0 }, color: lit };
+    return { position: vertex.position, normal: vertex.normal, texCoord, lightmapCoord: ZERO_LIGHTMAP_COORD, color: lit };
   }
   function append(name: string, image: ModelImageSelection, vertices: readonly (ModelVertex & { readonly texCoord: Vec2; readonly color?: Vec4 })[],
     indices: readonly number[], unlit = false, world = false): void {

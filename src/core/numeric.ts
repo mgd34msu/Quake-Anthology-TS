@@ -95,8 +95,21 @@ export function checkedFloatToInt(value: number): number {
   return integer + 0;
 }
 
+const numericOperationsCache = new WeakMap<NumericProfile, NumericOperations>();
+
 /** Select once per arithmetic owner. Unsupported native modes require their own backend. */
 export function createNumericOperations(profile: NumericProfile): NumericOperations {
+  // Operations are stateless closures over the profile's rounding/conversion
+  // choice; traces and movement queries re-derive them from the same shared
+  // profile objects thousands of times per frame, so retain one per profile.
+  const cached = numericOperationsCache.get(profile);
+  if (cached !== undefined) return cached;
+  const operations = createNumericOperationsUncached(profile);
+  numericOperationsCache.set(profile, operations);
+  return operations;
+}
+
+function createNumericOperationsUncached(profile: NumericProfile): NumericOperations {
   let round: (value: number) => number;
   switch (profile.arithmetic.kind) {
     case "binary32":
