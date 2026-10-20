@@ -99,5 +99,7 @@ export function kexQ2SaveRestorable(save: KexQ2SaveArchive): boolean {
   if (typeof game !== "object" || game === null || Array.isArray(game)) return false;
   const clients: unknown = Reflect.get(game, "clients");
   if (clients === undefined) return true;
-  return Array.isArray(clients) && clients.every(client => typeof client === "object" && client !== null && !Array.isArray(client) && Object.keys(client).length === 0);
+  if (!Array.isArray(clients)) return false;
+  const list: readonly unknown[] = clients;
+  return list.every(client => typeof client === "object" && client !== null && !Array.isArray(client) && Object.keys(client).length === 0);
 }

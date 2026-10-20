@@ -11,7 +11,6 @@ import { callMethod, numberValue, objectValue, readBoolean, readField, readObjec
 // else the shared runtime mirrors Rogue DeathBall over unified actors (ball
 // synthesized with both goals from deathmatch spawns when the map has no
 // authored dm_dball entities, balanced teams, team goal scoring).
-type Simulation = import("../../../src/app/bootstrap/simulation/runtime.ts").SharedSimulation;
 
 test("DeathBall plays on a Q3 world through the runtime match layer", async () => {
   const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q3-baseq3",
