@@ -13,7 +13,7 @@ import { sampleMd5Pose, skinMd5Mesh } from "../../../formats/q3-model/md5.ts";
 import type { MaterialGeometry, MaterialVertex } from "../../../materials/geometry.ts";
 import { q2AliasLight, q2ShellColor } from "./lighting.ts";
 import { q1SpriteGeometry, spriteQuad } from "./sprites.ts";
-import { at, attachSceneEntity, modelAttachmentTag, modelLocalDelta, modelWorldBounds, modelWorldDirection, modelWorldPoint } from "./transform.ts";
+import { at, attachSceneEntity, modelAttachmentTag, modelLocalDelta, modelWorldBounds } from "./transform.ts";
 import { DEFAULT_MODEL_REPLACEMENT_POLICY, selectModelEntity } from "./replacements.ts";
 import { byteColor } from "./types.ts";
 import { md5ShadowEnvelope } from "./shadow-bounds.ts";
@@ -175,9 +175,25 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
   }
   function appendGeometry(name: string, image: ModelImageSelection, localGeometry: MaterialGeometry, unlit: boolean, world = false): void {
     const indices = localGeometry.indices;
-    const geometry = world ? localGeometry : { indices, vertices: localGeometry.vertices.map(vertex => ({
-      position: modelWorldPoint(entity.transform, vertex.position), normal: modelWorldDirection(entity.transform, vertex.normal),
-      texCoord: vertex.texCoord, lightmapCoord: vertex.lightmapCoord, color: vertex.color })) };
+    // modelWorldPoint/modelWorldDirection inlined with the transform scalars
+    // hoisted; the fround placement (source float discipline) is unchanged.
+    const transform = entity.transform, [forward, left, up] = transform.axis;
+    const geometry = world ? localGeometry : { indices, vertices: localGeometry.vertices.map(vertex => {
+      const px = vertex.position.x * transform.scale.x, py = vertex.position.y * transform.scale.y, pz = vertex.position.z * transform.scale.z;
+      const nx = vertex.normal.x * transform.scale.x, ny = vertex.normal.y * transform.scale.y, nz = vertex.normal.z * transform.scale.z;
+      return {
+        position: {
+          x: Math.fround(transform.origin.x + Math.fround(Math.fround(Math.fround(forward.x * px) + Math.fround(left.x * py)) + Math.fround(up.x * pz))),
+          y: Math.fround(transform.origin.y + Math.fround(Math.fround(Math.fround(forward.y * px) + Math.fround(left.y * py)) + Math.fround(up.y * pz))),
+          z: Math.fround(transform.origin.z + Math.fround(Math.fround(Math.fround(forward.z * px) + Math.fround(left.z * py)) + Math.fround(up.z * pz))),
+        },
+        normal: {
+          x: Math.fround(Math.fround(Math.fround(forward.x * nx) + Math.fround(left.x * ny)) + Math.fround(up.x * nz)),
+          y: Math.fround(Math.fround(Math.fround(forward.y * nx) + Math.fround(left.y * ny)) + Math.fround(up.y * nz)),
+          z: Math.fround(Math.fround(Math.fround(forward.z * nx) + Math.fround(left.z * ny)) + Math.fround(up.z * nz)),
+        },
+        texCoord: vertex.texCoord, lightmapCoord: vertex.lightmapCoord, color: vertex.color };
+    }) };
     const depthHack = flags.kind === "q1" ? options.viewModel === true : flags.kind === "q2" ? (bits & 16) !== 0 : (bits & 8) !== 0;
     surfaces.push({ surfaceIndex: surfaces.length, fogSphere, name, entity, options, transform: entity.transform, image, localGeometry, geometry,
       depthRange: depthHack ? [0, 0.3] : [0, 1], cull: model.kind === "q1-spr" || model.kind === "q2-sp2" ? "none" : model.kind === "q1-mdl" || model.kind === "q2-md2" || model.kind === "md5" && (model.skinSelection.kind === "q1-mdl-replacement" || model.skinSelection.kind === "q2-md2-replacement") ? "front" : "back",
