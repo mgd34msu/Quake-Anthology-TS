@@ -70,6 +70,7 @@ test("native Q2 predicts sent moves before server execution and reconciles using
     expect(acknowledged.at(-1)).toBe(sent.at(-1));
     expect(acknowledged.at(-1)).not.toBe(client.acknowledgedFrame);
     expect(after.origin).toEqual(predicted.origin);
-    expect(remote.playerView(player.actor).origin).toEqual(after.origin);
+    // The reconciled view includes the game view offset (weapon recoil), like the server's own view.
+    expect(remote.playerView(player.actor).origin).toEqual(server.simulation.playerView(admitted.actor).origin);
   } finally { for (const owner of downloadOwners) owner.mounts.close(); client.close(); await server.close(); session.close(); await content.close(); await rm(userRoot, { recursive: true, force: true }); }
 }, 30000);
