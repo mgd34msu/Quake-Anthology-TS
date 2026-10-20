@@ -68,21 +68,21 @@ export function primaryShaderControl(events: PresentationState, assets: Applicat
   events.enableLocalMedia();
   return async (original: string, replacement: string, offset: string, initializing: boolean, consumerCurrent: () => boolean): Promise<void> => {
     const current = (): boolean => sourceCurrent() && consumerCurrent();
-    if (!current()) throw new Error("Shader consumer is retired");
+    // A consumer retired mid-dispatch (fast restart) drops the remap; its
+    // replacement rebuilds shader state from the full configstrings at init.
+    if (!current()) return;
     const parsed = Number.parseFloat(offset), timeOffset = Number.isNaN(parsed) ? 0 : parsed;
     events.publishLocalMedia(undefined, assets.content.recipe.engineBehavior.content, { kind: "shader-remap", original, replacement, timeOffset }, initializing, current);
     await preparePresentationShaders(events, assets);
-    if (!current()) throw new Error("Shader consumer is retired");
   };
 }
 
 export function componentMediaControl(events: PresentationState, audio: ApplicationAudio, assets: ApplicationAssets) {
   events.enableLocalMedia();
   return async (source: ActiveModPresentation, request: ComponentPresentationMediaRequest, initializing: boolean, current: () => boolean): Promise<void> => {
-    if (!current()) throw new Error("Component media consumer is retired");
+    if (!current()) return;
     events.publishLocalMedia(source.owner, source.identity.source.content, request, initializing, request.kind === "shader-remap" ? current : undefined);
     if (request.kind === "shader-remap") await preparePresentationShaders(events, assets);
     else await preparePresentationAudio(events, audio);
-    if (!current()) throw new Error("Component media consumer is retired");
   };
 }

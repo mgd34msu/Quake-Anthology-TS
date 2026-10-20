@@ -75,7 +75,7 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
       reconnectLimitSeconds: () => cvars.get('sv_reconnectlimit')?.integerValue ?? 3,
       minimumPing: () => cvars.variableValue('sv_minPing'), maximumPing: () => cvars.variableValue('sv_maxPing'),
       demoRestricted: () => options.content.q3Product?.restriction.kind === 'demo',
-      enabled: () => cvars.variableValue('g_gametype') !== 2 && cvars.variableValue('ui_singlePlayerActive') === 0,
+      enabled: () => cvars.variableValue('g_gametype') !== 2,
       gameDirectory: () => cvars.variableString('fs_game'), strictAuth: () => cvars.variableString('sv_strictAuth'),
       floodProtect: () => cvars.variableValue('sv_floodProtect') !== 0,
     },
