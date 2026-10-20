@@ -39,6 +39,8 @@ export class Q3ServerNetwork implements ApplicationNetwork {
   private checksumFeed: number;
   private changedWorld = false;
   private pending: ActorCommand[] = [];
+  /** Reliable-command overflows recorded during synchronous game output; disconnected at operation boundaries. */
+  private readonly overflowed = new Set<Peer>();
   private host: Q3ApplicationServerHost;
   private readonly peers = new Map<number, Peer>();
   private readonly entities = new Q3SnapshotEntities(32768);
@@ -147,6 +149,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
     if (this.ended) return []; this.now = Math.trunc(nowMilliseconds);
     const host = this.host, serverId = this.serverId;
     await host.prepare(this.checksumFeed, serverId, (index, value) => this.broadcastConfigstring(index, value)); if (this.ended) return []; this.assertWorld(host, serverId);
+    await this.disconnectOverflowed(); if (this.ended) return [];
     if (this.changedWorld) { this.changedWorld = false; for (const peer of this.peers.values()) this.gamestate(peer); }
     for (let event = this.options.transport.poll(); event !== null; event = this.options.transport.poll()) {
       if (this.ended) break;
@@ -178,6 +181,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
   private async publishEvents(_output: SimulationOutput, events: readonly SimulationPresentationEvent[], nowMilliseconds: number): Promise<void> {
     if (this.ended) return; this.now = Math.trunc(nowMilliseconds);
     await this.receiveEvents(events);
+    await this.disconnectOverflowed();
     if (this.ended) return;
     const masters = this.host.administration?.masters() ?? [];
     if (masters.length > 0 && this.options.transport.address.kind !== 'ipx') this.masterHeartbeat.send(masters, this.now, true);
@@ -212,28 +216,37 @@ export class Q3ServerNetwork implements ApplicationNetwork {
         const peer = [...this.peers.values()].find(peer => peer.player.sourceEntity === slot);
         if (peer !== undefined) await this.disconnectClient(peer.player.client, reason);
       },
-      sendServerCommand: async (slot, text) => {
+      sendServerCommand: (slot, text) => {
         for (const peer of [...this.peers.values()]) {
           if (this.ended || this.peers.get(peer.slot) !== peer) continue;
-          if (slot === -1 || peer.player.sourceEntity === slot) await this.queue(peer, text);
+          if (slot === -1 || peer.player.sourceEntity === slot) this.queue(peer, text);
         }
       },
       configstring: (index, value) => this.broadcastConfigstring(index, value),
     };
   }
-  private async broadcastConfigstring(index: number, value: string): Promise<void> {
+  private broadcastConfigstring(index: number, value: string): void {
     for (const peer of [...this.peers.values()]) {
       if (peer.connection.phase === 'connected') continue;
-      await this.configstring(peer, index, value);
+      this.configstring(peer, index, value);
     }
   }
-  private async configstring(peer: Peer, configIndex: number, value: string): Promise<void> {
+  private configstring(peer: Peer, configIndex: number, value: string): void {
     for (const command of q3ConfigstringCommands(configIndex, value)) {
       if (this.ended || this.peers.get(peer.slot) !== peer) break;
-      await this.queue(peer, command);
+      this.queue(peer, command);
     }
   }
-  private async queue(peer: Peer, text: string): Promise<void> { if (peer.connection.reliable.add(text).kind === 'overflow') await this.disconnectClient(peer.player.client, 'Server command overflow'); }
+  // Game output can arrive inside a nested synchronous VM call (bot library
+  // client commands), so reliable enqueue must not await; overflow disconnects
+  // are deferred to the next publish/poll boundary.
+  private queue(peer: Peer, text: string): void { if (peer.connection.reliable.add(text).kind === 'overflow') this.overflowed.add(peer); }
+  private async disconnectOverflowed(): Promise<void> {
+    for (const peer of [...this.overflowed]) {
+      this.overflowed.delete(peer);
+      if (!this.ended && this.peers.get(peer.slot) === peer) await this.disconnectClient(peer.player.client, 'Server command overflow');
+    }
+  }
   async disconnectClient(client: ClientId, reason: string): Promise<boolean> {
     const peer = [...this.peers.values()].find(peer => peer.player.client.equals(client)); if (peer === undefined) return false;
     const host = this.host;

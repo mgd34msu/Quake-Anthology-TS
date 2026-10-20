@@ -116,6 +116,8 @@ export class Q3QvmServerGame {
   private savedBots: unknown = null;
   private botPreparation: Q3GuestBotPreparation | null = null;
   private readonly botClients = new Set<number>();
+  /** Bot library client commands queue for async execution after the current VM call (game code may perform async host work, e.g. log file writes, inside ClientCommand). */
+  private readonly pendingBotCommands: { readonly slot: number; readonly argv: readonly string[] }[] = [];
   private readonly pendingBotAdmissions = new Set<number>();
   private readonly botMessages = new Map<number, BoundedQueue<string>>();
   private readonly services: QvmServerGameServices;
@@ -211,7 +213,7 @@ export class Q3QvmServerGame {
     this.botPreparation = preparation;
     this.bots = new Q3GuestBots({ library: { ...preparation.library, clientCommand: (slot, text) => {
       if (!this.botClients.has(slot)) throw new Error(`Bot command has no owned client ${slot}`);
-      this.game.clientCommand(slot, tokenizeCommand(text, 'q3').argv); this.admitPendingBots(); return undefined;
+      this.pendingBotCommands.push({ slot, argv: tokenizeCommand(text, 'q3').argv }); return undefined;
     } }, selected: preparation.selected, records: this.records, spatial: this.spatial, entities: this.options.entityText,
       mapName: this.state.cvars.variableString('mapname'), clients: {
         allocateClient: () => {
@@ -413,7 +415,7 @@ export class Q3QvmServerGame {
     try {
       await this.game.initializeAsync(this.options.now(), this.options.seed, start.kind === 'map-restart');
       await this.refreshServerInfo();
-      this.current(); this.lifecycle = { kind: 'running', output }; this.admitPendingBots();
+      this.current(); this.lifecycle = { kind: 'running', output }; await this.drainBotCommands();
     } catch (error) {
       try { await this.shutdown(); } catch (cleanup) { throw new AggregateError([error, cleanup], 'Q3 guest initialization and cleanup failed'); }
       throw error;
@@ -535,6 +537,14 @@ export class Q3QvmServerGame {
     entry.disconnectNotified = true;
     this.options.beforeDisconnect?.(entry.player.actor);
   }
+  private async drainBotCommands(): Promise<void> {
+    while (this.pendingBotCommands.length !== 0) {
+      const { slot, argv } = this.pendingBotCommands.shift()!;
+      if (!this.botClients.has(slot)) continue;
+      await this.game.clientCommandAsync(slot, argv); this.current();
+    }
+    this.admitPendingBots();
+  }
   private admitPendingBots(): void {
     for (const slot of this.pendingBotAdmissions) {
       this.pendingBotAdmissions.delete(slot);
@@ -549,14 +559,14 @@ export class Q3QvmServerGame {
   async consoleCommand(argv: readonly string[]): Promise<boolean> {
     this.externalOperations++;
     try {
-      this.running(); const handled = await this.game.consoleCommandAsync(argv); this.current(); this.admitPendingBots(); return handled;
+      this.running(); const handled = await this.game.consoleCommandAsync(argv); this.current(); await this.drainBotCommands(); return handled;
     } finally { this.finishExternalOperation(); }
   }
   async runFrame(timeMilliseconds: number): Promise<void> {
     this.externalOperations++;
     try { this.running();
       if (this.bots !== null && this.state.cvars.variableValue('bot_enable') !== 0) await this.game.module.callAsync([QvmGameExport.BOTAI_START_FRAME, timeMilliseconds]);
-      await this.game.runFrameAsync(timeMilliseconds); await this.refreshServerInfo(); this.current(); this.admitPendingBots();
+      await this.game.runFrameAsync(timeMilliseconds); await this.refreshServerInfo(); this.current(); await this.drainBotCommands();
     } finally { this.finishExternalOperation(); }
   }
   isBot(client: ClientId): boolean { return this.botClients.has(client.slot) && this.player(client) !== null; }

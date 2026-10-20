@@ -19,7 +19,7 @@ export interface SaveEligibility {
 export function saveUnavailable(state: SaveEligibility, purpose: SavePurpose): string | null {
   if (!state.active) return "No active world to save.";
   if (purpose === "transition") return state.authority === "remote" ? "Only the authoritative world can retain transition state." : null;
-  if (state.authority !== "offline") return "Save/load unavailable during a network game.";
+  if (state.authority !== "offline") return "Save/load unavailable while hosting a network game.";
   if (state.family !== "q3" && state.mode === "deathmatch" && state.matchSave !== true) return "Cannot save a deathmatch game.";
   if (state.family !== "q3" && state.intermission && state.matchSave !== true) return "Cannot save during intermission.";
   // Server-administration saves persist world state even with no players in it.

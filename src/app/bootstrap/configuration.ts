@@ -11,6 +11,7 @@ import type { ApplicationHost } from "./application.ts";
 import type { ApplicationOptions } from "./options.ts";
 import type { ApplicationConfigurationContent } from "./content.ts";
 import { applicationDiscoversMods, applicationConfigurationPreset, openApplicationConfigurationContent } from "./content.ts";
+import { sourceProgramProduct } from "../../content/catalog/source-program.ts";
 import { discoverInstalledContent, presetChoice, type InstalledCatalog } from "../../content/catalog/index.ts";
 import type { ExecutableRecipe } from "../../contracts/content.ts";
 import type { ContentId } from "../../contracts/content.ts";
@@ -355,7 +356,9 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
   if (content.q3Product !== undefined) options = { ...options, q3Product: content.q3Product };
   const dialect = configurationDialect(content), movement = configurationMovementDialect(content);
   const context: CommandContext = { session: session.session, origin: { kind: "server-console" } };
-  const source = createStartupSource(options, { source: content.selection.source, match: content.selection.match }, dialect, context, defaultCapacity, text => host.print(text));
+  const campaign = sourceProgramProduct(content.catalog, content.selection.source.content).expectation.campaign;
+  const source = createStartupSource(options, { source: content.selection.source, match: content.selection.match,
+    rules: options.rules ?? (campaign === "ctf" || campaign === "lrctf" ? "ctf" : "standard") }, dialect, context, defaultCapacity, text => host.print(text));
   registerGtvCvars(source);
   const inputCvars = new CvarRegistry({ dialect: movement, context, print: text => host.print(text) });
   const image = options.dedicated ? null : await ApplicationImageSettings.open({ deferPersistence: true, context, dialect,

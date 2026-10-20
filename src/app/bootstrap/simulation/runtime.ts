@@ -2676,7 +2676,7 @@ export class SharedSimulation implements Simulation {
     if (guest !== undefined) {
       const now = () => Math.trunc(this.timeSeconds * 1000);
       const state = new Q3ServerState({ session: this.session, now, print: guest.print,
-        settings: { gameType: 0, singlePlayer: false, maxClients: this.options.maxClients,
+        settings: { gameType: guest.gameType ?? (recipe.match.provider === "q3:ctf" ? GameType.GT_CTF : this.options.mode === "singleplayer" ? 2 : 0), singlePlayer: this.options.mode === "singleplayer", maxClients: this.options.maxClients,
           mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
           ...(this.options.restore !== undefined || this.options.sourceRegistry === undefined ? {} : { sourceRegistry: this.options.sourceRegistry }),
           ...(this.options.restore !== undefined || this.options.sourceArchive === undefined ? {} : { sourceArchive: this.options.sourceArchive }),

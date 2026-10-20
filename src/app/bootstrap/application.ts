@@ -614,6 +614,7 @@ export class Application {
     const product = content.catalog.product(content.recipe.map.entities.content);
     return { ...components, q3Guest: {
       prepared: content.preparedQ3Game,
+      gameType: content.recipe.match.provider === "q3:ctf" || product.expectation.campaign === "ctf" || product.expectation.campaign === "lrctf" ? 4 : options.mode === "singleplayer" ? 2 : 0,
       writable: new UserFileStore(product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory)),
       gameDirectory: basename(product.expectation.contentDirectory), print: text => host.print(text),
       common: { milliseconds: () => Math.trunc(performance.now()), realTime, commands: { executeNow: text => { commands().executeNow(text); }, append: text => commands().append(text), insert: text => commands().insert(text) } },

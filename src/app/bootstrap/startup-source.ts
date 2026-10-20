@@ -11,7 +11,7 @@ import { registerQ3ServerCvars } from "./simulation/q3/server-state.ts";
 import { registerFrameTimeCvars } from "./frame-time.ts";
 import type { ApplicationOptions } from "./options.ts";
 
-export function createStartupSource(options: ApplicationOptions, selection: Pick<ApplicationSourceSelection, "source" | "match">, dialect: CommandDialect,
+export function createStartupSource(options: ApplicationOptions, selection: Pick<ApplicationSourceSelection, "source" | "match"> & Partial<Pick<ApplicationSourceSelection, "rules">>, dialect: CommandDialect,
   context: CommandContext, maxClients: number, print: (text: string) => void): CvarRegistry {
   const cvars = new CvarRegistry({ dialect, context, print });
   if (dialect === "q2-classic" || dialect === "q2-rerelease") registerQ2ServerCvars(cvars, selection.match.provider);
@@ -28,7 +28,7 @@ export function createStartupSource(options: ApplicationOptions, selection: Pick
   } else for (const [name, value] of Object.entries({ skill: "1", deathmatch: "0", coop: "0", teamplay: "0", sv_cheats: "0", sv_aim: dialect === "q1-quakeworld" ? "2" : "0.93",
     developer: "0", pausable: "1", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1", footsteps: "1" })) cvars.register(name, value);
   for (const [name, value] of Object.entries({ skill: String(options.skill), deathmatch: options.mode === "deathmatch" ? "1" : "0",
-    coop: options.mode === "coop" ? "1" : "0", g_gametype: selection.match.provider === "q3:ctf" ? "4" : options.mode === "singleplayer" ? "2" : "0",
+    coop: options.mode === "coop" ? "1" : "0", g_gametype: selection.match.provider === "q3:ctf" || selection.rules === "ctf" && dialect === "q3" ? "4" : options.mode === "singleplayer" ? "2" : "0",
     // Rules-driven team launches put every client straight into play instead
     // of the source's pick-a-team spectator step.
     ...(selection.match.provider === "q3:ctf" ? { g_teamAutoJoin: "1", g_teamForceBalance: "1" } : {}),

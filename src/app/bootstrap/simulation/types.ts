@@ -84,6 +84,8 @@ export interface SimulationOptions {
   readonly q3Guest?: Pick<Q3GuestRuntimeOptions, "writable" | "common"> & {
     readonly prepared: PreparedQ3Game;
     readonly gameDirectory: string;
+    /** Q3 g_gametype for the guest's own match (derived from the mod's campaign/rules). */
+    readonly gameType?: number;
     print(text: string): void;
   };
   readonly identity: IdentityOwner;

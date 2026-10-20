@@ -54,7 +54,7 @@ test('selected LRCTF application executes actual qagame on the shared scene and 
       expect(() => app.simulation.close()).toThrow('shutdown must be awaited');
       expect(app.content.preparedQ3Game?.resource.requestedPath).toBe('vm/qagame.qvm');
       expect(guest.state.cvars.variableString('fs_game')).toBe('lrctf');
-      expect(guest.state.cvars.variableValue('sv_fps')).toBe(20);
+      expect(guest.state.cvars.variableValue('sv_fps')).toBe(40); // LRCTF's shipped autoexec.cfg sets sv_fps 40
       expect(guest.state.cvars.variableValue('g_gametype')).toBe(4);
       expect(guest.state.cvars.variableValue('bot_enable')).toBe(1);
       expect(guest.records.host.scene).toBe(app.simulation.scene);
@@ -72,7 +72,8 @@ test('selected LRCTF application executes actual qagame on the shared scene and 
       const bot = guest.players().find(player => guest.isBot(player.client));
       if (bot === undefined) throw new Error('Source module did not admit its bot');
       const initial = guest.records.player(bot.sourceEntity).origin;
-      for (let frame = 0; frame < 100; frame++) await app.step(50);
+      // A solo CTF bot waits out team-leader election before roaming (up to ~30 game seconds).
+      for (let frame = 0; frame < 800 && JSON.stringify(guest.records.player(bot.sourceEntity).origin) === JSON.stringify(initial); frame++) await app.step(50);
       expect(guest.records.player(bot.sourceEntity).origin).not.toEqual(initial);
       expect(guest.state.cvars.variableValue('bot_enable')).toBe(1);
     } finally { await app.close(); }

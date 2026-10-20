@@ -135,14 +135,18 @@ export function applicationSourceSelection(catalog: InstalledCatalog, options: P
   const source: ProviderReference = { provider: `${family}:official`, content: product.id };
   const program = sourceProgramProduct(catalog, product.id).expectation;
   const rerelease = program.edition === "rerelease";
-  const rules = options.rules ?? (family === "q2" && (program.campaign === "ctf" || program.campaign === "lmctf") ? program.campaign : "standard");
+  const rules = options.rules ?? (family === "q2" && (program.campaign === "ctf" || program.campaign === "lmctf") ? program.campaign
+    : family === "q3" && (program.campaign === "ctf" || program.campaign === "lrctf") ? "ctf" : "standard");
   if (rules === "lmctf" && family !== "q2") throw new Error("lmctf requires a Quake II game provider");
   if (rules === "ctf" && family !== "q2" && family !== "q3") throw new Error("ctf requires a Quake II or Quake III game provider");
   if (rules === "deathball" && family !== "q2") throw new Error("DeathBall requires a Quake II game provider");
   if (rules === "horde" && family !== "q1" && family !== "q2" && family !== "q3") throw new Error("Horde requires a Quake, Quake II or Quake III game provider");
   // Tag/DeathBall ship their tokens/models in Ground Zero content, so the
   // match role mounts the same-edition Rogue product on any Q2 program.
-  const match: ProviderReference = rules === "standard" ? source : rules === "ctf" && family === "q3" ? { provider: "q3:ctf", content: product.id } : rules === "ctf" || rules === "lmctf" ? { provider: `q2:${rules}`, content: catalog.require(`q2-${rerelease ? "rerelease" : "classic"}-${rules}`).id }
+  // A discovered Q3 guest mod owns its match through its own qagame; only the
+  // built-in Q3 source takes the shared q3:ctf match role.
+  const guestMod = family === "q3" && !expectedProducts.some(builtin => builtin.id === program.id);
+  const match: ProviderReference = rules === "standard" || guestMod ? source : rules === "ctf" && family === "q3" ? { provider: "q3:ctf", content: product.id } : rules === "ctf" || rules === "lmctf" ? { provider: `q2:${rules}`, content: catalog.require(`q2-${rerelease ? "rerelease" : "classic"}-${rules}`).id }
     : rules === "tag" || rules === "deathball" ? { provider: `q2:${rules}`, content: catalog.require(`q2-${rerelease ? "rerelease" : "classic"}-rogue`).id }
     : { provider: `${family}:${rules}`, content: product.id };
   return { source, match, rules };
