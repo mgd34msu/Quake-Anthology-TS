@@ -17,6 +17,7 @@ import type { Q2CompositionServices, Q2MatchSelection } from "../../../../src/co
 import { Q2Ctf } from "../../../../src/content/q2/multiplayer/ctf/index.ts";
 import { Q2Lmctf } from "../../../../src/content/q2/multiplayer/lmctf/runtime.ts";
 import { Q2Tag } from "../../../../src/content/q2/missionpacks/modes/index.ts";
+import { Q2Horde } from "../../../../src/content/q2/multiplayer/horde.ts";
 function compose(initializeInventory = true, entities = '{ "classname" "worldspawn" } { "classname" "info_player_start" }', match: Q2MatchSelection = { kind: "standard" }, clientCount = 2, deathmatchFlags?: Q2CompositionServices["deathmatchFlags"], options: Pick<Q2CompositionServices, "randomItems" | "dropQuadFire"> = {}) {
   const actors = new SessionActorRegistry(createIdentityOwner("rr-source-check")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
@@ -371,4 +372,17 @@ test("rerelease DualFire death drop preserves remaining duration and obeys live 
     expect(active.composition.armory?.items.powerups(active.second.actor.id).quadFireUntil).toBe(30);
     expect(active.composition.armory?.items.powerups(active.first.actor.id).quadFireUntil).toBe(0);
   }
+});
+
+test("Horde match checkpoint restores wave progress", () => {
+  const active = compose(true, undefined, { kind: "horde" });
+  const horde = active.composition.match.source;
+  if (!(horde instanceof Q2Horde)) throw new Error("Horde source not selected");
+  horde.wave = 7;
+  const checkpoint = captureQ2Product(active.composition);
+  const restored = compose(false, undefined, { kind: "horde" });
+  restoreQ2Product(restored.composition, checkpoint);
+  const restoredHorde = restored.composition.match.source;
+  if (!(restoredHorde instanceof Q2Horde)) throw new Error("Restored horde source not selected");
+  expect(restoredHorde.wave).toBe(7);
 });

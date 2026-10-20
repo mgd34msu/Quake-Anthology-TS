@@ -55,7 +55,7 @@ export function restoreQ2Product(source: Q2ProductRuntime, checkpoints: readonly
   if (selection.field("edition").choice("classic", "rerelease") !== source.configuration.edition || selection.field("program").choice("baseq2", "xatrix", "rogue", "mg2", "n64") !== source.configuration.program)
     throw new Error("Q2 checkpoint belongs to a different source product");
   const matchSelection = selection.field("match");
-  if (matchSelection.field("kind").choice("standard", "tag", "deathball", "ctf", "lmctf") !== source.match.selection.kind) throw new Error("Q2 checkpoint belongs to a different source match mode");
+  if (matchSelection.field("kind").choice("standard", "tag", "deathball", "ctf", "lmctf", "horde") !== source.match.selection.kind) throw new Error("Q2 checkpoint belongs to a different source match mode");
   if (source.match.selection.kind === "deathball" && (matchSelection.field("team1Skin").string() !== source.match.selection.team1Skin
     || matchSelection.field("team2Skin").string() !== source.match.selection.team2Skin || matchSelection.field("goalLimit").number() !== source.match.selection.goalLimit))
     throw new Error("Q2 checkpoint belongs to different DeathBall rules");
