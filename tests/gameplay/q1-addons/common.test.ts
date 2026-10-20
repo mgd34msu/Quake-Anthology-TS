@@ -169,7 +169,8 @@ test("authored immediate end text advances the shared intermission before its no
   const exit = spawn("trigger_changelevel", { map: "hub", endtext: "$authored_end_text", spawnflags: "1" }); touch(exit);
   expect(state.transitions).toHaveLength(0); think(exit, 0.1);
   expect(state.events.some(event => event.kind === "finale" && event.text === "$authored_end_text")).toBe(true);
-  expect(base.levelRules.requestExit(0.5, true).kind).toBe("waiting"); expect(base.levelRules.requestExit(1.1, true).kind).toBe("travel");
+  // game.time is the binary32 donor clock, so the +1s deadline is fround(0.1)+1, not the double 1.1.
+  expect(base.levelRules.requestExit(0.5, true).kind).toBe("waiting"); expect(base.levelRules.requestExit(Math.fround(0.1) + 1, true).kind).toBe("travel");
   expect(state.transitions).toHaveLength(1); expect(state.transitions[0]?.kind).toBe("campaign-level"); state.actors.close();
 });
 

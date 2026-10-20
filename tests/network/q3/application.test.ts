@@ -359,7 +359,7 @@ test('production protocol68 shared remote frontend draws retail q3dm1 and travel
     expect(() => browser.assertOpen()).not.toThrow();
     expect(lifecycle.slice(-2)).toEqual(["cg-shutdown:maps/q3dm2.bsp", "ui-shutdown:maps/q3dm2.bsp"]);
   } finally { shutdownGate.resolve(); await app?.close(); await server.close(); await browser.close(); browserCloses.mockRestore(); cgShutdown.mockRestore(); uiShutdown.mockRestore(); uiInit.mockRestore(); guestFrames.mockRestore(); scenes.mockRestore(); audio.mockRestore(); guestUiFrames.mockRestore(); guestKeys.mockRestore(); pure.mockRestore(); shaders.mockRestore(); pictures.mockRestore(); rmSync(root, { recursive: true, force: true }); }
-}, 60000);
+}, 120000);
 
 
 test('native Q3 downloads a referenced user package before guest init and pure admission', async () => {

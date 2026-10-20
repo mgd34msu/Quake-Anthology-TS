@@ -219,7 +219,7 @@ describe("QVM asynchronous traps", () => {
       void call.invokeAsync(qvmArguments([1]), 999);
       return 90;
     });
-    await expect(vm.invokeAsync(qvmArguments([0]))).rejects.toThrow("invalid QVM instruction index");
+    await expect(vm.invokeAsync(qvmArguments([0]))).rejects.toThrow("QVM private invocation requires an original function entry");
     expect(vm.isActive).toBe(false);
     expect(vm.stackPointer).toBe(vm.memory.length);
     expect(vm.invoke(qvmArguments([1]))).toBe(77);
