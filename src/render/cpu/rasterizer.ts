@@ -400,9 +400,16 @@ export class SoftwareRenderer implements RendererBackend {
     return { width: this.width, height: this.height, pixels: this.pixels.slice() };
   }
 
+  private readonly lightingByBatch = new WeakMap<DrawBatch, CpuLighting>();
   private fragmentLighting(batch: DrawBatch): CpuLighting {
+    // One snapshotted batch flows through every triangle/line fragment of a
+    // draw; resolve its depth image once instead of per primitive.
+    const cached = this.lightingByBatch.get(batch);
+    if (cached !== undefined) return cached;
     const lighting = batch.lighting;
-    return { parameters: lighting, depth: lighting.kind === "vertex" || lighting.atlas === null ? null : this.images.depthImage(lighting.atlas.image) };
+    const resolved: CpuLighting = { parameters: lighting, depth: lighting.kind === "vertex" || lighting.atlas === null ? null : this.images.depthImage(lighting.atlas.image) };
+    this.lightingByBatch.set(batch, resolved);
+    return resolved;
   }
 
   applyQ1Fog(projection: Mat4, fog: Q1Fog, skyFraction: number, output: "truecolor" | "classic-indexed" = "truecolor"): undefined {
