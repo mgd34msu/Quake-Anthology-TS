@@ -190,8 +190,19 @@ export function splitQ1SkyTexture(image: RenderImage): {
   readonly overlay: ImageLevel;
 } {
   const level = image.levels[0];
-  if (image.kind !== "indexed8" || level.width !== 256 || level.height !== 128)
-    throw new Error("Classic Q1 sky requires a 256x128 indexed texture");
+  if (level.width !== 256 || level.height !== 128)
+    throw new Error("Classic Q1 sky requires a 256x128 texture");
+  // Truecolor replacement skies (qdoom) keep the same side-by-side halves;
+  // their overlay transparency comes from the image alpha directly.
+  if (image.kind === "rgba8") {
+    const solid = new Uint8Array(128 * 128 * 4), overlay = new Uint8Array(solid.length);
+    for (let y = 0; y < 128; y++) for (let x = 0; x < 128; x++) {
+      overlay.set(level.pixels.subarray((y * 256 + x) * 4, (y * 256 + x) * 4 + 4), (y * 128 + x) * 4);
+      solid.set(level.pixels.subarray((y * 256 + x + 128) * 4, (y * 256 + x + 128) * 4 + 4), (y * 128 + x) * 4);
+    }
+    return { solid: { width: 128, height: 128, pixels: solid }, overlay: { width: 128, height: 128, pixels: overlay } };
+  }
+  if (image.kind !== "indexed8") throw new Error("Classic Q1 sky requires an indexed or RGBA texture");
   const solid = new Uint8Array(128 * 128 * 4), overlay = new Uint8Array(solid.length);
   let red = 0, green = 0, blue = 0;
   const color = (index: number): readonly [number, number, number] => {

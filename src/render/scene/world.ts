@@ -299,11 +299,20 @@ export class WorldScene {
         let material: Q1Material | Q2Material, q1Sky: Extract<WorldSurface, { readonly kind: "legacy" }>["q1Sky"] = null;
         if (map.kind === "q1-bsp") {
           material = createQ1Material(name, texture.image, lighting, { ...q1TextureAnimations(name, textures), alpha: warp ? options.q1WaterAlpha ?? 1 : 1 });
-          if (q1SurfaceKind(name) === "sky" && texture.content.kind === "indexed8") {
+          if (q1SurfaceKind(name) === "sky") {
             q1Sky = skyLayers.get(texture.image) ?? null;
             if (q1Sky === null) {
-              const split = original?.quake64Shift === undefined ? splitQ1SkyTexture(texture.content) : splitQ64SkyTexture(texture.content);
-              q1Sky = { solid: generated(`${name}:solid`, split.solid, "repeat"), overlay: generated(`${name}:overlay`, split.overlay, "repeat") };
+              const level = texture.content.levels[0];
+              const canSplit = original?.quake64Shift !== undefined
+                ? texture.content.kind === "indexed8"
+                : level !== undefined && level.width === 256 && level.height === 128;
+              // A sky texture that cannot split into classic layers (a
+              // truecolor or odd-sized replacement) still renders through
+              // the sky path as one scrolling layer, never the wall path.
+              const split = canSplit ? (original?.quake64Shift === undefined ? splitQ1SkyTexture(texture.content) : splitQ64SkyTexture(texture.content)) : null;
+              q1Sky = split === null
+                ? { solid: texture.image, overlay: generated(`${name}:overlay`, { width: 1, height: 1, pixels: new Uint8Array(4) }, "repeat") }
+                : { solid: generated(`${name}:solid`, split.solid, "repeat"), overlay: generated(`${name}:overlay`, split.overlay, "repeat") };
               skyLayers.set(texture.image, q1Sky);
             }
           }

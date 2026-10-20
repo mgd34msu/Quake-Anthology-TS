@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { splitQ64SkyTexture } from "../../src/materials/legacy.ts";
+import { splitQ1SkyTexture, splitQ64SkyTexture } from "../../src/materials/legacy.ts";
 import { createContentId, createMountId, createMountIdentity, createMountPlanId, createResourceId } from "../../src/contracts/content.ts";
 import type { ResolvedResourceReference } from "../../src/contracts/content.ts";
 import { digestBytes } from "../../src/content/mounts/index.ts";
@@ -13,4 +13,14 @@ test("Quake64 sky keeps vertical layers and index-zero foreground at half alpha"
     palette: { colors, source: { ...record, id: createResourceId(record) } }, transparency: { kind: "opaque" }, fullbright: null, translation: null });
   expect(result.solid).toEqual({ width: 2, height: 1, pixels: new Uint8Array([70, 80, 90, 255, 100, 110, 120, 255]) });
   expect(result.overlay).toEqual({ width: 2, height: 1, pixels: new Uint8Array([10, 20, 30, 128, 40, 50, 60, 128]) });
+});
+
+test("truecolor replacement skies split into the same side-by-side layers", () => {
+  const pixels = new Uint8Array(256 * 128 * 4);
+  pixels.set([1, 2, 3, 0], 0);
+  pixels.set([4, 5, 6, 255], 128 * 4);
+  const result = splitQ1SkyTexture({ kind: "rgba8", levels: [{ width: 256, height: 128, pixels }], borderColor: { x: 0, y: 0, z: 0, w: 0 } });
+  expect(result.overlay.width).toBe(128);
+  expect([...result.overlay.pixels.subarray(0, 4)]).toEqual([1, 2, 3, 0]);
+  expect([...result.solid.pixels.subarray(0, 4)]).toEqual([4, 5, 6, 255]);
 });
