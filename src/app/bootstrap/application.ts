@@ -4506,13 +4506,16 @@ export class Application {
       const remote = await this.network?.server.poll(performance.now()) ?? [];
       if (this.closed) throw new Error("Application closed during step");
       const menuPause = this.graphical?.presentations.some(presentation => presentation.ui.pauseMenuOpen) === true;
+      // Q3 UI only requests a pause from the menu in singleplayer; a deathmatch
+      // (even a local botmatch) keeps running behind the menu.
+      const menuPauseRequest = menuPause && this.options.mode === "singleplayer";
       const q3Cvars = this.simulation.q3Source()?.host.cvars ?? this.simulation.q3Guest()?.state.cvars;
-      if (q3Cvars !== undefined && menuPause !== this.q3MenuPause) {
-        for (const cvars of this.clientCvars.values()) cvars.set("cl_paused", menuPause ? "1" : "0", true);
+      if (q3Cvars !== undefined && menuPauseRequest !== this.q3MenuPause) {
+        for (const cvars of this.clientCvars.values()) cvars.set("cl_paused", menuPauseRequest ? "1" : "0", true);
       }
-      this.q3MenuPause = q3Cvars !== undefined && menuPause;
+      this.q3MenuPause = q3Cvars !== undefined && menuPauseRequest;
       const paused = q3Cvars !== undefined ? q3ServerPaused(q3Cvars,
-        menuPause || [...this.clientCvars.values()].some(cvars => cvars.variableValue("cl_paused") !== 0),
+        menuPauseRequest || [...this.clientCvars.values()].some(cvars => cvars.variableValue("cl_paused") !== 0),
         this.simulation.clientIdentities().filter(client => !this.botClients.some(bot => bot.client.id.equals(client))).length)
         : this.options.mode === "singleplayer" && this.network === null
           && this.simulation.players().length === this.localPlayers.length + this.botClients.length && menuPause

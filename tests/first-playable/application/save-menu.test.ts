@@ -71,7 +71,7 @@ for (const mode of ["singleplayer", "deathmatch"]) test(`actual Q3 ${mode} pause
     const local = app.localPlayers[0]; if (local === undefined || !(local.seat.presentation instanceof WorldSeatPresentation)) throw new Error("Missing local player");
     for (const down of [true, false]) app.input({ seat: local.seat.id, kind: "key", code: KeyCode.Escape, down, repeat: false, timeMilliseconds: performance.now() });
     const first = await app.step(1), time = app.timeMilliseconds;
-    const paused = await app.step(1000);
+    let paused = first; for (let index = 0; index < 10; index++) paused = await app.step(100);
     if (mode === "singleplayer") { expect(paused.snapshot).toEqual(first.snapshot); expect(paused.events).toEqual([]); expect(app.timeMilliseconds).toBe(time); }
     else expect(app.timeMilliseconds).toBe(time + 1000);
     for (const down of [true, false]) app.input({ seat: local.seat.id, kind: "key", code: KeyCode.Escape, down, repeat: false, timeMilliseconds: performance.now() });
