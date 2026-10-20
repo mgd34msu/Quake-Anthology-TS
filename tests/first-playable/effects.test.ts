@@ -357,65 +357,6 @@ test("rerelease monster muzzle profiles cover extended ordinary IDs and boss bla
   }
 });
 
-for (const [game, map] of [["q1-classic-id1", "e1m1"], ["q2-classic-baseq2", "base1"]] satisfies readonly (readonly [string, string])[]) test(`${game} selected Q3 bullet impact keeps materials until the shared world and no-world finalizers`, async () => {
-  const command = parseApplicationCommand(["--game", game, "--map", map, "--renderer", "cpu"]);
-  if (command.kind !== "run") throw new Error("Expected cross-game effect fixture");
-  const content = await loadApplicationContent(command.options), identity = createIdentityOwner("q3-material-order");
-  const owner: RendererResourceOwner = { identity: Symbol("q3-material-order"), session: identity.session, generation: 0 };
-  const assets = new ApplicationAssets(content, owner), actors = new SessionActorRegistry(identity);
-  const actor = actors.allocate("q3:weapons", "q3:weapons/machinegun");
-  const effects = new ApplicationEffects(assets, createSceneQueries(content.world), () => false);
-  try {
-    await assets.loadWorld();
-    const q3 = content.catalog.require("q3-baseq3").id;
-    const surface = assets.world.surfaces.find(surface => surface.kind === "legacy" && surface.plane !== null && surface.plane.normal.z > 0.99
-      && (surface.material.kind === "q1" ? surface.material.surface === "ordinary" : surface.material.surfaceFlags === 0));
-    if (surface === undefined || surface.plane === null) throw new Error("Fixture has no ordinary floor");
-    const vertices = surface.geometry.vertices;
-    const end = vertices.reduce((sum, vertex) => ({ x: sum.x + vertex.position.x / vertices.length,
-      y: sum.y + vertex.position.y / vertices.length, z: sum.z + vertex.position.z / vertices.length }), { x: 0, y: 0, z: 0 });
-    effects.receive([{ kind: "q3-ballistics", content: q3, seconds: 1, sequence: 1,
-      event: { kind: "impact", timeMilliseconds: 1000, actor: actor.id, weapon: 2, origin: { ...end, z: end.z + 40 }, end,
-        normal: surface.plane.normal, target: null, surfaceFlags: 0, hitKind: "wall" } }]);
-    const time = { kind: "seconds", value: 1.05 } satisfies WorldSnapshot["frame"]["time"];
-    const snapshot: WorldSnapshot = { session: identity.session, frame: { frame: 1, time, elapsed: { kind: "seconds", value: 0.05 }, phase: "frame-exit" },
-      actors: actors.observations(), bodies: [], inventories: [], configurations: [],
-      scene: { session: identity.session, time, world: null, entities: [], lights: [], particles: [], lightStyles: [], areaBits: null } };
-    await effects.prepare(snapshot, [], [], { content: q3, timeMilliseconds: 1050 });
-    const camera: SceneCamera = { origin: { ...end, z: end.z + 40 }, axis: anglesToAxis({ x: 90, y: 0, z: 0 }),
-      viewport: { x: 0, y: 0, width: 160, height: 120 }, projection: perspectiveProjection(90, 73.739795, 4096), clip: { kind: "none" } };
-    const prepared = effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations));
-    const groups = prepared.operations.flatMap(operation => operation.kind === "scene-group" && operation.order.kind === "source" ? [operation] : []);
-    const mark = groups.find(group => group.order.kind === "source" && group.order.material.material.name === "gfx/damage/bullet_mrk");
-    const explosion = groups.find(group => group.order.kind === "source" && group.order.material.material.name.toLowerCase() === "bulletexplosion");
-    if (mark === undefined || explosion === undefined) throw new Error("Bullet impact must produce a mark and explosion");
-    expect(groups.indexOf(mark)).toBeLessThan(groups.indexOf(explosion));
-    if (mark.order.kind !== "source" || explosion.order.kind !== "source") throw new Error("Expected resolved materials");
-    expect(mark.order.source.entity).toEqual({ kind: "world" });
-    expect(explosion.order.source.entity.kind).toBe("refentity");
-    expect(mark.order.material.finished.sort).toBe(4); expect(explosion.order.material.finished.sort).toBe(9);
-    const markDraw = mark.operations[0], explosionDraw = explosion.operations[0];
-    if (markDraw?.kind !== "draw" || explosionDraw?.kind !== "draw") throw new Error("Missing effect draw operations");
-    expect(markDraw.batches.some(batch => batch.indices.length > 0)).toBe(true);
-    expect(explosionDraw.batches.some(batch => batch.indices.length > 0)).toBe(true);
-    const world = assets.world.prepareView({ camera, time, target: { kind: "preview", id: "q3-order" }, operations: prepared.operations });
-    const finished = finishSceneOperations(prepared.operations);
-    expect(finished.indexOf(markDraw)).toBeGreaterThanOrEqual(0);
-    expect(finished.indexOf(explosionDraw)).toBeGreaterThan(finished.indexOf(markDraw));
-    // The world path coalesces consecutive draws (mergeDrawOperations), so
-    // draw identity is gone by design; the mark's texture and the explosion
-    // batch must still appear, in order, among the merged batches.
-    const worldBatches = world.view.operations.flatMap(operation => operation.kind === "draw" ? operation.batches : []);
-    const markBatch = markDraw.batches[0]; if (markBatch === undefined) throw new Error("Missing mark batch");
-    const markAt = worldBatches.findIndex(batch => batch.texture === markBatch.texture
-      || batch.texture.kind === "bind-image" && markBatch.texture.kind === "bind-image" && batch.texture.image === markBatch.texture.image);
-    const explosionBatch = explosionDraw.batches[0]; if (explosionBatch === undefined) throw new Error("Missing explosion batch");
-    const explosionAt = worldBatches.indexOf(explosionBatch);
-    expect(markAt).toBeGreaterThanOrEqual(0);
-    expect(explosionAt).toBeGreaterThan(markAt);
-  } finally { effects.close(); assets.close(); await content.close(); }
-}, 30000);
-
 test("Q1 source model trails preserve tracer alternation, spacing, blood density and lifetime", () => {
   const particles = new SourceParticles(new SourceRandom(1));
   particles.q1Trail({ x: 0, y: 0, z: 0 }, { x: 9, y: 0, z: 0 }, 3, 0);

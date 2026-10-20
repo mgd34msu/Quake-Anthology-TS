@@ -10,11 +10,48 @@ import { ENTITYNUM_NONE } from "../../../../content/q3/base/shared/player-state.
 import type { GameEntity } from "../../../../content/q3/base/game/state.ts";
 import { MAX_CLIENTS } from "../../../../content/q3/base/game/state.ts";
 import { MoveFlags } from "../../../../movement/q3/constants.ts";
-import { savedActorId } from "../../../../persistence/save-image.ts";
+import { readSavedActor, savedActorId } from "../../../../persistence/save-image.ts";
+import { readVector } from "../../../../persistence/shared.ts";
 import type { SaveReader } from "../../../../persistence/value.ts";
-import { readQ3ProjectileStates, readQ3WeaponStatistics } from "../q3-ballistics.ts";
+import type { Q3Projectile, Q3ProjectileImpact } from "../../../../content/q3/base/game/projectile.ts";
+import type { Q3RailStatistics } from "../../../../content/q3/base/game/hitscan.ts";
+import { TrajectoryType } from "../../../../content/q3/base/shared/trajectory.ts";
 import type { Q3SelectedArsenalCheckpoint } from "./q3.ts";
 import type { Q3SelectedSource } from "./q3-source.ts";
+
+export interface Q3WeaponStatistics extends Q3RailStatistics { readonly actor: OwnedActor; readonly shots: number; }
+
+export interface Q3ProjectileState extends Q3Projectile {
+  readonly expires: number;
+  phase: { readonly kind: "flight" } | { readonly kind: "event"; readonly time: number; readonly impact: Extract<Q3ProjectileImpact, { readonly kind: "impact" }> }
+    | { readonly kind: "attached"; readonly target: ActorId | null; readonly nextThink: number };
+}
+
+export function readQ3ProjectileStates(reader: SaveReader, actor: (reader: SaveReader) => OwnedActor,
+  reference: (saved: SavedActorId) => ActorId): readonly Q3ProjectileState[] {
+  const identity = (value: SaveReader): ActorId => reference(readSavedActor(value));
+  return reader.list(value => {
+    const trajectory = value.field("trajectory"), phaseReader = value.field("phase");
+    const type = trajectory.field("type").choice(TrajectoryType.TR_STATIONARY, TrajectoryType.TR_LINEAR, TrajectoryType.TR_GRAVITY);
+    const kind = phaseReader.field("kind").choice("flight", "event", "attached");
+    const phase: Q3ProjectileState["phase"] = kind === "flight" ? { kind } : kind === "attached"
+      ? { kind, target: phaseReader.field("target").nullable(identity), nextThink: phaseReader.field("nextThink").integer(0) } : {
+      kind: "event", time: phaseReader.field("time").integer(), impact: { kind: phaseReader.field("impact").field("kind").choice("impact"),
+        normal: readVector(phaseReader.field("impact").field("normal")), target: phaseReader.field("impact").field("target").nullable(identity),
+        flesh: phaseReader.field("impact").field("flesh").boolean(), surfaceFlags: phaseReader.field("impact").field("surfaceFlags").integer() } };
+    return { actor: actor(value.field("actor")), owner: identity(value.field("owner")), pass: value.field("pass").nullable(identity), phase,
+      damagePoint: readVector(value.field("damagePoint")), flags: value.field("flags").integer(), weapon: value.field("weapon").choice(4, 5, 8, 9, 10, 11),
+      direct: value.field("direct").integer(0), splash: value.field("splash").integer(0), radius: value.field("radius").finite(),
+      method: value.field("method").integer(0), splashMethod: value.field("splashMethod").integer(0), expires: value.field("expires").finite(),
+      trajectory: { type, time: trajectory.field("time").finite(), duration: trajectory.field("duration").finite(),
+        base: readVector(trajectory.field("base")), delta: readVector(trajectory.field("delta")) } };
+  });
+}
+
+export function readQ3WeaponStatistics(reader: SaveReader, actor: (reader: SaveReader) => OwnedActor): readonly Q3WeaponStatistics[] {
+  return reader.list(value => ({ actor: actor(value.field("actor")), shots: value.field("shots").integer(), hits: value.field("hits").integer(),
+    streak: value.field("streak").integer(), impressiveCount: value.field("impressiveCount").integer(), rewardUntil: value.field("rewardUntil").integer() }));
+}
 
 export function readLegacyQ3Source(reader: SaveReader, owner: (reader: SaveReader) => OwnedActor,
   reference: (saved: SavedActorId) => ActorId) {

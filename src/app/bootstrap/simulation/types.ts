@@ -18,7 +18,6 @@ import type { PreparedQuakeCSource } from "./quakec-source.ts";
 import type { ArsenalAmmoWarning, WeaponHudStatus } from "../../../contracts/ui.ts";
 import type { WeaponReference } from "./weapon-slot.ts";
 import type { HandGrenadeTravel } from "./equipment-runtime.ts";
-import type { Q3SharedBallisticEvent } from "./q3-ballistics.ts";
 import type { Q1SelectedArsenalTravel } from "./arsenal/q1.ts";
 import type { Q3SelectedArsenalCheckpoint } from "./arsenal/q3.ts";
 import type { LmctfTravel } from "../../../content/q2/multiplayer/lmctf/types.ts";
@@ -217,7 +216,6 @@ export type SourcePresentationEvent = { readonly kind: "presentation-owner"; rea
   | { readonly kind: "q2-rerelease"; readonly event: Q2RereleaseEvent }
   | { readonly kind: "q2-player"; readonly event: Q2PlayerEvent }
   | { readonly kind: "q3-character"; readonly event: Q3CharacterPresentationEvent }
-  | { readonly kind: "q3-ballistics"; readonly event: Q3SharedBallisticEvent }
   | { readonly kind: "q3-source"; readonly event: Q3SourceEvent };
 export type SimulationPresentationEvent = SourcePresentationEvent & { readonly owner?: PresentationOwner; readonly recipient?: ActorId; readonly sequence: number; readonly content: ContentId; readonly seconds: number; readonly sourceEntity?: number | null };
 

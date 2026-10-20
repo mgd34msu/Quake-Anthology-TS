@@ -84,9 +84,6 @@ export class ApplicationEffects {
   private readonly preparedRenderers = new Map<ContentId, SceneModelRenderer>();
   private readonly images = new Map<"q1" | "q2", RendererImage>();
   private readonly q3 = new Map<ContentId, Q3ApplicationEffects>();
-  private readonly q3Weapons = new Map<ContentId, Q3ApplicationEffects>();
-  private readonly preparedQ3Weapons = new Map<ContentId, Q3ApplicationEffects>();
-  private readonly q3WeaponTimes = new Map<ContentId, number>();
   private entityTrails = new Map<ActorId, { readonly content: ContentId; readonly origin: Vec3; readonly count: number }>();
   private q1Trails = new Map<ActorId, { readonly content: ContentId; readonly path: string; readonly origin: Vec3 }>();
   private readonly pending = new EventRing<SimulationPresentationEvent>(32768);
@@ -167,7 +164,7 @@ export class ApplicationEffects {
     }
     return result;
   }
-  drainSounds() { const taken = this.sounds.take(this.soundsCursor); this.sounds.retire(); return [...taken, ...[...this.q3.values(), ...this.q3Weapons.values()].flatMap(effects => effects.drainSounds())]; }
+  drainSounds() { const taken = this.sounds.take(this.soundsCursor); this.sounds.retire(); return [...taken, ...[...this.q3.values()].flatMap(effects => effects.drainSounds())]; }
   playerView(actor: ActorId, camera: SceneCamera): Q2EffectPlayerView {
     const shared = this.sharedPlayerView(actor, camera), effects = this.recipients.get(actor);
     if (effects === undefined) return shared;
@@ -209,18 +206,8 @@ export class ApplicationEffects {
     if (recipe.enemies.kind === "players") contents.add(recipe.enemies.character.content);
     const failures: { content: ContentId; path: string; error: string }[] = [];
     if (character !== recipe.map.entities.content && this.assets.content.catalog.product(character).expectation.family === "q3" && !this.q3.has(character)) {
-      try { this.q3.set(character, await Q3ApplicationEffects.create(this.assets, this.queries, character, this.isPlayer, "character", this.readHardware)); }
+      try { this.q3.set(character, await Q3ApplicationEffects.create(this.assets, this.queries, character, "character", this.readHardware)); }
       catch (error: unknown) { failures.push({ content: character, path: "Q3 character effect media", error: error instanceof Error ? error.message : String(error) }); }
-    }
-    for (const content of new Set(recipe.weapons.map(weapon => weapon.content))) {
-      if (content === recipe.map.entities.content || this.assets.content.catalog.product(content).expectation.family !== "q3"
-        || this.preparedQ3Weapons.has(content) || this.q3Weapons.has(content)) continue;
-      try {
-        const effects = await Q3ApplicationEffects.create(this.assets, this.queries, content, this.isPlayer, "weapons", this.readHardware);
-        this.preparedQ3Weapons.set(content, effects);
-      } catch (error: unknown) {
-        failures.push({ content, path: "Q3 effect media", error: error instanceof Error ? error.message : String(error) });
-      }
     }
     for (const content of contents) {
       if (this.assets.content.catalog.product(content).expectation.family !== "q2") continue;
@@ -259,7 +246,7 @@ export class ApplicationEffects {
     this.beams.push(beam);
   }
   async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[] = [],
-    weaponClock: { readonly content: ContentId; readonly timeMilliseconds: number } | null = null): Promise<void> {
+): Promise<void> {
     if (this.closed) throw new Error("Effect world is closed");
     const now = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
     if (this.time !== null && now < this.time) throw new Error("Effect time rewound without replacing its world owner");
@@ -307,17 +294,10 @@ export class ApplicationEffects {
       await group.renderer.preload([...group.statics, ...group.models, ...group.beams.flatMap(beam => [...beam.remote, ...(beam.local ?? [])])]);
     }
     for (const effects of this.q3.values()) await effects.prepare(Math.trunc(now * 1000), Math.trunc(elapsed * 1000));
-    for (const [content, effects] of this.q3Weapons) {
-      if (weaponClock === null || weaponClock.content !== content) throw new Error("Q3 ballistic effects require the selected weapon clock");
-      const current = weaponClock.timeMilliseconds, previous = this.q3WeaponTimes.get(content) ?? current;
-      if (current < previous) throw new Error("Q3 weapon effect clock rewound without replacing its world owner");
-      await effects.prepare(current, current - previous);
-      this.q3WeaponTimes.set(content, current);
-    }
     this.time = now;
     for (const [recipient, effects] of this.recipients) {
       if (!liveActors.has(recipient)) { effects.close(); this.recipients.delete(recipient); }
-      else await effects.prepare(snapshot, presentations, characters, weaponClock);
+      else await effects.prepare(snapshot, presentations, characters);
     }
   }
   frame(camera: SceneCamera, source: SourceSceneOrder, viewer: ActorId | null = null, q1Fog?: import("../../contracts/render.ts").SceneFog & { readonly kind: "q1" }): ApplicationEffectFrame {
@@ -344,7 +324,7 @@ export class ApplicationEffects {
     const operations: SceneOperation[] = [...this.staticBrushes.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform,
       { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights, q1Styles, ...(q1Fog === undefined ? {} : { q1Fog }), animationFrame: brush.frame })), ...prepared];
     const sourceLights: SurfaceDynamicLight[] = [], q3Admissions: Q3SceneAdmission[] = [];
-    for (const effects of [...this.q3.values(), ...this.q3Weapons.values()]) {
+    for (const effects of this.q3.values()) {
       const frame = effects.frame(camera, source, viewer, q1Fog); q3Admissions.push(frame.admission); operations.push(...frame.operations); q3Lights.push(...frame.q3Lights);
       sourceLights.push(...frame.q3Lights.map(light => ({ ...light, minimum: 0 })));
     }
@@ -390,18 +370,6 @@ export class ApplicationEffects {
       && source.sequence > (this.ownerRevisions.get(ownerKey) ?? -1) && (this.ownerRevisions.get(ownerKey) ?? 0) === revision;
     if (!current()) return;
     if (source.kind === "view-reset" || source.kind === "q2-player" || source.kind === "q1-level" || source.kind === "debug-graph") return;
-    if (source.kind === "q3-ballistics") {
-      if (source.event.kind === "rail-award") { this.reject(source, "Selected Q3 rail reward presentation has no source cgame binding"); return; }
-      let effects = this.q3Weapons.get(source.content);
-      if (effects === undefined) {
-        effects = this.preparedQ3Weapons.get(source.content) ?? await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer, undefined, this.readHardware);
-        if (!current()) { effects.close(); return; }
-        this.preparedQ3Weapons.delete(source.content);
-        this.q3Weapons.set(source.content, effects);
-      }
-      await effects.ballistic(source.event);
-      return;
-    }
     if (source.kind === "q3-source") {
       if (source.event.kind === "sound") {
         const sound = source.event;
@@ -449,7 +417,7 @@ export class ApplicationEffects {
       const pose = this.pose(source.event.actor);
       if (pose === undefined) { this.reject(source, "Q3 character event has no captured actor pose"); return; }
       let effects = this.q3.get(source.content);
-      if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer, undefined, this.readHardware); if (!current()) { effects.close(); return; } this.q3.set(source.content, effects); }
+      if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content, undefined, this.readHardware); if (!current()) { effects.close(); return; } this.q3.set(source.content, effects); }
       if (!effects.event(source.event, pose.origin)) this.reject(source, "Q3 event requires the full cgame snapshot payload");
       return;
     }
@@ -765,11 +733,11 @@ export class ApplicationEffects {
     this.staticBrushes.length = 0; this.styles = []; this.lights.clear(); this.sampledLights = [];
     this.entityTrails.clear(); this.q1Trails.clear(); this.shadowLights.clear(); this.sourceLights.clear(); this.flashlights.clear();
     this.playerViews.clear(); this.bonusFlashes.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.reset();
-    this.poses = []; this.time = null; this.q3WeaponTimes.clear();
+    this.poses = []; this.time = null;
     for (const group of this.groups.values()) {
       group.particles.clear(); group.models = []; group.statics.length = 0; group.beams = []; group.sampled = [];
     }
-    for (const effects of new Set([...this.q3.values(), ...this.q3Weapons.values(), ...this.preparedQ3Weapons.values()])) effects.resetRound();
+    for (const effects of this.q3.values()) effects.resetRound();
   }
   close(): void {
     if (this.closed) return;
@@ -777,10 +745,9 @@ export class ApplicationEffects {
     this.recipients.clear();
     this.closed = true; this.pending.reset(); this.unhandled.reset(); this.beams = []; this.explosions = []; this.lights.clear(); this.sampledLights = [];
     this.staticBrushes.length = 0; this.styles = [];
-    for (const effects of [...this.q3.values(), ...this.q3Weapons.values(), ...this.preparedQ3Weapons.values()]) effects.close();
-    this.preparedQ3Weapons.clear();
+    for (const effects of this.q3.values()) effects.close();
     for (const image of this.images.values()) this.assets.images.release(image);
-    this.images.clear(); this.groups.clear(); this.preparedRenderers.clear(); this.q3.clear(); this.q3Weapons.clear(); this.q3WeaponTimes.clear(); this.entityTrails.clear(); this.q1Trails.clear();
+    this.images.clear(); this.groups.clear(); this.preparedRenderers.clear(); this.q3.clear(); this.entityTrails.clear(); this.q1Trails.clear();
     this.shadowLights.clear(); this.sourceLights.clear(); this.flashlights.clear(); this.playerViews.clear(); this.bonusFlashes.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.reset();
   }
 }

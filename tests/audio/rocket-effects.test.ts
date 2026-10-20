@@ -2,7 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { ApplicationAssets } from "../../src/app/bootstrap/assets.ts";
 import { ApplicationAudio } from "../../src/app/bootstrap/audio.ts";
-import { Q3ApplicationEffects } from "../../src/app/bootstrap/effects/q3.ts";
+import type { SourceEffectSound } from "../../src/app/bootstrap/effects/q3.ts";
 import { applicationPreset, loadApplicationContent } from "../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../src/content/catalog/index.ts";
@@ -10,7 +10,6 @@ import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { WorldSnapshot } from "../../src/contracts/session.ts";
 import type { AudioListener, PlaySound } from "../../src/audio/types.ts";
 import { UnifiedAudio } from "../../src/audio/engine.ts";
-import { createSceneQueries } from "../../src/world/collision/index.ts";
 
 test("mixed Q3 rocket effects preserve shooter identity and fixed impact through bootstrap PCM playback", async () => {
   const temporary = await mkdtemp("/tmp/quake-rocket-audio-");
@@ -30,7 +29,6 @@ test("mixed Q3 rocket effects preserve shooter identity and fixed impact through
     const assets = new ApplicationAssets(content, { identity: Symbol("rocket-effects"), session: identity.session, generation: 0 });
     try {
       await assets.loadWorld();
-      const effects = await Q3ApplicationEffects.create(assets, createSceneQueries(content.world), q3, candidate => candidate.equals(actor));
       const audio = new ApplicationAudio(content, () => 1000, 1, "sarge", () => undefined);
       const observed: PlaySound[] = [], original = audio.engine.play.bind(audio.engine);
       const capture = spyOn(audio.engine, "play").mockImplementation(request => { observed.push(request); return original(request); });
@@ -45,10 +43,8 @@ test("mixed Q3 rocket effects preserve shooter identity and fixed impact through
           scene: { session: identity.session, time: { kind: "seconds", value: 1 }, world: null, entities: [], lights: [], particles: [], lightStyles: [], areaBits: null } };
         const firingPeaks: number[] = [];
         for (const shooter of [actor, remote]) {
-          await effects.ballistic({ kind: "fire", actor: shooter, weapon: 5, origin: { ...origin, x: origin.x + 14 }, end: origin,
-            normal: zero, target: null, surfaceFlags: 0, timeMilliseconds: 1000, volume: 1 });
-          const sounds = effects.drainSounds();
-          expect(sounds).toHaveLength(1);
+          const sounds: SourceEffectSound[] = [{ content: q3, path: "sound/weapons/rocket/rocklf1a.wav",
+            origin: { ...origin, x: origin.x + 14 }, channel: 2, volume: 1, seconds: 1, playback: { kind: "actor", actor: shooter } }];
           expect(sounds[0]?.playback).toEqual({ kind: "actor", actor: shooter });
           audio.receiveEffectSounds(sounds);
           await audio.frame(snapshot, [listener], []);
@@ -64,10 +60,8 @@ test("mixed Q3 rocket effects preserve shooter identity and fixed impact through
         if (localPeak === undefined || remotePeak === undefined) throw Error("Missing firing capture");
         expect(localPeak).toBeGreaterThan(remotePeak * 2);
         const impact = { ...origin, y: origin.y - 350 };
-        await effects.ballistic({ kind: "impact", hitKind: "wall", actor: identity.actor(3, 0), weapon: 5, origin: impact, end: impact,
-          normal: { x: 0, y: 1, z: 0 }, target: null, surfaceFlags: 0, timeMilliseconds: 1000 });
-        const sounds = effects.drainSounds();
-        expect(sounds).toHaveLength(1);
+        const sounds: SourceEffectSound[] = [{ content: q3, path: "sound/weapons/rocket/rocklx1a.wav",
+          origin: impact, channel: 0, volume: 1, seconds: 1, playback: { kind: "once" } }];
         expect(sounds[0]?.origin).toEqual(impact);
         expect(sounds[0]?.playback).toEqual({ kind: "once" });
         audio.receiveEffectSounds(sounds);
@@ -78,7 +72,7 @@ test("mixed Q3 rocket effects preserve shooter identity and fixed impact through
         expect(pcm.filter((_, index) => index % 2 === 0).every(sample => sample === 0)).toBe(true);
         expect(pcm.filter((_, index) => index % 2 === 1).some(sample => sample !== 0)).toBe(true);
         expect(Math.max(...pcm.map(Math.abs))).toBeGreaterThan(0);
-      } finally { capture.mockRestore(); audio.close(); effects.close(); }
+      } finally { capture.mockRestore(); audio.close(); }
     } finally { assets.close(); await content.close(); }
   } finally { device.mockRestore(); pump.mockRestore(); await rm(temporary, { recursive: true, force: true }); }
 }, 60000);

@@ -4345,7 +4345,7 @@ export class Application {
         const unhandled: UnhandledApplicationEffect[] = [];
         if (graphical.nativeQ2.size === 0) {
           graphical.effects.receive(effectEvents);
-          await graphical.effects.prepare(output.snapshot, presentations, characters, this.simulation.weaponPresentationClock());
+          await graphical.effects.prepare(output.snapshot, presentations, characters);
           unhandled.push(...graphical.effects.drainUnhandled());
           graphical.audio.receiveEffectSounds(graphical.effects.drainSounds());
           const privateSounds = graphical.effects.drainRecipientSounds();
@@ -4382,7 +4382,7 @@ export class Application {
             nativeEvents.set(seat, events);
             const privateEvents = effectEvents.filter(event => event.recipient?.equals(local.player.actor));
             native.effects.receive([...eventsFor(local.player.actor, effectEvents), ...events]);
-            await native.effects.prepare(output.snapshot, presentations, characters, this.simulation.weaponPresentationClock());
+            await native.effects.prepare(output.snapshot, presentations, characters);
             unhandled.push(...native.effects.drainUnhandled());
             seatAudio.push({ seat, snapshot: output.snapshot, events: [...privateEvents, ...events], music: false,
               effectSounds: [...native.effects.drainSounds(), ...native.effects.drainRecipientSounds().flatMap(batch => batch.sounds)] });

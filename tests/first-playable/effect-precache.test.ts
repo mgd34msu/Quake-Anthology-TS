@@ -15,6 +15,7 @@ import { anglesToAxis, identityMat4 } from "../../src/core/math.ts";
 import { createSceneQueries } from "../../src/world/collision/index.ts";
 import { SceneShaderRegistry } from "../../src/render/scene/shaders.ts";
 import { Q3ApplicationEffects } from "../../src/app/bootstrap/effects/q3.ts";
+import { EntityEvent } from "../../src/content/q3/base/shared/definitions.ts";
 import { SceneModelRenderer } from "../../src/render/scene/models/renderer.ts";
 
 test("Q3 character preparation registers common effects while deferring unselected weapon media", async () => {
@@ -27,19 +28,15 @@ test("Q3 character preparation registers common effects while deferring unselect
     try {
       await assets.loadWorld();
       const models = spyOn(assets, "model"), source = content.recipe.map.entities.content;
-      const effects = await Q3ApplicationEffects.create(assets, createSceneQueries(content.world), source, () => false, "character");
+      const effects = await Q3ApplicationEffects.create(assets, createSceneQueries(content.world), source, "character");
       try {
         expect(models.mock.calls.some(call => call[1] === "models/gibs/skull.md3")).toBe(true);
         expect(models.mock.calls.some(call => call[1].startsWith("models/weapons2/") && !call[1].startsWith("models/weapons2/shells/"))).toBe(false);
         expect(effects.drainSounds()).toHaveLength(0);
-        const weapons = spyOn(effects, "loadWeapons");
-        try {
-          const origin = { x: 0, y: 0, z: 0 };
-          await effects.ballistic({ kind: "fire", actor: identity.actor(1, 0), weapon: 2, origin, end: origin,
-            normal: origin, target: null, surfaceFlags: 0, timeMilliseconds: 1000, volume: 1 });
-          expect(weapons).toHaveBeenCalledTimes(1);
-          expect(models.mock.calls.some(call => call[1] === "models/weapons2/machinegun/machinegun_flash.md3")).toBe(true);
-        } finally { weapons.mockRestore(); }
+        const origin = { x: 0, y: 0, z: 0 };
+        expect(effects.event({ actor: identity.actor(1, 0), sequence: 1, timeMilliseconds: 1000, event: EntityEvent.EV_PLAYER_TELEPORT_IN, parameter: 0 }, origin)).toBe(true);
+        await effects.prepare(1000, 16);
+        expect(models.mock.calls.some(call => call[1].startsWith("models/weapons2/") && !call[1].startsWith("models/weapons2/shells/"))).toBe(false);
       } finally { effects.close(); models.mockRestore(); }
     } finally { assets.close(); await content.close(); }
   } finally { await rm(temporary, { recursive: true, force: true }); }
@@ -94,7 +91,7 @@ test("Q3 loading media stays empty and retries a deferred cinematic at actual us
       const guard = spyOn(provider.shaders, "hasCinematic").mockImplementation(name => name === "waterBubble");
       const register = spyOn(provider.shaders, "register");
       try {
-        await expect(Q3ApplicationEffects.create(assets, queries, source, () => false, "weapons")).rejects.toThrow("cinematic deferred");
+        await expect(Q3ApplicationEffects.create(assets, queries, source, "character")).rejects.toThrow("cinematic deferred");
         expect(register).not.toHaveBeenCalled();
       } finally { guard.mockRestore(); register.mockRestore(); }
       const flash = await assets.model(source, "models/weapons2/machinegun/machinegun_flash.md3");
@@ -109,31 +106,28 @@ test("Q3 loading media stays empty and retries a deferred cinematic at actual us
         expect(registered.mock.calls.some(call => call[0] === "effect-precache/video")).toBe(false);
       } finally { registered.mockRestore(); await provider.shaders.registrations.owner.remap({ original: flashShader, replacement: flashShader, timeOffset: 0, source: provider.shaders, current: () => true }); }
       const read = provider.textures.reader.read.bind(provider.textures.reader);
+      let failedPath: string | null = null;
       const failedRead = spyOn(provider.textures.reader, "read").mockImplementation(async (...args) => {
-        if (args[0] === "models/weapons2/machinegun/f_machinegun.tga") throw Error("temporary flash image read");
+        if (failedPath === null) { failedPath = args[0]; throw Error("temporary effect image read"); }
         return read(...args);
       });
       try {
-        await expect(Q3ApplicationEffects.create(assets, queries, source, () => false, "weapons")).rejects.toThrow("temporary flash image read");
+        await expect(Q3ApplicationEffects.create(assets, queries, source, "character")).rejects.toThrow("temporary effect image read");
       } finally { failedRead.mockRestore(); }
+      if (failedPath === null) throw Error("Character preparation read no effect image");
+      const retriedPath: string = failedPath;
       const reads = spyOn(provider.textures.reader, "read");
-      const effects = await Q3ApplicationEffects.create(assets, queries, source, () => false, "weapons");
+      const effects = await Q3ApplicationEffects.create(assets, queries, source, "character");
       try {
-        const flashReads = (): number => reads.mock.calls.filter(call => call[0] === "models/weapons2/machinegun/f_machinegun.tga").length;
-        expect(flashReads()).toBe(1);
+        const retriedReads = (): number => reads.mock.calls.filter(call => call[0] === retriedPath).length;
+        expect(retriedReads()).toBe(1);
         expect(effects.state.time).toBe(0);
         expect(effects.drainSounds()).toHaveLength(0);
-        const warm = spyOn(effects, "loadWeapons");
-        try {
-          const origin = { x: 0, y: 0, z: 0 };
-          await effects.ballistic({ kind: "fire", actor: identity.actor(1, 0), weapon: 2, origin, end: origin,
-            normal: origin, target: null, surfaceFlags: 0, timeMilliseconds: 1000, volume: 1 });
-          expect(warm).not.toHaveBeenCalled();
-          expect(effects.state.time).toBe(1000);
-          expect(effects.drainSounds().length).toBeGreaterThan(0);
-          await effects.prepare(1000, 16);
-          expect(flashReads()).toBe(1);
-        } finally { warm.mockRestore(); }
+        const origin = { x: 0, y: 0, z: 0 };
+        expect(effects.event({ actor: identity.actor(1, 0), sequence: 1, timeMilliseconds: 1000, event: EntityEvent.EV_PLAYER_TELEPORT_IN, parameter: 0 }, origin)).toBe(true);
+        expect(effects.state.time).toBe(1000);
+        await effects.prepare(1000, 16);
+        expect(retriedReads()).toBe(1);
       } finally { effects.close(); reads.mockRestore(); }
       const shared = new ApplicationEffects(assets, queries, () => false);
       const create = spyOn(Q3ApplicationEffects, "create");
