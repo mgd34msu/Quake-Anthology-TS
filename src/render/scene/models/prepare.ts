@@ -83,14 +83,23 @@ export function interpolateSceneMd2(model: Q2AliasModel, entity: SceneEntity, fr
   const move = { x: backLerp * (delta.x + old.translation.x) + front * current.translation.x,
     y: backLerp * (delta.y + old.translation.y) + front * current.translation.y,
     z: backLerp * (delta.z + old.translation.z) + front * current.translation.z };
-  return current.compressedVertices.map((vertex, index) => {
-    const previous = at(old.compressedVertices, index, "MD2 old vertex"), normal = at(current.vertices, index, "MD2 normal").normal;
-    return { normal, position: {
-      x: Math.fround(move.x + previous.position[0] * (backLerp * old.scale.x) + vertex.position[0] * (front * current.scale.x) + (shell ? normal.x * 4 : 0)),
-      y: Math.fround(move.y + previous.position[1] * (backLerp * old.scale.y) + vertex.position[1] * (front * current.scale.y) + (shell ? normal.y * 4 : 0)),
-      z: Math.fround(move.z + previous.position[2] * (backLerp * old.scale.z) + vertex.position[2] * (front * current.scale.z) + (shell ? normal.z * 4 : 0)),
+  const compressed = current.compressedVertices, previousCompressed = old.compressedVertices, normals = current.vertices;
+  if (previousCompressed.length !== compressed.length || normals.length !== compressed.length)
+    throw new RangeError("MD2 frame vertex counts differ");
+  const backX = backLerp * old.scale.x, backY = backLerp * old.scale.y, backZ = backLerp * old.scale.z;
+  const frontX = front * current.scale.x, frontY = front * current.scale.y, frontZ = front * current.scale.z;
+  const result: ModelVertex[] = [];
+  result.length = compressed.length;
+  for (let index = 0; index < compressed.length; index++) {
+    const vertex = compressed[index], previous = previousCompressed[index], normal = normals[index]?.normal;
+    if (vertex === undefined || previous === undefined || normal === undefined) throw new RangeError(`Missing MD2 vertex ${index}`);
+    result[index] = { normal, position: {
+      x: Math.fround(move.x + previous.position[0] * backX + vertex.position[0] * frontX + (shell ? normal.x * 4 : 0)),
+      y: Math.fround(move.y + previous.position[1] * backY + vertex.position[1] * frontY + (shell ? normal.y * 4 : 0)),
+      z: Math.fround(move.z + previous.position[2] * backZ + vertex.position[2] * frontZ + (shell ? normal.z * 4 : 0)),
     } };
-  });
+  }
+  return result;
 }
 
 function cullGeometry(bounds: Bounds | null, context: ModelPreparationContext): PreparedModelEntity["cull"] {

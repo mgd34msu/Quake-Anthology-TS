@@ -84,7 +84,7 @@ export function decodePng(bytes: Uint8Array, source = "<png>"): PngImage {
   try { raw = new Uint8Array(inflateSync(compressed, { maxOutputLength: rawLength })); }
   catch (error) { throw new BinaryError(source, 8, `PNG inflate: ${error instanceof Error ? error.message : String(error)}`); }
   if (raw.length !== rawLength) fail(8, "unexpected decompressed size");
-  const rawView = new DataView(raw.buffer, raw.byteOffset, raw.byteLength), pixels = new Uint8Array(width * height * 4);
+  const pixels = new Uint8Array(width * height * 4);
   const indices = colorType === 3 ? new Uint8Array(width * height) : null;
   const paletteView = palette === null ? null : new DataView(palette.buffer, palette.byteOffset, palette.byteLength);
   const transparentView = transparency === null ? null : new DataView(transparency.buffer, transparency.byteOffset, transparency.byteLength);
@@ -121,42 +121,47 @@ export function decodePng(bytes: Uint8Array, source = "<png>"): PngImage {
     return { width, height, pixels, bitDepth, colorType, gamma, srgbIntent, indexed: null };
   }
   let rawOffset = 0;
+  // Hoisted once: the per-pixel loop below used to re-read these per sample.
+  const transparentGray = transparentView !== null && (colorType === 0 || colorType === 2) ? transparentView.getUint16(0) : -1;
+  const transparentGreen16 = transparentView !== null && colorType === 2 ? transparentView.getUint16(2) : -1;
+  const transparentBlue16 = transparentView !== null && colorType === 2 ? transparentView.getUint16(4) : -1;
   for (const [x, y, dx, dy] of passes) {
     const w = Math.max(0, Math.ceil((width - x) / dx)), h = Math.max(0, Math.ceil((height - y) / dy));
     if (w === 0 || h === 0) continue;
     const rowLength = Math.ceil(w * bitsPerPixel / 8), rows = new Uint8Array(rowLength * h), rowsView = new DataView(rows.buffer);
     for (let py = 0; py < h; py++) {
-      const filter = rawView.getUint8(rawOffset++), row = py * rowLength;
+      const filter = raw[rawOffset++] ?? 0, row = py * rowLength;
       if (filter > 4) fail(8, `unknown scanline filter ${filter}`);
       for (let byte = 0; byte < rowLength; byte++) {
-        const a = byte >= byteStride ? rowsView.getUint8(row + byte - byteStride) : 0;
-        const b = py > 0 ? rowsView.getUint8(row + byte - rowLength) : 0;
-        const c = py > 0 && byte >= byteStride ? rowsView.getUint8(row + byte - rowLength - byteStride) : 0;
-        const prediction = filter === 0 ? 0 : filter === 1 ? a : filter === 2 ? b : filter === 3 ? Math.floor((a + b) / 2) : paeth(a, b, c);
-        rows[row + byte] = rawView.getUint8(rawOffset++) + prediction;
+        const a = byte >= byteStride ? (rows[row + byte - byteStride] ?? 0) : 0;
+        const b = py > 0 ? (rows[row + byte - rowLength] ?? 0) : 0;
+        const c = py > 0 && byte >= byteStride ? (rows[row + byte - rowLength - byteStride] ?? 0) : 0;
+        const prediction = filter === 0 ? 0 : filter === 1 ? a : filter === 2 ? b : filter === 3 ? (a + b) >> 1 : paeth(a, b, c);
+        rows[row + byte] = (raw[rawOffset++] ?? 0) + prediction;
       }
+      const sample = (px: number, channel: number): number => {
+        if (bitDepth === 8) return rows[row + px * channels + channel] ?? 0;
+        const bit = (px * channels + channel) * bitDepth, offset = row + Math.floor(bit / 8);
+        return bitDepth === 16 ? rowsView.getUint16(offset)
+          : rowsView.getUint8(offset) >>> (8 - bitDepth - bit % 8) & ((1 << bitDepth) - 1);
+      };
+      const byte = (value: number): number => bitDepth === 16 ? value >>> 8 : bitDepth === 8 ? value : Math.round(value * 255 / ((1 << bitDepth) - 1));
       for (let px = 0; px < w; px++) {
-        const sample = (channel: number): number => {
-          const bit = (px * channels + channel) * bitDepth, offset = row + Math.floor(bit / 8);
-          return bitDepth === 16 ? rowsView.getUint16(offset) : bitDepth === 8 ? rowsView.getUint8(offset)
-            : rowsView.getUint8(offset) >>> (8 - bitDepth - bit % 8) & ((1 << bitDepth) - 1);
-        };
-        const byte = (value: number): number => bitDepth === 16 ? value >>> 8 : bitDepth === 8 ? value : Math.round(value * 255 / ((1 << bitDepth) - 1));
         const index = (y + py * dy) * width + x + px * dx, out = index * 4;
-        if (indices !== null && paletteView !== null) {
-          const value = sample(0);
+        if (indices !== null && palette !== null && paletteView !== null) {
+          const value = sample(px, 0);
           if (value * 3 + 3 > paletteView.byteLength) fail(8, "palette index out of range");
           indices[index] = value;
-          pixels[out] = paletteView.getUint8(value * 3); pixels[out + 1] = paletteView.getUint8(value * 3 + 1); pixels[out + 2] = paletteView.getUint8(value * 3 + 2);
-          pixels[out + 3] = transparentView !== null && value < transparentView.byteLength ? transparentView.getUint8(value) : 255;
+          pixels[out] = palette[value * 3] ?? 0; pixels[out + 1] = palette[value * 3 + 1] ?? 0; pixels[out + 2] = palette[value * 3 + 2] ?? 0;
+          pixels[out + 3] = transparency !== null && value < transparency.length ? (transparency[value] ?? 255) : 255;
         } else if (colorType === 0 || colorType === 4) {
-          const value = sample(0); pixels[out] = byte(value); pixels[out + 1] = byte(value); pixels[out + 2] = byte(value);
-          pixels[out + 3] = colorType === 4 ? byte(sample(1)) : transparentView !== null && value === transparentView.getUint16(0) ? 0 : 255;
+          const value = sample(px, 0); pixels[out] = byte(value); pixels[out + 1] = byte(value); pixels[out + 2] = byte(value);
+          pixels[out + 3] = colorType === 4 ? byte(sample(px, 1)) : transparentView !== null && value === transparentGray ? 0 : 255;
         } else {
-          const r = sample(0), g = sample(1), b = sample(2);
+          const r = sample(px, 0), g = sample(px, 1), b = sample(px, 2);
           pixels[out] = byte(r); pixels[out + 1] = byte(g); pixels[out + 2] = byte(b);
-          pixels[out + 3] = colorType === 6 ? byte(sample(3)) : transparentView !== null && r === transparentView.getUint16(0)
-            && g === transparentView.getUint16(2) && b === transparentView.getUint16(4) ? 0 : 255;
+          pixels[out + 3] = colorType === 6 ? byte(sample(px, 3)) : transparentView !== null && r === transparentGray
+            && g === transparentGreen16 && b === transparentBlue16 ? 0 : 255;
         }
       }
     }
