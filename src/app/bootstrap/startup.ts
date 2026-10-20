@@ -1087,6 +1087,7 @@ export class StartupApplication {
     this.graphics?.menu.setStatus(this.status);
     this.demos?.refresh();
     if (this.lobby.current() !== null) this.graphics?.menu.openLocalLobby();
+    else this.graphics?.menu.openMain();
   }
 
   private publishFrontendRouting(client: ClientBootstrap): void {

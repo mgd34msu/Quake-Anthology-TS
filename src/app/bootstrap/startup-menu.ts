@@ -91,6 +91,7 @@ export class StartupMenu {
   private bindingMenu: UiMenuId | null = null;
   private lobbyMenu: UiMenuId | null = null;
   openLocalLobby(): void { if (this.lobbyMenu !== null) this.controller.openMenu(this.lobbyMenu); }
+  openMain(): void { this.controller.openMenu(main); }
   private readonly disposers: (() => void)[] = [];
   private status = "";
   private busy = false;
