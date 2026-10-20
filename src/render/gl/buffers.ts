@@ -99,15 +99,24 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
     colors[four] = color.x; colors[four + 1] = color.y;
     colors[four + 2] = color.z; colors[four + 3] = color.w;
     coordinates[two] = texCoord.x; coordinates[two + 1] = texCoord.y;
-    worst = Math.max(worst, Math.abs(position.x), Math.abs(position.y), Math.abs(position.z), Math.abs(position.w),
-      Math.abs(color.x), Math.abs(color.y), Math.abs(color.z), Math.abs(color.w), Math.abs(texCoord.x), Math.abs(texCoord.y));
+    if (worst === worst && !(Math.abs(position.x) <= worst)) worst = Math.abs(position.x);
+    if (worst === worst && !(Math.abs(position.y) <= worst)) worst = Math.abs(position.y);
+    if (worst === worst && !(Math.abs(position.z) <= worst)) worst = Math.abs(position.z);
+    if (worst === worst && !(Math.abs(position.w) <= worst)) worst = Math.abs(position.w);
+    if (worst === worst && !(Math.abs(color.x) <= worst)) worst = Math.abs(color.x);
+    if (worst === worst && !(Math.abs(color.y) <= worst)) worst = Math.abs(color.y);
+    if (worst === worst && !(Math.abs(color.z) <= worst)) worst = Math.abs(color.z);
+    if (worst === worst && !(Math.abs(color.w) <= worst)) worst = Math.abs(color.w);
+    if (worst === worst && !(Math.abs(texCoord.x) <= worst)) worst = Math.abs(texCoord.x);
+    if (worst === worst && !(Math.abs(texCoord.y) <= worst)) worst = Math.abs(texCoord.y);
     four += 4; two += 2;
   }
   if (batch.texturing === "pair") {
     let offset = 0;
     for (const vertex of batch.vertices) {
       arrays.coordinates2[offset] = vertex.texCoord2.x; arrays.coordinates2[offset + 1] = vertex.texCoord2.y;
-      worst = Math.max(worst, Math.abs(vertex.texCoord2.x), Math.abs(vertex.texCoord2.y));
+      if (worst === worst && !(Math.abs(vertex.texCoord2.x) <= worst)) worst = Math.abs(vertex.texCoord2.x);
+      if (worst === worst && !(Math.abs(vertex.texCoord2.y) <= worst)) worst = Math.abs(vertex.texCoord2.y);
       offset += 2;
     }
   }
@@ -116,7 +125,9 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
     let offset = 0;
     for (const position of batch.lighting.worldPositions) {
       arrays.worldPositions[offset] = position.x; arrays.worldPositions[offset + 1] = position.y; arrays.worldPositions[offset + 2] = position.z;
-      worst = Math.max(worst, Math.abs(position.x), Math.abs(position.y), Math.abs(position.z));
+      if (worst === worst && !(Math.abs(position.x) <= worst)) worst = Math.abs(position.x);
+      if (worst === worst && !(Math.abs(position.y) <= worst)) worst = Math.abs(position.y);
+      if (worst === worst && !(Math.abs(position.z) <= worst)) worst = Math.abs(position.z);
       offset += 3;
     }
     if (batch.lighting.kind === "q2-world") {
@@ -124,7 +135,9 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
       offset = 0;
       for (const normal of batch.lighting.normals) {
         arrays.normals[offset] = normal.x; arrays.normals[offset + 1] = normal.y; arrays.normals[offset + 2] = normal.z;
-        worst = Math.max(worst, Math.abs(normal.x), Math.abs(normal.y), Math.abs(normal.z));
+        if (worst === worst && !(Math.abs(normal.x) <= worst)) worst = Math.abs(normal.x);
+        if (worst === worst && !(Math.abs(normal.y) <= worst)) worst = Math.abs(normal.y);
+        if (worst === worst && !(Math.abs(normal.z) <= worst)) worst = Math.abs(normal.z);
         offset += 3;
       }
     }

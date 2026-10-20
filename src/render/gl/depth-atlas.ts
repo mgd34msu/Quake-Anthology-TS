@@ -52,8 +52,12 @@ export class DepthAtlasTarget {
         // The running maximum magnitude stays under the float32 overflow
         // midpoint exactly when every component rounds to a finite float32.
         let worst = 0;
-        for (const position of draw.positions)
-          worst = Math.max(worst, Math.abs(position.x), Math.abs(position.y), Math.abs(position.z), Math.abs(position.w));
+        for (const position of draw.positions) {
+          if (worst === worst && !(Math.abs(position.x) <= worst)) worst = Math.abs(position.x);
+          if (worst === worst && !(Math.abs(position.y) <= worst)) worst = Math.abs(position.y);
+          if (worst === worst && !(Math.abs(position.z) <= worst)) worst = Math.abs(position.z);
+          if (worst === worst && !(Math.abs(position.w) <= worst)) worst = Math.abs(position.w);
+        }
         if (!(worst < 3.4028235677973366e38))
           throw new RangeError("OpenGL depth atlas vertices must be finite float32");
         for (const index of draw.indices) {
