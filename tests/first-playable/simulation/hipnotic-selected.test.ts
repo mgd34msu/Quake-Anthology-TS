@@ -86,12 +86,7 @@ for (const edition of ["classic", "rerelease"] satisfies readonly ("classic" | "
     simulation.playerCommand(actor, "use", ["q1:weapon/hipnotic:proximity"]); place(400); step(true);
     const mine = [...game.entities.values()].find(entity => entity.classname === "proximity_grenade");
     if (mine === undefined) throw new Error("Missing live source mine");
-    if (product.startsWith("q3")) {
-      expect(() => simulation.checkpoint()).toThrow("complete saved-game checkpoint");
-      for (let i = 0; i < 600 && game.entities.has(mine.actor); i++) step();
-      expect(game.entities.has(mine.actor)).toBe(false);
-      return;
-    }
+    simulation.drainPresentationEvents();
     const saved = decodeSaveImage(encodeSaveImage(simulation.checkpoint())), restoredIdentity = createIdentityOwner(`restored-${product}-${edition}`);
     const restored = createSimulation({ ...options, identity: restoredIdentity, restoredClients: [restoredIdentity.client(0, 0), restoredIdentity.client(1, 0)], restore: saved });
     try {
@@ -103,7 +98,7 @@ for (const edition of ["classic", "rerelease"] satisfies readonly ("classic" | "
       for (let i = 0; i < 3; i++) { simulation.step({ elapsedMilliseconds: 100, commands: [] }); restored.step({ elapsedMilliseconds: 100, commands: [] }); }
       expect([...restoredGame.entities.values()].filter(entity => entity.classname === "proximity_grenade").map(entity => ({ delay: entity.delay, origin: restoredGame.body(entity).origin })))
         .toEqual([...game.entities.values()].filter(entity => entity.classname === "proximity_grenade").map(entity => ({ delay: entity.delay, origin: game.body(entity).origin })));
-      expect(simulation.captureTravel().players[0]?.selectedArsenal).toMatchObject({ kind: "q1", state: { weapon: "hipnotic:proximity" } });
+      if (!product.startsWith("q3")) expect(simulation.captureTravel().players[0]?.selectedArsenal).toMatchObject({ kind: "q1", state: { weapon: "hipnotic:proximity" } });
       for (let i = 0; i < 270 && [...restoredGame.entities.values()].some(entity => entity.classname === "proximity_grenade"); i++) restored.step({ elapsedMilliseconds: 100, commands: [] });
       expect([...restoredGame.entities.values()].some(entity => entity.classname === "proximity_grenade")).toBe(false);
     } finally { restored.close(); }
@@ -133,11 +128,14 @@ for (const product of ["q2-classic-baseq2", "q3-baseq3"]) test(`actual ${product
     key(49, true); await application.step(100); key(49, false);
     expect(game.player(local.actor)?.weapon).toBe("hipnotic:laser");
     expect(application.simulation.playerUi(local.actor).weaponStatus?.source.provider).toBe("q1:weapons/rerelease/hipnotic");
-    application.input({ seat: local.seat.id, kind: "mouse-wheel", delta: { x: 0, y: 1 }, timeMilliseconds: performance.now() });
+    // Wheel down is weapnext in the default binds (positive delta is wheel up).
+    application.input({ seat: local.seat.id, kind: "mouse-wheel", delta: { x: 0, y: -1 }, timeMilliseconds: performance.now() });
     await application.step(100);
     expect(game.player(local.actor)?.weapon).toBe("hipnotic:mjolnir");
     application.queueCommand("use", ["q1:weapon/hipnotic:proximity"], local.seat.id); await application.step(100);
     expect(game.player(local.actor)?.weapon).toBe("hipnotic:proximity");
+    // The game's own default.cfg owns q (e.g. Q2 binds it to use quad); bind the wheel explicitly.
+    presentation.local.input.bind({ input: { kind: "key", code: 113 }, target: { kind: "command", text: "+weaponwheel" } });
     key(113, true); await application.step(100);
     const wheel = presentation.ui.weaponWheel.drawState().wheel;
     if (wheel === null) throw new Error("Real wheel binding did not open");

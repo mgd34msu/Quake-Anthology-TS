@@ -53,7 +53,7 @@ for (const weapon of weapons) test.skipIf(["q1/id1/PAK0.PAK", "q2/baseq2/pak0.pa
   const step = (simulation: Simulation, actor: ActorId, client: ClientId, sequence: number, yaw: number, attack: boolean) => simulation.step({ elapsedMilliseconds: 100, commands: [{
     actor, source: { kind: "remote-client", client }, sequence,
     command: { kind: "q2-classic", milliseconds: 100, angleShorts: [0, Math.round(yaw * 65536 / 360) & 65535, 0], forwardMove: 0, sideMove: 0, upMove: 0, buttons: Number(attack), impulse: 0, lightLevel: 0 },
-    arsenal: { provider: weapon.provider, weapon: weapon.weapon, useHoldable: false },
+    arsenal: { provider: recipe.weapons[0]?.provider ?? weapon.provider, weapon: weapon.weapon, useHoldable: false },
   }] });
   try {
     const player = original.admitPlayer(client).actor, movement = original.movementPlayer(player);
@@ -86,7 +86,7 @@ for (const weapon of weapons) test.skipIf(["q1/id1/PAK0.PAK", "q2/baseq2/pak0.pa
             const decision = event.payload.outcome.decision;
             if (decision.request.target.equals(target.id) && decision.request.attack.weapon === weapon.weapon && decision.request.attack.attacker?.equals(shooter)) {
               expect(decision.request.attack.cause.kind).toBe(weapon.family); expect(decision.appliedDamage).toBeGreaterThan(0);
-              for (const mutation of decision.mutations) if (mutation.kind === "armor" && mutation.before.regular.kind === "q2" && mutation.after.regular.kind === "q2"
+              for (const mutation of decision.mutations) if (mutation.kind === "armor"
                 && mutation.before.powered.kind !== "none" && mutation.after.powered.kind !== "none") absorbed += mutation.before.powered.cells - mutation.after.powered.cells;
               hits++;
             }

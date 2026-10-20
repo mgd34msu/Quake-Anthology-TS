@@ -673,6 +673,8 @@ export class Q3SourceRuntime {
   playerCommand(actor: ActorId, name: string, args: readonly string[]): void {
     const entity = this.records.byActor(actor);
     if (entity === null || entity.client === null) throw new Error("Q3 client command has no admitted actor");
+    // Client commands execute inside G_RunFrame, after cvar updates.
+    this.settings.update();
     this.commands.dispatch(entity.slot, [name, ...args]);
   }
   playerWeapon(actor: ActorId): void {

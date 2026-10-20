@@ -120,6 +120,6 @@ for (const foreign of [false, true]) test(`Q3 give respects source gates and ${f
       simulation.playerCommand(actor, "give", ["q2:weapon_railgun"]); expect(simulation.inventory.count(actor, "q2:weapon_railgun")).toBe(1);
       simulation.playerCommand(actor, "give", ["Rocket Launcher"]); expect(simulation.inventory.count(actor, rocket)).toBe(2);
     } else expect(simulation.inventory.count(actor, ammo)).toBe(999);
-    expect(simulation.combat.read(actor)?.armor).toMatchObject({ points: 200 });
+    expect(simulation.combat.read(actor)?.armor).toMatchObject({ regular: { points: 200 } });
   } finally { simulation.close(); await content.close(); }
 }, 30000);
