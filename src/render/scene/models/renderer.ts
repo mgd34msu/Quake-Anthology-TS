@@ -226,6 +226,8 @@ export class SceneModelRenderer {
       let basis: { readonly yaw: number; readonly row: number; direction: Vec3 | null } | undefined;
       const vertexLights = this.provider.family === "q2" ? new Map<Vec3, Vec3>() : null;
       const indexedLights: (Vec3 | undefined)[] = [];
+      // Triangle strips/fans repeat the same vertex on consecutive corners.
+      let lastNormal: Vec3 | null = null, lastLight: Vec3 | null = null;
       const illuminate: ModelVertexLighting = (normal, _position, corner) => {
         if (this.provider.family === "q3") return unit;
         let previousNormalIndex: number | undefined;
@@ -242,16 +244,17 @@ export class SceneModelRenderer {
             : add3(scale3(current, 1 - entity.pose.backLerp), scale3(diffuseColor(previous, lighting), entity.pose.backLerp));
           return scale3(color, 1 / 255);
         }
+        if (previousNormalIndex === undefined && normal === lastNormal && lastLight !== null) return lastLight;
         // Q2 shade depends only on the table index once the entity light
         // and basis row are fixed, so indexed results are shared by every
         // vertex object carrying that table normal.
         const normalIndex = aliasNormalIndex(normal);
         if (normalIndex >= 0) {
           const indexed = indexedLights[normalIndex];
-          if (indexed !== undefined) return indexed;
+          if (indexed !== undefined) { lastNormal = normal; lastLight = indexed; return indexed; }
         }
         const cached = vertexLights?.get(normal);
-        if (cached !== undefined) return cached;
+        if (cached !== undefined) { lastNormal = normal; lastLight = cached; return cached; }
         if (light === undefined) {
           const sampled = this.lighting.sample(entity.transform.origin, lightingInput, q2Lighting).color;
           if (this.provider.family === "q2") light = q2AliasLight(entity.flags.kind === "q2" ? entity.flags.bits : 0, sampled, time, false, source.infrared);
@@ -300,6 +303,7 @@ export class SceneModelRenderer {
           if (normalIndex >= 0) indexedLights[normalIndex] = result;
           else vertexLights.set(normal, result);
         }
+        if (previousNormalIndex === undefined) { lastNormal = normal; lastLight = result; }
         return result;
       };
       preparedLights.set(entity, illuminate);
