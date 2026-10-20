@@ -120,7 +120,7 @@ test("ordinary shared browser controls sort and filter received Q1/Q2/Q3 servers
     key(KeyCode.Escape, true); key(KeyCode.Escape, false);
     expect(menu.controller.activeMenu).toBe("menu:startup:main");
     for (let index = 0; index < 5; index++) peers.push(await UdpTransport.bind({ host: "127.0.0.1", port: 0 }));
-    click(100, 130); click(100, 300);
+    activate("ui:startup:native"); activate("ui:startup:custom");
     activate("ui:startup:browse");
     expect(menu.controller.activeMenu).toBe("menu:startup:servers");
     const protocols: readonly BrowserProtocol[] = ["q1", "q2", "q3"];

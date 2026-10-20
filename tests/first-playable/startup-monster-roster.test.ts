@@ -109,9 +109,12 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
         if (family !== "q3") click(edition === "classic" ? 188 : 452, 130);
         const campaignRowOffset = family === "q3" ? 0 : 1;
         await capture(`native-${family}-${edition}-campaigns`);
+        const perPage = 8 - campaignRowOffset;
         for (const [index, preset] of presets.entries()) {
           const before = nativeLaunches.length;
-          click(100, 130 + (campaignRowOffset + index) * 34);
+          // The campaign list paginates at row 8 once a family's titles outgrow one page.
+          if (index > 0 && index % perPage === 0) click(100, 384);
+          click(100, 130 + (campaignRowOffset + index % perPage) * 34);
           if (preset.unavailable !== null) {
             expect(menu.controller.activeMenu).toBe("menu:startup:native-campaign"); expect(nativeLaunches).toHaveLength(before); continue;
           }

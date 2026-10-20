@@ -1435,6 +1435,10 @@ export class QuakeCSource {
     return undefined;
   }
   endFrame(): undefined {
+    // Source cvar effects are change notifications with no in-process consumer
+    // (server info is recomposed from registry state); the checkpoint already
+    // drops them, so frame end must too or they accumulate forever.
+    this.cvars.takeEffects();
     this.messages.flush();
     if (this.localMessagesStarted && !this.netQuakeWireAttached) this.netQuakeRouted.reset();
     const offset = this.machine.globalOffset("force_retouch"), current = this.machine.globals.float(offset);

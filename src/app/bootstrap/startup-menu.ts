@@ -100,6 +100,7 @@ export class StartupMenu {
   private page = 0;
   private monsterField: { readonly kind: "none" } | { readonly kind: "source" } | { readonly kind: "class"; readonly classname: string | null } = { kind: "none" };
   private savePage = 0;
+  private campaignPage = 0;
   private nativeFamily: StartupNativePreset["family"] = "q1";
   private nativeEdition = "classic";
   private nativePreset: StartupNativePreset | null = null;
@@ -146,7 +147,7 @@ export class StartupMenu {
         { family: "q3", label: "Quake III" },
       ] satisfies { family: StartupNativePreset["family"]; label: string }[]).map((game, index) => ({
         ...this.button(`game:${game.family}`, game.label, index, () => {
-          this.nativeFamily = game.family; this.status = ""; this.controller.openMenu(nativeCampaignMenu);
+          this.nativeFamily = game.family; this.campaignPage = 0; this.status = ""; this.controller.openMenu(nativeCampaignMenu);
         }, true), enabled: !this.busy && options.model.presets().some(preset => preset.family === game.family),
       })), this.button("custom", "Custom game", 3, () => { this.status = ""; this.controller.openMenu(session); }, true), this.back(),
     ]);
@@ -162,10 +163,12 @@ export class StartupMenu {
       const familyPresets = options.model.presets().filter(preset => preset.family === this.nativeFamily);
       const toggle = familyPresets.some(preset => preset.edition === "classic") && familyPresets.some(preset => preset.edition === "rerelease")
         ? (["classic", "rerelease"] satisfies readonly ("classic" | "rerelease")[]).map((edition, index) => ({
-          ...this.button(`edition-${edition}`, `${this.nativeEdition === edition ? "> " : ""}${edition === "classic" ? "Classic" : "Rerelease"}`, 0, () => { this.nativeEdition = edition; this.status = ""; }, true),
+          ...this.button(`edition-${edition}`, `${this.nativeEdition === edition ? "> " : ""}${edition === "classic" ? "Classic" : "Rerelease"}`, 0, () => { this.nativeEdition = edition; this.campaignPage = 0; this.status = ""; }, true),
           rect: { x: index === 0 ? 64 : 328, y: 114, width: 248, height: 29 } })) : [];
       const offset = toggle.length === 0 ? 0 : 1;
-      return [...this.nativeCampaigns().map((preset, index) => ({
+      const campaigns = this.nativeCampaigns(), perPage = 8 - offset, pages = Math.max(1, Math.ceil(campaigns.length / perPage));
+      this.campaignPage = Math.min(this.campaignPage, pages - 1);
+      return [...campaigns.slice(this.campaignPage * perPage, this.campaignPage * perPage + perPage).map((preset, index) => ({
         ...this.button(`preset:${preset.id}`, this.fit(`${preset.label}${preset.unavailable === null ? "" : " (unavailable)"}`, 486, menuText.body), offset + index, () => {
           this.nativePreset = preset; this.nativeSkill = preset.defaultSkill; this.nativeArena = undefined; this.status = "";
           if (preset.id !== "q3-baseq3") { this.controller.openMenu(nativeDifficultyMenu); return; }
@@ -173,7 +176,8 @@ export class StartupMenu {
           options.model.refreshBaseArenas().then(() => { this.setStatus(""); this.controller.openMenu(arenas); })
             .catch((error: unknown) => this.setStatus(error instanceof Error ? error.message : String(error)));
         }, true), enabled: !this.busy && preset.unavailable === null,
-      })), ...toggle, this.back()];
+      })), ...toggle, ...(pages > 1 ? [this.button("campaign-page", `More campaigns (${this.campaignPage + 1}/${pages})`, 8,
+        () => { this.campaignPage = (this.campaignPage + 1) % pages; }, true)] : []), this.back()];
     });
     this.register(nativeDifficultyMenu, () => {
       const preset = this.nativePreset;

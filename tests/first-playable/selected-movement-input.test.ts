@@ -18,7 +18,7 @@ test('startup-selected QuakeWorld movement drives the normal mixed-game applicat
         await model.prepareMaps();
         model.select('product', 'q2-classic-baseq2'); model.select('map', 'maps/base1.bsp');
         model.select('movement', 'q1-quakeworld'); model.select('character', 'q3-baseq3'); model.select('model', 'visor');
-        model.select('weapons', 'q2-rerelease-baseq2'); model.select('grapple', 'q2-classic-lmctf/offhand'); model.select('grenades', 'q2-classic-baseq2');
+        model.select('weapons', 'q2-rerelease-baseq2'); model.select('grapple', 'offhand'); model.select('grappleStyle', 'q2-lmctf'); model.select('grenades', 'enabled');
         await model.prepareMonsterRoster(); model.select('enemies', 'custom');
         const q1Monster = model.monsterRosterRows()[0]?.choices.find(choice => choice.id.startsWith('q1:') && choice.id.endsWith('/monster_army') && choice.unavailable === null);
         if (q1Monster === undefined) throw new Error('No installed Q1 roster choice');

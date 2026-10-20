@@ -6174,7 +6174,7 @@ export class SharedSimulation implements Simulation {
           renderFlags: model?.renderFlags ?? entity.renderFlags, alpha: model?.alpha ?? entity.alpha, origin: pose.origin, angles: pose.angles,
           previousOrigin: pose.previousOrigin,
           scale: model?.scale ?? 1, visible: entity.visible && (entity.serverFlags & 1) === 0, viewWeapon: false } satisfies Omit<SimulationPresentation, "path">;
-        if (entity.model !== "") result.push({ ...presentation, path: entity.model,
+        if (entity.model !== "" || entity.flare !== null) result.push({ ...presentation, path: entity.model,
           ...(entity.flare === null ? {} : { flare: entity.flare }),
           ...(entry.services.options.edition === "rerelease" && (entity.renderFlags & 128) !== 0 ? { modelBeam: { segmentLength: entity.frame } } : {}) });
         // Q2 modelindex2-4 draw with the same frame/skin as the primary model (e.g. the Jorg shell over its rider).

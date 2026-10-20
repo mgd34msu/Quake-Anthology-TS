@@ -58,7 +58,17 @@ export function parseServerProfile(value: unknown, definitions: readonly ServerS
   }) };
 }
 export function captureServerProfile(bindings: readonly BoundServerSetting[]): ServerProfile {
-  return parseServerProfile({ version: 1, overrides: bindings.map(binding => ({ id: binding.definition.id, value: binding.owner.read(binding.definition.target).desired })) }, bindings.map(binding => binding.definition));
+  // Live capture is not user input: a source may author values outside the
+  // menu choices (retail Hipnotic quake.rc sets teamplay to "0?Hipnotic").
+  // Such values are re-derived by the source at world start, so capture
+  // omits them instead of rejecting the whole profile.
+  const overrides: { id: ServerSettingId; value: string }[] = [];
+  for (const binding of bindings) {
+    const desired = binding.owner.read(binding.definition.target).desired;
+    try { overrides.push({ id: binding.definition.id, value: parseServerSetting(binding.definition, desired) }); }
+    catch (error) { if (!(error instanceof RangeError)) throw error; }
+  }
+  return { version: 1, overrides };
 }
 export function applyServerProfile(profile: ServerProfile, bindings: readonly BoundServerSetting[]): void {
   const validated = parseServerProfile(profile, bindings.map(binding => binding.definition));

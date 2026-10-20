@@ -21,7 +21,11 @@ test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3") || !corpusHasFile("q2/baseq2/p
   const model = new StartupSelectionModel(catalog, command.options);
   await model.prepareMaps();
   expect(model.rows().find(row => row.id === "model")?.choices.some(choice => choice.id === "sarge")).toBe(true);
-  expect(model.rows().find(row => row.id === "product")?.choices.find(choice => choice.id === "q1-rerelease-quake64")?.unavailable).not.toBeNull();
+  // Unavailable propagation follows corpus contents: demota data is the one
+  // expected product this corpus does not carry.
+  const demota = model.rows().find(row => row.id === "product")?.choices.find(choice => choice.id === "q3-demota");
+  if (corpusHasFile("q3a/demota/pak0.pk3")) expect(demota?.unavailable).toBeNull();
+  else expect(demota?.unavailable).not.toBeNull();
   const original = await model.resolve();
   expect(original.recipe.weapons).toEqual([{ provider: "q2:official", content: catalog.require("q2-classic-baseq2").id }]);
   model.select("weapons", "q3-baseq3"); model.select("movement", "q2-rerelease-baseq2");
@@ -50,7 +54,8 @@ test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3") || !corpusHasFile("q2/baseq2/p
   expect(selected.options).toMatchObject({ width: 1280, height: 720, gamma: 1.3, mode: "deathmatch", movement: "q2", character: "q3", characterModel: "sarge" });
   expect(model.summary().some(line => line.includes("Independent pickup replacement is not implemented"))).toBe(true);
   expect(() => model.select("map", "maps/not-installed.bsp")).toThrow("Unknown map");
-  expect(() => model.select("product", "q1-rerelease-quake64")).toThrow();
+  if (corpusHasFile("q3a/demota/pak0.pk3")) expect(() => model.select("product", "q3-demota")).not.toThrow();
+  else expect(() => model.select("product", "q3-demota")).toThrow();
   model.select("product", "q2-classic-baseq2");
   expect(model.options.map).toBe("maps/base1.bsp");
   model.select("rules", "ctf");

@@ -21,14 +21,19 @@ test("startup Display keeps renderer and Apply visible on one normal-sized page"
     app = await StartupApplication.open(parsed.options, { print: () => undefined }, join(root, "saves"));
     const startup = app, seat = startup.inputSeat; if (seat === null) throw new Error("Missing startup seat");
     const key = (code: number): void => { for (const down of [true, false]) startup.input({ seat, kind: "key", code, down, repeat: false, timeMilliseconds: performance.now() }); };
-    for (let index = 0; index < 3; index++) key(KeyCode.Down);
+    // Main menu order: Play a game, Load Game, Options, Library, Quit.
+    for (let index = 0; index < 2; index++) key(KeyCode.Down);
     key(KeyCode.Enter); key(KeyCode.Enter); await startup.step();
     const controller = observed.controller; if (controller === null) throw new Error("Missing rendered menu controller");
-    for (let index = 0; index < 12; index++) {
-      const focus = controller.state().focus; if (focus.kind === "menu" && focus.control === "ui:startup:apply-display") break;
+    for (let index = 0; index < 16; index++) {
+      const focus = controller.state().focus; if (focus.kind === "menu" && focus.control === "ui:video:renderer") break;
       key(KeyCode.Tab);
     }
-    expect(controller.state().focus).toMatchObject({ menu: "menu:settings:display:0", control: "ui:startup:apply-display" });
+    expect(controller.state().focus).toMatchObject({ menu: "menu:settings:display:0", control: "ui:video:renderer" });
+    // Changing the draft enables Apply renderer; it must stay on this same page.
+    key(KeyCode.Enter); await startup.step();
+    key(KeyCode.Tab);
+    expect(controller.state().focus).toMatchObject({ menu: "menu:settings:display:0", control: "ui:video:renderer-apply" });
     const pixels = startup.captureNextFrame(); await startup.step();
     await Bun.write("/tmp/video-settings-gl-startup-complete-page.png", encodePng(640, 480, await pixels));
     key(KeyCode.Tab); expect(controller.state().focus).toMatchObject({ control: "ui:settings:back" });

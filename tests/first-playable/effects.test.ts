@@ -399,10 +399,19 @@ for (const [game, map] of [["q1-classic-id1", "e1m1"], ["q2-classic-baseq2", "ba
     expect(markDraw.batches.some(batch => batch.indices.length > 0)).toBe(true);
     expect(explosionDraw.batches.some(batch => batch.indices.length > 0)).toBe(true);
     const world = assets.world.prepareView({ camera, time, target: { kind: "preview", id: "q3-order" }, operations: prepared.operations });
-    for (const operations of [finishSceneOperations(prepared.operations), world.view.operations]) {
-      expect(operations.indexOf(markDraw)).toBeGreaterThanOrEqual(0);
-      expect(operations.indexOf(explosionDraw)).toBeGreaterThan(operations.indexOf(markDraw));
-    }
+    const finished = finishSceneOperations(prepared.operations);
+    expect(finished.indexOf(markDraw)).toBeGreaterThanOrEqual(0);
+    expect(finished.indexOf(explosionDraw)).toBeGreaterThan(finished.indexOf(markDraw));
+    // The world path coalesces consecutive draws (mergeDrawOperations), so
+    // draw identity is gone by design; the mark's texture and the explosion
+    // batch must still appear, in order, among the merged batches.
+    const worldBatches = world.view.operations.flatMap(operation => operation.kind === "draw" ? operation.batches : []);
+    const markBatch = markDraw.batches[0]; if (markBatch === undefined) throw new Error("Missing mark batch");
+    const markAt = worldBatches.findIndex(batch => batch.texture === markBatch.texture
+      || batch.texture.kind === "bind-image" && markBatch.texture.kind === "bind-image" && batch.texture.image === markBatch.texture.image);
+    const explosionAt = worldBatches.indexOf(explosionDraw.batches[0]!);
+    expect(markAt).toBeGreaterThanOrEqual(0);
+    expect(explosionAt).toBeGreaterThan(markAt);
   } finally { effects.close(); assets.close(); await content.close(); }
 }, 30000);
 

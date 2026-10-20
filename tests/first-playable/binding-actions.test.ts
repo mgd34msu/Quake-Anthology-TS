@@ -31,7 +31,7 @@ test('binding editor captures shared offhand and primary actions and restores th
     const model = new StartupSelectionModel(await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, discoverMods: false }), parsed.options);
     await model.prepareMaps(); model.select('product', 'q2-classic-baseq2'); model.select('map', 'maps/base1.bsp');
     model.select('movement', 'q1-quakeworld'); model.select('character', 'q2-classic-baseq2'); model.select('weapons', 'q2-rerelease-baseq2');
-    model.select('grapple', 'q2-classic-lmctf/offhand'); model.select('grenades', 'q2-classic-baseq2');
+    model.select('grapple', 'offhand'); model.select('grappleStyle', 'q2-lmctf'); model.select('grenades', 'enabled');
     const launch = await model.resolve();
     const prints: string[] = [];
     application = await Application.open(launch.options, { print: text => { prints.push(text); } }, launch.recipe);

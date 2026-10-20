@@ -19,15 +19,18 @@ test("explicit Hipnotic executes native weapons and authored travel through the 
     const explicit = parseApplicationCommand(["--game", "q1-classic-hipnotic", "--progs", "progs.dat", "--map", "start", "--dedicated", "--movement", "q1", "--character", "q1", "--user-content-root", root]);
     if (explicit.kind !== "run") throw new Error("Missing explicit QuakeC launch options");
     expect(explicit.options.quakeCProgram).toBe("progs.dat");
-    expect(() => applicationPreset(catalog, { ...explicit.options, dedicated: false })).toThrow("--progs requires");
+    // Offline local worlds may run an explicit program; wire clients may not.
+    expect(() => applicationPreset(catalog, { ...explicit.options, dedicated: false })).not.toThrow();
+    expect(() => applicationPreset(catalog, { ...explicit.options, dedicated: false, network: { kind: "q1-client", remote: "127.0.0.1:26000" } })).toThrow("--progs requires");
     expect(() => parseApplicationCommand(["--progs", "../progs.dat"])).toThrow("Invalid relative resource path");
     expect(() => parseApplicationCommand(["--progs", "progs.dll"])).toThrow("mounted .dat artifact");
-    const app = await Application.open(explicit.options, { print: () => undefined }); application = app;
+    const app = await Application.open(explicit.options, { print: () => undefined, saveDirectory: root }); application = app;
     const simulation = app.simulation, source = simulation.quakecSource();
     if (source === null) throw new Error("Normal Hipnotic launch did not select QuakeC");
     expect(source.prepared.program.digest).toBe("sha256:35a2fdc3acb04bdafe8d0269f5327cd1d5b47971f1ef024429f1572d3201dc82");
     expect(source.kind).toBe("netquake"); expect(simulation.q1Source()).toBeNull();
-    await expect(loadApplicationContent({ ...launch.options, dedicated: false }, simulation.recipe)).rejects.toThrow("QuakeC application execution requires");
+    // Offline local worlds run the same explicit program; only wire clients are refused (above).
+    expect((await loadApplicationContent({ ...explicit.options, dedicated: false }, simulation.recipe)).preparedQuakeC).not.toBeNull();
     const vm = source.machine, field = (name: string) => vm.fieldOffset(name);
     expect(vm.profiling[vm.program.functionNamed("func_rotate_door").index]).toBeGreaterThan(0);
     expect(source.precacheNames("model")).not.toContain("");
@@ -148,7 +151,7 @@ for (const game of ["q1-classic-hipnotic", "q1-classic-id1", "q1-quakeworld"]) t
     const launch = parseApplicationCommand(["--game", game, ...(game === "q1-quakeworld" ? ["--mode", "deathmatch"] : ["--progs", "progs.dat"]),
       "--map", game === "q1-quakeworld" ? "e1m1" : "start", "--dedicated", "--movement", "q1", "--character", "q1", "--user-content-root", root]);
     if (launch.kind !== "run") throw new Error("Missing QC save launch");
-    let app = await Application.open(launch.options, { print: () => undefined }); application = app;
+    let app = await Application.open(launch.options, { print: () => undefined, saveDirectory: root }); application = app;
     const original = app.simulation.quakecSource(); if (original === null) throw new Error("Missing QC source");
     const client = app.session.createClient(0); client.connect("loopback");
     original.setClientInfo(client.id, new Map([["name", "Saved QC client"], ["team", "red"], ["noaim", "1"]]));
@@ -204,13 +207,13 @@ for (const game of ["q1-classic-hipnotic", "q1-classic-id1", "q1-quakeworld"]) t
       advance(20, 0);
       expect(app.simulation.requestWeapon(admitted.actor, { provider: original.prepared.execution.owner.provider, item: "q1:weapon/hipnotic:proximity" })).toBe(true);
     }
-    const path = join(root, "full.qtsave"), saved = original.machine.snapshot(), savedVisibility = original.clients.visibility.capture();
+    const path = join(root, "full.sav"), saved = original.machine.snapshot(), savedVisibility = original.clients.visibility.capture();
     const savedCvars = original.cvars.captureQuakeCState(), savedPrecache = original.precacheNames("model");
     await app.saveGame(path);
     for (let frame = 0; frame < 24; frame++) advance(100 + frame, frame < 5 ? 1 : 0);
     const expected = original.machine.snapshot(), expectedVisibility = original.clients.visibility.capture();
     await app.close(); application = null;
-    app = await Application.open(launch.options, { print: () => undefined }); application = app;
+    app = await Application.open(launch.options, { print: () => undefined, saveDirectory: root }); application = app;
     const freshClient = app.session.createClient(0); freshClient.connect("loopback");
     if (game === "q1-quakeworld") app.simulation.quakecSource()?.prepareClientSpawn(freshClient.id);
     app.simulation.admitPlayer(freshClient.id);
