@@ -143,6 +143,9 @@ export class QcMachine {
     if (definition === undefined) return this.fail(`missing global ${name}`);
     return definition.offset;
   }
+  globalOffsetOrNull(name: string): number | null {
+    return this.program.globalsByName.get(name)?.offset ?? null;
+  }
   fieldOffset(name: string): number {
     const definition = this.program.fieldsByName.get(name);
     if (definition === undefined) return this.fail(`missing entity field ${name}`);

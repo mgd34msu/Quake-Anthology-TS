@@ -324,7 +324,10 @@ export class QuakeCSource {
       if (slot < 1 || slot > options.maxClients || actor === null || options.actors.resolveOwned(actor.id) !== actor
         || client === undefined || client.slot + 1 !== slot || parameters === undefined)
         throw new Error("QC setspawnparms requires a current source client");
-      for (const [index, value] of parameters.entries()) vm.globals.setFloat(vm.globalOffset(`parm${index + 1}`), value);
+      for (const [index, value] of parameters.entries()) {
+        const offset = vm.globalOffsetOrNull(`parm${index + 1}`);
+        if (offset !== null) vm.globals.setFloat(offset, value);
+      }
     });
     host.set("changelevel", vm => {
       if (this.changeLevelIssued) return undefined;
@@ -691,11 +694,25 @@ export class QuakeCSource {
     this.clientIdentities.set(client.slot + 1, client);
     if (!this.spawnParameters.has(client.slot + 1)) {
       this.invoke(this.prepared.program.functionNamed("SetNewParms").index, 0, 0, this.currentTime);
-      this.spawnParameters.set(client.slot + 1, Array.from({ length: 16 }, (_, index) => this.machine.globals.float(this.machine.globalOffset(`parm${index + 1}`))));
+      this.spawnParameters.set(client.slot + 1, this.readSpawnParameters());
     }
     return this.worldHost.actor(client.slot + 1);
   }
   clientInfo(client: ClientId): ReadonlyMap<string, string> { return this.userInfo.get(client.slot + 1) ?? new Map<string, string>(); }
+  // Retail mods do not all declare the full parm1..parm16 set (qdoom stops
+  // at parm9); absent spawn parms read as zero and are never written back.
+  private readSpawnParameters(): number[] {
+    return Array.from({ length: 16 }, (_, index) => {
+      const offset = this.machine.globalOffsetOrNull(`parm${index + 1}`);
+      return offset === null ? 0 : this.machine.globals.float(offset);
+    });
+  }
+  private writeSpawnParameters(parameters: readonly number[]): void {
+    for (let index = 0; index < parameters.length; index++) {
+      const offset = this.machine.globalOffsetOrNull(`parm${index + 1}`), value = parameters[index];
+      if (offset !== null && value !== undefined) this.machine.globals.setFloat(offset, value);
+    }
+  }
   captureTravel(): QuakeCSourceTravel {
     if (this.spawning) throw new Error("Native QuakeC travel requires a loaded source world");
     const serverFlags = this.machine.globals.float(this.machine.globalOffset("serverflags"));
@@ -704,7 +721,7 @@ export class QuakeCSource {
       const actor = this.slots.at(slot);
       if (actor !== null && this.activeClients.has(actor.id)) {
         this.invoke(this.prepared.program.functionNamed("SetChangeParms").index, slot, 0, this.currentTime);
-        this.spawnParameters.set(slot, Array.from({ length: 16 }, (_, index) => this.machine.globals.float(this.machine.globalOffset(`parm${index + 1}`))));
+        this.spawnParameters.set(slot, this.readSpawnParameters());
       }
       const parameters = this.spawnParameters.get(slot);
       if (parameters === undefined) throw new Error("Native QuakeC connection has no spawn parameters");
@@ -878,7 +895,7 @@ export class QuakeCSource {
     }
     const spectator = this.spectatorSlots.has(slot), spectatorConnect = this.prepared.program.functionsByName.get("SpectatorConnect");
     if (!spectator || spectatorConnect !== undefined && spectatorConnect.index !== 0)
-      for (const [index, value] of parameters.entries()) this.machine.globals.setFloat(this.machine.globalOffset(`parm${index + 1}`), value);
+      this.writeSpawnParameters(parameters);
     const replayLocalPresentation = this.localMessagesStarted;
     this.activeClients.add(actor.id);
     if (this.kind === "netquake" && (!this.netQuakeWireAttached || this.localMessagesStarted)) {
