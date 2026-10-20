@@ -2,7 +2,6 @@
  * Copyright (C) Id Software and contributors. GPL-2.0-or-later. */
 import type { Vec3, Vec4 } from "../../contracts/math.ts";
 import type { Q2ModelShadowLight, BatchLighting, DepthImageLevel, MultitextureVertex, Q2ShadowAtlas, Q2ShadowProjection } from "../../contracts/render.ts";
-import { transformVec4 } from "../../core/math.ts";
 import { calcDynamicLightContribution } from "../../materials/q2-lighting.ts";
 import type { Sample } from "./triangle-kernel.ts";
 
@@ -43,15 +42,20 @@ export function shadowVisibility(position: Vec3, origin: Vec3, radius: number, s
   const rect = shadow.atlasRect, texel = atlas.texelSize;
   let baseX: number, baseY: number, lowX: number, lowY: number, highX: number, highY: number;
   let visible: (stored: number) => boolean;
+  let coneLimit = 0;
   if (shadow.kind === "cone") {
-    const clip = transformVec4(shadow.matrix, { ...position, w: 1 });
-    if (clip.w <= 0) return 1;
-    const x = clip.x / clip.w, y = clip.y / clip.w, z = clip.z / clip.w;
+    const matrix = shadow.matrix;
+    const clipW = matrix[3] * position.x + matrix[7] * position.y + matrix[11] * position.z + matrix[15];
+    if (clipW <= 0) return 1;
+    const x = (matrix[0] * position.x + matrix[4] * position.y + matrix[8] * position.z + matrix[12]) / clipW;
+    const y = (matrix[1] * position.x + matrix[5] * position.y + matrix[9] * position.z + matrix[13]) / clipW;
+    const z = (matrix[2] * position.x + matrix[6] * position.y + matrix[10] * position.z + matrix[14]) / clipW;
     if (x < 0 || x > 1 || y < 0 || y > 1 || z > 1) return 1;
     baseX = x * rect.z + rect.x; baseY = y * rect.w + rect.y;
     lowX = rect.x + texel; lowY = rect.y + texel;
     highX = rect.x + rect.z - texel; highY = rect.y + rect.w - texel;
-    visible = stored => z - (model ? 0.0025 : 0.0005) <= stored;
+    coneLimit = z - (model ? 0.0025 : 0.0005);
+    visible = stored => coneLimit <= stored;
   } else {
     const x = position.x - origin.x, y = position.y - origin.y, z = position.z - origin.z;
     const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
@@ -107,7 +111,13 @@ export function shadeQ2Fragment(lighting: CpuLighting, position: Vec3, normal: V
     }
     for (const light of parameters.lights) {
       if (light.scale === 0 || light.color.x === 0 && light.color.y === 0 && light.color.z === 0) continue;
+      // Falloff reaches zero at the light radius; point lights shift 16
+      // units along the (at most unit) interpolated normal first.
+      const dx = light.origin.x - position.x, dy = light.origin.y - position.y, dz = light.origin.z - position.z;
+      const reach = light.radius + (light.cone === null ? 16 : 0);
+      if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
       const contribution = calcDynamicLightContribution(light, position, normal);
+      if (contribution.x === 0 && contribution.y === 0 && contribution.z === 0) continue;
       let visibility = 1;
       if (light.shadow.kind !== "none") {
         if (parameters.atlas === null || lighting.depth === null) throw new Error("CPU shadow light requires its depth atlas");
