@@ -107,17 +107,24 @@ function snapshotSourceBatch(batch: SourceStageData["batch"], state: RenderState
     get texture() { return batch.texture; } };
 }
 
+const ZERO_TEXCOORD = { x: 0, y: 0 };
+
 function indexedVertex(batch: DrawBatch, offset: number): CpuVertex {
   const index = batch.indices[offset];
   if (index === undefined) throw new RangeError("Missing triangle index");
+  const attributes = worldAttributes(batch.lighting, index);
+  // Explicit field construction keeps one allocation per corner; nested
+  // attribute objects are read-only downstream and stay shared.
   if (batch.texturing === "pair") {
     const vertex = batch.vertices[index];
     if (vertex === undefined) throw new RangeError("Missing triangle vertex");
-    return { ...vertex, ...worldAttributes(batch.lighting, index) };
+    return { position: vertex.position, color: vertex.color, texCoord: vertex.texCoord,
+      texCoord2: vertex.texCoord2, worldPosition: attributes.worldPosition, worldNormal: attributes.worldNormal };
   }
   const vertex = batch.vertices[index];
   if (vertex === undefined) throw new RangeError("Missing triangle vertex");
-  return { ...vertex, texCoord2: { x: 0, y: 0 }, ...worldAttributes(batch.lighting, index) };
+  return { position: vertex.position, color: vertex.color, texCoord: vertex.texCoord,
+    texCoord2: ZERO_TEXCOORD, worldPosition: attributes.worldPosition, worldNormal: attributes.worldNormal };
 }
 
 function planeDistance(vertex: CpuVertex, plane: ClipPlane): number {

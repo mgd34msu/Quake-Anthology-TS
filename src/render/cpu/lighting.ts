@@ -19,8 +19,10 @@ export interface CpuTriangleLighting extends CpuLighting {
   readonly normals: readonly [Vec3, Vec3, Vec3];
 }
 
+const ZERO_WORLD_ATTRIBUTES: Pick<CpuVertex, "worldPosition" | "worldNormal"> = { worldPosition: { x: 0, y: 0, z: 0 }, worldNormal: { x: 0, y: 0, z: 0 } };
+
 export function worldAttributes(lighting: BatchLighting, index: number): Pick<CpuVertex, "worldPosition" | "worldNormal"> {
-  if (lighting.kind === "vertex") return { worldPosition: { x: 0, y: 0, z: 0 }, worldNormal: { x: 0, y: 0, z: 0 } };
+  if (lighting.kind === "vertex") return ZERO_WORLD_ATTRIBUTES;
   const position = lighting.worldPositions[index], normal = lighting.kind === "q2-world" ? lighting.normals[index] : { x: 0, y: 0, z: 0 };
   if (position === undefined || normal === undefined) throw new RangeError("CPU fragment lighting arrays do not cover the vertex");
   return { worldPosition: position, worldNormal: normal };

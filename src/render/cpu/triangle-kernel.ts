@@ -119,17 +119,17 @@ function wrapTexel(index: number, size: number): number {
 
 function sampleLevel(texture: TextureStorage, border: Vec4, u: number, v: number,
   wrap: TextureSampling["wrap"], linear: boolean, output: Sample): void {
-  const width = texture.width, height = texture.height, data = texture.data, maximum = texture.componentMaximum;
+  const width = texture.width, height = texture.height, data = texture.pixels, maximum = texture.componentMaximum;
   u = wrap === "repeat" ? u - Math.floor(u) : clamp(u);
   v = wrap === "repeat" ? v - Math.floor(v) : clamp(v);
   if (!linear) {
     const x = Math.min(width - 1, Math.floor(u * width));
     const y = Math.min(height - 1, Math.floor(v * height));
     const offset = (y * width + x) * 4;
-    output.r = data.getUint8(offset) / maximum;
-    output.g = data.getUint8(offset + 1) / maximum;
-    output.b = data.getUint8(offset + 2) / maximum;
-    output.a = data.getUint8(offset + 3) / maximum;
+    output.r = (data[offset] ?? 0) / maximum;
+    output.g = (data[offset + 1] ?? 0) / maximum;
+    output.b = (data[offset + 2] ?? 0) / maximum;
+    output.a = (data[offset + 3] ?? 0) / maximum;
     return;
   }
   const x = u * width - 0.5;
@@ -148,30 +148,37 @@ function sampleLevel(texture: TextureStorage, border: Vec4, u: number, v: number
   const w01 = (1 - fx) * fy / maximum;
   const w11 = fx * fy / maximum;
   const hasBorder = wrap === "clamp" && (x0 < 0 || y0 < 0 || x1 >= width || y1 >= height);
-  // Channel extraction consumes signed 32-bit words; avoid unsigned-number conversion.
-  let c00: number, c10: number, c01: number, c11: number, borderWeight = 0;
+  let borderWeight = 0;
   if (hasBorder) {
     // A negative offset denotes a GL_CLAMP border tap, not the nearest edge texel.
-    const p00 = x0 < 0 || y0 < 0 ? -1 : (y0 * width + x0) * 4;
-    const p10 = x1 >= width || y0 < 0 ? -1 : (y0 * width + x1) * 4;
-    const p01 = x0 < 0 || y1 >= height ? -1 : (y1 * width + x0) * 4;
-    const p11 = x1 >= width || y1 >= height ? -1 : (y1 * width + x1) * 4;
-    c00 = p00 < 0 ? 0 : data.getInt32(p00);
-    c10 = p10 < 0 ? 0 : data.getInt32(p10);
-    c01 = p01 < 0 ? 0 : data.getInt32(p01);
-    c11 = p11 < 0 ? 0 : data.getInt32(p11);
-    borderWeight = ((p00 < 0 ? w00 : 0) + (p10 < 0 ? w10 : 0) + (p01 < 0 ? w01 : 0) + (p11 < 0 ? w11 : 0)) * maximum;
+    const offsets = [
+      x0 < 0 || y0 < 0 ? -1 : (y0 * width + x0) * 4,
+      x1 >= width || y0 < 0 ? -1 : (y0 * width + x1) * 4,
+      x0 < 0 || y1 >= height ? -1 : (y1 * width + x0) * 4,
+      x1 >= width || y1 >= height ? -1 : (y1 * width + x1) * 4,
+    ];
+    const weights = [w00, w10, w01, w11];
+    let r = 0, g = 0, b = 0, a = 0;
+    for (const index of [0, 1, 2, 3]) {
+      const tapOffset = offsets[index] ?? -1, weight = weights[index] ?? 0;
+      if (tapOffset < 0) continue;
+      r += (data[tapOffset] ?? 0) * weight;
+      g += (data[tapOffset + 1] ?? 0) * weight;
+      b += (data[tapOffset + 2] ?? 0) * weight;
+      a += (data[tapOffset + 3] ?? 0) * weight;
+    }
+    borderWeight = (((offsets[0] ?? -1) < 0 ? w00 : 0) + ((offsets[1] ?? -1) < 0 ? w10 : 0) + ((offsets[2] ?? -1) < 0 ? w01 : 0) + ((offsets[3] ?? -1) < 0 ? w11 : 0)) * maximum;
+    output.r = r; output.g = g; output.b = b;
+    // RGB storage contributes no alpha to any texture environment.
+    output.a = texture.hasAlpha ? a : 1;
   } else {
-    c00 = data.getInt32((y0 * width + x0) * 4);
-    c10 = data.getInt32((y0 * width + x1) * 4);
-    c01 = data.getInt32((y1 * width + x0) * 4);
-    c11 = data.getInt32((y1 * width + x1) * 4);
+    const p00 = (y0 * width + x0) * 4, p10 = (y0 * width + x1) * 4, p01 = (y1 * width + x0) * 4, p11 = (y1 * width + x1) * 4;
+    output.r = (data[p00] ?? 0) * w00 + (data[p10] ?? 0) * w10 + (data[p01] ?? 0) * w01 + (data[p11] ?? 0) * w11;
+    output.g = (data[p00 + 1] ?? 0) * w00 + (data[p10 + 1] ?? 0) * w10 + (data[p01 + 1] ?? 0) * w01 + (data[p11 + 1] ?? 0) * w11;
+    output.b = (data[p00 + 2] ?? 0) * w00 + (data[p10 + 2] ?? 0) * w10 + (data[p01 + 2] ?? 0) * w01 + (data[p11 + 2] ?? 0) * w11;
+    // RGB storage contributes no alpha to any texture environment.
+    output.a = texture.hasAlpha ? (data[p00 + 3] ?? 0) * w00 + (data[p10 + 3] ?? 0) * w10 + (data[p01 + 3] ?? 0) * w01 + (data[p11 + 3] ?? 0) * w11 : 1;
   }
-  output.r = (c00 >>> 24) * w00 + (c10 >>> 24) * w10 + (c01 >>> 24) * w01 + (c11 >>> 24) * w11;
-  output.g = ((c00 >>> 16) & 255) * w00 + ((c10 >>> 16) & 255) * w10 + ((c01 >>> 16) & 255) * w01 + ((c11 >>> 16) & 255) * w11;
-  output.b = ((c00 >>> 8) & 255) * w00 + ((c10 >>> 8) & 255) * w10 + ((c01 >>> 8) & 255) * w01 + ((c11 >>> 8) & 255) * w11;
-  // RGB storage contributes no alpha to any texture environment.
-  output.a = texture.hasAlpha ? (c00 & 255) * w00 + (c10 & 255) * w10 + (c01 & 255) * w01 + (c11 & 255) * w11 : 1;
   if (hasBorder) {
     output.r += Math.fround(border.x) * borderWeight;
     output.g += Math.fround(border.y) * borderWeight;
