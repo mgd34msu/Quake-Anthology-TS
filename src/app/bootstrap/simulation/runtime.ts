@@ -85,7 +85,7 @@ import { q3GameCvarDefinitions } from "../../../content/q3/base/settings.ts";
 import { giveQ1 } from "../../../content/composition/q1/give.ts";
 import { q2CheatsAllowed } from "../../../content/q2/base/player/commands.ts";
 import type { NetQuakeClientBinding } from "./players.ts";
-import { QuakeCSource, preparedQuakeCWeaponStage, preparedQuakeCDamageScaling } from "./quakec-source.ts";
+import { QuakeCSource, preparedQuakeCWeaponStage } from "./quakec-source.ts";
 import type { QwUserCommand, UserCommand } from "../../../contracts/protocol.ts";
 import { id1DamageMultiplier } from "../../../content/q1/quakec/id1-program.ts";
 import { createNativeQ1PusherServices } from "./native-q1-pusher.ts";
@@ -792,7 +792,6 @@ export class SharedSimulation implements Simulation {
     this.handGrenades = this.createHandGrenades();
     this.grapple = this.createGrapple();
     if ((this.weaponProvider.content !== this.recipe.map.entities.content || providerFamily(this.weaponProvider.provider) !== (this.source.kind === "quakec" ? "q1" : this.source.kind === "q3-qvm" ? "q3" : this.source.kind === "q2-native" ? "q2" : this.source.kind))) {
-      if (this.source.kind === "quakec" && !preparedQuakeCDamageScaling(this.source.game.prepared)) throw new Error("Selected arsenal requires a qualified original QuakeC damage scale");
       if (providerFamily(this.weaponProvider.provider) === "q1") {
         this.selectedArsenal = this.createSelectedQ1Arsenal();
       } else if (providerFamily(this.weaponProvider.provider) === "q2" && (this.source.kind === "q1" || this.source.kind === "quakec" || this.source.kind === "q2" || this.source.kind === "q3" || this.source.kind === "q3-qvm" || this.source.kind === "q2-native")) {
@@ -920,7 +919,6 @@ export class SharedSimulation implements Simulation {
           services: { clients: simulation.modClients, match: simulation.sourceMatch, weapons: {
             bind: (actor, binding) => {
               simulation.actors.assertOwned(actor);
-              if (simulation.source.kind === "quakec" && preparedQuakeCWeaponStage(simulation.source.game.prepared) === null) throw new Error("Primary QC weapon handoff lacks a qualified source boundary");
               if (!simulation.weaponSlots.has(actor.id)) simulation.bindWeaponSlot(actor.id);
               const slot = simulation.weaponSlots.get(actor.id); if (slot === undefined) throw new Error("Source weapon slot was not admitted");
               return slot.bind(binding);
@@ -3740,11 +3738,9 @@ export class SharedSimulation implements Simulation {
       return this.admitQ2NativePlayer(client, userinfo ?? `\\name\\Player ${client.slot + 1}\\skin\\male/grunt\\fov\\90`);
     }
     if (source.kind === "quakec") {
-      const movement = providerTiming(this.recipe, this.recipe.movement.provider).clock.kind;
       if (travel !== undefined && travel.source.kind !== source.game.kind
         || this.options.dedicated === true && providerFamily(this.recipe.character.definition.provider) !== "q1"
-        || source.game.kind === "quakeworld" && this.options.dedicated !== true
-        || source.game.kind === "netquake" && movement === "q1-quakeworld")
+        || source.game.kind === "quakeworld" && this.options.dedicated !== true)
         throw new Error("QC clients require matching source travel; native QuakeWorld requires dedicated operation and native wire servers require Q1 character presentation");
       if (userinfo !== undefined) source.game.setClientInfo(client, q2Userinfo(userinfo));
       const actor = source.game.admitClient(client), body = this.bodies.read(actor.id);

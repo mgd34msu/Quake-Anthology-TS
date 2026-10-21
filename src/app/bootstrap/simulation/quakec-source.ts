@@ -113,9 +113,6 @@ export interface PreparedQuakeCSource {
   readonly resources: ReadonlyMap<string, { readonly resource: ResolvedResourceReference; readonly modelBounds: Bounds | null }>;
 }
 
-export function preparedQuakeCDamageScaling(prepared: PreparedQuakeCSource): boolean {
-  return prepared.combatDeclaration?.damageScale !== undefined || id1ProgramBinding(prepared.program).attribution === "pinned";
-}
 export function preparedQuakeCWeaponStage(prepared: PreparedQuakeCSource): QcWeaponStage | null {
   return prepared.weaponStage === undefined ? qcWeaponStage(prepared.program, prepared.weaponDeclaration) : prepared.weaponStage;
 }
@@ -382,14 +379,14 @@ export class QuakeCSource {
       options.ownsWeapon === undefined ? undefined : (actor, item) => options.ownsWeapon?.(actor.id, item) ?? false, options.pickupPolicy, prepared.declaredPickups);
     this.pickups = pickups;
     const weaponStage = preparedQuakeCWeaponStage(prepared);
-    if (options.primaryWeaponSelected !== undefined && weaponStage === null) throw new Error("QC artifact has no qualified primary weapon stage");
     this.weaponStage = weaponStage === null ? null : new QcWeaponStageBinding(weaponStage, () => this.machine, reference => {
       const actor = this.slots.at(this.entities.slot(reference));
       return actor === null || !this.activeClients.has(actor.id) || (options.primaryWeaponSelected?.(actor.id) ?? true);
     });
     const sourceFunctions = pickups.composeFunctions(this.projectiles.compose(this.attacks.compose(damage.functionBoundary)));
+    // Without a derivable client spawn call the program spawns clients
+    // through its own engine-called flow; the notification wrap is skipped.
     const spawned = options.clientSpawned, spawnCall = weaponStage?.client?.spawn, spawnFunction = spawnCall?.functionIndex;
-    if (spawned !== undefined && spawnFunction === undefined) throw new Error("QC artifact has no qualified client spawn stage");
     const functions = spawned === undefined || spawnCall === undefined || spawnFunction === undefined ? sourceFunctions : {
       functions: new Set([...sourceFunctions.functions, spawnFunction]), run: (call: import("../../../compat/qc/machine.ts").QcCallSite, execute: import("../../../compat/qc/machine.ts").QcFunctionExecution): undefined => {
         if (call.functionIndex !== spawnFunction) return sourceFunctions.run(call, execute);

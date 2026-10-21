@@ -14,6 +14,97 @@ export interface QcWeaponStage {
   readonly repeats: readonly RepeatGate[];
 }
 
+function qcFunctionEnd(program: QcProgram, fn: QcFunction): number {
+  return program.functions.reduce((end, other) => other.firstStatement > fn.firstStatement ? Math.min(end, other.firstStatement) : end, program.statements.length);
+}
+
+/** The declared stage's function shape, as a predicate instead of a rejection. */
+function qcStageFunction(program: QcProgram, name: string): QcFunction | null {
+  let value: QcFunction;
+  try { value = program.functionNamed(name); } catch { return null; }
+  if (value.index === 0 || value.firstStatement <= 0 || value.namedBuiltin || value.parameterSizes.length !== 0) return null;
+  const end = qcFunctionEnd(program, value);
+  if (program.statements.slice(value.firstStatement, end).some(statement => (statement.opcode === QcOpcode.Return || statement.opcode === QcOpcode.Done) && statement.a !== 0)) return null;
+  return value;
+}
+
+function qcDerivedClientCall(program: QcProgram, name: string, result: "void" | "entity"): QcClientStageCall | null {
+  let fn: QcFunction;
+  try { fn = program.functionNamed(name); } catch { return null; }
+  if (fn.firstStatement <= 0 || fn.namedBuiltin) return null;
+  const end = qcFunctionEnd(program, fn);
+  const returns = program.statements.slice(fn.firstStatement, end).filter(statement => (statement.opcode === QcOpcode.Return || statement.opcode === QcOpcode.Done) && statement.a !== 0);
+  if (result === "void" ? returns.length !== 0 : returns.length === 0 || returns.some(statement => statement.a !== 1 && !program.globals.some(global => global.offset === statement.a && global.type === "entity"))) return null;
+  // Classic programs declare these parameterless; rerelease programs take
+  // the client explicitly. Validation decides which shape is genuine.
+  const candidates: readonly ModSourceCall[] = [{ function: name, arguments: [], globals: [] },
+    { function: name, arguments: [{ kind: "input", name: "self" }], globals: [] }];
+  for (const call of candidates) {
+    try { validateQcSourceCall(program, call, new Set<ModCallbackInput>(["self", "time"]), "client stage"); }
+    catch { continue; }
+    return Object.freeze({ functionIndex: fn.index, call });
+  }
+  return null;
+}
+
+/** Find next-shot release gates by the declared validator's structural pattern. */
+function qcDerivedRepeats(program: QcProgram, continuations: ReadonlySet<number>): RepeatGate[] {
+  const named = new Set(program.globals.filter(global => global.name !== "" && global.name !== "IMMEDIATE").flatMap(global => Array.from({ length: global.type === "vector" ? 3 : 1 }, (_, index) => global.offset + index)));
+  const temporary = (word: number, owner: QcFunction): boolean => Number.isInteger(word) && word >= 28 && word * 4 < program.initialGlobals.length
+    && (!named.has(word) || word >= owner.parameterStart && word < owner.parameterStart + owner.localWords);
+  const pure = new Set([QcOpcode.LoadF, QcOpcode.NotF, QcOpcode.EqF, QcOpcode.NeF, QcOpcode.Le, QcOpcode.Ge, QcOpcode.Lt, QcOpcode.Gt, QcOpcode.And, QcOpcode.Or, QcOpcode.BitAnd, QcOpcode.BitOr,
+    QcOpcode.AddF, QcOpcode.SubF, QcOpcode.MulF, QcOpcode.DivF]);
+  const original = new DataView(program.initialGlobals.buffer, program.initialGlobals.byteOffset, program.initialGlobals.byteLength);
+  const repeats: RepeatGate[] = [], ranges: { entry: number; exit: number }[] = [];
+  for (const index of continuations) {
+    const owner = program.functionAt(index), end = qcFunctionEnd(program, owner);
+    for (let entry = owner.firstStatement; entry < end; entry++) {
+      const first = program.statements[entry];
+      if (first?.opcode !== QcOpcode.LoadF || !temporary(first.c, owner)) continue;
+      let exit = entry + 1;
+      const written = new Set<number>([first.c]);
+      while (exit < end) {
+        const statement = program.statements[exit];
+        if (statement === undefined || !pure.has(statement.opcode) || !temporary(statement.c, owner)) break;
+        written.add(statement.c); exit++;
+      }
+      const join = program.statements[exit], release = program.statements[exit + 1], returned = program.statements[exit + 2];
+      if (exit <= entry || exit + 2 >= end || join === undefined || (join.opcode !== QcOpcode.If && join.opcode !== QcOpcode.IfNot)
+        || signedQcBranch(join.b) !== 3 || !written.has(join.a) || !temporary(join.a, owner)
+        || release?.opcode !== QcOpcode.Call0 || returned?.opcode !== QcOpcode.Return || returned.a !== 0
+        || ranges.some(range => entry <= range.exit && exit >= range.entry)) continue;
+      if (release.a < 0 || release.a * 4 + 4 > original.byteLength) continue;
+      let callee: QcFunction;
+      try { callee = program.functionAt(original.getInt32(release.a * 4, true)); } catch { continue; }
+      if (qcStageFunction(program, callee.name) === null) continue;
+      ranges.push({ entry, exit });
+      repeats.push({ region: { functionIndex: owner.index, entry, exit, replaceable: true }, released: join.a, value: join.opcode === QcOpcode.IfNot ? 1 : 0 });
+    }
+  }
+  return repeats;
+}
+
+/**
+ * Derive the stage from the program itself: the weapons.qc/client.qc skeleton
+ * every QC program keeps, held to the declared validator's shapes. Programs
+ * too exotic for any part degrade to the parts that do qualify -- never null.
+ */
+export function qcDerivedWeaponStage(program: QcProgram): QcWeaponStage {
+  const dispatcher = qcStageFunction(program, "W_WeaponFrame");
+  const continuations = new Set<number>();
+  const families: readonly (readonly [string, number])[] = [["shot", 6], ["axe", 4], ["axeb", 4], ["axec", 4], ["axed", 4], ["nail", 2], ["light", 2], ["rocket", 6]];
+  for (const [family, count] of families) for (let ordinal = 1; ordinal <= count + 4; ordinal++) {
+    const fn = qcStageFunction(program, `player_${family}${ordinal}`);
+    if (fn === null) { if (ordinal > count) break; continue; }
+    continuations.add(fn.index);
+  }
+  const spawn = qcDerivedClientCall(program, "PutClientInServer", "void");
+  const selectSpawn = qcDerivedClientCall(program, "SelectSpawnPoint", "entity");
+  const client: QcWeaponStage["client"] = spawn === null || selectSpawn === null ? undefined
+    : Object.freeze({ spawn, selectSpawn, objectives: Object.freeze({ kind: "none" }) });
+  return { dispatcher: dispatcher?.index ?? -1, ...(client === undefined ? {} : { client }), continuations, repeats: qcDerivedRepeats(program, continuations) };
+}
+
 /** Artifact-qualified weapons.qc dispatchers and player.qc next-shot release branches. */
 export function qcWeaponStage(program: QcProgram, declared?: QcPrimaryWeaponStageDeclaration): QcWeaponStage | null {
   if (declared !== undefined) {
@@ -34,7 +125,7 @@ export function qcWeaponStage(program: QcProgram, declared?: QcPrimaryWeaponStag
       objectives: objectives.kind === "none" ? Object.freeze({ kind: objectives.kind }) : Object.freeze({ kind: objectives.kind, call: source("call" in objectives ? objectives.call : objectives.function, "void") }) }) });
   }
   const qw = program.digest === "sha256:ff51cb5e77360d72b93487d89198dcf94629b92f8bae100fc6ea48a6c12a7830";
-  if (!qw && program.digest !== "sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580") return null;
+  if (!qw && program.digest !== "sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580") return qcDerivedWeaponStage(program);
   const fn = (name: string, index: number, first: number): number => {
     const original = program.functionNamed(name);
     if (original.index !== index || original.firstStatement !== first || original.localWords !== 0
@@ -194,7 +285,8 @@ export class QcWeaponStageBinding {
   }
 
   composeFunctions(inner: QcFunctionBoundary): QcFunctionBoundary {
-    if (inner.functions.has(this.stage.dispatcher)) throw new QcProgramError("Original weapon dispatcher already has a boundary owner");
+    // A generic damage layout observes every function; the dispatcher run
+    // below already takes precedence for its own function either way.
     return { functions: new Set([...inner.functions, this.stage.dispatcher]), run: (call, execute) => {
       if (call.functionIndex !== this.stage.dispatcher) return inner.run(call, execute);
       const vm = this.machine();

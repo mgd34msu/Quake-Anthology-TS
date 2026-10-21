@@ -10,7 +10,7 @@ import { openArchive } from "../../../src/content/archive/index.ts";
 import { loadQcProgram, QcEntityMemory, QcMachine, classicQcEntityLayout, createQcBuiltins } from "../../../src/compat/qc/index.ts";
 import type { QcBuiltin, QcHostBuiltinName } from "../../../src/compat/qc/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
-import { qcWeaponStage, QcWeaponStageBinding, invokeQcClientStage, qcClientStageSelf } from "../../../src/content/q1/quakec/weapon-stage.ts";
+import { qcWeaponStage, qcDerivedWeaponStage, QcWeaponStageBinding, invokeQcClientStage, qcClientStageSelf } from "../../../src/content/q1/quakec/weapon-stage.ts";
 import { id1DamageMultiplier } from "../../../src/content/q1/quakec/id1-program.ts";
 import { SourceRandom } from "../../../src/app/bootstrap/simulation/random.ts";
 
@@ -137,4 +137,34 @@ test("declared client calls execute original Copper parameters, globals and enti
   expect(() => qcWeaponStage(program, { ...parsed, client: { ...parsed.client, spawn: { function: "autosave", arguments: [], globals: [] } } })).toThrow("incompatible source signature");
   expect(() => qcWeaponStage(program, { ...parsed, client: { ...parsed.client, selectSpawn: { function: "FindNextIntermission", arguments: [{ kind: "input", name: "attacker" }], globals: [] } } })).toThrow("cannot read attacker");
   expect(() => qcWeaponStage(program, { ...parsed, client: { ...parsed.client, spawn: { function: "autosave", arguments: [{ kind: "input", name: "self" }, { kind: "string", value: "x" }], globals: [{ name: "isKex", value: { kind: "vector", value: { x: 0, y: 0, z: 0 } } }] } } })).toThrow("incompatible type");
+});
+
+// Every QC program derives its weapon stage from its own weapons.qc/client.qc
+// skeleton; the derivation must reproduce the pinned retail stages exactly and
+// fully qualify undeclared mod programs such as qdoom.
+test("derived weapon stage reproduces pinned stages and qualifies qdoom", async () => {
+  const archive = await openArchive(`${testCorpusRoot()}/q1/id1/PAK0.PAK`);
+  const qdoom = await openArchive(`${testCorpusRoot()}/q1/qdoom/pak0.pak`);
+  try {
+    const entry = archive.findEntries("progs.dat").at(-1), doomEntry = qdoom.findEntries("progs.dat").at(-1);
+    if (entry === undefined || doomEntry === undefined) throw new Error("Missing QC programs");
+    const programs = [loadQcProgram(await archive.readEntry(entry)),
+      loadQcProgram(await Bun.file(`${testCorpusRoot()}/q1/qw/qwprogs.dat`).bytes()),
+      loadQcProgram(await qdoom.readEntry(doomEntry))];
+    for (const program of programs) {
+      const derived = qcDerivedWeaponStage(program), selected = qcWeaponStage(program);
+      if (selected === null) throw new Error("Missing selected weapon stage");
+      expect(derived.dispatcher).toBe(selected.dispatcher);
+      expect([...derived.continuations].sort((a, b) => a - b)).toEqual([...selected.continuations].sort((a, b) => a - b));
+      expect(derived.repeats).toEqual(selected.repeats);
+      expect(derived.client?.spawn.functionIndex).toBe(selected.client?.spawn.functionIndex);
+      expect(derived.client?.selectSpawn.functionIndex).toBe(selected.client?.selectSpawn.functionIndex);
+    }
+    const doomProgram = programs[2];
+    if (doomProgram === undefined) throw new Error("Missing qdoom program");
+    const doom = qcWeaponStage(doomProgram);
+    expect(doom?.client).toBeDefined();
+    expect(doom?.continuations.size).toBe(32);
+    expect(doom?.repeats.length).toBe(4);
+  } finally { archive.close(); qdoom.close(); }
 });
