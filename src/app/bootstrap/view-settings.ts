@@ -39,7 +39,10 @@ export class ApplicationViewSettings {
   }
   async load(store: ConfigStore): Promise<void> {
     const text = await store.loadText("view.json"); if (text === null) return;
-    const value: unknown = JSON.parse(text);
+    // Text that is not JSON keeps the defaults, like absence; parsed
+    // values still face validation.
+    let value: unknown;
+    try { value = JSON.parse(text); } catch { return; }
     if (typeof value !== "object" || value === null || !("version" in value) || value.version !== 1
       || !("fieldOfView" in value) || typeof value.fieldOfView !== "number") throw new Error("Invalid view preferences");
     this.setFieldOfView(value.fieldOfView);

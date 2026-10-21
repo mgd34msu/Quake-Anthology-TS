@@ -22,7 +22,10 @@ function preferences(value: unknown): AudioPreferences {
 export async function loadAudioSettings(store: ConfigStore): Promise<Partial<AudioPreferences>> {
   const text = await store.loadText('audio.json');
   if (text === null) return {};
-  const value: unknown = JSON.parse(text);
+  // Text that is not JSON behaves like the absent document; parsed
+  // values still face the preferences validation below.
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { return {}; }
   return preferences(value);
 }
 export async function saveAudioSettings(store: ConfigStore, audio: { readonly musicPreferences?: MusicPreferences; readonly outputFormat?: AudioOutputFormat; readonly selectedOutput: string | null; readonly effectsVolume: number; readonly musicVolume: number }): Promise<void> {

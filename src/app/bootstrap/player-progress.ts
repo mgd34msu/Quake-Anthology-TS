@@ -32,7 +32,10 @@ export class PlayerProgressStore {
     let text: string;
     try { text = await readFile(file, "utf8"); }
     catch (error) { if (isRecord(error) && error["code"] === "ENOENT") return store; throw error; }
-    const value: unknown = JSON.parse(text);
+    // Torn or foreign text opens as empty progress, like the absent file;
+    // parsed documents still face the shape checks below.
+    let value: unknown;
+    try { value = JSON.parse(text); } catch { return store; }
     if (!isRecord(value) || value["version"] !== 1 || !isUnknownArray(value["events"])) throw new Error("Invalid player progress file");
     for (const item of value["events"]) {
       const event = decode(item), key = identity(event);

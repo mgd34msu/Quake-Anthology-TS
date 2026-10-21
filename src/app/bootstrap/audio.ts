@@ -191,7 +191,14 @@ export class ApplicationAudio {
       if (selection.kind === "selected") throw new Error(`Required environment resource is missing: ${request.content}/${request.path}`);
       return;
     }
-    const definitions = parseEnvironments(new TextDecoder().decode(await mounts.read(resource)), text => this.print(text));
+    let definitions: ReturnType<typeof parseEnvironments>;
+    try { definitions = parseEnvironments(new TextDecoder().decode(await mounts.read(resource)), text => this.print(text)); }
+    catch (error) {
+      // The default environment file is optional; a selected one is not.
+      if (selection.kind === "selected" || this.closed) throw error;
+      this.print(`Sound environments unavailable: ${error instanceof Error ? error.message : String(error)}\n`);
+      return;
+    }
     if (this.closed) return;
     this.environment = { definitions, trace: listener => (start, end, mins, maxs) => {
       const current = this.listeners.find(value => value.seat.equals(listener.seat));
@@ -393,7 +400,11 @@ export class ApplicationAudio {
       const mounts = await this.content.forContent(content);
       const file = await mounts.open(`models/players/${this.characterModel}/animation.cfg`)
         ?? await mounts.open("models/players/sarge/animation.cfg");
-      return file === null ? "normal" : parsePlayerAnimationConfig(new TextDecoder().decode(file.bytes), file.reference.requestedPath).footsteps;
+      if (file === null) return "normal";
+      // An unparsable authored config reports and falls back to default
+      // footsteps, matching CG_ParseAnimationFile -- never a failed launch.
+      try { return parsePlayerAnimationConfig(new TextDecoder().decode(file.bytes), file.reference.requestedPath).footsteps; }
+      catch { return "normal"; }
     })();
     this.footsteps.set(content, pending);
     return pending;

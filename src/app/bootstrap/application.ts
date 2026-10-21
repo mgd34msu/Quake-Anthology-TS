@@ -3596,11 +3596,22 @@ export class Application {
       throw new Error("Campaign cinematics require an offline local presentation");
     const simulation = this.simulation, request = this.reserveMovie(simulation);
     const current = (): boolean => !this.closed && !this.stopping && this.simulation === simulation && this.movieRequests.get(simulation) === request;
-    const playback = await CampaignCinematic.prepare({ name: target.name, loop: false, hold: false, silent: false }, this.content,
-      graphical.assets, graphical.audio, graphical.renderer, seat, current, this.screenCaptions(simulation, this.content, seat));
-    if (!current()) { playback.close(this.presentationFrames); throw new Error("Campaign cinematic belongs to a retired world request"); }
     const next = target.kind === "picture" && target.name.toLowerCase() === "victory.pcx" && this.options.mode === "coop"
       ? parseQ2Travel("*base1") : target.next;
+    let playback: CampaignCinematic;
+    try {
+      playback = await CampaignCinematic.prepare({ name: target.name, loop: false, hold: false, silent: false }, this.content,
+        graphical.assets, graphical.audio, graphical.renderer, seat, current, this.screenCaptions(simulation, this.content, seat));
+    } catch (error) {
+      // A cinematic that cannot be played is skipped to the next stop, as
+      // in the source engines -- never a blocked campaign transition.
+      if (!current()) throw error;
+      this.host.print(`Campaign cinematic unavailable: ${error instanceof Error ? error.message : String(error)}\n`);
+      this.movieRequests.delete(simulation);
+      if (next !== null) await this.advanceQ2Travel(carry === null && target.newUnit ? { ...next, newUnit: true } : next, carry); else this.requestQuit();
+      return;
+    }
+    if (!current()) { playback.close(this.presentationFrames); throw new Error("Campaign cinematic belongs to a retired world request"); }
     this.activateMovie(playback);
     this.movies.set(simulation, { playback, request, current, complete: async () => {
       if (!current()) return;
@@ -3665,16 +3676,27 @@ export class Application {
         cvars?.set("nextmap", "", true);
       };
       if (phase === "playing") {
+        let unavailable = false;
         if (saved === undefined) {
           if (request === null) throw new Error("Missing system cinematic request");
-          playback = await CampaignCinematic.prepare(request, resources, assets, audio, renderer, seat, current, this.screenCaptions(simulation, resources, seat));
+          try { playback = await CampaignCinematic.prepare(request, resources, assets, audio, renderer, seat, current, this.screenCaptions(simulation, resources, seat)); }
+          catch (error) {
+            // A cinematic that cannot be played completes immediately, as
+            // in the source engines -- never a stuck transition.
+            if (!current()) throw error;
+            this.host.print(`Cinematic unavailable: ${error instanceof Error ? error.message : String(error)}\n`);
+            unavailable = true;
+          }
         } else playback = await CampaignCinematic.restore(saved.field("playback").value, resources, assets, audio, renderer, seat, current, this.screenCaptions(simulation, resources, seat));
-        if (!current()) { playback.close(this.presentationFrames); throw new Error("System cinematic belongs to a retired destination request"); }
-        if (saved !== undefined && this.movies.has(simulation)) { playback.close(this.presentationFrames); throw new Error("Saved component cinematics have competing fullscreen owners"); }
-        const movie: NonNullable<Application["campaignMovie"]> = { playback, request: ticket, current, complete: async (): Promise<void> => { complete(); },
-          ...(component === undefined ? {} : { componentOwned: true }) };
-        if (published && this.simulation === simulation) this.activateMovie(playback);
-        this.movies.set(simulation, movie);
+        if (unavailable) complete();
+        else if (playback !== null) {
+          if (!current()) { playback.close(this.presentationFrames); throw new Error("System cinematic belongs to a retired destination request"); }
+          if (saved !== undefined && this.movies.has(simulation)) { playback.close(this.presentationFrames); throw new Error("Saved component cinematics have competing fullscreen owners"); }
+          const movie: NonNullable<Application["campaignMovie"]> = { playback, request: ticket, current, complete: async (): Promise<void> => { complete(); },
+            ...(component === undefined ? {} : { componentOwned: true }) };
+          if (published && this.simulation === simulation) this.activateMovie(playback);
+          this.movies.set(simulation, movie);
+        }
       }
       const detach = (): void => {
         if (this.movies.get(simulation)?.request === ticket) this.movies.delete(simulation);

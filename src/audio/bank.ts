@@ -26,7 +26,12 @@ export class SoundBank {
             this.touched.add(prior);
             return prior;
         }
-        const pcm = opened.bytes[0] === 82 ? (family === "q3" ? decodeQ3Wav : decodeQuakeWav)(opened.bytes, path) : decodeSoundBytes(opened.bytes, path);
+        // Source engines warn and substitute silence for a sound that
+        // cannot be decoded; a present-but-foreign file must behave like
+        // the already-handled missing one.
+        let pcm: SoundAsset["pcm"];
+        try { pcm = opened.bytes[0] === 82 ? (family === "q3" ? decodeQ3Wav : decodeQuakeWav)(opened.bytes, path) : decodeSoundBytes(opened.bytes, path); }
+        catch { return null; }
         const asset = { resource: opened.reference.id, reference: opened.reference, name: path, pcm };
         assets.set(opened.reference.id, asset);
         this.touched.add(asset);
@@ -44,8 +49,9 @@ export class SoundBank {
             assets.delete(resource); }
     async openMusic(path: string, source: ContentId | null = null): Promise<PcmStream | null> {
         const opened = await this.content.open(path);
-        return opened === null || (source !== null && opened.reference.provenance.mount.identity.content !== source)
-            ? null : openPcmBytes(opened.bytes, path);
+        if (opened === null || (source !== null && opened.reference.provenance.mount.identity.content !== source))
+            return null;
+        try { return openPcmBytes(opened.bytes, path); } catch { return null; }
     }
     clear(): void { this.assets.clear(); this.touched.clear(); }
 }

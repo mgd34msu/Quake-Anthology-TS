@@ -77,11 +77,16 @@ test("actual mixed Q2 campaign plays, skips and completes unit CIN without losin
     expect(game.simulation).not.toBe(beforeEof); expect(game.options.map).toBe("maps/bunk1.bsp");
     expect(game.localPlayers[0]?.seat.client).toBe(client);
     console.log(`Campaign movie normal EOF reached bunk1 after ${movieFrames} movie frame calls`);
+    // A missing campaign movie is reported and skipped to the next stop,
+    // as in the source engines -- progression never blocks on a video.
     const beforeMissing = game.simulation;
     await exit("missing-campaign-movie.cin+*bunk1");
-    expect(game.simulation).toBe(beforeMissing); expect(controls().input.focus.kind).toBe("console");
+    let missingFrames = 0;
+    while (game.simulation === beforeMissing && missingFrames < 1800) { await game.step(100); missingFrames++; }
+    expect(game.simulation).not.toBe(beforeMissing); expect(game.options.map).toBe("maps/bunk1.bsp");
+    expect(game.localPlayers[0]?.seat.client).toBe(client);
     expect(messages.some(message => message.includes("Missing campaign cinematic"))).toBe(true);
-    tap(96); await game.step(100);
+    if (controls().input.focus.kind === "console") { tap(96); await game.step(100); }
     await exit("eou1_.cin+*bunk1");
     for (let frame = 0; frame < 12; frame++) await game.step(100);
     const rejected = spyOn(game.session, "replaceWorld").mockImplementationOnce(() => { throw new Error("campaign destination preparation rejected"); });

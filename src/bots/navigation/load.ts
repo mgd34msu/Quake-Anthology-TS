@@ -40,8 +40,13 @@ export async function preloadNavigation(options: Pick<NavigationLoadOptions, "ma
     const opened = await options.resources.open(path);
     if (opened === null) continue;
     if (path.endsWith(".nav") && options.navigationContent !== undefined && opened.reference.provenance.mount.identity.content !== options.navigationContent) continue;
-    const asset = path.endsWith(".aas") ? parseAas(opened.bytes, path, blockChecksum(options.mapBytes)) : parseKexNavigation(opened.bytes, path);
-    return { map, asset, resource: opened.reference };
+    // A supplied asset that does not describe this map (stale checksum,
+    // foreign or corrupt file) counts as absent, like botlib refusing the
+    // file: try the next candidate, then constructed navigation.
+    try {
+      const asset = path.endsWith(".aas") ? parseAas(opened.bytes, path, blockChecksum(options.mapBytes)) : parseKexNavigation(opened.bytes, path);
+      return { map, asset, resource: opened.reference };
+    } catch { continue; }
   }
   return { map, asset: null, resource: null };
 }

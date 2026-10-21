@@ -39,6 +39,7 @@ const repeat: TextureSampling = { wrap: "repeat", filter: "linear-mipmap-nearest
 /** Images retain palette data until the backend upload, including translated skins. */
 export class SceneTextureLoader {
   private readonly policy: ImagePolicy | undefined;
+  private readonly strict: boolean;
   readonly fullbrightFirst: number;
   private readonly loaded = new Map<string, Promise<SceneTexture | null>>();
   private readonly requests = new Map<string, { readonly name: string; readonly options: SceneTextureLoadOptions }>();
@@ -50,8 +51,11 @@ export class SceneTextureLoader {
   readonly missing: SceneTexture;
 
   constructor(readonly images: SceneImageRegistry, readonly reader: SceneAssetReader,
-    readonly palette: Palette | null = null, options: { readonly policy?: ImagePolicy; readonly fullbrightFirst?: number } = {}) {
+    readonly palette: Palette | null = null, options: { readonly policy?: ImagePolicy; readonly fullbrightFirst?: number; readonly strict?: boolean } = {}) {
     this.policy = options.policy === undefined ? undefined : snapshotImagePolicy(options.policy);
+    // Staged replacement loaders validate strictly so a settings change
+    // can reject atomically; live loaders skip undecodable candidates.
+    this.strict = options.strict === true;
     this.fullbrightFirst = options.fullbrightFirst ?? 224;
     this.white = this.register("*white", { kind: "rgba8", levels: [{ width: 1, height: 1, pixels: new Uint8Array([255, 255, 255, 255]) }],
       borderColor: { x: 1, y: 1, z: 1, w: 1 } }, { wrap: "repeat", filter: "nearest" });
@@ -173,86 +177,95 @@ export class SceneTextureLoader {
       const asset = await this.reader.read(path);
       this.requireOpen();
       if (asset === null) continue;
-      const suffix = path.slice(path.lastIndexOf(".")).toLowerCase();
-      let content: RenderImage;
-      let animation: readonly [AnimatedFrame, ...AnimatedFrame[]] | null = null;
-      if (suffix === ".gif") {
-        const decoded = decodeGif(asset.bytes, path);
-        const convert = (image: ImageLevel): AnimatedFrame => {
-          const rgba = this.rgba(image, options.mipmap !== false);
-          const result = options.family === "q2" && options.mipmap !== false ? q2MipmappedImage(rgba) : rgba;
-          if (result.kind === "depth32f") throw new Error("GIF mip processing produced depth pixels");
-          return result;
-        };
-        animation = [convert(decoded.frames[0].image), ...decoded.frames.slice(1).map(frame => convert(frame.image))];
-        content = animation[0];
-      } else if (suffix === ".lmp") {
-        if (this.palette === null) throw new Error("Quake picture textures require their content palette");
-        const pic = decodeQpic(asset.bytes, path);
-        content = indexedRenderImage([{ width: pic.width, height: pic.height, pixels: pic.indices }], this.palette,
-          { kind: "opaque" }, { first: this.fullbrightFirst, last: 255 });
-      } else if (suffix === ".wal") {
-        if (this.palette === null) throw new Error("WAL textures require their content palette");
-        const wal = decodeWal(asset.bytes, path);
-        content = indexedRenderImage(wal.levels, this.palette);
-      } else if (suffix === ".pcx") {
-        const pcx = decodePcx(asset.bytes, path);
-        if (this.palette === null && pcx.palette === null) throw new Error(`PCX has no palette: ${path}`);
-        const palette = pcx.palette ?? this.palette?.colors;
-        if (palette === undefined || palette === null) throw new Error(`PCX palette was lost: ${path}`);
-        if (options.family === "q2" && (options.usage === "skin" || options.usage === "sprite") && this.palette !== null) {
-          const pixels = options.usage === "skin" ? floodSkin(pcx.indices, pcx.width, pcx.height, this.palette) : pcx.indices;
-          content = indexedRenderImage([{ width: pcx.width, height: pcx.height, pixels }], this.palette, { kind: "index", index: 255 });
-        } else {
-          const pixels = new Uint8Array(pcx.width * pcx.height * 4), count = pcx.indices.length;
-          for (const [offset, index] of pcx.indices.entries()) {
-            let color = index;
-            if (options.family === "q2" && index === 255) {
-              const above = offset > pcx.width ? pcx.indices[offset - pcx.width] : undefined;
-              const below = offset < count - pcx.width ? pcx.indices[offset + pcx.width] : undefined;
-              const left = offset > 0 ? pcx.indices[offset - 1] : undefined;
-              const right = offset < count - 1 ? pcx.indices[offset + 1] : undefined;
-              color = [above, below, left, right].find(value => value !== undefined && value !== 255) ?? 0;
+      // A candidate that cannot be decoded is skipped, like the source
+      // engines trying each extension in turn -- not a fatal load.
+      try {
+        const suffix = path.slice(path.lastIndexOf(".")).toLowerCase();
+        let content: RenderImage;
+        let animation: readonly [AnimatedFrame, ...AnimatedFrame[]] | null = null;
+        if (suffix === ".gif") {
+          const decoded = decodeGif(asset.bytes, path);
+          const convert = (image: ImageLevel): AnimatedFrame => {
+            const rgba = this.rgba(image, options.mipmap !== false);
+            const result = options.family === "q2" && options.mipmap !== false ? q2MipmappedImage(rgba) : rgba;
+            if (result.kind === "depth32f") throw new Error("GIF mip processing produced depth pixels");
+            return result;
+          };
+          animation = [convert(decoded.frames[0].image), ...decoded.frames.slice(1).map(frame => convert(frame.image))];
+          content = animation[0];
+        } else if (suffix === ".lmp") {
+          if (this.palette === null) throw new Error("Quake picture textures require their content palette");
+          const pic = decodeQpic(asset.bytes, path);
+          content = indexedRenderImage([{ width: pic.width, height: pic.height, pixels: pic.indices }], this.palette,
+            { kind: "opaque" }, { first: this.fullbrightFirst, last: 255 });
+        } else if (suffix === ".wal") {
+          if (this.palette === null) throw new Error("WAL textures require their content palette");
+          const wal = decodeWal(asset.bytes, path);
+          content = indexedRenderImage(wal.levels, this.palette);
+        } else if (suffix === ".pcx") {
+          const pcx = decodePcx(asset.bytes, path);
+          if (this.palette === null && pcx.palette === null) throw new Error(`PCX has no palette: ${path}`);
+          const palette = pcx.palette ?? this.palette?.colors;
+          if (palette === undefined || palette === null) throw new Error(`PCX palette was lost: ${path}`);
+          if (options.family === "q2" && (options.usage === "skin" || options.usage === "sprite") && this.palette !== null) {
+            const pixels = options.usage === "skin" ? floodSkin(pcx.indices, pcx.width, pcx.height, this.palette) : pcx.indices;
+            content = indexedRenderImage([{ width: pcx.width, height: pcx.height, pixels }], this.palette, { kind: "index", index: 255 });
+          } else {
+            const pixels = new Uint8Array(pcx.width * pcx.height * 4), count = pcx.indices.length;
+            for (const [offset, index] of pcx.indices.entries()) {
+              let color = index;
+              if (options.family === "q2" && index === 255) {
+                const above = offset > pcx.width ? pcx.indices[offset - pcx.width] : undefined;
+                const below = offset < count - pcx.width ? pcx.indices[offset + pcx.width] : undefined;
+                const left = offset > 0 ? pcx.indices[offset - 1] : undefined;
+                const right = offset < count - 1 ? pcx.indices[offset + 1] : undefined;
+                color = [above, below, left, right].find(value => value !== undefined && value !== 255) ?? 0;
+              }
+              pixels.set([palette[color * 3] ?? 0, palette[color * 3 + 1] ?? 0, palette[color * 3 + 2] ?? 0, options.family === "q2" && index === 255 ? 0 : 255], offset * 4);
             }
-            pixels.set([palette[color * 3] ?? 0, palette[color * 3 + 1] ?? 0, palette[color * 3 + 2] ?? 0, options.family === "q2" && index === 255 ? 0 : 255], offset * 4);
+            content = this.rgba({ width: pcx.width, height: pcx.height, pixels }, options.mipmap !== false);
           }
-          content = this.rgba({ width: pcx.width, height: pcx.height, pixels }, options.mipmap !== false);
+        } else {
+          if (![".png", ".tga", ".bmp", ".jpg", ".jpeg"].includes(suffix)) throw new Error(`Unsupported scene image format: ${path}`);
+          const decoded = suffix === ".png" ? decodePng(asset.bytes, path) : suffix === ".tga" ? options.family === undefined || options.family === "q3"
+            ? decodeQ3Tga(asset.bytes, path) : decodeTga(asset.bytes, path)
+            : suffix === ".bmp" ? decodeBmp(asset.bytes, path) : decodeJpeg(asset.bytes, path);
+          content = this.rgba(decoded, options.mipmap !== false);
         }
-      } else {
-        if (![".png", ".tga", ".bmp", ".jpg", ".jpeg"].includes(suffix)) throw new Error(`Unsupported scene image format: ${path}`);
-        const decoded = suffix === ".png" ? decodePng(asset.bytes, path) : suffix === ".tga" ? options.family === undefined || options.family === "q3"
-          ? decodeQ3Tga(asset.bytes, path) : decodeTga(asset.bytes, path)
-          : suffix === ".bmp" ? decodeBmp(asset.bytes, path) : decodeJpeg(asset.bytes, path);
-        content = this.rgba(decoded, options.mipmap !== false);
-      }
-      let logicalSize: Pick<ImageLevel, "width" | "height"> = content.levels[0];
-      if (options.family === "q2" && suffix !== ".wal" && (name.toLowerCase().endsWith(".wal") || !explicit && wall)) {
-        const original = await this.reader.readOriginal?.(`${base}.wal`) ?? await this.reader.read(`${base}.wal`);
-        if (original !== null) logicalSize = decodeWal(original.bytes, `${base}.wal`);
-      }
-      if (options.family === "q2" && name.toLowerCase().endsWith(".pcx") && suffix !== ".pcx") {
-        const requested = await this.reader.readOriginal?.(name) ?? await this.reader.read(name);
-        if (requested !== null) logicalSize = decodePcx(requested.bytes, name);
-      }
-      if (options.family === "q1" && requested === "lmp" && suffix !== ".lmp") {
-        const original = await this.reader.readOriginal?.(name) ?? await this.reader.read(name);
-        if (original !== null) logicalSize = decodeQpic(original.bytes, name);
-      }
-      const original = await this.reader.readOriginal?.(path);
-      if (original !== undefined && original !== null && logicalSize === content.levels[0]) {
-        if (suffix === ".pcx") logicalSize = decodePcx(original.bytes, path);
-        else if (suffix === ".wal") logicalSize = decodeWal(original.bytes, path);
-        else if (suffix === ".lmp") logicalSize = decodeQpic(original.bytes, path);
-        else if (suffix === ".gif") logicalSize = decodeGif(original.bytes, path);
-        else if (suffix === ".png") logicalSize = decodePng(original.bytes, path);
-        else if (suffix === ".tga") logicalSize = decodeTga(original.bytes, path);
-        else if (suffix === ".jpg" || suffix === ".jpeg") logicalSize = decodeJpeg(original.bytes, path);
-        else if (suffix === ".bmp") logicalSize = decodeBmp(original.bytes, path);
-      }
-      if (animation === null && options.family === "q2" && options.mipmap !== false) content = q2MipmappedImage(content);
-      const texture = this.register(name, content, { wrap: options.wrap ?? "repeat", filter: options.mipmap === false ? "linear" : "linear-mipmap-nearest" }, asset.source, logicalSize);
-      if (animation !== null) this.animate(texture, animation);
-      return texture;
+        let logicalSize: Pick<ImageLevel, "width" | "height"> = content.levels[0];
+        // The original beneath a replacement only recovers the logical
+        // size; an undecodable original keeps the loaded image's size.
+        const adoptOriginalSize = (decode: () => Pick<ImageLevel, "width" | "height">): void => {
+          try { logicalSize = decode(); } catch (error) { if (this.strict) throw error; this.requireOpen(); }
+        };
+        if (options.family === "q2" && suffix !== ".wal" && (name.toLowerCase().endsWith(".wal") || !explicit && wall)) {
+          const original = await this.reader.readOriginal?.(`${base}.wal`) ?? await this.reader.read(`${base}.wal`);
+          if (original !== null) adoptOriginalSize(() => decodeWal(original.bytes, `${base}.wal`));
+        }
+        if (options.family === "q2" && name.toLowerCase().endsWith(".pcx") && suffix !== ".pcx") {
+          const requested = await this.reader.readOriginal?.(name) ?? await this.reader.read(name);
+          if (requested !== null) adoptOriginalSize(() => decodePcx(requested.bytes, name));
+        }
+        if (options.family === "q1" && requested === "lmp" && suffix !== ".lmp") {
+          const original = await this.reader.readOriginal?.(name) ?? await this.reader.read(name);
+          if (original !== null) adoptOriginalSize(() => decodeQpic(original.bytes, name));
+        }
+        const original = await this.reader.readOriginal?.(path);
+        if (original !== undefined && original !== null && logicalSize === content.levels[0]) {
+          adoptOriginalSize(() => suffix === ".pcx" ? decodePcx(original.bytes, path)
+            : suffix === ".wal" ? decodeWal(original.bytes, path)
+            : suffix === ".lmp" ? decodeQpic(original.bytes, path)
+            : suffix === ".gif" ? decodeGif(original.bytes, path)
+            : suffix === ".png" ? decodePng(original.bytes, path)
+            : suffix === ".tga" ? decodeTga(original.bytes, path)
+            : suffix === ".jpg" || suffix === ".jpeg" ? decodeJpeg(original.bytes, path)
+            : suffix === ".bmp" ? decodeBmp(original.bytes, path) : logicalSize);
+        }
+        if (animation === null && options.family === "q2" && options.mipmap !== false) content = q2MipmappedImage(content);
+        const texture = this.register(name, content, { wrap: options.wrap ?? "repeat", filter: options.mipmap === false ? "linear" : "linear-mipmap-nearest" }, asset.source, logicalSize);
+        if (animation !== null) this.animate(texture, animation);
+        return texture;
+      } catch (error) { if (this.strict) throw error; this.requireOpen(); continue; }
     }
     return null;
   }

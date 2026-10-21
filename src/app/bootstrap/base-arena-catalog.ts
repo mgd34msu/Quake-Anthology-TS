@@ -12,30 +12,37 @@ export interface BaseArena {
   readonly timeLimit: number;
 }
 export interface BaseArenaCatalog { readonly arenas: readonly BaseArena[]; readonly regularCount: number; readonly tierCount: number; }
+function arenaInfosFromText(text: string): ReadonlyMap<string, string>[] {
+  const infos: ReadonlyMap<string, string>[] = [];
+  const parser = new CommonParseState(), cursor = new CommonParseCursor(text);
+  for (;;) {
+    const token = parser.parse(cursor); if (token === "") break;
+    if (token !== "{") throw new Error("Malformed base arena definition");
+    const fields = new Map<string, string>();
+    for (;;) {
+      const key = parser.parse(cursor); if (key === "}") break;
+      if (key === "") throw new Error("Unterminated base arena definition");
+      fields.set(key, parser.parse(cursor, false) || "<NULL>");
+    }
+    infos.push(fields);
+  }
+  return infos;
+}
+
 /** UI_LoadArenas numbering is distinct from the source game's file-order arena numbers. */
 export function parseBaseArenaCatalog(texts: readonly string[]): BaseArenaCatalog {
-  const infos: ReadonlyMap<string, string>[] = [];
-  for (const text of texts) {
-    const parser = new CommonParseState(), cursor = new CommonParseCursor(text);
-    for (;;) {
-      const token = parser.parse(cursor); if (token === "") break;
-      if (token !== "{") throw new Error("Malformed base arena definition");
-      const fields = new Map<string, string>();
-      for (;;) {
-        const key = parser.parse(cursor); if (key === "}") break;
-        if (key === "") throw new Error("Unterminated base arena definition");
-        fields.set(key, parser.parse(cursor, false) || "<NULL>");
-      }
-      infos.push(fields);
-    }
-  }
-  const singles = infos.filter(row => row.get("type")?.includes("single"));
+  return catalogFromInfos(texts.flatMap(arenaInfosFromText));
+}
+
+function catalogFromInfos(infos: readonly ReadonlyMap<string, string>[]): BaseArenaCatalog {
+  // Arenas without a usable map name are skipped, as in UI_LoadArenas.
+  const singles = infos.filter(row => row.get("type")?.includes("single"))
+    .filter(row => { const name = row.get("map"); return name !== undefined && /^[a-z0-9_/-]+$/i.test(name); });
   const regularCount = Math.floor(singles.filter(row => !row.get("special")).length / 4) * 4;
   let single = 0, specialNumber = regularCount;
   const arenas = singles.map(row => {
     const special = row.get("special") ?? "", number = special ? specialNumber++ : single++;
-    const name = row.get("map");
-    if (name === undefined || !/^[a-z0-9_/-]+$/i.test(name)) throw new Error("Invalid base arena map name");
+    const name = row.get("map") ?? "";
     const frag = Number.parseInt(row.get("fraglimit") ?? "0", 10) || 0, time = Number.parseInt(row.get("timelimit") ?? "0", 10) || 0;
     return { number, map: `maps/${name}.bsp`, title: row.get("longname") ?? name, special,
       selection: special.toLowerCase() === "training" ? -4 : special.toLowerCase() === "final" ? regularCount : number,
@@ -45,12 +52,15 @@ export function parseBaseArenaCatalog(texts: readonly string[]): BaseArenaCatalo
 }
 export async function readBaseArenaCatalog(mounts: Pick<MountedContent, "listFiles" | "open">): Promise<BaseArenaCatalog> {
   const files = ["scripts/arenas.txt", ...(await mounts.listFiles("scripts", ".arena")).map(name => `scripts/${name}`)];
-  const texts: string[] = [];
+  const infos: ReadonlyMap<string, string>[] = [];
   for (const path of files) {
     const resource = await mounts.open(path);
-    if (resource !== null) texts.push(Buffer.from(resource.bytes).toString("latin1"));
+    if (resource === null) continue;
+    // A malformed arena file is skipped with the rest intact, as in
+    // UI_LoadArenasFromFile -- never a failed launch.
+    try { infos.push(...arenaInfosFromText(Buffer.from(resource.bytes).toString("latin1"))); } catch { continue; }
   }
-  return parseBaseArenaCatalog(texts);
+  return catalogFromInfos(infos);
 }
 export function baseArenaForMap(catalog: BaseArenaCatalog, map: string): BaseArena {
   const path = map.toLowerCase().replace(/^maps\//, "").replace(/\.bsp$/, "");

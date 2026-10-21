@@ -44,6 +44,7 @@ type CinematicAssets = {
   readonly assets: { readonly images: Pick<ApplicationQ3Assets["assets"]["images"], "allocate" | "commit" | "release"> };
   readonly print: ApplicationQ3Assets["print"];
 };
+/** The requested cinematic cannot be played (absent, unsupported, or undecodable). */
 class MissingCinematicError extends Error {}
 
 export class ApplicationQ3Cinematics implements EngineUiCinematics {
@@ -70,8 +71,11 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
       if (this.closed) throw new Error("UI cinematic loaded after close");
       if (resource === null || resource.bytes.length === 0) throw new MissingCinematicError(`Missing cinematic ${name}`);
       const extension = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
-      if (extension !== "roq" && extension !== "cin" && extension !== "ogv" && extension !== "pcx") throw new Error(`Unsupported cinematic format: ${extension}`);
-      this.sources.set(path, { source: extension === "pcx" ? cinematicPcx(resource.bytes, name) : cinematicBytes(extension, resource.bytes, name), resource: resource.reference });
+      if (extension !== "roq" && extension !== "cin" && extension !== "ogv" && extension !== "pcx") throw new MissingCinematicError(`Unsupported cinematic format: ${extension}`);
+      let source: ReturnType<typeof cinematicBytes>;
+      try { source = extension === "pcx" ? cinematicPcx(resource.bytes, name) : cinematicBytes(extension, resource.bytes, name); }
+      catch { if (this.closed) throw new Error("UI cinematic loaded after close"); throw new MissingCinematicError(`Undecodable cinematic ${name}`); }
+      this.sources.set(path, { source, resource: resource.reference });
     }
     return { path };
   }

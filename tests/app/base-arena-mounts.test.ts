@@ -36,3 +36,24 @@ test("arena discovery uses active loose overlays and preserves restricted mounts
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// A malformed arena file or a row without a usable map is skipped with the
+// rest of the catalog intact, as in UI_LoadArenas -- never a failed launch.
+test("malformed arena files and unusable rows are skipped", async () => {
+  const root = await mkdtemp(join(tmpdir(), "quake-arena-bad-"));
+  try {
+    await mkdir(join(root, "scripts"), { recursive: true });
+    await writeFile(join(root, "scripts/arenas.txt"),
+      '{ map good type single bots "sarge" }\n{ type single bots "visor" }\n{ map "bad name!" type single bots "grunt" }');
+    await writeFile(join(root, "scripts/broken.arena"), "this is not an arena file {");
+    const sources: ContentMount[] = [
+      { kind: "loose", identity: createMountIdentity("mount:arena:bad", "q3:classic:baseq3:test", 0), rootPath: root },
+    ];
+    const plan: ResolvedMountPlan = { id: "mount-plan:arena-bad:0", mounts: sources, defaultOrder: sources.map(source => source.identity.id), prefixOrders: [] };
+    using mounts = await openMountPlan(plan);
+    const catalog = await readBaseArenaCatalog(mounts);
+    expect(catalog.arenas.map(arena => arena.map)).toEqual(["maps/good.bsp"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

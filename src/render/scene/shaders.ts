@@ -101,7 +101,12 @@ export class SceneShaderRegistry {
   }
 
   addScript(text: string, source = "<shader>"): void {
-    for (const entry of inspectShaderScript(text, source).entries) {
+    // A script file that cannot be lexed at all (foreign encoding, binary
+    // garbage) contributes no shaders, as in the source engines -- it must
+    // not abort loading the remaining scripts or the game.
+    let entries: ReturnType<typeof inspectShaderScript>["entries"];
+    try { entries = inspectShaderScript(text, source).entries; } catch { return; }
+    for (const entry of entries) {
       const name = this.key(entry.name);
       if (!this.programs.has(name)) {
         this.programs.set(name, entry.program);

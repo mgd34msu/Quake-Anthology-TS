@@ -86,6 +86,9 @@ export async function saveServerProfile(store: ConfigStore, name: string, profil
 export async function loadServerProfile(store: ConfigStore, name: string, definitions: readonly ServerSettingDefinition[]): Promise<ServerProfile | null> {
   const file = Bun.file(settingsPath(store.root, name));
   if (!await file.exists()) return null;
-  const value: unknown = JSON.parse(await file.text());
+  // Text that is not JSON behaves like the absent profile; parsed
+  // values still face profile validation.
+  let value: unknown;
+  try { value = JSON.parse(await file.text()); } catch { return null; }
   return parseServerProfile(value, definitions);
 }

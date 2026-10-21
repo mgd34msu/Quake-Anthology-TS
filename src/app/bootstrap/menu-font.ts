@@ -38,7 +38,7 @@ export async function loadMenuFont(options: MenuFontOptions): Promise<{ readonly
     const colors = paletteAsset === null ? null : decodePcx(paletteAsset.bytes, "pics/colormap.pcx").palette;
     const palette = paletteAsset === null || colors === null ? null : { colors, source: paletteAsset.reference };
     const textures = new SceneTextureLoader(images, mountedImageReader(options.catalog, mounts), palette,
-      options.imagePolicy === undefined ? {} : { policy: options.imagePolicy });
+      { strict: true, ...(options.imagePolicy === undefined ? {} : { policy: options.imagePolicy }) });
     try {
     const texture = await textures.load(family === "q2" ? "pics/conchars.pcx" : "gfx/2d/bigchars", { family, mipmap: false, wrap: "clamp" });
     if (texture === null) throw new Error("Quake III console charset is missing");
@@ -73,7 +73,7 @@ export async function loadMenuTypography(catalog: InstalledCatalog,
     const mounts = await catalog.mountsFor(q3.id);
     const mounted = await openMountPlan({ id: "mount-plan:menu:typography", mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
     const textures = new SceneTextureLoader(images, mountedImageReader(catalog, mounted), null,
-      imagePolicy === undefined ? {} : { policy: imagePolicy });
+      { strict: true, ...(imagePolicy === undefined ? {} : { policy: imagePolicy }) });
     try {
       const texture = await textures.load("menu/art/font1_prop.tga", { family: "q3", mipmap: false, wrap: "clamp" });
       if (texture === null) throw new Error("Quake III proportional menu font is missing");

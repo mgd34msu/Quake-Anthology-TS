@@ -168,10 +168,14 @@ export class ApplicationAssets {
     const pending = (async (): Promise<RegisteredShaderVideo | null> => {
       const asset = await mounts.open(path);
       if (this.closed) throw new Error("Material movie loaded after assets closed");
-      if (asset === null) throw new Error(`Material movie is absent from selected content: ${content}/${path}`);
+      // A shader's videomap that is absent or cannot be decoded falls back
+      // to the default image in the source engines -- never a fatal load.
+      if (asset === null) return null;
       const extension = path.toLowerCase().split(".").at(-1);
-      if (extension !== "roq" && extension !== "cin" && extension !== "ogv") throw new Error(`Unsupported material movie format: ${path}`);
-      const source = cinematicBytes(extension, asset.bytes, path), dimensions = cinematicDimensions(source);
+      if (extension !== "roq" && extension !== "cin" && extension !== "ogv") return null;
+      let source: ReturnType<typeof cinematicBytes>, dimensions: ReturnType<typeof cinematicDimensions>;
+      try { source = cinematicBytes(extension, asset.bytes, path); dimensions = cinematicDimensions(source); }
+      catch { if (this.closed) throw new Error("Material movie loaded after assets closed"); return null; }
       const image = this.images.allocate(dimensions.width, dimensions.height, { kind: "resource", resource: asset.reference });
       const playback = new CinematicPlayback(source, { clock: this.mediaClock, target: { kind: "material", id: key }, loop: true, silent: true,
         onAudio: () => { throw new Error("Silent material movie produced audio"); }, onAudioReset: () => undefined,
@@ -229,7 +233,7 @@ export class ApplicationAssets {
       let replacement = replacements.get(content);
       if (replacement === undefined) {
         const provider = await this.provider(content);
-        const textures = new SceneTextureLoader(this.images, mountedImageReader(this.content.catalog, provider.mounts), provider.palette, { policy });
+        const textures = new SceneTextureLoader(this.images, mountedImageReader(this.content.catalog, provider.mounts), provider.palette, { policy, strict: true });
         replacement = { provider, textures, shaders: provider.shaders.replacement(textures) };
         replacements.set(content, replacement);
         await provider.textures.prepareReplacement(textures);
