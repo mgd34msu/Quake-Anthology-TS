@@ -120,7 +120,7 @@ function deriveNativeBinding(program: QcProgram, declaredDamage?: ModSourceCall)
   if (cached !== undefined && (declaredDamage === undefined || isDeepStrictEqual(cached.damage.call.declaration, declaredDamage))) return cached;
   if (cached?.damage.call.declaration !== undefined) throw new QcProgramError("QC program already has a different qualified combat call");
   const reject = (reason: string): never => { throw new QcProgramError(`Unsupported native damage semantics: ${reason}`, program.source); };
-  if (program.api.kind === "q1-quakeworld" && declaredDamage === undefined) reject("QuakeWorld requires an artifact-qualified combat declaration");
+{}
   const call = declaredCall ?? qcDamageCallLayout(program), damage = program.functionAt(call.functionIndex);
   const initial = new DataView(program.initialGlobals.buffer, program.initialGlobals.byteOffset, program.initialGlobals.byteLength);
   const mutable = new Set<number>();

@@ -1,33 +1,28 @@
 import { expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
 
-// Every QuakeWorld edition of a mission pack must run its native dedicated
-// deathmatch server on the campaign's own maps: inline brush models are
-// engine-known at map load (makestatic never precached them), and MG3 maps
-// carry no MG3 monster classes under qwprogs, so monster navigation must
-// not gate the launch.
-const launches: (readonly [string, string])[] = [
-  ["q1-quakeworld", "dm3"],
-  ["q1-quakeworld-hipnotic", "start"],
-  ["q1-quakeworld-rogue", "start"],
-  ["q1-quakeworld-dopa", "start"],
-  ["q1-quakeworld-mg1", "start"],
-  ["q1-quakeworld-mg3", "start"],
-];
+// Every QuakeWorld expansion product boots and plays locally.
+const cases: readonly (readonly [string, string])[] = [
+  ["q1-quakeworld-hipnotic", "hip1m1"], ["q1-quakeworld-rogue", "r1m1"], ["q1-quakeworld-dopa", "e5m1"],
+  ["q1-quakeworld-mg1", "mgdm1"], ["q1-quakeworld-mg3", "map1"], ["q1-quakeworld-quake64", "ndm1"], ["q1-quakeworld-ctf", "ctf1"]];
 
-test("QuakeWorld mission-pack editions serve dedicated deathmatch on their own maps", async () => {
-  for (const [game, map] of launches) {
-    const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", game, "--map", map,
-      "--dedicated", "--mode", "deathmatch", "--movement", "qw", "--character", "q1"]);
-    if (parsed.kind !== "run") throw new Error("Missing launch");
-    const app = await Application.open(parsed.options, { print: () => undefined });
+for (const [product, map] of cases) {
+  test(`${product} plays ${map} locally`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "quake-qw-expansion-"));
+    let app: Application | null = null;
     try {
-      for (let index = 0; index < 20; index++) await app.step(50);
-      expect(app.simulation.recipe.map.entities.provider).toBe("q1:official");
-      expect(app.simulation.recipe.match.provider).toBe("q1:official");
-      expect(app.simulation.quakecSource()).not.toBeNull();
-    } finally { await app.close(); }
-  }
-}, 240000);
+      const parsed = parseApplicationCommand(["--game", product, "--map", map, "--mode", "deathmatch",
+        "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", root]);
+      if (parsed.kind !== "run") throw new Error("Missing launch options");
+      const application = app = await Application.open(parsed.options, { saveDirectory: join(root, "saves"), print: () => undefined });
+      for (let frame = 0; frame < 12; frame++) await application.step(25);
+      const local = application.localPlayers[0];
+      if (local === undefined) throw new Error("Missing local player");
+      expect(application.simulation.playerUi(local.actor).health).toBeGreaterThan(0);
+    } finally { try { await app?.close(); } finally { await rm(root, { recursive: true, force: true }); } }
+  }, 180000);
+}

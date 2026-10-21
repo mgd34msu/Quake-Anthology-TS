@@ -88,8 +88,8 @@ export function createQcSpatialBindings(world: QcSpatialWorld): ReadonlyMap<QcHo
       vm.returnFloat(1);
     });
   function setSize(vm: QcMachine, slot: number, bounds: Bounds): void {
+    // PF_setsize never validated ordering; retail data (mg3) relies on it.
     const { min, max } = bounds;
-    if (min.x > max.x || min.y > max.y || min.z > max.z) return vm.fail("backwards mins/maxs");
     const reference = options.entities.reference(slot);
     vm.setEntityVector(reference, "mins", min); vm.setEntityVector(reference, "maxs", max);
     vm.setEntityVector(reference, "size", { x: vm.numeric.subtract(max.x, min.x), y: vm.numeric.subtract(max.y, min.y), z: vm.numeric.subtract(max.z, min.z) });

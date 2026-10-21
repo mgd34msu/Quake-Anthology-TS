@@ -605,7 +605,8 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
     bodies.write(actor, { ...state, velocity: { x: 7, y: 8, z: 9 } });
     expect(fields.vector(field("velocity"))).toEqual({ x: 7, y: 8, z: 9 });
     vm.globals.setInt(4, reference); vm.globals.setVector(7, { x: 2, y: 0, z: 0 }); vm.globals.setVector(10, { x: 1, y: 0, z: 0 });
-    expect(() => call("setsize", 3)).toThrow("backwards mins/maxs");
+    call("setsize", 3); // PF_setsize accepts backwards bounds verbatim (retail mg3 relies on it).
+    expect(fields.vector(field("mins"))).toEqual({ x: 2, y: 0, z: 0 }); expect(fields.vector(field("maxs"))).toEqual({ x: 1, y: 0, z: 0 });
     vm.globals.setVector(7, bounds.min); vm.globals.setVector(10, bounds.max); call("setsize", 3);
     expect(bodies.linked(actor.id)?.state.origin.x).toBe(origin.x + 8);
     vm.globals.setVector(4, origin); vm.globals.setFloat(7, 64); call("findradius", 2);
