@@ -38,9 +38,11 @@ export function matchMapUnavailable(selection: MatchModeSelection, classnames: r
     // like native LMCTF does when info_flag_* is absent.
     if (!classes.has("info_player_deathmatch")) return "LMCTF map is missing: info_player_deathmatch";
   } else if (selection.rules === "ctf" || selection.rules === "lmctf") {
+    // The unified flag layer synthesizes bases from the farthest deathmatch
+    // spawns wherever authored flags are absent, on every world.
     const flags = selection.family === "q3" ? ["team_CTF_redflag", "team_CTF_blueflag"] : ["item_flag_team1", "item_flag_team2"];
     const missing = flags.filter(name => !classes.has(name));
-    if (missing.length !== 0) return `CTF map is missing: ${missing.join(", ")}`;
+    if (missing.length !== 0 && !classes.has("info_player_deathmatch")) return `CTF map is missing: ${missing.join(", ")}`;
   }
   if (selection.mode === "deathmatch" && selection.rules !== "deathball" && !classes.has("info_player_deathmatch") && !(selection.family === "q3" && classes.has("team_CTF_redplayer") && classes.has("team_CTF_blueplayer")))
     return "Deathmatch requires an authored player spawn";

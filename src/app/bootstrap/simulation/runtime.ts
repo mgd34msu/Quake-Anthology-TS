@@ -347,7 +347,7 @@ export class SharedSimulation implements Simulation {
   private readonly initialSpawnPoint: string;
   private readonly pendingStartItems = new Set<ActorId>();
   private pendingSharedRestore: SharedWorldRestoreCompletion | null = null;
-  private readonly detachedModels = new Map<OwnedActor, { readonly content: ContentId; readonly path: string }>();
+  private readonly detachedModels = new Map<OwnedActor, { readonly content: ContentId; readonly path: string; readonly family?: "q1" | "q2"; readonly skin?: number; readonly effects?: number }>();
   private readonly q1Characters = new Map<OwnedActor, Q1CharacterActor>();
   private q1CharacterFoundation: Q1EntityServices | null = null;
   private readonly q1CharacterAdjuncts = new Set<Q1EntityServices>();
@@ -5274,6 +5274,13 @@ export class SharedSimulation implements Simulation {
       && providerFamily(this.recipe.map.entities.provider) !== "q2";
   }
 
+  /** Shared flag-CTF on any world whose own source does not already run it. */
+  private get foreignCtf(): boolean {
+    return this.recipe.match.provider === "q1:ctf" && this.options.mode === "deathmatch" && this.source.kind !== "q1";
+  }
+
+  private get flagMode(): "lmctf" | "ctf" | null { return this.foreignLmctf ? "lmctf" : this.foreignCtf ? "ctf" : null; }
+
   private lmctfRuneHeld(actor: ActorId): string | null {
     for (const [kind, rune] of this.lmctfRunes) if (rune.holder?.equals(actor) === true) return kind;
     return null;
@@ -5300,7 +5307,7 @@ export class SharedSimulation implements Simulation {
       const parts = (entity.get("origin") ?? "").split(/\s+/).map(Number);
       const [x, y, z] = parts;
       if (parts.length !== 3 || x === undefined || y === undefined || z === undefined || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
-      if ((classname === "info_flag_red" || classname === "info_flag_blue") && !flags.has(classname)) flags.set(classname, { x, y, z });
+      if ((classname === "info_flag_red" || classname === "info_flag_blue" || classname === "item_flag_team1" || classname === "item_flag_team2") && !flags.has(classname)) flags.set(classname, { x, y, z });
       else if (classname.startsWith("item_health")) health.push({ x, y, z });
     }
     this.lmctfSpots = { flags, health };
@@ -5308,7 +5315,7 @@ export class SharedSimulation implements Simulation {
   }
 
   private lmctfFlagHome(team: 1 | 2): Vec3 | null {
-    const authored = this.lmctfOrigins().flags.get(team === 1 ? "info_flag_red" : "info_flag_blue");
+    const authored = this.lmctfOrigins().flags.get(this.flagMode === "ctf" ? (team === 1 ? "item_flag_team1" : "item_flag_team2") : (team === 1 ? "info_flag_red" : "info_flag_blue"));
     if (authored !== undefined) return authored;
     // Native LMCTF synthesizes bases from the deathmatch spawns farthest apart.
     const spots = this.tagSpawnOrigins();
@@ -5331,12 +5338,14 @@ export class SharedSimulation implements Simulation {
   private spawnLmctfFlag(team: 1 | 2, origin: Vec3): void {
     const state = this.lmctfFlags.get(team);
     if (state === undefined) return;
-    const actor = this.actors.allocate(this.recipe.match.provider, team === 1 ? "q2:item_flag_team1" : "q2:item_flag_team2");
-    const bounds = { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 33 } };
+    const ctf = this.flagMode === "ctf";
+    const actor = this.actors.allocate(this.recipe.match.provider, ctf ? (team === 1 ? "q1:item_flag_team1" : "q1:item_flag_team2") : (team === 1 ? "q2:item_flag_team1" : "q2:item_flag_team2"));
+    const bounds = ctf ? { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 74 } } : { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 33 } };
     this.bodies.create(actor, { origin: { x: origin.x, y: origin.y, z: origin.z }, velocity: zero, angles: zero, bounds, ground: null });
     this.physics.setSolid(actor, "trigger", null, providerFamily(this.recipe.map.entities.provider));
     this.callbacks.bind(actor, { think: null, touch: contact => this.lmctfFlagTouched(team, contact), use: null, pain: null, die: null });
-    this.detachedModels.set(actor, { content: this.recipe.match.content, path: team === 1 ? "players/male/flag1.md2" : "players/male/flag2.md2" });
+    this.detachedModels.set(actor, ctf ? { content: this.recipe.match.content, path: "progs/flag.mdl", family: "q1", skin: team - 1, effects: team === 1 ? 32 : 16 }
+      : { content: this.recipe.match.content, path: team === 1 ? "players/male/flag1.md2" : "players/male/flag2.md2" });
     this.bodies.link(actor);
     state.actor = actor;
   }
@@ -5369,13 +5378,13 @@ export class SharedSimulation implements Simulation {
     this.actors.release(state.actor); state.actor = null;
     state.carrier = player; state.droppedAt = null;
     const owned = this.actors.resolveOwned(player);
-    if (owned !== null) this.inventory.give(owned, "q2:flag", 1);
+    if (owned !== null && this.flagMode === "lmctf") this.inventory.give(owned, "q2:flag", 1);
     return undefined;
   }
 
   private lmctfTakeFlag(actor: ActorId): void {
     const owned = this.actors.resolveOwned(actor);
-    if (owned !== null) this.inventory.consume(owned, "q2:flag", this.inventory.count(actor, "q2:flag"));
+    if (owned !== null && this.flagMode === "lmctf") this.inventory.consume(owned, "q2:flag", this.inventory.count(actor, "q2:flag"));
   }
 
   private spawnLmctfRune(kind: string, origin: Vec3): void {
@@ -5410,6 +5419,7 @@ export class SharedSimulation implements Simulation {
       const home = this.lmctfFlagHome(team);
       if (home !== null) { this.lmctfFlags.set(team, { actor: null, home, carrier: null, droppedAt: null }); this.spawnLmctfFlag(team, home); }
     }
+    if (this.flagMode !== "lmctf") return;
     // Runes scatter over health spots by farthest-point sampling (native
     // Rune_Spawn uses health edicts); deathmatch spawns are the fallback.
     const spots = [...this.lmctfOrigins().health];
@@ -5429,7 +5439,7 @@ export class SharedSimulation implements Simulation {
   }
 
   private tickLmctf(): void {
-    if (!this.foreignLmctf) return;
+    if (this.flagMode === null) return;
     if (!this.lmctfPrepared) this.prepareLmctf();
     const players = this.players();
     // Auto-balanced team assignment; the shared combat team drives friendly
@@ -6592,8 +6602,8 @@ export class SharedSimulation implements Simulation {
         skin: q2Entity?.skin ?? 0, effects: q2Entity?.effects ?? 0, renderFlags: q2Entity?.renderFlags ?? 0, origin: pose.origin, previousOrigin: pose.previousOrigin, angles: pose.angles, ...visual,
         ...(colors === null ? {} : { playerColors: { top: colors.shirt, bottom: colors.pants } }), visible: true, viewWeapon: false });
     }
-    for (const [actor, model] of this.detachedModels) { const body = this.bodies.read(actor.id); if (body !== null) result.push({ actor: actor.id, content: model.content, family: "q2", path: model.path,
-      frame: 0, oldFrame: 0, skin: 0, effects: 2, renderFlags: 0, origin: body.origin, angles: body.angles, scale: 1, visible: true, viewWeapon: false }); }
+    for (const [actor, model] of this.detachedModels) { const body = this.bodies.read(actor.id); if (body !== null) result.push({ actor: actor.id, content: model.content, family: model.family ?? "q2", path: model.path,
+      frame: 0, oldFrame: 0, skin: model.skin ?? 0, effects: model.effects ?? 2, renderFlags: 0, origin: body.origin, angles: body.angles, scale: 1, visible: true, viewWeapon: false }); }
     const weaponModels = this.selectedArsenal === null ? this.viewModels : new Map(this.players().flatMap(actor => {
       // A connected bot can sit in the Q3 spawn queue before ClientBegin
       // admits its selected arsenal; it has no first-person weapon yet.
@@ -7452,7 +7462,10 @@ export class SharedSimulation implements Simulation {
     reader.field("entryCarry").list(value => this.entryCarry.set(owner(value.field("actor")), readQ1Travel(value.field("state"))));
     reader.field("detachedModels").list(value => {
       const actor = owner(value.field("actor"));
-      this.detachedModels.set(actor, { content: readContentId(value.field("content")), path: value.field("path").string() });
+      this.detachedModels.set(actor, { content: readContentId(value.field("content")), path: value.field("path").string(),
+        ...(value.field("family").value === undefined ? {} : { family: value.field("family").choice("q1", "q2") }),
+        ...(value.field("skin").value === undefined ? {} : { skin: value.field("skin").integer(0) }),
+        ...(value.field("effects").value === undefined ? {} : { effects: value.field("effects").integer(0) }) });
       this.callbacks.bind(actor, { think: self => this.actors.release(self), touch: null, use: null, pain: null, die: null });
     });
     reader.field("viewModels").list(value => {

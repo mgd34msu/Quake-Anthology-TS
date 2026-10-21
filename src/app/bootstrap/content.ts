@@ -136,7 +136,7 @@ export function applicationSourceSelection(catalog: InstalledCatalog, options: P
   const rerelease = program.edition === "rerelease";
   const rules = options.rules ?? (family === "q2" && (program.campaign === "ctf" || program.campaign === "lmctf") ? program.campaign
     : family === "q3" && (program.campaign === "ctf" || program.campaign === "lrctf") ? "ctf" : "standard");
-  if (rules === "ctf" && family === "q1" && program.edition === "quakeworld") throw new Error("ctf requires a classic or rerelease Quake game provider");
+{}
   if (rules === "horde" && family !== "q1" && family !== "q2" && family !== "q3") throw new Error("Horde requires a Quake, Quake II or Quake III game provider");
   // Tag/DeathBall ship their tokens/models in Ground Zero content, so the
   // match role mounts the same-edition Rogue product on any Q2 program.
@@ -243,9 +243,11 @@ function selectedApplicationPreset(catalog: InstalledCatalog, options: Applicati
   const nativeProgram = selectedQuakeCProgram(catalog, options);
   const q2GameLibrary = selectedQ2GameLibrary(catalog, options);
   const { source: provider, match, rules } = applicationSourceSelection(catalog, options);
-  // Generic CTF on a Q1 world runs the same-edition ThreeWave program: the
-  // match role already mounts that product, so execution follows it too.
-  const programProduct = rules === "ctf" && family === "q1" ? catalog.require(match.content) : sourceProgramProduct(catalog, product.id);
+  // Generic CTF on a NetQuake Q1 world runs the same-edition ThreeWave
+  // program: the match role already mounts that product, so execution
+  // follows it too. QuakeWorld programs keep their own execution; the
+  // shared flag layer runs over them instead.
+  const programProduct = rules === "ctf" && family === "q1" && !quakeworld ? catalog.require(match.content) : sourceProgramProduct(catalog, product.id);
   const equipmentSource = nativeProgram === undefined && q2GameLibrary === undefined && !q3Guest && !quakeworld
     ? { ...provider, content: programProduct.id } : provider;
   const playerProducts = applicationPlayerProducts(catalog, options, quakeworld || q3Guest);

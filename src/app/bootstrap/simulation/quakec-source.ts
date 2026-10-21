@@ -1357,6 +1357,18 @@ export class QuakeCSource {
       read: () => ({ health: words.float(this.field("health")), armor: this.armor(slot), mass: 200,
         canTakeDamage: words.float(this.field("takedamage")) !== 0, invulnerable: words.float(this.field("invincible_finished")) >= this.currentTime, team: this.matchTeam(actor.id) }),
       writeHealth: health => { words.setFloat(this.field("health"), health); return undefined; },
+      writeTraits: traits => {
+        // Teams live in client info (QW userinfo team, NetQuake pants color);
+        // damage/invulnerability map onto the program's own fields.
+        const mapped = traits.team === null ? null : this.kind === "quakeworld" ? traits.team : traits.team === "red" ? "5" : traits.team === "blue" ? "14" : traits.team;
+        if (mapped !== this.matchTeam(actor.id)) {
+          if (this.activeClients.has(actor.id)) this.setMatchTeam(actor.id, mapped);
+          else if (this.kind !== "quakeworld") { const value = mapped === null ? 0 : Number(mapped); if (Number.isFinite(value)) words.setFloat(this.field("team"), value); }
+        }
+        if (traits.canTakeDamage !== (words.float(this.field("takedamage")) !== 0)) words.setFloat(this.field("takedamage"), traits.canTakeDamage ? 1 : 0);
+        if (traits.invulnerable !== (words.float(this.field("invincible_finished")) >= this.currentTime)) words.setFloat(this.field("invincible_finished"), traits.invulnerable ? Number.POSITIVE_INFINITY : 0);
+        return undefined;
+      },
       validateArmor: armor => {
         if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q1") throw new Error("Cannot store foreign armor in native id1 fields");
         return undefined;

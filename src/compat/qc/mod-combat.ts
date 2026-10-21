@@ -1,4 +1,5 @@
 import { qcEmptyArmor } from "../../content/q1/quakec/armor-points.ts";
+import type { CombatTraits } from "../../world/gameplay/authority.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { ArmorState, DamageOutcome, DamageRequest } from "../../contracts/gameplay.ts";
@@ -84,7 +85,15 @@ export class QcModCombat {
         if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q1") throw new Error("Cannot store foreign armor in source QC fields");
         return undefined;
       },
-      writeHealth: (health: number): undefined => { words.setFloat(this.field("health"), health); return undefined; }, writeArmor };
+      writeHealth: (health: number): undefined => { words.setFloat(this.field("health"), health); return undefined; },
+      writeTraits: (traits: CombatTraits): undefined => {
+        const player = services.match?.player(actor.id) ?? null;
+        const mapped = traits.team === "red" ? "team:red" : traits.team === "blue" ? "team:blue" : traits.team;
+        if (player !== null && player.team() !== mapped) player.setTeam(mapped);
+        if (traits.canTakeDamage !== (words.float(this.field("takedamage")) !== 0)) words.setFloat(this.field("takedamage"), traits.canTakeDamage ? 1 : 0);
+        if (traits.invulnerable !== (words.float(this.field("invincible_finished")) > this.seconds())) words.setFloat(this.field("invincible_finished"), traits.invulnerable ? Number.POSITIVE_INFINITY : 0);
+        return undefined;
+      }, writeArmor };
     // A full save admitted copied canonical state before restoring this guest's exact words.
     if (services.combat.read(actor.id) === null) services.combat.bind(actor, state); else services.combat.rebind(actor, state);
     return undefined;
