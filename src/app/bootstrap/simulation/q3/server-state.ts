@@ -9,6 +9,8 @@ import type { Q3HostSettings } from './host.ts';
 export interface Q3ServerStateOptions {
   readonly session: SessionId;
   readonly settings: Q3HostSettings;
+  /** Last-seam command filter (for example suppressing guest attack while a foreign weapon is active). */
+  readonly filterUserCommand?: (slot: number, value: WireUserCommand) => WireUserCommand;
   now(): number;
   print(text: string): void;
 }
@@ -92,6 +94,9 @@ export class Q3ServerState {
     const command = this.commands.get(slot);
     return command === undefined ? undefined : { ...command, angles: [...command.angles] };
   }
-  setUserCommand(slot: number, value: WireUserCommand): void { this.commands.set(slot, { ...value, angles: [...value.angles] }); }
+  setUserCommand(slot: number, value: WireUserCommand): void {
+    const filtered = this.options.filterUserCommand?.(slot, value) ?? value;
+    this.commands.set(slot, { ...filtered, angles: [...filtered.angles] });
+  }
   clearClient(slot: number): void { this.userinfo.delete(slot); this.commands.delete(slot); }
 }

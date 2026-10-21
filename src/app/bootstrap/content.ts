@@ -1,4 +1,3 @@
-import { preparedNativePrimary } from "./simulation/q2-native-world.ts";
 import { prepareNativeQ2Map } from "./simulation/native-q2-map.ts";
 import { prepareApplicationMods } from "./mod-selection.ts";
 import { prepareApplicationQvmGrapple, type PreparedQvmGrapple } from "./qvm-grapple-selection.ts";
@@ -521,13 +520,8 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
 {}
     const q3Execution = recipe.execution.find(module => module.kind === "qvm" && module.role === "server-game");
     const q3Prepared = presentationSource?.kind !== "unified" && q3Execution?.kind === "qvm" && q3Execution.role === "server-game" ? await prepareQ3Game(q3Execution, mounts) : null;
-    if (q3Prepared !== null && recipe.weapons.some(weapon => weapon.provider !== recipe.map.entities.provider || weapon.content !== recipe.map.entities.content)
-      && Object.values({ input: q3Prepared.primary.input, weapons: q3Prepared.primary.weapons, inventory: q3Prepared.primary.inventory,
-        pickups: q3Prepared.primary.pickups, combat: q3Prepared.primary.combat }).some(profile => profile === null))
-      throw new Error("Selected QVM arsenal requires complete artifact-qualified primary player, weapon, inventory, pickup and combat interfaces");
     const q2Execution = recipe.execution.find(module => module.kind === "native" && module.role === "server-game");
     const q2Prepared = presentationSource?.kind !== "unified" && q2Execution?.kind === "native" ? q2Execution.api.kind === "q2-rerelease-game" ? await prepareRereleaseGuest(q2Execution, mounts) : await prepareClassicGuest(q2Execution, mounts) : null;
-    if (q2Prepared !== null && recipe.weapons.some(weapon => weapon.provider !== recipe.map.entities.provider || weapon.content !== recipe.map.entities.content) && preparedNativePrimary(q2Prepared) === null) throw new Error("Selected native arsenal requires a complete original primary declaration");
     if (q2Prepared !== null) prepareNativeQ2Map(world, q2Prepared.execution.api.kind === "q2-rerelease-game" ? "rerelease" : "classic", options.mode);
     const loaded = new LoadedApplicationContent(catalog, recipe, world, mounts, prepared, pure, q3Prepared, q2Prepared, product.q3Product, mapSidecars.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     try { if (presentationSource === undefined) { await loaded.prepareWeaponBehaviors(); await loaded.prepareMods(); await loaded.prepareQvmGrapple(); } else if (presentationSource.kind === "unified") await loaded.prepareMods("presentation"); return loaded; }

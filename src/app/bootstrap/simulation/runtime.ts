@@ -565,12 +565,6 @@ export class SharedSimulation implements Simulation {
     this.session = options.identity.session;
     this.q1Campaign = new Q1CampaignState(options.travel?.source.kind === "q1" ? options.travel.source.flags : 0, options.travel?.source.kind === "q1" ? options.travel.source.skill : options.skill);
     this.recipe = options.recipe;
-    if (options.recipe.equipment.grapple.kind === "enabled" || options.recipe.equipment.handGrenades.kind === "enabled") {
-      const native = options.q2Guest, qvm = options.q3Guest;
-      const supported = native === undefined ? qvm === undefined || qvm.prepared.primary.combat !== null
-        : preparedNativePrimary(native.prepared) !== null;
-      if (!supported) throw new Error(`${options.recipe.map.entities.content} lacks a supported shared combat interface. Disable Hook and Offhand grenades or choose a supported game module.`);
-    }
     this.startItems = options.restore === undefined ? options.startItems ?? "" : savedSimulationSettings(options.restore).startItems;
     this.initialSpawnPoint = options.nativeQ2Travel?.spawnPoint ?? options.travel?.spawnPoint
       ?? (options.restore === undefined ? options.initialSpawnPoint ?? "" : savedSimulationSettings(options.restore).initialSpawnPoint);
@@ -800,8 +794,7 @@ export class SharedSimulation implements Simulation {
         this.selectedArsenal = this.createSelectedQ3Arsenal();
       } else throw new Error("Selected foreign arsenal is not implemented for this provider");
     }
-    if (this.source.kind === "q2-native" && this.selectedArsenal !== null) {
-      if (this.nativePrimary() === null) throw new Error("Selected native arsenal requires a qualified original weapon profile");
+    if (this.source.kind === "q2-native" && this.selectedArsenal !== null && this.nativePrimary() !== null) {
       this.modClientApplications.subscribe(event => {
         if (event.application.scope !== "client-command") return undefined;
         if (event.phase === "before") {
@@ -817,9 +810,7 @@ export class SharedSimulation implements Simulation {
         return undefined;
       });
     }
-    if (this.source.kind === "q3-qvm" && this.selectedArsenal !== null) {
-      if (this.source.weapons === null || this.source.inventory === null || this.source.combat === null || this.source.pickups === null)
-        throw new Error("Selected QVM arsenal requires a complete qualified source profile");
+    if (this.source.kind === "q3-qvm" && this.selectedArsenal !== null && this.source.weapons !== null) {
       this.modClientApplications.subscribe(event => {
         if (event.application.scope !== "movement-slice") return undefined;
         if (event.phase === "before") this.qvmWeaponDecisions.push({ application: event.application, reached: false });
@@ -2710,7 +2701,20 @@ export class SharedSimulation implements Simulation {
     const guest = this.options.q3Guest;
     if (guest !== undefined) {
       const now = () => Math.trunc(this.timeSeconds * 1000);
+      // Without a qualified primary weapon interface the guest runs as a
+      // black box: its own weapons stay silent while a foreign weapon is
+      // active, exactly like the native command gating below.
+      const guestGame: { current: Q3QvmServerGame | null } = { current: null };
       const state = new Q3ServerState({ session: this.session, now, print: guest.print,
+        filterUserCommand: (slot, command) => {
+          const game = guestGame.current;
+          if (game === null || guest.prepared.primary.weapons !== null || this.selectedArsenal === null) return command;
+          const reference = game.records.reference(slot);
+          if (reference === null) return command;
+          const actor = this.actors.resolveOwned(reference);
+          if (actor === null || this.weaponSlots.get(actor.id)?.primarySelected() !== false) return command;
+          return { ...command, buttons: command.buttons & ~1 };
+        },
         settings: { gameType: guest.gameType ?? (recipe.match.provider === "q3:ctf" ? GameType.GT_CTF : this.options.mode === "singleplayer" ? 2 : 0), singlePlayer: this.options.mode === "singleplayer", maxClients: this.options.maxClients,
           mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
           ...(this.options.restore !== undefined || this.options.sourceRegistry === undefined ? {} : { sourceRegistry: this.options.sourceRegistry }),
@@ -2847,6 +2851,7 @@ export class SharedSimulation implements Simulation {
           return client;
         });
       }
+      guestGame.current = game;
       return { kind: "q3-qvm", game, catalog: sourceCatalog, combat: combatBindings, inventory: nativeInventory, weapons: primaryWeapons, pickups: pickupBindings };
     }
     if (this.options.preparedQuakeC !== undefined) {
@@ -4437,7 +4442,6 @@ export class SharedSimulation implements Simulation {
         if (this.grapple?.source.kind === "q3-qvm") this.grapple.source.game.pull(entry.player.actor);
         const scale = this.grapple?.gravityScale(entry.player.actor) ?? 1;
         const artifact = this.options.q3Guest?.prepared.artifact, definition = artifact === undefined ? null : q3GrappleProfile(artifact);
-        if (scale !== 1 && definition === null) throw new Error("Native Q3 equipment gravity requires a declared source Pmove entry");
         const remove = scale === 1 || definition === null ? null : guest.game.module.observeFunction({ kind: "qvm", module: definition.module, instructionIndex: definition.callbacks.playerMove }, call => {
           const movement = call.argument(0), pointer = guest.game.module.memory.view(movement, 4).getInt32(0, true);
           const expected = guest.game.data.checkpoint().clientsWord + entry.player.sourceEntity * definition.clientStride;
