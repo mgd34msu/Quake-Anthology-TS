@@ -86,6 +86,7 @@ import { LocalQ3ClientState } from "./q3-client/client-state.ts";
 import { StartupServerBrowser } from "./server-browser.ts";
 import { Q3BrowserView } from "../../network/q3/browser-view.ts";
 import { fromQ3UserCommand } from "../../network/q3/adapters.ts";
+import { wireQ3UserCommand } from "./simulation/q3-commands.ts";
 import type { Q3GuestOutput, Q3GuestMapTransition } from "./simulation/q3/guest-runtime.ts";
 import { serviceLoading } from "./loading.ts";
 import { UserFileStore } from "../../platform/files/writable.ts";
@@ -4598,10 +4599,7 @@ export class Application {
       const localCommands = paused ? [] : this.graphical?.input.build(frameMilliseconds, this.elapsed, this.frames, elapsedMilliseconds) ?? [];
       for (const command of localCommands) if (command.source.kind === "local-seat") {
         const state = this.localGuest?.seats.get(command.source.seat)?.state;
-        if (state !== undefined) {
-          if (command.command.kind !== "q3") throw new Error("Guest local input must use Q3 commands");
-          state.commands.append(fromQ3UserCommand(command.command));
-        }
+        if (state !== undefined) state.commands.append(command.command.kind === "q3" ? fromQ3UserCommand(command.command) : wireQ3UserCommand(command, this.elapsed, 0));
       }
       const progressedEvents: SimulationPresentationEvent[] = [], progressedRoundEvents: SimulationPresentationEvent[] = [];
       let pendingBeforeFrameEvents = beforeFrameEvents, displayedMilliseconds = this.elapsed - frameMilliseconds, progressedEventCount = 0;

@@ -884,7 +884,9 @@ export class QuakeCSource {
     const parameters = this.spawnParameters.get(slot);
     if (parameters === undefined) throw new Error("Native QuakeC client has no source spawn parameters");
     if (this.kind === "quakeworld") {
-      if (!this.preparedClients.has(slot)) throw new Error("QW begin requires completed source spawn preparation");
+      // Spawn preparation is an admission phase, not a caller obligation:
+      // network signon prepares explicitly, local admission prepares here.
+      if (!this.preparedClients.has(slot)) this.prepareClientSpawn(client);
     } else {
       words.bytes.fill(0);
       words.setFloat(this.field("colormap"), slot); words.setFloat(this.field("team"), 1);

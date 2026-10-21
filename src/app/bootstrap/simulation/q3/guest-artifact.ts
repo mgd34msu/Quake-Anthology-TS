@@ -22,16 +22,12 @@ export function assertQ3GuestRecipe(recipe: ExecutableRecipe, execution: Q3GameE
   const owner = recipe.map.entities;
   const same = (reference: typeof owner): boolean => reference.content === owner.content && reference.provider === owner.provider;
   if (execution.api.kind !== 'q3-qagame' || !same(execution.owner)
-    || recipe.execution.length !== 1 || recipe.execution[0] !== execution || owner.provider !== 'q3:official'
-    || recipe.campaign.kind !== 'none'
-    || recipe.movement.provider !== 'q3:movement' || recipe.movement.content !== owner.content
-    || recipe.character.definition.provider !== 'q3:character' || recipe.character.definition.content !== owner.content
-    || recipe.character.appearance.content !== owner.content || !recipe.character.appearance.provider.startsWith('q3:model/')
+    || recipe.execution.length !== 1 || recipe.execution[0] !== execution
     || recipe.weapons.length !== 1
     || ![recipe.engineBehavior, recipe.combat, recipe.inventory, recipe.match, recipe.transition].every(same)
     || recipe.enemies.kind !== 'map-defined'
     || recipe.timing.find(timing => timing.provider === owner.provider)?.clock.kind !== 'q3') {
-    throw new Error('Q3 bytecode requires one native Q3 server game, native movement and character, map-defined actors and supported source providers without campaign');
+    throw new Error('Q3 bytecode requires one native Q3 server game, map-defined actors and supported source providers');
   }
 }
 

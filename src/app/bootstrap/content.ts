@@ -207,9 +207,8 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
   options = resolveApplicationMovement(catalog, options);
   const product = catalog.require(options.product), family = product.expectation.family;
   const q3Guest = family === "q3" && presentationSource?.family !== "q3" && options.network.kind !== "q3-client" && !expectedProducts.some(builtin => builtin.id === sourceProgramProduct(catalog, product.id).expectation.id);
-  if (q3Guest && (!options.dedicated && options.network.kind !== "offline" || options.network.kind !== "native-server" && options.network.kind !== "offline" || options.mode !== "deathmatch"
-    || options.movement !== "q3" || options.character !== "q3"))
-    throw new Error("Selected Q3 mods require an offline local or dedicated server with native Q3 movement and character and deathmatch");
+  if (q3Guest && options.network.kind !== "native-server" && options.network.kind !== "offline")
+    throw new Error("Selected Q3 mods require an offline local or dedicated server");
   const quakeworld = product.expectation.edition === "quakeworld" && presentationSource?.family !== "qw" && options.network.kind !== "qw-client";
   const nativeProgram = selectedQuakeCProgram(catalog, options);
   if (selectedQ2GameLibrary(catalog, options) !== undefined && (family !== "q2" || options.movement !== "q2" || options.character !== "q2"
@@ -220,8 +219,10 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
     || options.network.kind !== "offline" && options.network.kind !== "native-server"
     || options.network.kind === "native-server" && options.character !== "q1"))
     throw new Error("--progs requires an offline/server NetQuake source world; native wire servers require Q1 character presentation");
-  if (quakeworld && (!options.dedicated || options.mode !== "deathmatch" || options.character !== "q1"
-    || options.q1Protocol !== undefined || options.network.kind !== "offline" && options.network.kind !== "native-server"))
+  // Serving real QuakeWorld wire clients keeps the native presentation
+  // requirements; local play runs the same program in the shared simulation.
+  if (quakeworld && options.network.kind === "native-server" && (!options.dedicated || options.mode !== "deathmatch" || options.character !== "q1"
+    || options.q1Protocol !== undefined))
     throw new Error("Native QuakeWorld requires dedicated deathmatch with Q1 character presentation and its native protocol");
   return selectedApplicationPreset(catalog, options, nativeSources, { quakeworld, q3Guest });
 }
@@ -450,7 +451,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
   for (const module of recipe.execution) {
     if (presentationSource?.kind === "unified") continue;
     if (module.kind === "qvm" && module.role === "server-game") {
-      if (!options.dedicated && options.network.kind !== "offline" || options.network.kind !== "native-server" && options.network.kind !== "offline" || options.mode !== "deathmatch")
+      if (options.network.kind !== "native-server" && options.network.kind !== "offline")
         throw new Error("Q3 bytecode requires offline local or dedicated Q3 server operation");
       assertQ3GuestRecipe(recipe, module);
       continue;
@@ -460,7 +461,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
       const nativeQw = product.edition === "quakeworld" && module.api.kind === "q1-quakeworld" && options.mode === "deathmatch"
         && (options.network.kind === "offline" || options.network.kind === "native-server") && options.q1Protocol === undefined;
       const nativeNq = catalog.product(recipe.map.entities.content).expectation.family === "q1" && module.api.kind === "q1-netquake" && (options.network.kind === "offline" || options.network.kind === "native-server");
-      if (nativeQw && !options.dedicated || !nativeQw && !nativeNq
+      if (!nativeQw && !nativeNq
         || options.network.kind !== "offline" && recipe.map.geometryContent !== recipe.map.entities.content || module.owner.provider !== recipe.map.entities.provider
         || module.owner.content !== recipe.map.entities.content || recipe.execution.length !== 1)
         throw new Error("QuakeC requires matching source actors and validated artifact; native network maps must belong to the source content and QuakeWorld requires dedicated operation");

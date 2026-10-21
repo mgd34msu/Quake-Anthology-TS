@@ -4,6 +4,7 @@ import { resolveQ3ArsenalControls } from "./arsenal-intent.ts";
 import type { ActorCommand } from "../../../contracts/session.ts";
 import type { UserCommand as SelectedCommand } from "../../../contracts/protocol.ts";
 import type { UserCommand } from "../../../content/q3/base/shared/player-state.ts";
+import type { WireUserCommand } from "../../../network/q3/message.ts";
 import type { MovementPlayer } from "./players.ts";
 
 /** Foreign local/bot input owns absolute aim; Q3 commands already contain source-relative words. */
@@ -37,6 +38,13 @@ export function q3CommandForControls(input: Pick<ActorCommand, "command">, milli
     forwardmove: axis(command.forwardMove), rightmove: axis(command.sideMove),
     upmove: command.kind === "q2-rerelease" ? (command.buttons & 8) !== 0 ? 127 : (command.buttons & 16) !== 0 ? -127 : 0
       : (command.kind === "q1-netquake" || command.kind === "q1-quakeworld") && (command.buttons & 2) !== 0 ? 127 : axis(command.upMove) };
+}
+
+/** Any selected command dialect as a Q3 wire command, for guest seams that only speak Q3. */
+export function wireQ3UserCommand(input: Pick<ActorCommand, "command">, milliseconds: number, weapon: number): WireUserCommand {
+  const converted = q3CommandForControls(input, milliseconds, { requestedWeapon: weapon, useHoldable: false });
+  return { serverTime: converted.serverTime, angles: [converted.angles.x, converted.angles.y, converted.angles.z],
+    buttons: converted.buttons, weapon: converted.weapon, forwardmove: converted.forwardmove, rightmove: converted.rightmove, upmove: converted.upmove };
 }
 
 /** Source spawn/inactivity frames can supply commands without a new transport packet. */

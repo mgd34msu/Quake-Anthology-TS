@@ -233,7 +233,7 @@ import type { ClientMovementOptions, ClientMovementResult } from "./q3/types.ts"
 import { Q3SourceRuntime, createQ3SourceHost, readQ3MovementState, writeQ3MovementState, writeQ3CharacterAnimation,
   readQ3MovementEnvironment, readQ3ArsenalRuntime, writeQ3ArsenalRuntime, applyQ3CommandPolicy } from "./q3/index.ts";
 import { CommandButtons, MoveFlags, MoveType, PlayerAnimation } from "../../../movement/q3/constants.ts";
-import { q3SourceCommand, relativeQ3SourceCommand, relativeMovementCommand, selectedQ3Command } from "./q3-commands.ts";
+import { q3SourceCommand, relativeQ3SourceCommand, relativeMovementCommand, selectedQ3Command, wireQ3UserCommand } from "./q3-commands.ts";
 import { q3SourceAnimation, q3SourceTorso, runQ3TorsoOperation } from "../../../movement/q3/animation.ts";
 import { createQ1MonsterMovement } from "../../../movement/q1/index.ts";
 import type { Q1MonsterMovement } from "../../../movement/q1/monsters.ts";
@@ -553,8 +553,7 @@ export class SharedSimulation implements Simulation {
     const qvm = options.recipe.execution.find(module => module.kind === "qvm" && module.role === "server-game");
     if (qvm !== undefined) {
       assertQ3GuestRecipe(options.recipe, qvm);
-      if (options.mode !== "deathmatch"
-        || options.q3Guest === undefined || !isDeepStrictEqual(qvm, options.q3Guest.prepared.execution)
+      if (options.q3Guest === undefined || !isDeepStrictEqual(qvm, options.q3Guest.prepared.execution)
         || options.travel !== undefined || options.q3Session !== undefined
         || options.restore === undefined && (options.restoredClients?.length ?? 0) !== 0
         || options.initialSourceMilliseconds !== undefined && (!Number.isSafeInteger(options.initialSourceMilliseconds) || options.initialSourceMilliseconds < 0 || options.initialSourceMilliseconds > 0x7fffffff))
@@ -572,12 +571,12 @@ export class SharedSimulation implements Simulation {
     if (quakec !== undefined) {
       const nativeMap = quakec.api.kind === "q1-quakeworld" ? options.recipe.map.entities.content.startsWith("q1:quakeworld:")
         : options.recipe.map.entities.content.startsWith("q1:");
-      if (quakec.api.kind === "q1-quakeworld" && options.dedicated !== true || options.preparedQuakeC === undefined || !isDeepStrictEqual(quakec, options.preparedQuakeC.execution)
+      if (options.preparedQuakeC === undefined || !isDeepStrictEqual(quakec, options.preparedQuakeC.execution)
         || options.recipe.execution.length !== 1 || !nativeMap
         || options.recipe.enemies.kind !== "map-defined")
-        throw new Error("QuakeC simulation requires the prepared dedicated native supported artifact and map-defined actors");
-      if (quakec.api.kind === "q1-quakeworld" && (options.mode !== "deathmatch" || options.maxClients > 32))
-        throw new Error("Native QuakeWorld requires deathmatch, at most 32 clients and QuakeWorld movement");
+        throw new Error("QuakeC simulation requires the prepared native supported artifact and map-defined actors");
+      if (quakec.api.kind === "q1-quakeworld" && options.maxClients > 32)
+        throw new Error("Native QuakeWorld supports at most 32 clients");
       if (options.travel !== undefined && (options.restore !== undefined || options.travel.source.kind !== (quakec.api.kind === "q1-quakeworld" ? "quakeworld" : "netquake"))
         || options.restore === undefined && (options.restoredClients?.length ?? 0) !== 0
         || options.originalSaveCandidate !== true && options.initialSourceMilliseconds !== undefined && options.initialSourceMilliseconds !== 1000)
@@ -3744,9 +3743,8 @@ export class SharedSimulation implements Simulation {
     }
     if (source.kind === "quakec") {
       if (travel !== undefined && travel.source.kind !== source.game.kind
-        || this.options.dedicated === true && providerFamily(this.recipe.character.definition.provider) !== "q1"
-        || source.game.kind === "quakeworld" && this.options.dedicated !== true)
-        throw new Error("QC clients require matching source travel; native QuakeWorld requires dedicated operation and native wire servers require Q1 character presentation");
+        || this.options.dedicated === true && providerFamily(this.recipe.character.definition.provider) !== "q1")
+        throw new Error("QC clients require matching source travel and native wire servers require Q1 character presentation");
       if (userinfo !== undefined) source.game.setClientInfo(client, q2Userinfo(userinfo));
       const actor = source.game.admitClient(client), body = this.bodies.read(actor.id);
       if (body === null) throw new Error("QC reserved client has no shared body");
@@ -4416,19 +4414,21 @@ export class SharedSimulation implements Simulation {
     const guest = this.source.game;
     const seen = new Set<ActorId>();
     const commands = input.commands.map(command => {
-      if (command.source.kind !== "local-seat" || command.command.kind !== "q3" || command.arsenal !== undefined && this.selectedArsenal === null
+      if (command.source.kind !== "local-seat" || command.arsenal !== undefined && this.selectedArsenal === null
         || !this.options.identity.owns(command.source.seat) || !this.options.identity.owns(command.source.client))
-        throw new Error("Q3 guest local input requires an owned seat and native Q3 command");
+        throw new Error("Q3 guest local input requires an owned seat");
       const player = guest.player(command.source.client);
       if (player === null || !player.actor.equals(command.actor) || seen.has(player.actor))
         throw new Error("Q3 guest local input must target its admitted player once per frame");
       seen.add(player.actor);
       this.observeClientCommand(command);
       this.requireEquipmentPlayer(player.actor);
-      this.grapple?.setJump(player.actor, command.command.upMove > 0);
+      this.grapple?.setJump(player.actor, command.command.kind === "q2-rerelease" ? (command.command.buttons & 8) !== 0 : command.command.upMove > 0);
       const slot = this.weaponSlots.get(player.actor);
       if (this.grapple?.selection.binding === "slot") this.grapple.input(player.actor, slot?.equipmentSelected() === true && (command.command.buttons & 1) !== 0);
-      const native = fromQ3UserCommand(command.command), requested = this.nativeWeaponRequests.get(player.actor);
+      const requested = this.nativeWeaponRequests.get(player.actor);
+      const native = command.command.kind === "q3" ? fromQ3UserCommand(command.command)
+        : wireQ3UserCommand(command, Math.trunc(this.timeSeconds * 1000), requested ?? 0);
       return { player, command: { ...native, buttons: this.selectedArsenal === null && slot?.primarySelected() === false ? native.buttons & ~1 : native.buttons, ...(requested === undefined ? {} : { weapon: requested }) } };
     });
     const profile = providerTiming(this.recipe, this.recipe.map.entities.provider).clock;
