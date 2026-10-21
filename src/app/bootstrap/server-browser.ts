@@ -74,16 +74,17 @@ export class StartupServerBrowser {
   static async open(config: ConfigStore): Promise<StartupServerBrowser> {
     const transport = await UdpTransport.bind({ host: "0.0.0.0", port: 0, broadcast: true });
     const result = new StartupServerBrowser(transport, config);
+    // Text that is not JSON at all behaves like the absent saved list;
+    // parsed lists still face their validation below.
+    const isJsonText = (text: string): boolean => { try { const value: unknown = JSON.parse(text); return value !== undefined; } catch { return false; } };
     try {
-      // An undecodable saved list behaves like the absent one.
-      for (const protocol of protocols) { const saved = await config.loadText(`servers-${protocol}`); if (saved !== null && saved.length <= 65536) { try { result.browser(protocol).restoreFavorites(saved); for (const address of result.browser(protocol).favoriteAddresses()) browserAddress(address); } catch { continue; } } }
+      for (const protocol of protocols) { const saved = await config.loadText(`servers-${protocol}`); if (saved !== null && isJsonText(saved)) { if (saved.length > 65536) throw new Error("Saved server list is too large"); result.browser(protocol).restoreFavorites(saved); for (const address of result.browser(protocol).favoriteAddresses()) browserAddress(address); } }
       for (const protocol of protocols) {
         const master = await config.loadText(`servers-master-${protocol}`);
         if (master !== null && master.trim().length <= 2048) result.masterAddresses.set(protocol, master.trim());
         const saved = await config.loadText(`servers-direct-${protocol}`);
-        if (saved === null) continue;
-        let servers: ReturnType<typeof readDirectServers>;
-        try { servers = readDirectServers(saved); } catch { continue; }
+        if (saved === null || !isJsonText(saved)) continue;
+        const servers = readDirectServers(saved);
         result.directServers.set(protocol, servers);
         for (const server of servers) result.browser(protocol).add(server.address, "direct");
         const last = servers[0];
@@ -162,9 +163,12 @@ export class StartupServerBrowser {
       const generation = this.generation, saved = await this.config.loadText("servers-cache-q3");
       this.assertGeneration(generation, true); assertCurrent();
       if (saved === null) return;
-      // The browser cache is disposable: undecodable means no cache.
-      let cache: ReturnType<typeof readQ3BrowserCache>;
-      try { cache = readQ3BrowserCache(saved); } catch { return; }
+      // A cache that is not JSON at all means no cache; parsed caches
+      // still face version and shape validation.
+      let parsedCache: unknown;
+      try { parsedCache = JSON.parse(saved); } catch { return; }
+      if (parsedCache === undefined) return;
+      const cache = readQ3BrowserCache(saved);
       const live = new Map(this.browser("q3").list().filter(entry => entry.status !== null).map(entry => [addressKey(entry.address), entry]));
       for (const source of [1, 2, 3] satisfies readonly Q3BrowserSource[]) this.clearQ3(source);
       this.masterEpoch++; this.master = null;

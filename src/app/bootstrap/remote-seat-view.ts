@@ -77,6 +77,7 @@ export class RemoteSeatView {
     const effects = new ApplicationEffects(assets, remote.scene, actor => remote.isPlayer(actor), options.options.seed);
     let ui: ApplicationSeatUi | null = null, q3: ApplicationQ3Client | null = null;
     try {
+      options.assertCurrent();
       if(ownsAssets)await assets.loadWorld();
       const font=ownsAssets ? await assets.loadConsoleFont() : options.font;
       const typography = await assets.loadMenuTypography(); options.assertCurrent();

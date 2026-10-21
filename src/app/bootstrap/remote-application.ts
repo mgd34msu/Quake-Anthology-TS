@@ -2037,27 +2037,34 @@ export class RemoteApplication {
     const controls = this.controls, frontend = this.frontend, remote = peer.source.remote;
     const content=peer.loadedContent;
     if (peer.closed || peer.view !== null || controls === null || frontend === null || content===null || this.primaryPeer !== peer && this.presentation === null) return;
-    const player = connection !== undefined && remote instanceof Q3RemotePresentation ? remote.admittedPlayer : remote.player;
-    if (player === null || connection === undefined && remote.output === null) return;
-    const generation = this.worldLoadGeneration;
-    const assertCurrent = (): void => { if (peer.closed || this.closed || this.closing || generation !== this.worldLoadGeneration || this.controls !== controls || this.frontend !== frontend) throw new Error("Remote seat presentation was replaced"); };
-    const players = [...controls.locals.filter(local => !local.player.seat.id.equals(peer.seat.id)).map(local=>local.player), {seat:peer.seat,actor:player.actor}].sort((a,b)=>a.seat.id.equals(this.seatId)?-1:b.seat.id.equals(this.seatId)?1:a.seat.id.index-b.seat.id.index);
-    const prepared = await controls.prepareLocalSeats(players.map(player=>player.seat)); assertCurrent();
-    prepared.publish(players,this.ownership.kind === "borrowed" ? this.ownership.client : undefined,{playerView: actor=>this.sourceForActor(actor).playerView(actor)},"retain");
-    const local = controls.locals.find(local=>local.player.seat.id.equals(peer.seat.id));
-    if (local === undefined) throw new Error("Remote input publication lost its admitted seat");
-    const cvars = this.configuration.seatSources.get(peer.seat.id);
-    if (cvars === undefined) throw new Error("Remote seat presentation lost its registry");
-    const q3 = connection === undefined ? null : this.q3Browser !== null && this.keyProfile !== null
-      ? {connection,browser:this.q3Browser,keys:this.keyProfile} : (()=>{throw new Error("Q3 remote seat has no guest services");})();
-    const view = await RemoteSeatView.prepare({ local,controls,source:peer.source,cvars,assets:frontend.assets,content,art:frontend.art,font:frontend.font,audio:frontend.audio,
-      renderer:this.renderer,images:this.imageSettings,view:this.viewSettings,options:this.options,q3,systemCinematics:this.componentCinematics(frontend.audio),
-      viewport:()=>this.seatViewport(peer.seat.id),count:()=>controls.locals.length,index:()=>controls.locals.indexOf(local),now:()=>performance.now(),assertCurrent,
-      quit:()=>this.requestQuit(),execute:(name,args)=>this.queueCommand(name,args,peer.seat.id),print:text=>this.print(text) });
-    try { assertCurrent(); view.publish(controls.locals.indexOf(local),controls.locals.length); peer.view=view;
-      if(view.presentation.q3Client!==null && this.viewSettings.override!==null)view.presentation.q3Client.cvars.set("cg_fov",String(this.viewSettings.fieldOfView)); this.publishRemoteLayouts(); }
-    catch(error){await view.close();throw error;}
-    if(connection!==undefined){const pure=peer.source.pureCommand(nativeAtoi(q3InfoValue(connection.gameState.get(1)??"","sv_serverid")));if(pure!==null)connection.reliable.add(pure);}
+    try {
+      const player = connection !== undefined && remote instanceof Q3RemotePresentation ? remote.admittedPlayer : remote.player;
+      if (player === null || connection === undefined && remote.output === null) return;
+      const generation = this.worldLoadGeneration;
+      const assertCurrent = (): void => { if (peer.closed || this.closed || this.closing || generation !== this.worldLoadGeneration || this.controls !== controls || this.frontend !== frontend) throw new Error("Remote seat presentation was replaced"); };
+      const players = [...controls.locals.filter(local => !local.player.seat.id.equals(peer.seat.id)).map(local=>local.player), {seat:peer.seat,actor:player.actor}].sort((a,b)=>a.seat.id.equals(this.seatId)?-1:b.seat.id.equals(this.seatId)?1:a.seat.id.index-b.seat.id.index);
+      const prepared = await controls.prepareLocalSeats(players.map(player=>player.seat)); assertCurrent();
+      prepared.publish(players,this.ownership.kind === "borrowed" ? this.ownership.client : undefined,{playerView: actor=>this.sourceForActor(actor).playerView(actor)},"retain");
+      const local = controls.locals.find(local=>local.player.seat.id.equals(peer.seat.id));
+      if (local === undefined) throw new Error("Remote input publication lost its admitted seat");
+      const cvars = this.configuration.seatSources.get(peer.seat.id);
+      if (cvars === undefined) throw new Error("Remote seat presentation lost its registry");
+      const q3 = connection === undefined ? null : this.q3Browser !== null && this.keyProfile !== null
+        ? {connection,browser:this.q3Browser,keys:this.keyProfile} : (()=>{throw new Error("Q3 remote seat has no guest services");})();
+      const view = await RemoteSeatView.prepare({ local,controls,source:peer.source,cvars,assets:frontend.assets,content,art:frontend.art,font:frontend.font,audio:frontend.audio,
+        renderer:this.renderer,images:this.imageSettings,view:this.viewSettings,options:this.options,q3,systemCinematics:this.componentCinematics(frontend.audio),
+        viewport:()=>this.seatViewport(peer.seat.id),count:()=>controls.locals.length,index:()=>controls.locals.indexOf(local),now:()=>performance.now(),assertCurrent,
+        quit:()=>this.requestQuit(),execute:(name,args)=>this.queueCommand(name,args,peer.seat.id),print:text=>this.print(text) });
+      try { assertCurrent(); view.publish(controls.locals.indexOf(local),controls.locals.length); peer.view=view;
+        if(view.presentation.q3Client!==null && this.viewSettings.override!==null)view.presentation.q3Client.cvars.set("cg_fov",String(this.viewSettings.fieldOfView)); this.publishRemoteLayouts(); }
+      catch(error){await view.close();throw error;}
+      if(connection!==undefined){const pure=peer.source.pureCommand(nativeAtoi(q3InfoValue(connection.gameState.get(1)??"","sv_serverid")));if(pure!==null)connection.reliable.add(pure);}
+    } catch (error) {
+      // A seat retired while its view was still binding ends quietly,
+      // like the closed-seat guard at entry; live failures still throw.
+      if (peer.closed || this.closed || this.closing) return;
+      throw error;
+    }
   }
 
   private pollRemoteSeats(now: number): void {
