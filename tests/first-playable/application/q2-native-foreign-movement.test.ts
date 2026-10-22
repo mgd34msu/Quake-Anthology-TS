@@ -65,6 +65,45 @@ test("classic native DLL runs with Quake 1 movement interposed at Pmove", async 
   expect(lane.health).toBeGreaterThan(0);
 }, 240_000);
 
+test("classic native DLL with Q3 movement turns, jumps, crouches and stands", async () => {
+  const root = await mkdtemp(join(tmpdir(), "quake-native-foreign-actions-"));
+  let app: Application | null = null;
+  try {
+    const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--q2-game", "gamex86.dll",
+      "--movement", "q3", "--character", "q2", "--renderer", "cpu", "--hidden",
+      "--width", "320", "--height", "240", "--user-content-root", root]);
+    if (parsed.kind !== "run") throw new Error("Missing launch options");
+    app = await Application.open(parsed.options, { saveDirectory: join(root, "saves"), print: () => undefined });
+    const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
+    if (app.simulation.q2Native() === null) throw new Error("Native source was not admitted");
+    const key = (code: number, down: boolean): void => { app?.input({ seat: local.seat.id, kind: "key", code, down, repeat: false, timeMilliseconds: performance.now() }); };
+    const view = () => { const v = app?.simulation.playerView(local.actor); if (v === undefined) throw new Error("Missing view"); return v; };
+    for (let i = 0; i < 20; i++) await app.step(50);
+    const standingHeight = view().viewHeight, spawnYaw = view().angles.y;
+    // Mouse yaw must reach the guest player state through the interposed
+    // Pmove: aim comes from this frame's command, not last frame's state.
+    app.input({ seat: local.seat.id, kind: "mouse-motion", position: { x: 0, y: 0 }, delta: { x: 400, y: 0 }, timeMilliseconds: performance.now() });
+    for (let i = 0; i < 4; i++) await app.step(50);
+    expect(Math.abs(view().angles.y - spawnYaw)).toBeGreaterThan(10);
+    // Jump leaves and returns to the floor.
+    const groundZ = view().origin.z;
+    key(32, true);
+    let peakZ = groundZ;
+    for (let i = 0; i < 20; i++) { await app.step(50); peakZ = Math.max(peakZ, view().origin.z); if (i === 2) key(32, false); }
+    expect(peakZ - groundZ).toBeGreaterThan(20);
+    expect(view().origin.z).toBeCloseTo(groundZ, 0);
+    // Crouch (the game profile binds it to C) lowers the eye, and releasing
+    // it stands back up instead of sticking at crouch height.
+    key(99, true);
+    for (let i = 0; i < 10; i++) await app.step(50);
+    expect(view().viewHeight).toBeLessThan(standingHeight);
+    key(99, false);
+    for (let i = 0; i < 10; i++) await app.step(50);
+    expect(view().viewHeight).toBe(standingHeight);
+    expect(app.simulation.playerUi(local.actor).health).toBeGreaterThan(0);
+  } finally { try { await app?.close(); } finally { await rm(root, { recursive: true, force: true }); } }
+}, 240_000);
+
 test("rerelease native DLL runs with Quake 1 movement interposed at Pmove", async () => {
   const lane = await runLane("q2-rerelease-baseq2", "game_x64.dll", "q1");
   expect(lane.artifact).toBe("game_x64.dll");

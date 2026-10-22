@@ -6303,7 +6303,7 @@ export class SharedSimulation implements Simulation {
       accepted: actor => this.modClientCommands.get(actor) ?? null, frame: () => this.sourceFrame,
       originalCommand: (identity, command) => this.selectedArsenal === null || this.requireNativeWeapons().continuing(identity.actor)
         ? command : { ...command, buttons: command.buttons & ~1 },
-      movement: (identity, projection, command, run) => {
+      movement: (identity, projection, command, aim, run) => {
         const velocity = this.nativeEquipmentVelocity.get(identity.actor);
         if (velocity !== undefined) { projection.write({ ...projection.read(), velocity }); this.nativeEquipmentVelocity.delete(identity.actor); }
         const owned = this.actors.resolveOwned(identity.actor), player = owned === null ? undefined : this.nativeMovementPlayers.get(owned);
@@ -6333,7 +6333,6 @@ export class SharedSimulation implements Simulation {
             }
           }
           if (this.selectedArsenal?.has(identity.actor) === true) player.arsenal = this.arsenal(player);
-          const aim = this.playerView(identity.actor).angles;
           const serverTime = Math.trunc(this.timeSeconds * 1000) + command.milliseconds;
           const converted = selectedNativeCommand(command, aim, player, serverTime);
           let input: ActorCommand = { actor: identity.actor, sequence: player.lastSequence + 1,

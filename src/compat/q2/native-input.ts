@@ -62,8 +62,11 @@ export interface NativeInputServices {
   originalCommand?(identity: ModClientIdentity, command: NativeCommand): NativeCommand;
   /** One guest Pmove call. `run` executes the guest's own movement; a
    * foreign selected movement provider may step instead and project its
-   * result through `projection` without calling `run`. */
-  movement(identity: ModClientIdentity, projection: NativeInputMotion, command: NativeCommand, run: () => GuestCallResult): GuestCallResult;
+   * result through `projection` without calling `run`. `aim` is the
+   * absolute view Pmove computes from this command plus delta_angles;
+   * the guest player state still holds the previous frame's angles
+   * during the call, so it must never be read as the current aim. */
+  movement(identity: ModClientIdentity, projection: NativeInputMotion, command: NativeCommand, aim: Vec3, run: () => GuestCallResult): GuestCallResult;
 }
 type NativeInputSource = ({ readonly edition: "classic"; readonly host: ClassicQ2GuestHost }
   | { readonly edition: "rerelease"; readonly host: RereleaseGuestModule }) & { retire(slot: number, identity: ModClientIdentity): void };
@@ -287,7 +290,7 @@ export class NativeInputBinding {
         }
         return undefined;
       } };
-    return this.services.movement(scope.identity, projection, command, () => this.services.applications.active
+    return this.services.movement(scope.identity, projection, command, this.aim(command, view), () => this.services.applications.active
       ? this.apply(scope, "movement-slice", command, view, cmd, () => {
         const result = this.runBody(scope, run); moved = true; return result;
       }) : this.runBody(scope, run));

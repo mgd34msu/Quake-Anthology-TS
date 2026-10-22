@@ -101,6 +101,18 @@ test.skipIf(!existsSync(archivePath))("retail q3dm1 movement uses shared collisi
     expect(crouch.viewHeight).toBe(12);
     expect(crouch.state.commandTimeMilliseconds).toBe(198);
     expect(crouch.state.predictableEventSequence).toBeGreaterThan(0);
+    // A repeated command time runs no substep; it must keep the current
+    // hull instead of collapsing the player to a point.
+    const repeated = provider.move({ ...input, state: crouch.state, currentBounds: crouch.bounds, commandSequence: 4,
+      command: { ...input.command, serverTimeMilliseconds: 198, upMove: 0 } }, services);
+    if (repeated.status !== "active") throw new Error("Actor was removed during repeated command");
+    expect(repeated.bounds).toEqual(crouch.bounds);
+    // Releasing crouch stands back up with the standing eye height.
+    const stood = provider.move({ ...input, state: crouch.state, currentBounds: crouch.bounds, commandSequence: 5,
+      command: { ...input.command, serverTimeMilliseconds: 264, buttons: 0, upMove: 0 } }, services);
+    if (stood.status !== "active") throw new Error("Actor was removed during stand");
+    expect(stood.bounds).toEqual(Q3_SOURCE_STANDING_BOUNDS);
+    expect(stood.viewHeight).toBe(Q3_SOURCE_POSTURES.standingViewHeight);
     const authored = provider.move({ ...input, command: { ...input.command, upMove: 0 }, environment: { ...input.environment, clientOutputs: { stance: true } } }, services);
     if (authored.status !== "active") throw new Error("Player removed");
     expect(authored.bounds).toEqual(crouch.bounds); expect(authored.viewHeight).toBe(crouch.viewHeight);

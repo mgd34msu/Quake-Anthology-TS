@@ -303,7 +303,7 @@ test.skipIf(!available)("retail external player velocity enters source Pmove and
     applications, bodyBounds: () => body().bounds, clientOutputs: () => requestedBody === undefined ? null : { bodyBounds: requestedBody },
     identity: slot => slot === 1 ? clientIdentity : null, live: identity => identity.actor.equals(actor.id), accepted: () => null,
     frame: () => ({ frame: 0, time: { kind: "milliseconds", value: 0 }, elapsed: { kind: "milliseconds", value: 25 }, phase: "client-command" }),
-    onRelease: () => () => undefined, retired: () => undefined, movement: (_identity, _projection, _command, run) => run(),
+    onRelease: () => () => undefined, retired: () => undefined, movement: (_identity, _projection, _command, _aim, run) => run(),
     numeric: createNumericOperations({ id: "q2-rerelease:source-f32", arithmetic: { kind: "binary32", round: "each-operation" }, scalarStorage: "binary32", floatToInt: "checked-c-truncation", integerOverflow: "wrap32" }),
   });
   try {

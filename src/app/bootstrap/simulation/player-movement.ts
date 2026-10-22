@@ -46,7 +46,9 @@ export function playerStandingBounds(character: GameFamily): Bounds {
   return character === "q3" ? Q3_SOURCE_STANDING_BOUNDS : { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
 }
 export function playerPostures(player: Pick<MovementPlayer, "character" | "standingBounds" | "viewHeight">): Q3Postures {
-  return player.character === "q3" ? Q3_SOURCE_POSTURES : { standingViewHeight: player.viewHeight,
+  // Standing eye height is a character constant; snapshotting the player's
+  // current view height here would freeze the crouched eye level forever.
+  return player.character === "q3" ? Q3_SOURCE_POSTURES : { standingViewHeight: 22,
     crouched: { bounds: { min: player.standingBounds.min, max: { ...player.standingBounds.max, z: 4 } }, viewHeight: -2 },
     dead: { bounds: { min: player.standingBounds.min, max: { ...player.standingBounds.max, z: -8 } }, viewHeight: -16 },
     invulnerabilityExpanded: Q3_SOURCE_POSTURES.invulnerabilityExpanded };

@@ -512,7 +512,9 @@ export function movePlayer(state: Q3Motion, command: Q3Command, options: Q3Motio
   }
   const fixed = options.fixedMsec ?? 66;
   if (!Number.isInteger(fixed) || fixed < 1 || fixed > 0x7fffffff) throw new RangeError("Movement step must be a positive signed 32-bit integer");
-  let result: Q3MotionResult = { contacts: [], bounds: zeroBounds, waterlevel: 0, watertype: 0, xyspeed: 0 };
+  // A command whose time does not advance runs no substep; the result must
+  // still report the hull the player currently occupies, never a point.
+  let result: Q3MotionResult = { contacts: [], bounds: options.currentBounds ?? options.standingBounds, waterlevel: 0, watertype: 0, xyspeed: 0 };
   const finalTime = command.serverTime;
   if (finalTime < state.commandTime) return result;
   if (finalTime > state.commandTime + 1000) state.commandTime = finalTime - 1000;
