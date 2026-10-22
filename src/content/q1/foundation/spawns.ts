@@ -12,6 +12,14 @@ import { spawnButton, spawnDoor, spawnPlat, spawnSecretDoor } from "./movers.ts"
 import { pathEndTime, spawnMonster } from "./monsters.ts";
 export { linkDoors } from "./movers.ts";
 
+/** An authored classname with no Q1 spawn implementation. Foreign-world
+ * hosts catch this to hand the entity to its authored-family adjunct. */
+export class UnknownQ1SpawnError extends Error {
+  constructor(readonly classname: string, readonly sourceOrdinal: number | null) {
+    super(`Q1 official spawn not yet implemented: ${classname} at source entity ${sourceOrdinal}`);
+  }
+}
+
 function initTrigger(game: Q1EntityServices, entity: Q1Actor): undefined {
   const angles = game.body(entity).angles;
   entity.movedir = angles.x === 0 && angles.y === 0 && angles.z === 0 ? ZERO : moveDirection(angles, game);
@@ -122,7 +130,7 @@ export function spawnMapActor(game: Q1EntityServices, entity: Q1Actor): undefine
     case "ambient_comp_hum": case "ambient_drone": if (game.usesId1Precaches) game.precacheSound(entity.classname === "ambient_comp_hum" ? "ambience/comp1.wav" : "ambience/drone6.wav"); game.host.emit({ kind: "ambient", origin: game.body(entity).origin, path: entity.classname === "ambient_comp_hum" ? "ambience/comp1.wav" : "ambience/drone6.wav", volume: entity.classname === "ambient_comp_hum" ? 1 : 0.5, attenuation: 3 }); return undefined;
     case "misc_explobox": case "misc_explobox2": return spawnBarrel(game, entity);
     case "monster_army": case "monster_dog": return spawnMonster(game, entity);
-    default: throw new Error(`Q1 official spawn not yet implemented: ${entity.classname} at source entity ${entity.sourceOrdinal}`);
+    default: throw new UnknownQ1SpawnError(entity.classname, entity.sourceOrdinal);
   }
 }
 

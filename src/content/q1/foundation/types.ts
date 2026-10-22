@@ -142,6 +142,9 @@ export interface Q1FoundationOptions {
   readonly inventoryProvider: ProviderId;
   readonly gravity: number;
   readonly maxClients?: number;
+  /** Foreign-authored map: classes without a Q1 spawn are reported in the
+   * spawn report for an authored-family adjunct instead of failing load. */
+  readonly foreignWorld?: boolean;
   readonly noExit?: 0 | 1 | 2;
   readonly teamplay?: number;
   readonly aimThreshold?: number;

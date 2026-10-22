@@ -94,6 +94,12 @@ export class Q1SourceComposition {
     const name = map.source.replace(/^.*[/\\]/u, "").replace(/\.bsp$/u, "");
     this.services.setCvar("sv_gravity", name === "e1m8" ? "100" : "800"); return this.game.spawnMap(map);
   }
+  /** Spawn authored entities against foreign geometry, or an adjunct's
+   * kept ordinals of an authored list. */
+  spawnEntities(entityList: Parameters<Q1Foundation["spawnEntities"]>[0], modelBounds: Parameters<Q1Foundation["spawnEntities"]>[1],
+    mapName: string, keep: ReadonlySet<number> | null = null) {
+    this.services.setCvar("sv_gravity", mapName === "e1m8" ? "100" : "800"); return this.game.spawnEntities(entityList, modelBounds, mapName, keep);
+  }
   private ctfServices(): Q1CtfServices {
     const { game, clients, services } = this;
     return {
