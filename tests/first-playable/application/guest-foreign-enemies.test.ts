@@ -174,4 +174,76 @@ describe("selected enemies on guest worlds", () => {
     expect(application.simulation.presentations().length).toBe(before);
     for (let step = 0; step < 10; step++) await application.step(50);
   }, 300_000);
+
+  // The remaining TS-primary foreign lanes: the selected TS source keeps
+  // players/match while the authored family's own modules spawn and step
+  // everything the primary has no classes for.
+  async function foreignLane(args: string[], authoredFamily: "q1" | "q2",
+    sourceCheck: (app: Application) => boolean): Promise<void> {
+    const corpus = testCorpusRoot();
+    const laneDirectory = await mkdtemp(join(tmpdir(), "foreign-world-ts-"));
+    directory = laneDirectory;
+    const parsed = parseApplicationCommand(["--content-root", corpus, ...args, "--user-content-root", laneDirectory]);
+    if (parsed.kind !== "run") throw new Error("Missing foreign lane options");
+    const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+    const q1Source = q1MonsterSources.find(source => source.edition === "classic");
+    if (q1Source === undefined) throw new Error("Missing Q1 classic monster source");
+    application = await Application.open(parsed.options, { saveDirectory: join(laneDirectory, "saves"), print: () => undefined },
+      await recipe(catalog, parsed.options, q1Source.provider, "q1-classic-id1", "monster_army"));
+    const simulation = application.simulation;
+    expect(sourceCheck(application)).toBe(true);
+    const admission = simulation.admitPlayer(application.session.createClient(0).id);
+    const player = simulation.actors.resolveOwned(admission.actor);
+    if (player === null) throw new Error("Admitted player missing");
+    for (let step = 0; step < 20; step++) await application.step(50);
+    const data = selectedData(application);
+    expect(data.authored.length).toBeGreaterThanOrEqual(5);
+    const adjunctPresentations = simulation.presentations().filter(entry => entry.family === authoredFamily);
+    expect(adjunctPresentations.length).toBeGreaterThanOrEqual(15);
+    // A replaced authored monster engages a teleported player.
+    let health = 10000;
+    for (const entry of data.authored) {
+      if (health < 10000) break;
+      const monster = simulation.actors.resolveSaved(entry.actor);
+      if (monster === null) continue;
+      const monsterBody = simulation.bodies.read(monster.id), current = simulation.bodies.read(player.id);
+      if (monsterBody === null || current === null) continue;
+      simulation.combat.setHealth(player, 10000);
+      const dx = current.origin.x - monsterBody.origin.x, dy = current.origin.y - monsterBody.origin.y;
+      const length = Math.hypot(dx, dy) || 1;
+      simulation.bodies.write(player, { ...current, origin: {
+        x: monsterBody.origin.x + dx / length * 60, y: monsterBody.origin.y + dy / length * 60, z: monsterBody.origin.z } });
+      simulation.bodies.link(player);
+      for (let step = 0; step < 80 && health >= 10000; step++) {
+        await application.step(50);
+        health = Math.min(health, simulation.playerUi(admission.actor).health);
+      }
+    }
+    expect(health).toBeLessThan(10000);
+    const before = simulation.presentations().length;
+    const save = join(laneDirectory, "saves", "foreign-ts.sav");
+    await application.saveGame(save);
+    await application.loadGame(save);
+    expect(sourceCheck(application)).toBe(true);
+    expect(application.simulation.presentations().length).toBe(before);
+    for (let step = 0; step < 10; step++) await application.step(50);
+  }
+
+  test("TS Q3 source hosts a Q1 map through the foreign world adjunct", async () => {
+    await foreignLane(["--game", "q3-baseq3", "--map-game", "q1-classic-id1", "--map", "e1m1",
+      "--movement", "q3", "--character", "q3", "--mode", "singleplayer", "--dedicated"],
+      "q1", app => app.simulation.q3Source() !== null);
+  }, 300_000);
+
+  test("TS Q1 source hosts a Q2 map through the foreign world adjunct", async () => {
+    await foreignLane(["--game", "q1-classic-id1", "--map-game", "q2-classic-baseq2", "--map", "base1",
+      "--movement", "q1", "--character", "q1", "--mode", "singleplayer", "--dedicated"],
+      "q2", app => app.simulation.q1Source() !== null);
+  }, 300_000);
+
+  test("TS Q2 source hosts a Q1 map through the foreign world adjunct", async () => {
+    await foreignLane(["--game", "q2-classic-baseq2", "--map-game", "q1-classic-id1", "--map", "e1m1",
+      "--movement", "q2", "--character", "q2", "--mode", "singleplayer", "--dedicated"],
+      "q1", app => app.simulation.q2Source() !== null);
+  }, 300_000);
 });

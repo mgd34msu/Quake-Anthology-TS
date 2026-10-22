@@ -74,6 +74,23 @@ export function readForeignQ2WorldCheckpoint(reader: SaveReader): ForeignQ2World
     packs: reader.field("packs").list(pack => ({ pack: pack.field("pack").choice("xatrix", "rogue"),
       monsters: readQ2MissionPackMonstersCheckpoint(pack.field("monsters")), steamId: pack.field("steamId").integer() })) };
 }
+/** Q1 authored-family world adjunct state for foreign maps on a TS primary. */
+export interface ForeignQ1WorldCheckpoint {
+  readonly version: 1;
+  readonly reference: ProviderReference;
+  readonly edition: "classic" | "rerelease";
+  readonly program: "id1" | "hipnotic" | "rogue" | "dopa" | "mg1" | "mg3" | "ctf";
+  readonly frame: FrameContext;
+  readonly random: ReturnType<SourceRandom["checkpoint"]>;
+  readonly entities: Q1FoundationCheckpoint;
+}
+export function readForeignQ1WorldCheckpoint(reader: SaveReader): ForeignQ1WorldCheckpoint {
+  const random = readRandom(reader.field("random"));
+  if (random.kind !== "glibc-random" && random.kind !== "q2-rerelease-mt19937") return reader.field("random").fail("Unsupported foreign world random stream");
+  return { version: reader.field("version").literal(1), reference: readProvider(reader.field("reference")),
+    edition: reader.field("edition").choice("classic", "rerelease"), program: reader.field("program").choice("id1", "hipnotic", "rogue", "dopa", "mg1", "mg3", "ctf"),
+    frame: readFrame(reader.field("frame")), random, entities: readQ1FoundationCheckpoint(reader.field("entities")) };
+}
 export function readSelectedMonstersCheckpoint(reader: SaveReader): SelectedMonstersCheckpoint {
   return { version: reader.field("version").literal(2), authored: reader.field("authored").list(value => {
     const activation = value.field("activation"), kind = activation.field("kind").choice("active", "dormant", "scheduled");

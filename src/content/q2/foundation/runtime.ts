@@ -19,10 +19,14 @@ export class Q2Foundation extends Q2EntityServices {
     resolve(classname: string, source: Q2SpawnFields): MonsterDefinitionReference | null;
     spawn(actor: OwnedActor, source: Q2SpawnFields, definition: MonsterDefinitionReference): undefined;
   } | null = null;
-  load(source: string): Q2SpawnReport {
+  /** Spawn an authored entity string. `keep` restricts spawning to those
+   * authored ordinals (worldspawn always spawns) while field ordinals stay
+   * authored, for an adjunct spawning a primary's unclaimed remainder. */
+  load(source: string, keep: ReadonlySet<number> | null = null): Q2SpawnReport {
     const fields = parseQ2Entities(source, this.options.edition);
     const replacements = new Map<number, MonsterDefinitionReference>();
     if (this.monsterAdmission !== null) for (const field of fields) {
+      if (keep !== null && field.ordinal !== 0 && !keep.has(field.ordinal)) continue;
       if (inhibitQ2Spawn(field, this.options) || this.options.mode === "deathmatch" && field.classname.startsWith("monster_")) continue;
       const definition = this.monsterAdmission.resolve(field.classname, field);
       if (definition !== null) replacements.set(field.ordinal, definition);
@@ -30,6 +34,7 @@ export class Q2Foundation extends Q2EntityServices {
     const inhibited: Q2SpawnFields[] = [], removedBySource: Q2SpawnFields[] = [], spawned: Q2Entity[] = [];
     const replaced: OwnedActor[] = [];
     for (const field of fields) {
+      if (keep !== null && field.ordinal !== 0 && !keep.has(field.ordinal)) continue;
       if (inhibitQ2Spawn(field, this.options)) { inhibited.push(field); continue; }
       const definition = replacements.get(field.ordinal);
       if (definition != null && this.monsterAdmission !== null) {
