@@ -67,10 +67,16 @@ export class ClassicGuestServices {
   #playerMovement: EquipmentMovement | undefined;
   #writePlayerVelocity: ((actor: OwnedActor, velocity: Vec3) => undefined) | null = null;
   private readonly inputMotion = new Map<ActorId, NativeInputMotion>();
+  /** Exact body writes during a motion slice; the pmove struct quantizes
+   * origin to 1/8 units, so slice-internal re-reads use the last write. */
+  private readonly motionBodies = new Map<ActorId, BodyState>();
   withInputMovement<T>(actor: ActorId, projection: NativeInputMotion, run: () => T): T {
     const previous = this.inputMotion.get(actor); this.inputMotion.set(actor, projection);
     try { return run(); }
-    finally { if (previous === undefined) this.inputMotion.delete(actor); else this.inputMotion.set(actor, previous); }
+    finally {
+      if (previous === undefined) { this.inputMotion.delete(actor); this.motionBodies.delete(actor); }
+      else this.inputMotion.set(actor, previous);
+    }
   }
   #readPlayerVelocity: ((actor: ActorId) => Vec3 | undefined) | null = null;
   #loading = true;
@@ -198,17 +204,23 @@ export class ClassicGuestServices {
     return undefined;
   }
   private body(record: RawEntityView): BodyState {
+    const cachedActor = record.currentActor(), cached = cachedActor === null ? undefined : this.motionBodies.get(cachedActor);
+    if (cached !== undefined) return cached;
     const view = record.bytes;
     const client = record.slot > 0 && record.slot <= this.options.maxClients ? this.host.edicts.clientPrefix(record.slot) : null;
     const actor = record.currentActor(), pending = actor === null ? undefined : this.#readPlayerVelocity?.(actor);
     const motion = actor === null ? undefined : this.inputMotion.get(actor)?.read();
     const velocity = motion?.velocity ?? pending ?? (client === null ? zero : { x: client.getInt16(10, true) * 0.125, y: client.getInt16(12, true) * 0.125, z: client.getInt16(14, true) * 0.125 });
-    return { origin: motion?.origin ?? vector(view, 4), angles: vector(view, 16), velocity, bounds: { min: vector(view, 188), max: vector(view, 200) }, ground: null };
+    // Clients ground on the world while their pmove state says so; the
+    // guest's private groundentity is outside the public edict prefix.
+    const grounded = client !== null && (client.getUint8(16) & 4) !== 0;
+    return { origin: motion?.origin ?? vector(view, 4), angles: vector(view, 16), velocity, bounds: { min: vector(view, 188), max: vector(view, 200) },
+      ground: grounded ? this.host.edicts.at(0).currentActor() : null };
   }
   private bindEntity(record: RawEntityView, actor: OwnedActor): undefined {
     this.options.engine.bodies.bind(actor, { read: () => this.body(record), write: state => {
       const velocity = this.body(record).velocity, motion = this.inputMotion.get(actor.id);
-      if (motion !== undefined) motion.write(state);
+      if (motion !== undefined) { this.motionBodies.set(actor.id, state); motion.write(state); }
       else if (state.velocity.x !== velocity.x || state.velocity.y !== velocity.y || state.velocity.z !== velocity.z) {
         if (record.slot < 1 || record.slot > this.options.maxClients || this.#writePlayerVelocity === null)
           throw new Error("API3 velocity writes require a source semantic binding");

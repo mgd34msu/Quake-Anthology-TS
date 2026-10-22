@@ -35,10 +35,17 @@ function messageBuffer(): SizeBuf { const buffer = new SizeBuf(); SZ_Init(buffer
 export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   #writePlayerVelocity: ((actor: OwnedActor, velocity: Vec3) => undefined) | null = null;
   private readonly inputMotion = new Map<ActorId, NativeInputMotion>();
+  /** Exact body writes during a motion slice; slice-internal re-reads must
+   * see the last committed state (ground, bounds), not the guest's pre-move
+   * snapshot of it. */
+  private readonly motionBodies = new Map<ActorId, BodyState>();
   withInputMovement<T>(actor: ActorId, projection: NativeInputMotion, run: () => T): T {
     const previous = this.inputMotion.get(actor); this.inputMotion.set(actor, projection);
     try { return run(); }
-    finally { if (previous === undefined) this.inputMotion.delete(actor); else this.inputMotion.set(actor, previous); }
+    finally {
+      if (previous === undefined) { this.inputMotion.delete(actor); this.motionBodies.delete(actor); }
+      else this.inputMotion.set(actor, previous);
+    }
   }
   #readPlayerVelocity: ((actor: ActorId) => Vec3 | undefined) | null = null;
   setPlayerVelocityWriter(write: (actor: OwnedActor, velocity: Vec3) => undefined, read: (actor: ActorId) => Vec3 | undefined): void {
@@ -202,16 +209,23 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   private inlineModel(index: number): number { const path = this.resource("model", index); if (index === 1 && path === this.options.mapPath) return 0; const model = Number(path.slice(1)); if (!path.startsWith("*") || !Number.isInteger(model) || model < 0 || model >= this.options.scene.geometry.models.length) throw new Error(`Invalid API2023 inline model ${path}`); return model; }
   private view(slot: number): RereleasePublicEdict { return new RereleasePublicEdict(this.memory, this.host.module.entities().atSlot(slot)); }
   private body(view: RereleasePublicEdict): BodyState {
-    const actor = view.record.currentActor(), pending = actor === null ? undefined : this.#readPlayerVelocity?.(actor);
+    const actor = view.record.currentActor(), cached = actor === null ? undefined : this.motionBodies.get(actor);
+    if (cached !== undefined) return cached;
+    const pending = actor === null ? undefined : this.#readPlayerVelocity?.(actor);
     const motion = actor === null ? undefined : this.inputMotion.get(actor)?.read();
     const velocity = motion?.velocity ?? pending ?? (view.record.slot > 0 && view.record.slot <= this.options.maxClients && view.pointer("client") !== null ? view.playerVelocity() : undefined);
-    return view.body(velocity, motion?.origin);
+    const state = view.body(velocity, motion?.origin);
+    if (view.record.slot < 1 || view.record.slot > this.options.maxClients || view.pointer("client") === null) return state;
+    const grounded = actor !== null && this.inputMotion.has(actor) ? this.inputMotion.get(actor)?.grounded() === true : (view.playerMovementFlags() & 4) !== 0;
+    if (!grounded) return state;
+    const world = this.host.actor(this.host.module.entities().atSlot(0));
+    return world === null ? state : { ...state, ground: world.id };
   }
   private bindEntity(record: RawEntityView, actor: OwnedActor): RereleaseActorBindings {
     const view = new RereleasePublicEdict(this.memory, record); this.#links.delete(actor.id);
     return { body: { read: () => this.body(view), write: state => {
       const velocity = this.body(view).velocity, motion = this.inputMotion.get(actor.id);
-      if (motion !== undefined) motion.write(state);
+      if (motion !== undefined) { this.motionBodies.set(actor.id, state); motion.write(state); }
       else if (state.velocity.x !== velocity.x || state.velocity.y !== velocity.y || state.velocity.z !== velocity.z) {
         if (record.slot < 1 || record.slot > this.options.maxClients || view.pointer("client") === null || this.#writePlayerVelocity === null)
           throw new Error("API2023 velocity writes require a source semantic binding");

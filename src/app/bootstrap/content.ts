@@ -211,10 +211,10 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
     throw new Error("Selected Q3 mods require an offline local or dedicated server");
   const quakeworld = product.expectation.edition === "quakeworld" && presentationSource?.family !== "qw" && options.network.kind !== "qw-client";
   const nativeProgram = selectedQuakeCProgram(catalog, options);
-  if (selectedQ2GameLibrary(catalog, options) !== undefined && (family !== "q2" || options.movement !== "q2" || options.character !== "q2"
+  if (selectedQ2GameLibrary(catalog, options) !== undefined && (family !== "q2"
     || options.quakeCProgram !== undefined || options.botSkill !== undefined
     || options.network.kind !== "offline" && options.network.kind !== "native-server" && options.network.kind !== "q2-server"))
-    throw new Error("--q2-game requires Quake II source, movement and character with native offline/server operation");
+    throw new Error("--q2-game requires a Quake II source with native offline/server operation");
   if (nativeProgram !== undefined && (family !== "q1" || product.expectation.edition === "quakeworld"
     || options.network.kind !== "offline" && options.network.kind !== "native-server"
     || options.network.kind === "native-server" && options.character !== "q1"))
@@ -472,9 +472,8 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     if (module.kind === "native" && module.role === "server-game" && (module.api.kind === "q2-classic-game" && module.profile.kind === "windows-i386" || module.api.kind === "q2-rerelease-game" && module.profile.kind === "windows-x86-64")) {
       const product = catalog.product(recipe.map.entities.content);
       if (product.expectation.family !== "q2" || (module.api.kind === "q2-rerelease-game" ? product.expectation.edition !== "rerelease" : product.expectation.edition !== "classic") || recipe.execution.length !== 1
-        || module.owner.provider !== recipe.map.entities.provider || module.owner.content !== recipe.map.entities.content
-        || recipe.movement.provider !== "q2:movement" || recipe.character.definition.provider !== "q2:character" || recipe.enemies.kind !== "map-defined")
-        throw new Error("Native Quake II requires edition-matching actors, movement, character and arsenal");
+        || module.owner.provider !== recipe.map.entities.provider || module.owner.content !== recipe.map.entities.content)
+        throw new Error("Native Quake II requires edition-matching source actors");
       continue;
     }
     if (module.kind !== "typescript") throw new Error(`Application cannot execute ${module.kind} ${module.role} module ${module.owner.provider} (${module.artifact.requestedPath}): this executor is not joined to the shared simulation. Select a supported TypeScript execution module.`);

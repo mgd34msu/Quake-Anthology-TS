@@ -23,11 +23,30 @@ import { writeNativeUserCommand } from "./native-mod-client-stages.ts";
 import { bindNativeModEntry, type NativeModEntryBinding } from "./native-mod-entries.ts";
 
 type NativeCommand = Q2UserCommand | Q2RereleaseUserCommand;
+export interface NativeInputMotionOutputs {
+  readonly grounded: boolean;
+  /** Guest edict slot of the ground entity (0 = world); null when airborne. */
+  readonly groundSlot: number | null;
+  readonly ducked: boolean;
+  readonly waterLevel: number;
+  /** Guest contents bits (Q2 dialect). */
+  readonly waterType: number;
+  readonly viewHeight: number;
+  /** Absolute view angles Pmove computed from cmd + delta_angles; the
+   * guest copies them into its player state after the call. */
+  readonly viewAngles: Vec3;
+  /** Hull the guest copies back to its edict after Pmove (mins/maxs). */
+  readonly bounds: Bounds;
+  /** Guest edict slots bumped during the move (Pmove touch list). */
+  readonly touches: readonly number[];
+}
 export interface NativeInputMotion {
   read(): { readonly origin: Vec3; readonly velocity: Vec3 };
   grounded(): boolean;
   view(): { readonly viewOffset: Vec3; readonly crouched: boolean };
   write(value: { readonly origin: Vec3; readonly velocity: Vec3 }): undefined;
+  /** Pmove result fields the guest reads after its movement call. */
+  writeOutputs(outputs: NativeInputMotionOutputs): undefined;
 }
 export interface NativeInputServices {
   readonly applications: ModClientApplications;
@@ -41,7 +60,10 @@ export interface NativeInputServices {
   onRelease(listener: (actor: ActorId) => undefined): () => void;
   retired(identity: ModClientIdentity): void;
   originalCommand?(identity: ModClientIdentity, command: NativeCommand): NativeCommand;
-  movement<T>(identity: ModClientIdentity, projection: NativeInputMotion, run: () => T): T;
+  /** One guest Pmove call. `run` executes the guest's own movement; a
+   * foreign selected movement provider may step instead and project its
+   * result through `projection` without calling `run`. */
+  movement(identity: ModClientIdentity, projection: NativeInputMotion, command: NativeCommand, run: () => GuestCallResult): GuestCallResult;
 }
 type NativeInputSource = ({ readonly edition: "classic"; readonly host: ClassicQ2GuestHost }
   | { readonly edition: "rerelease"; readonly host: RereleaseGuestModule }) & { retire(slot: number, identity: ModClientIdentity): void };
@@ -189,7 +211,6 @@ export class NativeInputBinding {
       const player = memory.readPointer(memory.offset(address, BigInt(fieldOffset(pmoveLayout, "player"))));
       if (player?.byteOffset !== source.host.entities().atSlot(scope.slot).address.byteOffset) return run();
     }
-    if (!this.services.applications.active) return this.runBody(scope, run);
     const classic = source.edition === "classic", view = memory.borrow(address, classic ? CLASSIC_Q2_PMOVE_BYTES : pmoveLayout.byteLength);
     const commandOffset = classic ? 28 : fieldOffset(pmoveLayout, "cmd.msec");
     const cmd = new DataView(view.buffer, view.byteOffset + commandOffset, classic ? 16 : usercmdLayout.byteLength);
@@ -217,11 +238,59 @@ export class NativeInputBinding {
         return { viewOffset: { ...offset, z: offset.z + view.getInt8(fieldOffset(pmoveStateLayout, "viewheight")) },
         crouched: (view.getUint16(fieldOffset(pmoveStateLayout, "pm_flags"), true) & 1) !== 0 };
       },
-      write: value => { store(4, value.origin); store(classic ? 10 : 16, value.velocity); return undefined; } };
-    return this.services.movement(scope.identity, projection, () => this.apply(scope, "movement-slice", command, view, cmd,
-      () => {
+      write: value => { store(4, value.origin); store(classic ? 10 : 16, value.velocity); return undefined; },
+      writeOutputs: outputs => {
+        // Preserve guest-owned flag bits (jump-held, timed states); the
+        // selected movement owns grounded/ducked, water and eye height.
+        if (classic) {
+          view.setUint8(16, (view.getUint8(16) & ~5) | (outputs.ducked ? 1 : 0) | (outputs.grounded ? 4 : 0));
+          view.setInt32(224, outputs.waterType, true); view.setInt32(228, outputs.waterLevel, true);
+          view.setFloat32(192, outputs.viewHeight, true);
+          for (const [axis, value] of [outputs.viewAngles.x, outputs.viewAngles.y, outputs.viewAngles.z].entries()) view.setFloat32(180 + axis * 4, value, true);
+          for (const [axis, value] of [outputs.bounds.min.x, outputs.bounds.min.y, outputs.bounds.min.z].entries()) view.setFloat32(196 + axis * 4, value, true);
+          for (const [axis, value] of [outputs.bounds.max.x, outputs.bounds.max.y, outputs.bounds.max.z].entries()) view.setFloat32(208 + axis * 4, value, true);
+          if (source.edition === "classic") memory.writePointer(memory.offset(address, 220n),
+            outputs.groundSlot === null ? null : source.host.edicts.at(outputs.groundSlot).address);
+          if (source.edition === "classic") {
+            const count = Math.min(outputs.touches.length, 32);
+            view.setInt32(48, count, true);
+            for (let index = 0; index < count; index++) {
+              const slot = outputs.touches[index]; if (slot === undefined) continue;
+              memory.writePointer(memory.offset(address, BigInt(52 + index * 4)), source.host.edicts.at(slot).address);
+            }
+          }
+        } else {
+          const flagsOffset = fieldOffset(pmoveStateLayout, "pm_flags");
+          view.setUint16(flagsOffset, (view.getUint16(flagsOffset, true) & ~5) | (outputs.ducked ? 1 : 0) | (outputs.grounded ? 4 : 0), true);
+          view.setUint32(fieldOffset(pmoveLayout, "watertype"), outputs.waterType, true);
+          view.setUint8(fieldOffset(pmoveLayout, "waterlevel"), outputs.waterLevel);
+          view.setInt8(fieldOffset(pmoveStateLayout, "viewheight"), outputs.viewHeight);
+          const viewAnglesOffset = fieldOffset(pmoveLayout, "viewangles");
+          for (const [axis, value] of [outputs.viewAngles.x, outputs.viewAngles.y, outputs.viewAngles.z].entries()) view.setFloat32(viewAnglesOffset + axis * 4, value, true);
+          const minsOffset = fieldOffset(pmoveLayout, "mins"), maxsOffset = fieldOffset(pmoveLayout, "maxs");
+          for (const [axis, value] of [outputs.bounds.min.x, outputs.bounds.min.y, outputs.bounds.min.z].entries()) view.setFloat32(minsOffset + axis * 4, value, true);
+          for (const [axis, value] of [outputs.bounds.max.x, outputs.bounds.max.y, outputs.bounds.max.z].entries()) view.setFloat32(maxsOffset + axis * 4, value, true);
+          const viewOffset = fieldOffset(pmoveLayout, "viewoffset");
+          view.setFloat32(viewOffset, 0, true); view.setFloat32(viewOffset + 4, 0, true); view.setFloat32(viewOffset + 8, 0, true);
+          if (source.edition === "rerelease") memory.writePointer(memory.offset(address, BigInt(fieldOffset(pmoveLayout, "groundentity"))),
+            outputs.groundSlot === null ? null : source.host.entities().atSlot(outputs.groundSlot).address);
+          if (source.edition === "rerelease") {
+            const count = Math.min(outputs.touches.length, 32);
+            view.setUint32(fieldOffset(pmoveLayout, "touch.num"), count, true);
+            for (let index = 0; index < count; index++) {
+              const slot = outputs.touches[index]; if (slot === undefined) continue;
+              const plane = memory.offset(address, BigInt(fieldOffset(pmoveLayout, `touch.touches[${index}].plane.normal`)));
+              memory.writeFloat32(plane, 0); memory.writeFloat32(memory.offset(plane, 4n), 0); memory.writeFloat32(memory.offset(plane, 8n), 1);
+              memory.writePointer(memory.offset(address, BigInt(fieldOffset(pmoveLayout, `touch.touches[${index}].ent`))), source.host.entities().atSlot(slot).address);
+            }
+          }
+        }
+        return undefined;
+      } };
+    return this.services.movement(scope.identity, projection, command, () => this.services.applications.active
+      ? this.apply(scope, "movement-slice", command, view, cmd, () => {
         const result = this.runBody(scope, run); moved = true; return result;
-      }));
+      }) : this.runBody(scope, run));
   }
   private runBody(scope: CommandScope, run: (body?: MovementBodyShape) => GuestCallResult): GuestCallResult {
     this.assertLive(scope);
