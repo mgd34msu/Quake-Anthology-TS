@@ -126,16 +126,19 @@ export function prepareLegacyMaterialBatches(material: Q1Material | Q2Material, 
   const lightmap = material.lighting.kind === "lightmap" || material.lighting.kind === "decoupled-lightmap" ? material.lighting.image : null;
   const state: RenderState = { blend: blended ? { source: "src-alpha", destination: "one-minus-src-alpha" } : { source: "one", destination: "zero" },
     depthTest: "less-equal", depthWrite: !blended, alphaTest: fence ? "gt0" : "none", cull: context.cull, depthRange: context.depthRange, polygonOffset: null };
+  // Material-constant terms hoisted out of the per-vertex map.
+  const q1Liquid = material.kind === "q1" && (material.surface === "water" || material.surface === "slime" || material.surface === "lava" || material.surface === "teleport");
+  const q2Warp = material.kind === "q2" && material.warp, q2Flowing = material.kind === "q2" && !material.warp && material.flowing;
+  const q2Flow = material.kind === "q2" ? material.flowing : false;
+  // Q2 R_RenderBrushPoly/R_DrawAlphaSurfaces undo texture intensity on unlit brush passes.
+  const intensity = material.kind === "q2" && material.lighting.kind !== "vertex" && (material.warp || blended) ? 0.5 : 1;
+  const vertexLit = material.lighting.kind === "vertex";
   const vertices = geometry.vertices.map(vertex => {
     let uv = vertex.texCoord;
-    if (material.kind === "q1" && ["water", "slime", "lava", "teleport"].includes(material.surface)) uv = liquidTexCoords(uv, context.time, "q1");
-    else if (material.kind === "q2") {
-      if (material.warp) uv = liquidTexCoords(uv, context.time, "q2", material.flowing);
-      else if (material.flowing) uv = q2FlowingTexCoords(uv, context.time);
-    }
-    // Q2 R_RenderBrushPoly/R_DrawAlphaSurfaces undo texture intensity on unlit brush passes.
-    const intensity = material.kind === "q2" && material.lighting.kind !== "vertex" && (material.warp || blended) ? 0.5 : 1;
-    const color = material.lighting.kind === "vertex" ? { x: vertex.color.x / 255, y: vertex.color.y / 255, z: vertex.color.z / 255, w: alpha }
+    if (q1Liquid) uv = liquidTexCoords(uv, context.time, "q1");
+    else if (q2Warp) uv = liquidTexCoords(uv, context.time, "q2", q2Flow);
+    else if (q2Flowing) uv = q2FlowingTexCoords(uv, context.time);
+    const color = vertexLit ? { x: vertex.color.x / 255, y: vertex.color.y / 255, z: vertex.color.z / 255, w: alpha }
       : { x: intensity, y: intensity, z: intensity, w: alpha };
     return { position: context.project(vertex.position), texCoord: uv,
       color: { x: color.x * tint.x / 255, y: color.y * tint.y / 255, z: color.z * tint.z / 255, w: color.w } };
