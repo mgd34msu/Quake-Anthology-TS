@@ -24,6 +24,10 @@ export class DepthAtlasTarget {
    * One-off caster draws (fresh objects each frame) never reach the cache. */
   private readonly packedPositions = new WeakMap<DepthAtlasDraw, Float32Array>();
   private readonly seenDraws = new WeakSet<DepthAtlasDraw>();
+  /** Draws whose positions/indices already passed validation. Retained draws
+   * are immutable by the same identity contract the packing cache relies on,
+   * so revalidating every component on every shadow update is pure waste. */
+  private readonly validatedDraws = new WeakSet<DepthAtlasDraw>();
   private readonly primitiveRestart: boolean;
   private readonly textureCoordinates: number;
 
@@ -52,6 +56,7 @@ export class DepthAtlasTarget {
       if (pass.clearDepth !== null && (!Number.isFinite(pass.clearDepth) || pass.clearDepth < 0 || pass.clearDepth > 1))
         throw new RangeError("OpenGL depth atlas clear must be in 0..1");
       for (const draw of pass.draws) {
+        if (this.validatedDraws.has(draw)) continue;
         if (draw.indices.length % 3 !== 0 || draw.positions.length % 4 !== 0) throw new RangeError("OpenGL depth atlas triangles are incomplete");
         // The running maximum magnitude stays under the float32 overflow
         // midpoint exactly when every component rounds to a finite float32.
@@ -67,6 +72,7 @@ export class DepthAtlasTarget {
           const index = draw.indices[offset] ?? -1;
           if (!(index >= 0) || index >= vertexCount || (index | 0) !== index) throw new RangeError("OpenGL depth atlas vertex index is invalid");
         }
+        this.validatedDraws.add(draw);
       }
     }
     const integer = (name: number, count = 1): Int32Array => {
