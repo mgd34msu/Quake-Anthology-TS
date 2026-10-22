@@ -1,6 +1,6 @@
 import { classicPrimaryWorldProfile } from "../../../compat/q2/classic/world-profile.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
-import type { ActorId } from "../../../contracts/identity.ts";
+import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { ModuleIdentity } from "../../../contracts/execution.ts";
 import type { EquipmentMovement } from "../../../contracts/movement.ts";
 import type { Q2EntityState, Q2PlayerState, Q2UserCommand } from "../../../contracts/protocol.ts";
@@ -233,9 +233,12 @@ export class ClassicGuestWorld {
   frame(milliseconds: number): void {
     this.operation(() => {
       this.requireRunning(); if (milliseconds !== 100) throw new RangeError("API 3 RunFrame requires the source 100ms cadence");
-      this.source.host.runFrame(); this.services.publishEntities();
+      this.services.syncMonsterProxies();
+      this.source.host.runFrame(); this.services.forwardMonsterProxyDamage(); this.services.publishEntities();
     });
   }
+  allocateMonsterProxy(): number | null { return this.services.allocateMonsterProxy(); }
+  bindMonsterProxy(slot: number, actor: OwnedActor): void { this.services.bindMonsterProxy(slot, actor); }
   actor(slot: number): ActorId | null { this.requireRunning(); return this.source.host.edicts.at(slot).currentActor(); }
   entityInfo(slot: number): { readonly actor: ActorId | null; readonly active: boolean; readonly serverFlags: number; readonly areas: readonly [number, number]; readonly clusters: readonly number[] | null; readonly firstCluster: number; readonly headnode: number; readonly ownerSlot: number | null } {
     this.requireRunning();

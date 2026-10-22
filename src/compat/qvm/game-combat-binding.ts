@@ -3,6 +3,7 @@ import type { QvmCombatMass, QvmCombatTeam, QvmDamageFlags } from "../../contrac
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { ArmorState, AttackProvenance, DamageRequest, ProtectionChannel } from "../../contracts/gameplay.ts";
 import type { Vec3 } from "../../contracts/math.ts";
+import type { BodyState } from "../../contracts/world.ts";
 import type { QvmModuleOptions } from "./module.ts";
 import type { QvmGame } from "./game.ts";
 import type { SharedBodyTable } from "../../world/actors/body.ts";
@@ -51,6 +52,7 @@ export class QvmCombatBindings {
   private readonly source: QvmGameCombat;
   private readonly scopes: QvmDamageScopes;
   private readonly admitted = new Map<number, OwnedActor>();
+  private readonly proxies = new Map<number, OwnedActor>();
   private readonly protection = { powered: new Map<OwnedActor, ArmorIntercept>(), regular: new Map<OwnedActor, ArmorIntercept>() };
   private readonly removals = new CleanupStack();
   private removeArmor: (() => void) | null = null;
@@ -123,15 +125,58 @@ export class QvmCombatBindings {
         this.removals.push(actors.onRelease(actor => {
           this.protection.powered.delete(actor); this.protection.regular.delete(actor);
           for (const [slot, current] of this.admitted) if (current === actor) this.admitted.delete(slot);
+          for (const [slot, current] of [...this.proxies]) if (current === actor) { this.proxies.delete(slot); if (!this.closed) this.freeEntity(slot); }
           this.removeUnusedArmorHook();
           return undefined;
         }));
       }
     } catch (error) { this.close(); throw error; }
   }
+  /** Allocate an inert guest entity as a stand-in for a shared TS actor
+   * (a selected monster) projected into this guest. The guest's own spawn
+   * marks it in use with zeroed private fields, so no guest think runs;
+   * the TS actor owns behavior while guest traces and damage address the
+   * slot. Returns the guest slot. */
+  spawnProxyEntity(): number {
+    if (this.closed) throw new Error("Source combat bindings are retired");
+    const pointer = this.options.game.module.call([], this.options.definition.callbacks.allocate);
+    const slot = this.options.game.data.numberFromPointer(pointer);
+    if (slot < 0 || slot >= 1022 || this.proxies.has(slot) || this.admitted.has(slot)) throw new Error("Source proxy allocation returned an unusable slot");
+    this.options.game.data.entityBytes(slot).setInt32(this.options.definition.fields.takedamage, 1, true);
+    return slot;
+  }
+  /** Bind a proxy slot to its TS actor: guest-backed combat admission plus
+   * release tracking. Shared health written before admission (a restore)
+   * is carried into the guest field so the view switch loses nothing. */
+  bindProxy(slot: number, actor: OwnedActor): undefined {
+    if (this.proxies.has(slot)) throw new Error("Source proxy slot is already bound");
+    if (this.options.slot(actor.id) !== slot) throw new Error("Source proxy actor has no matching guest slot");
+    const health = this.options.combat.read(actor.id)?.health ?? null;
+    this.proxies.set(slot, actor);
+    this.admit(actor);
+    if (health !== null) this.options.game.data.entityBytes(slot).setInt32(this.options.definition.fields.health, Math.trunc(health), true);
+    return undefined;
+  }
+  /** Mirror the TS body into the guest entity fields guest code reads
+   * (radius tests, visibility); shared traces already use the TS body. */
+  syncProxyEntity(slot: number, body: BodyState): undefined {
+    if (!this.proxies.has(slot)) return undefined;
+    const entity = this.options.game.data.entity(slot);
+    entity.r.currentOrigin = body.origin; entity.r.currentAngles = body.angles;
+    entity.r.mins = body.bounds.min; entity.r.maxs = body.bounds.max;
+    entity.r.absmin = { x: body.origin.x + body.bounds.min.x, y: body.origin.y + body.bounds.min.y, z: body.origin.z + body.bounds.min.z };
+    entity.r.absmax = { x: body.origin.x + body.bounds.max.x, y: body.origin.y + body.bounds.max.y, z: body.origin.z + body.bounds.max.z };
+    entity.s.pos = { ...entity.s.pos, base: body.origin, delta: body.velocity };
+    return undefined;
+  }
+  private freeEntity(slot: number): undefined {
+    const pointer = this.options.game.data.checkpoint().entitiesWord + slot * this.options.definition.entityStride;
+    this.options.game.module.call([pointer], this.options.definition.callbacks.free);
+    return undefined;
+  }
   close(): undefined {
     if (this.closed) return undefined;
-    this.closed = true; this.protection.powered.clear(); this.protection.regular.clear(); this.admitted.clear(); this.removeUnusedArmorHook();
+    this.closed = true; this.protection.powered.clear(); this.protection.regular.clear(); this.admitted.clear(); this.proxies.clear(); this.removeUnusedArmorHook();
     this.removals.runAll();
     return undefined;
   }

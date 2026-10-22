@@ -166,6 +166,8 @@ export interface QuakeCSourceOptions {
   readonly restore?: { readonly checkpoint: QuakeCCheckpoint; readonly clients: readonly ClientId[] };
   readonly recipe: ExecutableRecipe;
   readonly world: DecodedWorld;
+  /** Entity text with selected-monster replacements removed; defaults to the authored map text. */
+  readonly entityText?: string;
   readonly scene: SharedSceneQueries;
   readonly actors: SessionActorRegistry;
   readonly callbacks: ActorCallbackTable;
@@ -1423,7 +1425,7 @@ export class QuakeCSource {
       if (offset !== undefined) this.machine.globals.setFloat(offset, this.cvars.variableValue(name));
     }
     this.machine.globals.setInt(this.machine.globalOffset("mapname"), this.machine.strings.allocate(map.replace(/^maps\//, "").replace(/\.bsp$/, "")));
-    for (const [ordinal, pairs] of parseEntities(quakeCMapEntities(this.options.world, this.options.mode)).entries()) {
+    for (const [ordinal, pairs] of parseEntities(this.options.entityText ?? quakeCMapEntities(this.options.world, this.options.mode)).entries()) {
       const actor = ordinal === 0 ? this.worldActor : this.slots.allocate("quakec:authored");
       const slot = this.sourceSlot(actor.id); if (slot === null) throw new Error("Missing authored QC source slot");
       this.worldHost.actor(slot);

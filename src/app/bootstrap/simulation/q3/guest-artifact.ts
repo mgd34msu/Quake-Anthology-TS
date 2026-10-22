@@ -25,7 +25,7 @@ export function assertQ3GuestRecipe(recipe: ExecutableRecipe, execution: Q3GameE
     || recipe.execution.length !== 1 || recipe.execution[0] !== execution
     || recipe.weapons.length !== 1
     || ![recipe.engineBehavior, recipe.combat, recipe.inventory, recipe.match, recipe.transition].every(same)
-    || recipe.enemies.kind !== 'map-defined'
+    || recipe.enemies.kind === 'players'
     || recipe.timing.find(timing => timing.provider === owner.provider)?.clock.kind !== 'q3') {
     throw new Error('Q3 bytecode requires one native Q3 server game, map-defined actors and supported source providers');
   }

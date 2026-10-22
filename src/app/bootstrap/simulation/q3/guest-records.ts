@@ -29,6 +29,7 @@ export class Q3GuestRecords {
   private writePlayerVelocity: ((actor: OwnedActor, velocity: Vec3) => undefined) | null = null;
   setPlayerVelocityWriter(write: (actor: OwnedActor, velocity: Vec3) => undefined): void { this.writePlayerVelocity = write; }
   private readonly actors = new Map<number, OwnedActor>();
+  private readonly foreign = new Set<number>();
   private readonly links = new Map<number, ReturnType<Q3VisibilityBindings['link']>>();
   private readonly retiredInputs = new Set<number>();
   private readonly inputMotion = new Set<number>();
@@ -42,7 +43,7 @@ export class Q3GuestRecords {
     });
     this.unobserve = host.actors.onRelease(actor => {
       const source = [...this.actors].find(([, owned]) => owned === actor);
-      if (source !== undefined) { this.actors.delete(source[0]); this.links.delete(source[0]); }
+      if (source !== undefined) { this.actors.delete(source[0]); this.foreign.delete(source[0]); this.links.delete(source[0]); }
       return undefined;
     });
   }
@@ -73,6 +74,20 @@ export class Q3GuestRecords {
     const actor = this.host.actors.allocateAtSource(this.host.provider, slot, 'q3:guest-slot');
     this.bind(slot, actor);
     return actor;
+  }
+
+  /** Register a shared TS actor projected into a guest slot as a proxy
+   * entity. Unlike bind(), the actor's body stays TS-owned; the guest slot
+   * exists so guest traces and damage can address it. */
+  registerForeign(slot: number, actor: OwnedActor): undefined {
+    this.entity(slot);
+    if (slot >= 1022 || this.retiredInputs.has(slot)) throw new RangeError('Q3 foreign proxy slot cannot own a shared actor');
+    if (this.actors.has(slot)) throw new Error('Q3 foreign proxy slot is occupied');
+    const source = this.host.actors.sourceOf(actor.id);
+    if (source === null || source.provider !== this.host.provider || source.slot !== slot) throw new Error('Q3 foreign proxy actor has no matching source binding');
+    this.actors.set(slot, actor);
+    this.foreign.add(slot);
+    return undefined;
   }
 
   private bind(slot: number, actor: OwnedActor): void {
@@ -175,7 +190,9 @@ export class Q3GuestRecords {
   captureCheckpoint() {
     if (this.closed) throw new Error('Q3 guest records are retired');
     if (this.retiredInputs.size !== 0 || this.inputMotion.size !== 0) throw new Error('Q3 input must finish before checkpoint');
-    return [...this.actors].map(([slot, actor]) => {
+    // Foreign proxies are projections of shared actors; like their source
+    // bindings, they are rebuilt on restore instead of checkpointed.
+    return [...this.actors].filter(([slot]) => !this.foreign.has(slot)).map(([slot, actor]) => {
       this.host.actors.assertOwned(actor);
       const link = this.links.get(slot);
       return { slot, actor: savedActorId(actor.id), visibility: link === undefined ? null : {
@@ -200,7 +217,7 @@ export class Q3GuestRecords {
       slots.add(entry.slot); actors.add(actor);
       return { ...entry, actor };
     });
-    if (actors.size !== this.host.actors.ownedBy(this.host.provider).filter(actor => this.host.actors.sourceOf(actor.id)?.slot !== 1022).length) reader.fail('guest record checkpoint omits owned actors');
+    if (actors.size !== this.host.actors.ownedBy(this.host.provider).filter(actor => { const source = this.host.actors.sourceOf(actor.id); return source !== null && source.provider === this.host.provider && source.slot !== 1022; }).length) reader.fail('guest record checkpoint omits owned actors');
     for (const entry of bindings) {
       this.bind(entry.slot, entry.actor);
       if (entry.visibility !== null) this.links.set(entry.slot, entry.visibility);

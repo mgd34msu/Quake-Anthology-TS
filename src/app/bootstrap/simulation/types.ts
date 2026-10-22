@@ -121,10 +121,14 @@ export interface SimulationTravel {
   readonly source: { readonly kind: "q1"; readonly flags: number; readonly skill: 0 | 1 | 2 | 3 }
     | QuakeCSourceTravel
     | { readonly kind: "q2"; readonly serverFlags: number; readonly lmctf?: LmctfTravel; readonly rerelease?: Q2RereleaseCampaignState; readonly landmark: { readonly clientSlot: number; readonly name: string;
-      readonly relativeOrigin: Vec3; readonly relativeVelocity: Vec3; readonly relativeViewAngles: Vec3 } | null };
+      readonly relativeOrigin: Vec3; readonly relativeVelocity: Vec3; readonly relativeViewAngles: Vec3 } | null }
+    // Worlds with no campaign program of their own (Q3, QVM guests) carry
+    // their players through shared health, armor and inventory alone.
+    | { readonly kind: "shared" };
   readonly players: readonly { readonly client: ClientId; readonly weaponSlot?: WeaponReference; readonly handGrenades?: HandGrenadeTravel; readonly selectedArsenal?: { readonly kind: "q1"; readonly state: Q1SelectedArsenalTravel }
     | { readonly kind: "q2"; readonly weapon: ItemId | null; readonly inventory: readonly InventoryEntry[] }
-    | { readonly kind: "q3"; readonly state: Q3SelectedArsenalCheckpoint; readonly milliseconds: number }; readonly state: { readonly kind: "q1"; readonly carry: Q1TravelState } | { readonly kind: "q2"; readonly carry: Q2PlayerCarry } | { readonly kind: "quakec" } }[];
+    | { readonly kind: "q3"; readonly state: Q3SelectedArsenalCheckpoint; readonly milliseconds: number }; readonly state: { readonly kind: "q1"; readonly carry: Q1TravelState } | { readonly kind: "q2"; readonly carry: Q2PlayerCarry } | { readonly kind: "quakec" }
+    | { readonly kind: "shared"; readonly health: number; readonly armor: ArmorState; readonly inventory: readonly InventoryEntry[] } }[];
 }
 
 export interface PlayerAdmission { readonly actor: ActorId; readonly viewHeight: number; }

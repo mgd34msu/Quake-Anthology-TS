@@ -76,15 +76,25 @@ export class SessionActorRegistry implements ActorRegistry {
   }
 
   allocateAtSource(owner: ProviderId, sourceSlot: number, definition: `${string}:${string}`): OwnedActor {
-    if (!Number.isSafeInteger(sourceSlot) || sourceSlot < 0) throw new RangeError("Source slot must be a nonnegative safe integer");
-    let table = this.sourceSlots.get(owner);
-    if (table === undefined) { table = new Map<number, OwnedActor>(); this.sourceSlots.set(owner, table); }
-    if (table.has(sourceSlot)) throw new RangeError(`Source slot ${owner}/${sourceSlot} is occupied`);
     const actor = this.allocate(owner, definition);
-    this.requireSlot(actor).source = Object.freeze({ provider: owner, slot: sourceSlot });
+    this.bindSource(actor, owner, sourceSlot);
+    return actor;
+  }
+
+  /** Bind an existing actor to a source slot, e.g. when a restored actor is
+   * projected into a source address space that was rebuilt around it. */
+  bindSource(actor: OwnedActor, provider: ProviderId, sourceSlot: number): undefined {
+    if (this.closed) throw new Error("Actor registry is closed");
+    if (!Number.isSafeInteger(sourceSlot) || sourceSlot < 0) throw new RangeError("Source slot must be a nonnegative safe integer");
+    const slot = this.requireSlot(actor);
+    if (slot.source !== null) throw new RangeError("Actor already has a source binding");
+    let table = this.sourceSlots.get(provider);
+    if (table === undefined) { table = new Map<number, OwnedActor>(); this.sourceSlots.set(provider, table); }
+    if (table.has(sourceSlot)) throw new RangeError(`Source slot ${provider}/${sourceSlot} is occupied`);
+    slot.source = Object.freeze({ provider, slot: sourceSlot });
     table.set(sourceSlot, actor);
     this.orderingRevision++;
-    return actor;
+    return undefined;
   }
 
   atSource(owner: ProviderId, slot: number): OwnedActor | null { return this.sourceSlots.get(owner)?.get(slot) ?? null; }

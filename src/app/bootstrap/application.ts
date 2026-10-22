@@ -3250,7 +3250,7 @@ export class Application {
       await this.advanceQ2Travel({ kind: "map", name: map, spawnPoint, newUnit: false, next: null }, native ? null : this.simulation.captureTravel(spawnPoint));
       return;
     }
-    await this.replaceWorld(map, this.simulation.q3Source() === null && this.simulation.q3Guest() === null ? this.simulation.captureTravel(spawnPoint) : null);
+    await this.replaceWorld(map, this.simulation.captureTravel(spawnPoint));
   }
 
   private async restoreComponentClients(image: SaveImage, graphical: NonNullable<Application["graphical"]>, simulation: SharedSimulation): Promise<void> {

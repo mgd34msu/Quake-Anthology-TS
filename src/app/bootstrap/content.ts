@@ -2,9 +2,10 @@ import { prepareNativeQ2Map } from "./simulation/native-q2-map.ts";
 import { prepareApplicationMods } from "./mod-selection.ts";
 import { prepareApplicationQvmGrapple, type PreparedQvmGrapple } from "./qvm-grapple-selection.ts";
 import { prepareApplicationWeaponBehavior, prepareConfiguredApplicationRecipe, type PreparedWeaponBehavior } from "./weapon-behavior-selection.ts";
-import { prepareRereleaseGuest, type PreparedRereleaseGuest } from "./simulation/rerelease-guest-source.ts";
+import type { PreparedRereleaseGuest } from "./simulation/rerelease-guest-source.ts";
 import { sourceProgramImplementation, sourceProgramProduct } from "../../content/catalog/source-program.ts";
-import { prepareClassicGuest, type PreparedClassicGuest } from "./simulation/classic-guest-source.ts";
+import type { PreparedClassicGuest } from "./simulation/classic-guest-source.ts";
+import { prepareQ2Guest } from "./simulation/q2-native-world.ts";
 import type { DemoFamily } from "./demo-playback.ts";
 export interface ApplicationContentSource { readonly kind: "recorded" | "unified"; readonly family: DemoFamily; }
 import { mkdir } from "node:fs/promises";
@@ -211,11 +212,10 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
     throw new Error("Selected Q3 mods require an offline local or dedicated server");
   const quakeworld = product.expectation.edition === "quakeworld" && presentationSource?.family !== "qw" && options.network.kind !== "qw-client";
   const nativeProgram = selectedQuakeCProgram(catalog, options);
-  if (selectedQ2GameLibrary(catalog, options) !== undefined && (family !== "q2"
-    || options.quakeCProgram !== undefined || options.botSkill !== undefined
+  if (selectedQ2GameLibrary(catalog, options) !== undefined && (options.quakeCProgram !== undefined || options.botSkill !== undefined
     || options.network.kind !== "offline" && options.network.kind !== "native-server" && options.network.kind !== "q2-server"))
-    throw new Error("--q2-game requires a Quake II source with native offline/server operation");
-  if (nativeProgram !== undefined && (family !== "q1" || product.expectation.edition === "quakeworld"
+    throw new Error("--q2-game requires native offline/server operation without a second guest program");
+  if (nativeProgram !== undefined && (product.expectation.edition === "quakeworld"
     || options.network.kind !== "offline" && options.network.kind !== "native-server"
     || options.network.kind === "native-server" && options.character !== "q1"))
     throw new Error("--progs requires an offline/server NetQuake source world; native wire servers require Q1 character presentation");
@@ -254,7 +254,10 @@ function selectedApplicationPreset(catalog: InstalledCatalog, options: Applicati
   const movement: ProviderReference = nativeSources?.movement ?? { provider: `${options.movement}:movement`, content: catalog.require(playerProducts.movement).id };
   const character: ProviderReference = nativeSources?.character ?? { provider: `${options.character}:character`, content: catalog.require(playerProducts.character).id };
   const appearance: ProviderReference = { provider: `${options.character}:model/${options.characterModel}`, content: character.content };
-  const rerelease = product.expectation.edition === "rerelease";
+  // A Q2 guest DLL hosted by another family's product carries its edition
+  // in the artifact; the filename picks the recipe claim and preparation
+  // re-derives it from the PE header before anything runs.
+  const rerelease = q2GameLibrary !== undefined && family !== "q2" ? q2GameLibrary.toLowerCase().includes("x64") : product.expectation.edition === "rerelease";
   const timing = (reference: ProviderReference, source: GameFamily, edition: boolean, movementRole = false) => {
     const native = nativeProviderTiming(reference, source, edition);
     return source === "q1" && (catalog.product(reference.content).expectation.edition === "quakeworld" || movementRole && options.movementProduct === "q1-quakeworld") ? { ...native, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: movementRole && (options.movementProduct !== undefined || nativeSources !== undefined) ? 255 : 50 } satisfies typeof native.clock } : native;
@@ -523,7 +526,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     const q3Execution = recipe.execution.find(module => module.kind === "qvm" && module.role === "server-game");
     const q3Prepared = presentationSource?.kind !== "unified" && q3Execution?.kind === "qvm" && q3Execution.role === "server-game" ? await prepareQ3Game(q3Execution, mounts) : null;
     const q2Execution = recipe.execution.find(module => module.kind === "native" && module.role === "server-game");
-    const q2Prepared = presentationSource?.kind !== "unified" && q2Execution?.kind === "native" ? q2Execution.api.kind === "q2-rerelease-game" ? await prepareRereleaseGuest(q2Execution, mounts) : await prepareClassicGuest(q2Execution, mounts) : null;
+    const q2Prepared = presentationSource?.kind !== "unified" && q2Execution?.kind === "native" ? await prepareQ2Guest(q2Execution, mounts) : null;
     if (q2Prepared !== null) prepareNativeQ2Map(world, q2Prepared.execution.api.kind === "q2-rerelease-game" ? "rerelease" : "classic", options.mode);
     const loaded = new LoadedApplicationContent(catalog, recipe, world, mounts, prepared, pure, q3Prepared, q2Prepared, product.q3Product, mapSidecars.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     try { if (presentationSource === undefined) { await loaded.prepareWeaponBehaviors(); await loaded.prepareMods(); await loaded.prepareQvmGrapple(); } else if (presentationSource.kind === "unified") await loaded.prepareMods("presentation"); return loaded; }

@@ -70,6 +70,9 @@ export class ClassicGuestServices {
   /** Exact body writes during a motion slice; the pmove struct quantizes
    * origin to 1/8 units, so slice-internal re-reads use the last write. */
   private readonly motionBodies = new Map<ActorId, BodyState>();
+  /** Guest edict stand-ins for shared TS monsters (see spawnProxyEdict). */
+  readonly #pendingProxies = new Map<number, import("../../../contracts/execution.ts").RawEntityView>();
+  readonly #monsterProxies = new Map<ActorId, { readonly view: import("../../../contracts/execution.ts").RawEntityView; health: number }>();
   withInputMovement<T>(actor: ActorId, projection: NativeInputMotion, run: () => T): T {
     const previous = this.inputMotion.get(actor); this.inputMotion.set(actor, projection);
     try { return run(); }
@@ -344,8 +347,66 @@ export class ClassicGuestServices {
       skin: state.modelIndexes[0] === 255 ? 0 : state.skin, skinPath: state.modelIndexes[0] === 255 ? `players/${model}/${skin}.pcx` : null,
       attachedModels: state.modelIndexes.slice(1).map(index => index === 255 ? `players/${model}/${weapon}` : this.resource("model", index)) };
   }
+  /** Reserve a guest edict for a shared TS monster about to be admitted.
+   * Returns the guest slot, or null when no combat profile is declared. */
+  allocateMonsterProxy(): number | null {
+    if (this.#combat === null || this.#host === null) return null;
+    const view = this.#combat.spawnProxyEdict();
+    this.#pendingProxies.set(view.slot, view);
+    return view.slot;
+  }
+  bindMonsterProxy(slot: number, actor: OwnedActor): void {
+    const view = this.#pendingProxies.get(slot);
+    if (view === undefined) throw new Error("Monster proxy slot was not allocated");
+    this.#pendingProxies.delete(slot);
+    const combat = this.options.engine.combat.read(actor.id);
+    this.#monsterProxies.set(actor.id, { view, health: combat?.health ?? 0 });
+    this.#syncMonsterProxy(actor.id);
+  }
+  #syncMonsterProxy(actor: ActorId): void {
+    const entry = this.#monsterProxies.get(actor), combat = this.#combat;
+    if (entry === undefined || combat === null) return;
+    const body = this.options.engine.bodies.read(actor);
+    if (body === null) return;
+    const state = this.options.engine.combat.read(actor);
+    combat.syncProxyEdict(entry.view, body, state);
+    entry.health = state?.health ?? 0;
+  }
+  syncMonsterProxies(): void { for (const actor of [...this.#monsterProxies.keys()]) this.#syncMonsterProxy(actor); }
+  /** After a guest frame, forward guest-inflicted proxy health loss into
+   * shared combat so TS pain/death behavior runs; the guest already
+   * applied its own damage rules to the proxy fields. */
+  forwardMonsterProxyDamage(): void {
+    const combat = this.#combat; if (combat === null) return;
+    const engine = this.options.engine, provenance = this.options.damageProvenance;
+    for (const [actor, entry] of [...this.#monsterProxies]) {
+      if (!engine.actors.isLive(actor)) {
+        try { combat.freeProxyEdict(entry.view); } finally { this.#monsterProxies.delete(actor); }
+        continue;
+      }
+      const health = combat.proxyHealth(entry.view), body = engine.bodies.read(actor);
+      if (body !== null) {
+        const guestVelocity = combat.proxyVelocity(entry.view);
+        if (guestVelocity.x !== body.velocity.x || guestVelocity.y !== body.velocity.y || guestVelocity.z !== body.velocity.z)
+          engine.bodies.write(this.options.engine.actors.resolveOwned(actor) ?? (() => { throw new Error("Monster proxy actor was released"); })(), { ...body, velocity: guestVelocity });
+      }
+      if (health >= entry.health) { entry.health = engine.combat.read(actor)?.health ?? health; continue; }
+      const amount = entry.health - health;
+      entry.health = health;
+      if (provenance === undefined || this.#host === null) continue;
+      // The guest applied this damage internally; its attacker is not
+      // observable at this boundary, so the world takes credit.
+      const world = engine.actors.atSource(this.#host.options.provider, 0)?.id ?? actor;
+      engine.combat.apply({ target: actor, amount, knockback: 0, direction: { x: 0, y: 0, z: 0 }, point: body?.origin ?? { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 1 }, delivery: "direct",
+        attack: { ...provenance(world, world, actor), attacker: world, inflictor: world, cause: { kind: "q2", meansOfDeath: 0, damageFlags: 0 } } });
+      entry.health = engine.combat.read(actor)?.health ?? entry.health;
+    }
+  }
   publishEntities(): void {
     for (const actor of this.options.engine.actors.ownedBy(this.host.options.provider)) {
+      // Shared actors admitted under the map provider without a guest
+      // edict (selected TS monsters) publish through their own sources.
+      if (!this.host.edicts.resolves(actor.id)) continue;
       const record = this.host.edicts.fromPointer(this.host.edicts.pointer(actor.id));
       if (record.slot === 0) continue;
       const state = this.entityState(record.slot);

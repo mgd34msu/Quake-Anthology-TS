@@ -111,6 +111,33 @@ export class ClassicCombatBindings {
     } };
     engine.combat.bind(actor, binding); return undefined;
   }
+  /** Allocate a real guest edict as a stand-in for a shared TS actor (a
+   * selected monster), so guest traces and damage have an edict to hit.
+   * The edict stays inert: zeroed private fields mean no think, no
+   * physics and no client; the shared TS monster owns all behavior. */
+  spawnProxyEdict(): RawEntityView {
+    const allocated = this.host.invoke(this.entry(this.profile.entries.spawn), classicSignature([], q2Pointer), []);
+    if (allocated.kind !== "pointer" || allocated.value === null) throw new Error("Source G_Spawn returned no monster projection");
+    return this.host.edicts.fromPointer(allocated.value);
+  }
+  freeProxyEdict(view: RawEntityView): void {
+    this.host.invoke(this.entry(this.profile.entries.free), classicSignature([q2Pointer]), [pointer(view.address)]);
+    this.host.edicts.reconcile();
+  }
+  syncProxyEdict(view: RawEntityView, body: { readonly origin: import("../../../contracts/math.ts").Vec3; readonly angles: import("../../../contracts/math.ts").Vec3; readonly velocity: import("../../../contracts/math.ts").Vec3; readonly bounds: { readonly min: import("../../../contracts/math.ts").Vec3; readonly max: import("../../../contracts/math.ts").Vec3 } },
+    combat: { readonly health: number; readonly canTakeDamage: boolean; readonly mass: number } | null): void {
+    const { memory } = this.host, { profile } = this;
+    writeClassicVector(memory, memory.offset(view.address, 4n), body.origin);
+    writeClassicVector(memory, memory.offset(view.address, 16n), body.angles);
+    writeClassicVector(memory, memory.offset(view.address, 188n), body.bounds.min);
+    writeClassicVector(memory, memory.offset(view.address, 200n), body.bounds.max);
+    writeClassicVector(memory, this.at(view, profile.fields.velocity), body.velocity);
+    memory.writeInt32(this.at(view, profile.fields.health), combat?.health ?? 0);
+    memory.writeInt32(this.at(view, profile.fields.damageable), combat?.canTakeDamage === true ? 1 : 0);
+    memory.writeInt32(this.at(view, profile.fields.mass), combat?.mass ?? 100);
+  }
+  proxyHealth(view: RawEntityView): number { return this.host.memory.readInt32(this.at(view, this.profile.fields.health)); }
+  proxyVelocity(view: RawEntityView): import("../../../contracts/math.ts").Vec3 { return readClassicVector(this.host.memory, this.at(view, this.profile.fields.velocity)); }
   private armorStage(actor: OwnedActor, channel: ProtectionChannel): SourceArmorStage {
     return { bind: intercept => {
       const entry = this.armorBindings.get(actor) ?? {};

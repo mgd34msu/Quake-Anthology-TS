@@ -103,6 +103,14 @@ export class ClassicQ2Edicts {
     if (current.bytes.getInt32(88, true) === 0 && !this.#retainedClients.has(record.slot)) return null;
     return this.actors.atSource(this.provider, record.slot);
   }
+  /** Whether this actor has a guest edict (directly or through the
+   * semantic projection). Shared actors the guest does not own — such as
+   * selected TS monsters — resolve to false instead of throwing. */
+  resolves(actor: ActorId): boolean {
+    if (this.projection !== undefined) { try { this.projection.address(actor); return true; } catch { return false; } }
+    const source = this.actors.sourceOf(actor);
+    return source !== null && source.provider === this.provider;
+  }
   pointer(actor: ActorId): GuestAddress {
     if (this.projection !== undefined) return this.projection.address(actor);
     const source = this.actors.sourceOf(actor);
