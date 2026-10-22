@@ -39,9 +39,9 @@ export function interpolateAliasFrames(current: ModelFrame, previous: ModelFrame
       z: Math.fround(vertex.position.z * frontLerp + (old.position.z + previousOriginDelta.z) * backLerp),
     } };
   });
-  if (byPrevious === undefined) { byPrevious = new WeakMap(); aliasInterpolationCache.set(current, byPrevious); }
+  if (byPrevious === undefined) { byPrevious = new WeakMap<ModelFrame, Map<string, readonly ModelVertex[]>>(); aliasInterpolationCache.set(current, byPrevious); }
   let byKey = byPrevious.get(previous);
-  if (byKey === undefined) { byKey = new Map(); byPrevious.set(previous, byKey); }
+  if (byKey === undefined) { byKey = new Map<string, readonly ModelVertex[]>(); byPrevious.set(previous, byKey); }
   if (byKey.size >= 256) byKey.clear();
   byKey.set(cacheKey, result);
   return result;
