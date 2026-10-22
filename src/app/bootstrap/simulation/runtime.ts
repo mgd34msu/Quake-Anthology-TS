@@ -1166,8 +1166,11 @@ export class SharedSimulation implements Simulation {
           const preserved = source.kind === "q1" && this.options.world.kind === "q1-bsp" && entity !== null
             && preservesAuthoredQ1Placement({ map: this.recipe.map, authored: this.options.world.entityList[entry.sourceOrdinal], definition, game: source.game, entity, body });
           if (!preserved && !preservedQ2) {
-            const nativeBounds = map.kind === "q2" ? map.monsters.definition(entry.classname, map.game)?.bounds
-              : baseSpecies.find(species => species.classnames.includes(entry.classname))?.bounds;
+            // Classes without a species/definition record (army, dog) fall
+            // back to the selected hull for reachability instead of
+            // failing placement outright.
+            const nativeBounds = (map.kind === "q2" ? map.monsters.definition(entry.classname, map.game)?.bounds
+              : baseSpecies.find(species => species.classnames.includes(entry.classname))?.bounds) ?? body.bounds;
             const nativeMovement = map.kind === "q2" ? map.monsters.definition(entry.classname, map.game)?.locomotion
               : baseSpecies.find(species => species.classnames.includes(entry.classname))?.movement;
             const position = map.kind === "q2" ? parseQ2Entities(this.options.world.entities, map.game.options.edition)[entry.sourceOrdinal]?.values.get("origin")
@@ -1347,6 +1350,12 @@ export class SharedSimulation implements Simulation {
           policy: monsterSource.kind === "q1" ? { kind: "q1", move: "normal", hull: null } : { kind: "q2", contentsMask: 1, leafContents: "merged" } });
         if (trace.startSolid || trace.allSolid) {
           const native = modules === null ? null : modules.monsters.definition(entry.classname, modules.game);
+          const species = modules === null ? baseSpecies.find(candidate => candidate.classnames.includes(entry.classname)) : undefined;
+          // Authored hulls drive reachability; classes without a species
+          // record here (army, dog) fall back to the selected hull rather
+          // than failing admission outright.
+          const nativeBounds = native?.bounds ?? species?.bounds ?? body.bounds;
+          const nativeMovement = native?.locomotion ?? species?.movement;
           const authored = parseQ2Entities(this.options.world.entities, edition)[entry.sourceOrdinal];
           const position = authored?.values.get("origin");
           const medium = (origin: Vec3): number => {
@@ -1355,9 +1364,9 @@ export class SharedSimulation implements Simulation {
             return contents === "water" ? 32 : contents === "slime" ? 16 : contents === "lava" ? 8 : 0;
           };
           const originalMedium = medium(body.origin);
-          const placement = native === undefined || native === null || position === undefined ? null : nearbyMonsterPlacement({ body, locomotion: "walk", worldActor: this.worldActor(),
+          const placement = position === undefined ? null : nearbyMonsterPlacement({ body, locomotion: "walk", worldActor: this.worldActor(),
             sameMedium: origin => medium(origin) === originalMedium,
-            authored: { origin: relocated ?? parseVector(position), bounds: native.bounds, locomotion: native.locomotion === "fly" || native.locomotion === "swim" ? native.locomotion : "walk" },
+            authored: { origin: relocated ?? parseVector(position), bounds: nativeBounds, locomotion: nativeMovement === "fly" || nativeMovement === "swim" ? nativeMovement : "walk" },
             query: { target: { kind: "world" }, passActor: entry.actor.id, numeric: providerTiming(this.recipe, definition.source.provider).numeric,
               policy: monsterSource.kind === "q1" ? { kind: "q1", move: "normal", hull: null } : { kind: "q2", contentsMask: 1, leafContents: "merged" } },
             blockedBy: () => undefined, trace: query => this.scene.traceExcluding(query, []) });
