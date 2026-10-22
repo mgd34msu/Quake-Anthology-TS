@@ -69,18 +69,27 @@ export class QcBorrowedActors {
     const vm = this.host.machine(), borrowed = this.bySlot.get(vm.entities.slot(reference));
     if (borrowed === undefined) return;
     this.host.actors.assertOwned(borrowed.actor);
-    const offsets = this.fieldOffsets();
+    this.fieldOffsets();
     if (kind === "write") {
-      if (words === 1 && privateFields.some(name => word === offsets.get(name))) return;
-      throw new QcProgramError("Original QC cannot mutate a borrowed actor outside its source owner");
+      // Projected fields are canonical (owned by the actor's source);
+      // every other field is row-local QC state: zero-initialized at
+      // borrow and checkpointed with the machine's entity memory, so
+      // original QC reads/writes of its own timers and scratch fields
+      // on a foreign actor (quad timers in T_Damage, search times)
+      // behave exactly as they would on a native row.
+      for (let current = word; current < word + words; current++) {
+        const field = this.fieldsByWord.get(current);
+        if (field !== undefined && !privateFields.some(name => name === field))
+          throw new QcProgramError(`Original QC cannot mutate borrowed field ${field} outside its source owner`);
+      }
+      return;
     }
     const requested: ProjectionField[] = [];
     for (let current = word; current < word + words; current++) {
       const field = this.fieldsByWord.get(current);
-      if (field === undefined) throw new QcProgramError(`Borrowed QC actor has no canonical field projection at ${current}`);
-      if (!requested.includes(field)) requested.push(field);
+      if (field !== undefined && !requested.includes(field)) requested.push(field);
     }
-    this.refresh(borrowed, requested);
+    if (requested.length !== 0) this.refresh(borrowed, requested);
   }
   private fieldOffsets(): ReadonlyMap<ProjectionField, number> {
     if (this.offsets === null) {
