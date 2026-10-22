@@ -13,7 +13,7 @@ import { blend, byte, sampleBound, clamp, colorWord, LITTLE_ENDIAN, passesAlpha,
 import type { BoundTexture, Framebuffer, Sample, TexturePlaneDerivative, TriangleSetup } from "./triangle-kernel.ts";
 import { rasterizeAliasedLine } from "./lines.ts";
 import type { LineFragment } from "./lines.ts";
-import { worldAttributes, shadeQ2Fragment } from "./lighting.ts";
+import { cullTriangleLights, worldAttributes, shadeQ2Fragment } from "./lighting.ts";
 import type { CpuVertex, CpuLighting } from "./lighting.ts";
 import { CpuImages } from "./textures.ts";
 import { applyQ1DepthFog, applyQ2DepthFog } from "./fog.ts";
@@ -616,6 +616,7 @@ export class SoftwareRenderer implements RendererBackend {
       case "q2-fog": applyQ2DepthFog(this.framebuffer, operation, this.alphaBits); return;
       case "depth-atlas": {
         const image = this.images.depthImage(operation.image), target = new SoftwareRenderer(image.width, image.height, this.owner, this.subpixelBits, 0);
+        target.colorWrite = false;
         // Atlas image row zero is V=0. Raster rows run from the top of the target.
         for (let y = 0; y < image.height; y++)
           target.depth.set(image.pixels.subarray(y * image.width, (y + 1) * image.width), (image.height - 1 - y) * image.width);
@@ -1266,7 +1267,7 @@ export class SoftwareRenderer implements RendererBackend {
       white, depthWrite, stencilEnabled, colorWrite, textureConsumed, primaryAlpha,
       secondaryAlpha, constantDepth, blending, depthTest, alphaTest, secondaryEnvironment,
       texture, secondaryTexture, derivative, secondaryDerivative,
-      lighting: { ...this.fragmentLighting(batch), positions: [ia.worldPosition, ib.worldPosition, ic.worldPosition],
+      lighting: { ...cullTriangleLights(this.fragmentLighting(batch), [ia.worldPosition, ib.worldPosition, ic.worldPosition]), positions: [ia.worldPosition, ib.worldPosition, ic.worldPosition],
         normals: [ia.worldNormal, ib.worldNormal, ic.worldNormal] },
       width: this.width, height: this.height,
       state: { blend: { ...state.blend } }, alphaBits: this.alphaBits,

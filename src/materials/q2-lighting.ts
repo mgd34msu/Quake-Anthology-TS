@@ -19,13 +19,21 @@ export function spotConeAttenuation(direction: Vec3, coneDirection: Vec3, coneCo
 
 /** Point lights shift 16 units along the normal; negative red bypasses Lambert. */
 export function calcDynamicLightContribution(light: DynamicLightSample, position: Vec3, normal: Vec3): Vec3 {
-  const lightPosition = light.cone !== null ? light.origin
-    : vec3(light.origin.x + normal.x * 16, light.origin.y + normal.y * 16, light.origin.z + normal.z * 16);
-  const delta = vec3(lightPosition.x - position.x, lightPosition.y - position.y, lightPosition.z - position.z);
-  const distance = Math.hypot(delta.x, delta.y, delta.z), falloff = pointLightFalloff(distance, light.radius), inverseDistance = 1 / Math.max(distance, 1);
-  const direction = vec3(delta.x * inverseDistance, delta.y * inverseDistance, delta.z * inverseDistance);
-  const lambert = light.color.x < 0 ? 1 : Math.max(direction.x * normal.x + direction.y * normal.y + direction.z * normal.z, 0);
+  const out = vec3(0, 0, 0);
+  calcDynamicLightContributionInto(out, light, position, normal);
+  return out;
+}
+
+/** Allocation-free form for per-fragment loops; identical arithmetic. */
+export function calcDynamicLightContributionInto(out: { x: number; y: number; z: number }, light: DynamicLightSample, position: Vec3, normal: Vec3): void {
+  const lightX = light.cone !== null ? light.origin.x : light.origin.x + normal.x * 16;
+  const lightY = light.cone !== null ? light.origin.y : light.origin.y + normal.y * 16;
+  const lightZ = light.cone !== null ? light.origin.z : light.origin.z + normal.z * 16;
+  const deltaX = lightX - position.x, deltaY = lightY - position.y, deltaZ = lightZ - position.z;
+  const distance = Math.hypot(deltaX, deltaY, deltaZ), falloff = pointLightFalloff(distance, light.radius), inverseDistance = 1 / Math.max(distance, 1);
+  const directionX = deltaX * inverseDistance, directionY = deltaY * inverseDistance, directionZ = deltaZ * inverseDistance;
+  const lambert = light.color.x < 0 ? 1 : Math.max(directionX * normal.x + directionY * normal.y + directionZ * normal.z, 0);
   let scale = falloff * lambert * light.scale;
-  if (light.cone !== null) scale *= spotConeAttenuation(direction, light.cone.direction, light.cone.cosHalfAngle);
-  return vec3(light.color.x * scale, light.color.y * scale, light.color.z * scale);
+  if (light.cone !== null) scale *= spotConeAttenuation({ x: directionX, y: directionY, z: directionZ }, light.cone.direction, light.cone.cosHalfAngle);
+  out.x = light.color.x * scale; out.y = light.color.y * scale; out.z = light.color.z * scale;
 }

@@ -12,7 +12,7 @@ type TextureEnvironment = TextureBundle["environment"];
 export type ImageInternalFormat = "rgb8" | "rgba8";
 import type { LineTextureDerivative } from "./lines.ts";
 import type { CpuTriangleLighting } from "./lighting.ts";
-import { interpolateWorldInto, shadeQ2Fragment } from "./lighting.ts";
+import { interpolateWorldInto, shadeQ2FragmentInto } from "./lighting.ts";
 
 export interface Sample {
   r: number;
@@ -543,6 +543,7 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
   const fragmentPosition = { x: 0, y: 0, z: 0 }, fragmentNormal = { x: 0, y: 0, z: 0 };
   const fragmentVertexColor = { x: 0, y: 0, z: 0, w: 0 };
   const fragmentTexel: Sample = { r: 1, g: 1, b: 1, a: 1 };
+  const fragmentShade: Sample = { r: 0, g: 0, b: 0, a: 0 };
   for (let y = Math.max(minY, firstY); y <= Math.min(maxY, lastY); y++) {
     const sampleY = y + 0.5, rowA = edgeAY * sampleY, rowB = edgeBY * sampleY, rowC = edgeCY * sampleY;
     const attributeRowA = attributeAY * sampleY, attributeRowB = attributeBY * sampleY, attributeRowC = attributeCY * sampleY;
@@ -565,10 +566,14 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
       if (!depthPassed && !stencilEnabled) continue;
       const inverseW = aiw * wa + biw * wb + ciw * wc;
       const reciprocal = 1 / inverseW;
-      let r: number;
-      let g: number;
-      let blue: number;
-      let alpha: number;
+      let r = 0;
+      let g = 0;
+      let blue = 0;
+      let alpha = 0;
+      // Depth-only fragments (shadow volumes, atlas casters) skip every
+      // color term; alpha is only consumed by the alpha test below, which
+      // is exactly when textureConsumed holds.
+      if (textureConsumed) {
       if (white) {
         r = g = blue = alpha = clamp(inverseW * reciprocal);
       } else {
@@ -602,7 +607,8 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
         interpolateWorldInto(fragmentPosition, lighting.positions[0], lighting.positions[1], lighting.positions[2], weightsA, weightsB, weightsC);
         interpolateWorldInto(fragmentNormal, lighting.normals[0], lighting.normals[1], lighting.normals[2], weightsA, weightsB, weightsC);
         fragmentTexel.r = texelR; fragmentTexel.g = texelG; fragmentTexel.b = texelB; fragmentTexel.a = texelA;
-        const result = shadeQ2Fragment(lighting, fragmentPosition, fragmentNormal, vertexColor, fragmentTexel);
+        shadeQ2FragmentInto(fragmentShade, lighting, fragmentPosition, fragmentNormal, vertexColor, fragmentTexel);
+        const result = fragmentShade;
         r = result.r; g = result.g; blue = result.b; alpha = result.a;
       }
       if (textureConsumed && secondaryEnvironment !== null && secondaryTexture.kind !== "incomplete") {
@@ -636,11 +642,13 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
         if (effect === "alpha" || effect === "rgba") alpha *= 1 - amount;
         if (effect === "overlay") { r = fog.color.x; g = fog.color.y; blue = fog.color.z; alpha *= amount; }
       }
+      }
       if (alphaTest !== "none" && !passesAlpha(alpha, alphaTest)) continue;
       if (stencilEnabled && !stencilFragment(framebuffer.stencil, pixel, depthPassed, stencilFunction, stencilCompareMask, stencilWriteMask, stencilMaximum, stencilDepthFail, stencilDepthPass)) continue;
-      if (!colorWrite) continue;
-      if (blending === "opaque") colors[pixel] = colorWord(r, g, blue, alphaBits === 0 ? 1 : alpha);
-      else writeFragment(framebuffer, alphaBits, pixel, r, g, blue, alpha, state, blending);
+      if (colorWrite) {
+        if (blending === "opaque") colors[pixel] = colorWord(r, g, blue, alphaBits === 0 ? 1 : alpha);
+        else writeFragment(framebuffer, alphaBits, pixel, r, g, blue, alpha, state, blending);
+      }
       if (depthWrite) depths[pixel] = depth;
     }
   }

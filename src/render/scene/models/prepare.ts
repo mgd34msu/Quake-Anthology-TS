@@ -74,11 +74,19 @@ function lodIndex(entity: SceneEntity, count: number, radius: number, context: M
   return Math.max(0, Math.min(count - 1, lod + (options.lodBias ?? 0)));
 }
 
+const md2InterpolationCache = new WeakMap<Q2AliasModel, Map<string, readonly ModelVertex[]>>();
+
 /** Q2 stores scaled packed coordinates after interpolating translation and origin. */
 export function interpolateSceneMd2(model: Q2AliasModel, entity: SceneEntity, frame: number, oldFrame: number, backLerp: number,
   shell: boolean): readonly ModelVertex[] {
   const current = at(model.frames, frame, "MD2 frame"), old = at(model.frames, oldFrame, "MD2 old frame");
   const delta = modelLocalDelta(entity.transform, sub3(entity.previousOrigin, entity.transform.origin));
+  // Interpolation is a pure function of these inputs; many entities share
+  // a model pose in the same frame (and static poses repeat every frame).
+  const cacheKey = `${frame}|${oldFrame}|${backLerp}|${shell ? 1 : 0}|${delta.x}|${delta.y}|${delta.z}`;
+  let cache = md2InterpolationCache.get(model);
+  const cached = cache?.get(cacheKey);
+  if (cached !== undefined) return cached;
   const front = 1 - backLerp;
   const move = { x: backLerp * (delta.x + old.translation.x) + front * current.translation.x,
     y: backLerp * (delta.y + old.translation.y) + front * current.translation.y,
@@ -99,6 +107,9 @@ export function interpolateSceneMd2(model: Q2AliasModel, entity: SceneEntity, fr
       z: Math.fround(move.z + previous.position[2] * backZ + vertex.position[2] * frontZ + (shell ? normal.z * 4 : 0)),
     } };
   }
+  if (cache === undefined) { cache = new Map<string, readonly ModelVertex[]>(); md2InterpolationCache.set(model, cache); }
+  if (cache.size >= 512) cache.clear();
+  cache.set(cacheKey, result);
   return result;
 }
 

@@ -19,12 +19,19 @@ export function sampleTimedFrame<T>(frames: TimedFrames<T>, timeSeconds: number,
 }
 
 /** Q1 and Q2 light the current pose's normal while interpolating vertex positions. */
+const aliasInterpolationCache = new WeakMap<ModelFrame, WeakMap<ModelFrame, Map<string, readonly ModelVertex[]>>>();
+
 export function interpolateAliasFrames(current: ModelFrame, previous: ModelFrame, backLerp: number,
   previousOriginDelta: Vec3 = { x: 0, y: 0, z: 0 }): readonly ModelVertex[] {
   if (!Number.isFinite(backLerp) || backLerp < 0 || backLerp > 1) throw new RangeError("backLerp must be in 0..1");
   if (current.vertices.length !== previous.vertices.length) throw new RangeError("Alias poses have different vertex counts");
+  // Pure in its inputs; shared poses repeat across entities and frames.
+  const cacheKey = `${backLerp}|${previousOriginDelta.x}|${previousOriginDelta.y}|${previousOriginDelta.z}`;
+  let byPrevious = aliasInterpolationCache.get(current);
+  const cached = byPrevious?.get(previous)?.get(cacheKey);
+  if (cached !== undefined) return cached;
   const frontLerp = 1 - backLerp;
-  return current.vertices.map((vertex, index) => {
+  const result = current.vertices.map((vertex, index) => {
     const old = at(previous.vertices, index, "previous vertex");
     return { normal: vertex.normal, position: {
       x: Math.fround(vertex.position.x * frontLerp + (old.position.x + previousOriginDelta.x) * backLerp),
@@ -32,6 +39,12 @@ export function interpolateAliasFrames(current: ModelFrame, previous: ModelFrame
       z: Math.fround(vertex.position.z * frontLerp + (old.position.z + previousOriginDelta.z) * backLerp),
     } };
   });
+  if (byPrevious === undefined) { byPrevious = new WeakMap(); aliasInterpolationCache.set(current, byPrevious); }
+  let byKey = byPrevious.get(previous);
+  if (byKey === undefined) { byKey = new Map(); byPrevious.set(previous, byKey); }
+  if (byKey.size >= 256) byKey.clear();
+  byKey.set(cacheKey, result);
+  return result;
 }
 
 export interface AliasMeshVertex extends ModelVertex { readonly texCoord: Vec2; }

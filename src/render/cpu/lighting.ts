@@ -1,8 +1,8 @@
 /* Q2 fragment and shadow equations ported from the reference port
  * Copyright (C) Id Software and contributors. GPL-2.0-or-later. */
 import type { Vec3, Vec4 } from "../../contracts/math.ts";
-import type { Q2ModelShadowLight, BatchLighting, DepthImageLevel, MultitextureVertex, Q2ShadowAtlas, Q2ShadowProjection } from "../../contracts/render.ts";
-import { calcDynamicLightContribution } from "../../materials/q2-lighting.ts";
+import type { Q2FragmentLight, Q2ModelShadowLight, BatchLighting, DepthImageLevel, MultitextureVertex, Q2ShadowAtlas, Q2ShadowProjection } from "../../contracts/render.ts";
+import { calcDynamicLightContributionInto } from "../../materials/q2-lighting.ts";
 import type { Sample } from "./triangle-kernel.ts";
 
 export interface CpuVertex extends MultitextureVertex {
@@ -16,6 +16,32 @@ export interface CpuLighting {
 export interface CpuTriangleLighting extends CpuLighting {
   readonly positions: readonly [Vec3, Vec3, Vec3];
   readonly normals: readonly [Vec3, Vec3, Vec3];
+}
+
+/** Drop dynamic lights that cannot reach any fragment of this triangle.
+ * Falloff is exactly zero beyond reach, and every fragment position lies
+ * inside the triangle's AABB, so culling by AABB distance is exact. */
+export function cullTriangleLights(lighting: CpuLighting, positions: readonly [Vec3, Vec3, Vec3]): CpuLighting {
+  const parameters = lighting.parameters;
+  if (parameters.kind !== "q2-world" || parameters.lights.length === 0) return lighting;
+{}
+  const minX = Math.min(positions[0].x, positions[1].x, positions[2].x), maxX = Math.max(positions[0].x, positions[1].x, positions[2].x);
+  const minY = Math.min(positions[0].y, positions[1].y, positions[2].y), maxY = Math.max(positions[0].y, positions[1].y, positions[2].y);
+  const minZ = Math.min(positions[0].z, positions[1].z, positions[2].z), maxZ = Math.max(positions[0].z, positions[1].z, positions[2].z);
+  const keep = (light: Q2FragmentLight): boolean => {
+    if (light.scale === 0 || light.color.x === 0 && light.color.y === 0 && light.color.z === 0) return false;
+    const reach = light.radius + (light.cone === null ? 16 : 0);
+    const dx = light.origin.x < minX ? minX - light.origin.x : light.origin.x > maxX ? light.origin.x - maxX : 0;
+    const dy = light.origin.y < minY ? minY - light.origin.y : light.origin.y > maxY ? light.origin.y - maxY : 0;
+    const dz = light.origin.z < minZ ? minZ - light.origin.z : light.origin.z > maxZ ? light.origin.z - maxZ : 0;
+    return dx * dx + dy * dy + dz * dz <= reach * reach;
+  };
+  if (parameters.pass === "model") {
+    const lights = parameters.lights.filter(keep);
+    return lights.length === parameters.lights.length ? lighting : { ...lighting, parameters: { ...parameters, lights } };
+  }
+  const lights = parameters.lights.filter(keep);
+  return lights.length === parameters.lights.length ? lighting : { ...lighting, parameters: { ...parameters, lights } };
 }
 
 const ZERO_WORLD_ATTRIBUTES: Pick<CpuVertex, "worldPosition" | "worldNormal"> = { worldPosition: { x: 0, y: 0, z: 0 }, worldNormal: { x: 0, y: 0, z: 0 } };
@@ -97,9 +123,22 @@ function aliasShade(position: Vec3, vertex: Vec4, scale: number, lights: readonl
 
 export function shadeQ2Fragment(lighting: CpuLighting, position: Vec3, normal: Vec3,
   vertex: Vec4, texel: Readonly<Sample>): Sample {
+  const out: Sample = { r: 0, g: 0, b: 0, a: 0 };
+  shadeQ2FragmentInto(out, lighting, position, normal, vertex, texel);
+  return out;
+}
+
+const lightContributionScratch = { x: 0, y: 0, z: 0 };
+
+/** Allocation-free form for per-fragment loops; identical arithmetic. */
+export function shadeQ2FragmentInto(out: Sample, lighting: CpuLighting, position: Vec3, normal: Vec3,
+  vertex: Vec4, texel: Readonly<Sample>): void {
   const parameters = lighting.parameters;
-  if (parameters.kind === "vertex") return { r: vertex.x * texel.r, g: vertex.y * texel.g,
-    b: vertex.z * texel.b, a: vertex.w * texel.a };
+  if (parameters.kind === "vertex") {
+    out.r = vertex.x * texel.r; out.g = vertex.y * texel.g;
+    out.b = vertex.z * texel.b; out.a = vertex.w * texel.a;
+    return;
+  }
   if (parameters.kind === "q2-world") {
     let r = parameters.pass === "model" ? vertex.x : parameters.pass !== "texture" ? texel.r : texel.r * vertex.x;
     let g = parameters.pass === "model" ? vertex.y : parameters.pass !== "texture" ? texel.g : texel.g * vertex.y;
@@ -116,7 +155,8 @@ export function shadeQ2Fragment(lighting: CpuLighting, position: Vec3, normal: V
       const dx = light.origin.x - position.x, dy = light.origin.y - position.y, dz = light.origin.z - position.z;
       const reach = light.radius + (light.cone === null ? 16 : 0);
       if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
-      const contribution = calcDynamicLightContribution(light, position, normal);
+      calcDynamicLightContributionInto(lightContributionScratch, light, position, normal);
+      const contribution = lightContributionScratch;
       if (contribution.x === 0 && contribution.y === 0 && contribution.z === 0) continue;
       let visibility = 1;
       if (light.shadow.kind !== "none") {
@@ -127,11 +167,12 @@ export function shadeQ2Fragment(lighting: CpuLighting, position: Vec3, normal: V
     }
     if (parameters.pass === "model") { r *= texel.r; g *= texel.g; b *= texel.b; }
     if (parameters.pass === "material-lightmap") { r *= vertex.x; g *= vertex.y; b *= vertex.z; }
-    return { r, g, b, a: parameters.pass === "lightmap" ? 1 : texel.a * vertex.w };
+    out.r = r; out.g = g; out.b = b; out.a = parameters.pass === "lightmap" ? 1 : texel.a * vertex.w;
+    return;
   }
   if (lighting.depth === null) throw new Error("CPU model shadows require their depth atlas");
   const shade = aliasShade(position, vertex, parameters.shadeScale, parameters.lights, parameters.atlas, lighting.depth);
-  return { r: texel.r * shade.x, g: texel.g * shade.y, b: texel.b * shade.z, a: texel.a * vertex.w };
+  out.r = texel.r * shade.x; out.g = texel.g * shade.y; out.b = texel.b * shade.z; out.a = texel.a * vertex.w;
 }
 
 export function interpolateWorld(a: Vec3, b: Vec3, c: Vec3, wa: number, wb: number, wc: number): Vec3 {
