@@ -85,18 +85,36 @@ export function buildGammaTable(profile: GammaProfile): Uint8Array {
   return table;
 }
 
+/** Composed gamma+intensity tables per profile object; profiles are stable settings records. */
+const composedGammaTables = new WeakMap<GammaProfile, { readonly table: Uint8Array; readonly identity: boolean }>();
+
 export function applyImageGamma(level: ImageLevel, profile: GammaProfile): ImageLevel {
   if (level.pixels.length !== level.width * level.height * 4) throw new RangeError("Gamma input must be RGBA8");
-  const table = buildGammaTable(profile), pixels = level.pixels.slice();
-  const intensity = profile.kind === "q1-gl" || profile.onlyGamma ? 1 : Math.max(1, profile.intensity);
-  if (!Number.isFinite(intensity)) throw new RangeError("Intensity must be finite");
-  for (let offset = 0; offset < pixels.length; offset++) {
-    if (offset % 4 === 3) continue;
-    const value = pixels[offset];
-    if (value === undefined) throw new RangeError("Missing pixel");
-    const corrected = table[Math.min(255, Math.trunc(Math.fround(value * Math.fround(intensity))))];
-    if (corrected === undefined) throw new RangeError("Missing gamma entry");
-    pixels[offset] = corrected;
+  const pixels = level.pixels.slice();
+  let cached = composedGammaTables.get(profile);
+  if (cached === undefined) {
+    const table = buildGammaTable(profile);
+    const intensity = profile.kind === "q1-gl" || profile.onlyGamma ? 1 : Math.max(1, profile.intensity);
+    if (!Number.isFinite(intensity)) throw new RangeError("Intensity must be finite");
+    // Intensity composes into the table over the 256-value byte domain, so
+    // the per-pixel loop is a single lookup; identity skips it entirely.
+    const composed = new Uint8Array(256);
+    let identity = true;
+    for (let value = 0; value < 256; value++) {
+      const corrected = table[Math.min(255, Math.trunc(Math.fround(value * Math.fround(intensity))))] ?? 0;
+      composed[value] = corrected;
+      if (corrected !== value) identity = false;
+    }
+    cached = { table: composed, identity };
+    composedGammaTables.set(profile, cached);
+  }
+  const { table: composed, identity } = cached;
+  if (!identity) {
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+      pixels[offset] = composed[pixels[offset] ?? 0] ?? 0;
+      pixels[offset + 1] = composed[pixels[offset + 1] ?? 0] ?? 0;
+      pixels[offset + 2] = composed[pixels[offset + 2] ?? 0] ?? 0;
+    }
   }
   return { width: level.width, height: level.height, pixels };
 }
