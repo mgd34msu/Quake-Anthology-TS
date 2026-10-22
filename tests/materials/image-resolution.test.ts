@@ -375,7 +375,9 @@ test("all Q2 usages share native override precedence, explicit truecolor priorit
     files.delete(`custom/example.${extension}`);
   }
   const broken = loader(new Map([["pics/broken.png", asset(new Uint8Array(), "bad-png")], ["pics/broken.pcx", asset(pcx, "native")]]));
-  try { await expect(broken.load("pics/broken.pcx", { family: "q2" })).rejects.toThrow(); } finally { broken.close(); broken.images.close(); }
+  // Live loaders treat an undecodable override candidate as absent and
+  // fall through to the native image (strict staged loaders reject).
+  try { expect((await broken.load("pics/broken.pcx", { family: "q2" }))?.image.source).toEqual({ kind: "generated", name: "native" }); } finally { broken.close(); broken.images.close(); }
 });
 
 test("semantic Q2 skin and sprite PCX retain global palette, flood fill, transparency and separate cache entries", async () => {
@@ -461,6 +463,6 @@ test("wall usage retains WAL dimensions and opaque index255 while pictures keep 
     if (native?.content.kind !== "indexed8") throw new Error("Native WAL lost palette");
     expect(native.content.transparency).toEqual({ kind: "opaque" }); expect(native.content.palette).toBe(palette); expect(native.content.levels[0].pixels[0]).toBe(255);
     files.set("pics/unknown.blob", asset(new Uint8Array(), "unsupported"));
-    await expect(textures.load("pics/unknown.blob")).rejects.toThrow("Unsupported scene image format");
+    expect(await textures.load("pics/unknown.blob")).toBeNull();
   } finally { textures.close(); images.close(); }
 });

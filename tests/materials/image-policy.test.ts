@@ -121,7 +121,7 @@ test("replacement preparation replays used skin requests and rejects a newly sel
   const reader = { read: async (path: string) => path.endsWith(".png") ? { bytes: png, source: { kind: "generated", name: path } satisfies Parameters<SceneImageRegistry["register"]>[3] }
     : path.endsWith(".gif") ? { bytes: new Uint8Array([1]), source: { kind: "generated", name: path } satisfies Parameters<SceneImageRegistry["register"]>[3] } : null };
   const original = new SceneTextureLoader(images, reader, null, { policy: imagePolicyFromControls({ overrideLevel: 2, overrideMask: 1, formats: "png gif" }) });
-  const replacement = new SceneTextureLoader(images, reader, null, { policy: imagePolicyFromControls({ overrideLevel: 2, overrideMask: 1, formats: "gif png" }) });
+  const replacement = new SceneTextureLoader(images, reader, null, { strict: true, policy: imagePolicyFromControls({ overrideLevel: 2, overrideMask: 1, formats: "gif png" }) });
   try {
     const image = await original.load("models/custom/skin.png", { family: "q2", usage: "skin", mipmap: false });
     if (image === null) throw new Error("Missing original skin");

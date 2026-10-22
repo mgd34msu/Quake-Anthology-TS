@@ -265,7 +265,7 @@ export class SceneTextureLoader {
         const texture = this.register(name, content, { wrap: options.wrap ?? "repeat", filter: options.mipmap === false ? "linear" : "linear-mipmap-nearest" }, asset.source, logicalSize);
         if (animation !== null) this.animate(texture, animation);
         return texture;
-      } catch (error) { if (this.strict) throw error; this.requireOpen(); continue; }
+      } catch (error) { if (this.strict || this.images.isClosed) throw error; this.requireOpen(); continue; }
     }
     return null;
   }

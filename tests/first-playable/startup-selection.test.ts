@@ -59,7 +59,9 @@ test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3") || !corpusHasFile("q2/baseq2/p
   model.select("product", "q2-classic-baseq2");
   expect(model.options.map).toBe("maps/base1.bsp");
   model.select("rules", "ctf");
-  await expect(model.resolve()).rejects.toThrow("CTF map is missing");
+  // The unified flag layer synthesizes bases from deathmatch spawns, so a
+  // non-CTF authored map still resolves instead of refusing the mode.
+  expect((await model.resolve()).recipe.match.provider).toBe("q2:ctf");
   model.select("product", "q2-classic-ctf");
   expect((await model.resolve()).recipe.match.provider).toBe("q2:ctf");
   model.select("product", "q2-classic-baseq2");
@@ -68,7 +70,7 @@ test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3") || !corpusHasFile("q2/baseq2/p
   // deathmatch variant to be reset) and the session follows the rules.
   expect(model.options.rules).toBe("ctf");
   expect(model.options.mode).toBe("deathmatch");
-  await expect(model.resolve()).rejects.toThrow("CTF map is missing");
+  expect((await model.resolve()).recipe.match.provider).toBe("q2:ctf");
   model.select("rules", "standard");
   expect((await model.resolve()).recipe.match.provider).toBe("q2:official");
   expect(model.rows().find(row => row.id === "weapons")?.value).toBe("q3-baseq3");

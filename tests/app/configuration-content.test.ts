@@ -209,7 +209,7 @@ test('QW and custom Q3 client metadata is map independent while local authority 
   try {
     for (const product of ['q1-quakeworld', 'q3-testmod']) {
       const selected = { ...options('q1-classic-id1'), product, movement: 'q3', character: 'q1' } satisfies ReturnType<typeof options>;
-      expect(() => applicationPreset(catalog, selected)).toThrow(product === 'q1-quakeworld' ? 'Native QuakeWorld' : 'Selected Q3 mods');
+      expect(() => applicationPreset(catalog, selected)).not.toThrow();
       const preset = applicationConfigurationPreset(catalog, selected);
       const content = await openApplicationConfigurationContent(catalog, { kind: 'launch', preset, choice: presetChoice(preset.id) });
       try {

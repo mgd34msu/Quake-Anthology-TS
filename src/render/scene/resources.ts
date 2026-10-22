@@ -13,6 +13,8 @@ export class SceneImageRegistry {
 
   constructor(readonly owner: RendererResourceOwner, private readonly clock: MediaClock = { sample: () => performance.now() }) {}
 
+  get isClosed(): boolean { return this.closed; }
+
   /** A separately releasable scope within this renderer's image namespace. */
   fork(clock: MediaClock = this.clock): SceneImageRegistry {
     if (this.closed) throw new Error("Scene image registry is closed");

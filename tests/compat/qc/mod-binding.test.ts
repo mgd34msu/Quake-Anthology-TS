@@ -255,7 +255,7 @@ test("native arithmetic is observed without imposing an id1 subtraction template
 });
 
 
-test("declared original Threewave QuakeWorld combat retains source stores and rejects unqualified admission", async () => {
+test("declared original Threewave QuakeWorld combat retains source stores; unqualified binding derives without a declaration", async () => {
   const { validateQcModCombat } = await import("../../../src/compat/qc/mod-combat.ts");
   const { readQuakeCCompatibility } = await import("../../../src/compat/qc/compatibility.ts");
   const bytes = await Bun.file(`${testCorpusRoot()}/q1/ctf/qwprogs.dat`).bytes(), program = loadQcProgram(bytes);
@@ -265,9 +265,11 @@ test("declared original Threewave QuakeWorld combat retains source stores and re
   const encoded = new TextEncoder().encode(JSON.stringify(raw)), declaration = readQuakeCCompatibility(encoded, program.digest).combat;
   if (declaration === undefined) throw new Error("Missing declared source combat");
   expect(program.api.kind).toBe("q1-quakeworld");
-  expect(() => id1ProgramBinding(program)).toThrow("artifact-qualified combat declaration");
+  // Unqualified programs derive their binding from bytecode proofs; no
+  // declaration is attached until one validates.
+  expect(id1ProgramBinding(program).damage.call.declaration).toBeUndefined();
   expect(() => validateQcModCombat(program, { ...declaration, damage: { ...declaration.damage, arguments: declaration.damage.arguments.slice(0, 3) } })).toThrow();
-  expect(() => id1ProgramBinding(program)).toThrow("artifact-qualified combat declaration");
+  expect(id1ProgramBinding(program).damage.call.declaration).toBeUndefined();
   expect(() => readQuakeCCompatibility(encoded, "sha256:" + "0".repeat(64))).toThrow();
   validateQcModCombat(program, declaration);
   const binding = id1ProgramBinding(program);
