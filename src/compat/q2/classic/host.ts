@@ -177,11 +177,11 @@ export class ClassicQ2GuestHost {
   init(): undefined { if (this.#initialized) throw new Error("API 3 Init already completed"); this.call("Init"); this.#initialized = true; this.edicts.reconcile(); return undefined; }
   shutdown(): undefined {
     try { this.call("Shutdown"); } finally { this.#pickups?.close(); this.#pickups = null; this.#initialized = false; }
-    if (this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) this.options.services.engine.actors.release(actor);
+    if (this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) if (this.options.services.engine.actors.sourceOf(actor.id)?.provider === this.options.provider) this.options.services.engine.actors.release(actor);
     return undefined;
   }
   spawnEntities(map: string, entities: string, spawnPoint: string): undefined {
-    if (this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) this.options.services.engine.actors.release(actor);
+    if (this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) if (this.options.services.engine.actors.sourceOf(actor.id)?.provider === this.options.provider) this.options.services.engine.actors.release(actor);
     const before = this.options.runner.instructionsExecuted;
     try {
       this.withStrings([map, entities, spawnPoint], pointers => {
@@ -205,13 +205,13 @@ export class ClassicQ2GuestHost {
   }
   async saveLoading(name: "ReadGame" | "ReadLevel", filename: string, nextFrame: () => Promise<void>): Promise<void> {
     this.#pickups?.assertIdle();
-    if (this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) this.options.services.engine.actors.release(actor);
+    if (this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) if (this.options.services.engine.actors.sourceOf(actor.id)?.provider === this.options.provider) this.options.services.engine.actors.release(actor);
     const address = allocateClassicString(this.memory, filename);
     try { await this.callLoading(name, [{ kind: "pointer", value: address }], nextFrame, Math.min(Number.MAX_SAFE_INTEGER, this.options.instructionBudget * 10)); }
     finally { this.memory.unmap(address, classicStringAllocationBytes(filename)); }
   }
   async spawnEntitiesLoading(map: string, entities: string, spawnPoint: string, nextFrame: () => Promise<void>): Promise<void> {
-    if (this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) this.options.services.engine.actors.release(actor);
+    if (this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) if (this.options.services.engine.actors.sourceOf(actor.id)?.provider === this.options.provider) this.options.services.engine.actors.release(actor);
     const records = [map, entities, spawnPoint].map(text => ({ text, address: allocateClassicString(this.memory, text) }));
     const before = this.options.runner.instructionsExecuted;
     try {
@@ -301,7 +301,7 @@ export class ClassicQ2GuestHost {
   }
   save(name: "WriteGame" | "ReadGame" | "WriteLevel" | "ReadLevel", filename: string, autosave = false): undefined {
     this.#pickups?.assertIdle();
-    if ((name === "ReadGame" || name === "ReadLevel") && this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) this.options.services.engine.actors.release(actor);
+    if ((name === "ReadGame" || name === "ReadLevel") && this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) if (this.options.services.engine.actors.sourceOf(actor.id)?.provider === this.options.provider) this.options.services.engine.actors.release(actor);
     this.withStrings([filename], pointers => { this.call(name, name === "WriteGame" ? [...pointers, { kind: "int32", value: Number(autosave) }] : pointers); return undefined; });
     return undefined;
   }

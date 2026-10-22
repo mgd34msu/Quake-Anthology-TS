@@ -227,6 +227,12 @@ export class RereleaseForeignActors {
       const view = this.host.module.entities().fromPointer(address), source = new RereleaseSourceEdict(view, this.host.module);
       entry = { actor: owned, view, generation: source.generation(), releasing: false, syncing: false };
       this.#actors.set(actor, entry); this.#slots.set(view.slot, entry);
+      // Guest code running inside G_Spawn can make the host bind this
+      // edict as a native actor before the projection exists. That
+      // phantom duplicates the projection's edict; retire it so the
+      // slot has exactly one owner.
+      const phantom = this.host.options.engine.actors.atSource(this.host.module.memory.module.id, view.slot);
+      if (phantom !== null && phantom !== owned) this.host.options.engine.actors.release(phantom);
     }
     try { this.#sync(entry); }
     catch (error) { this.#release(entry); throw error; }

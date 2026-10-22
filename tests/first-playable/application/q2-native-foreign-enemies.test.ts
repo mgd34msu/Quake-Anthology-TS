@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Application } from "../../../src/app/bootstrap/application.ts";
+import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
@@ -85,7 +86,9 @@ test("unqualified classic guest keeps monsters guest-native and says so", async 
     const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
     for (let i = 0; i < 20; i++) await app.step(50);
     expect(app.simulation.presentations().filter(p => p.family === "q1")).toHaveLength(0);
-    expect(printed.some(text => text.includes("Selected enemies") && text.includes("guest-native"))).toBe(true);
+    if (!(local.seat.presentation instanceof WorldSeatPresentation)) throw new Error("Missing local UI");
+    const consoleText = local.seat.presentation.ui.local.console.buffer.dump();
+    expect(consoleText.includes("Selected enemies") && consoleText.includes("guest-native")).toBe(true);
     expect(app.simulation.playerUi(local.actor).health).toBeGreaterThan(0);
   } finally { try { await app.close(); } finally { await rm(root, { recursive: true, force: true }); } }
 }, 300_000);

@@ -355,6 +355,7 @@ export class SharedSimulation implements Simulation {
   /** Selected-monster replacement plans per guest entity text. */
   private readonly guestMonsterPlans = new Map<string, GuestMonsterPlan | null>();
   private guestMonstersAdmitted = false;
+  private pendingGuestMonsterReport: string | null = null;
   private readonly sharedTravelApplied = new Set<ActorId>();
   /** Clients whose combat binding is a movement-only mirror of guest state
    * (unqualified DLLs keep combat guest-private; the guest stays the damage
@@ -1408,7 +1409,9 @@ export class SharedSimulation implements Simulation {
     if (plan === null) return;
     if (plan.kept.length !== 0) {
       const reasons = [...new Set(plan.kept.map(entry => `${entry.classname}: ${entry.reason}`))].join("; ");
-      this.events.message({ kind: "print", level: 2, text: `Selected enemies: ${plan.replacements.length} replaced; ${plan.kept.length} guest-native (${reasons})\n` });
+      // Admission runs during world load, before presentation cursors
+      // exist; defer the report to the first stepped frame so it lands.
+      this.pendingGuestMonsterReport = `Selected enemies: ${plan.replacements.length} replaced; ${plan.kept.length} guest-native (${reasons})\n`;
     }
     for (const replacement of plan.replacements) {
       const definition = replacement.definition;
@@ -1439,7 +1442,14 @@ export class SharedSimulation implements Simulation {
 
   /** One guest frame of selected-monster source time on a native world,
    * mirroring the monster branches of the shared turn loop. */
+  private flushGuestMonsterReport(): void {
+    if (this.pendingGuestMonsterReport === null) return;
+    const text = this.pendingGuestMonsterReport; this.pendingGuestMonsterReport = null;
+    this.events.message({ kind: "print", level: 2, text });
+  }
+
   private runGuestMonsters(): void {
+    this.flushGuestMonsterReport();
     if (this.selectedMonsters === null || (this.source.kind !== "q2-native" && this.source.kind !== "q3-qvm")) return;
     // Selected monsters read player health through shared combat; keep the
     // guest mirror current so they can acquire and damage the player.
@@ -4799,6 +4809,7 @@ export class SharedSimulation implements Simulation {
       if (input.elapsedMilliseconds !== 100 || input.commands.length !== 0) throw new Error("Source round settlement requires one empty 100ms input");
     } else if (settlement.kind === "ready") this.sourceRoundSettlement = { kind: "none" };
     this.stepping = true;
+    this.flushGuestMonsterReport();
     try {
       if (this.source.kind === "q2" && this.q2ServerRegistry !== null) {
         const gravity = this.q2ServerRegistry.variableValue("sv_gravity");

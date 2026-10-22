@@ -265,7 +265,10 @@ export class RereleaseQ2GuestHost {
     const registry = this.options.engine.actors;
     // Restore creates source placeholders before this host encounters their edicts.
     // Projected components borrow actors and must never retire their primary owner.
+    // Shared adjunct actors owned by this provider without a source binding
+    // (selected monsters) are not guest edicts and survive the rebind.
     const actors = this.options.semantics.project === undefined ? registry.ownedBy(this.module.memory.module.id)
+      .filter(actor => registry.sourceOf(actor.id)?.provider === this.module.memory.module.id)
       : [...this.#lifetimes.values()].map(entry => entry.actor);
     for (const actor of actors) if (registry.isLive(actor.id)) registry.release(actor);
     this.#lifetimes.clear();
