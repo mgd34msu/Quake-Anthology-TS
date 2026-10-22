@@ -7,7 +7,7 @@ import type { BodyState } from "../../contracts/world.ts";
 import type { QvmModuleOptions } from "./module.ts";
 import type { QvmGame } from "./game.ts";
 import type { SharedBodyTable } from "../../world/actors/body.ts";
-import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult, SourceArmorStage } from "../../world/gameplay/authority.ts";
+import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult, SourceArmorStage, CombatTraits } from "../../world/gameplay/authority.ts";
 import type { SessionActorRegistry } from "../../world/actors/registry.ts";
 import { attackDamageFlags } from "../../world/gameplay/armor.ts";
 import { QvmGameCombat, qvmCanonicalDamageFlags, qvmSourceDamageFlags, validateQvmCombatCall, validateQvmCombatPositions, type QvmReactionCall, type QvmGameArmorDefinition, type QvmGameCombatDefinition, type QvmGameDamage } from "./game-combat.ts";
@@ -267,6 +267,27 @@ export class QvmCombatBindings {
         const write = this.armorWrite(slot, armor); if (write === null) return undefined;
         const state = game.data.publicPlayerBytes(slot); state.setInt32(184 + definition.armor.pointsStat * 4, write.points, true);
         if (write.tier !== null) state.setInt32(184 + write.tier.stat * 4, write.tier.value, true);
+        return undefined;
+      },
+      // Shared TS actors projected into the guest (selected monsters) own
+      // their traits; write them through to the guest fields guest code
+      // reads, so guest traces and damage observe the same state.
+      writeTraits: (traits: CombatTraits): undefined => {
+        view().setInt32(definition.fields.takedamage, traits.canTakeDamage ? 1 : 0, true);
+        const declared = definition.state.mass;
+        if (declared.kind === "constant") {
+          if (traits.mass !== declared.value) throw new Error("Source mass is constant in the guest profile");
+        } else if (declared.storage === "float32") view().setFloat32(declared.offset, traits.mass, true);
+        else view().setInt32(declared.offset, Math.trunc(traits.mass), true);
+        let flags = view().getInt32(definition.reactions.flags, true);
+        flags = traits.invulnerable ? flags | definition.state.flags.invulnerable : flags & ~definition.state.flags.invulnerable;
+        flags = traits.noKnockback === true ? flags | definition.state.flags.noKnockback : traits.noKnockback === false ? flags & ~definition.state.flags.noKnockback : flags;
+        view().setInt32(definition.reactions.flags, flags, true);
+        if (slot < game.data.numClients) {
+          const team = definition.state.team.values.find(value => value.team === traits.team);
+          if (team !== undefined) game.data.publicPlayerBytes(slot).setInt32(248 + definition.state.team.persistentStat * 4, team.value, true);
+          else if (traits.team !== null) throw new Error("Source team is not representable in the guest profile");
+        } else if (traits.team !== null) throw new Error("Source team is not representable for a non-client guest entity");
         return undefined;
       } };
     if (combat.read(actor.id) === null) combat.bind(actor, binding); else combat.rebind(actor, binding);
