@@ -30,6 +30,25 @@ export function calcDynamicLightContributionInto(out: { x: number; y: number; z:
   const lightY = light.cone !== null ? light.origin.y : light.origin.y + normal.y * 16;
   const lightZ = light.cone !== null ? light.origin.z : light.origin.z + normal.z * 16;
   const deltaX = lightX - position.x, deltaY = lightY - position.y, deltaZ = lightZ - position.z;
+  // Exact zero skips: falloff is zero beyond the radius, and the Lambert term
+  // is zero when the unnormalized dot is negative beyond any rounding the
+  // normalized dot could add. The 2^-40 relative margins dwarf that rounding
+  // (a few ulp), so skipped fragments are exactly the full path's zeros.
+  if (Number.isFinite(light.scale)) {
+    const radius = light.radius;
+    if (radius >= 0 && deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ > radius * radius * (1 + 2 ** -40)) {
+      out.x = 0; out.y = 0; out.z = 0;
+      return;
+    }
+    if (light.color.x >= 0) {
+      const termX = deltaX * normal.x, termY = deltaY * normal.y, termZ = deltaZ * normal.z;
+      const dot = termX + termY + termZ;
+      if (dot < -(Math.abs(termX) + Math.abs(termY) + Math.abs(termZ)) * 2 ** -40) {
+        out.x = 0; out.y = 0; out.z = 0;
+        return;
+      }
+    }
+  }
   const distance = Math.hypot(deltaX, deltaY, deltaZ), falloff = pointLightFalloff(distance, light.radius), inverseDistance = 1 / Math.max(distance, 1);
   const directionX = deltaX * inverseDistance, directionY = deltaY * inverseDistance, directionZ = deltaZ * inverseDistance;
   const lambert = light.color.x < 0 ? 1 : Math.max(directionX * normal.x + directionY * normal.y + directionZ * normal.z, 0);

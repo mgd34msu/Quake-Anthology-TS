@@ -151,36 +151,43 @@ export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: Wo
   const lights = options.q3Lights ?? [], surfaceDlightMasks = new Map<number, number>();
   if (lights.length > 32) throw new RangeError("Q3 world lighting supports the source 32-light mask");
   const initialMask = lights.length === 32 ? -1 : (1 << lights.length) - 1;
-  const pending: { readonly child: BspChild; readonly mask: number; readonly planes: number }[] = [{
-    child: map.nodes.length === 0 ? { kind: "leaf", index: 0 } : { kind: "node", index: 0 }, mask: initialMask, planes: (1 << planes.length) - 1,
-  }];
-  while (pending.length !== 0) {
-    const item = pending.pop();
-    if (item === undefined) break;
-    const { child, mask } = item;
-    if (child.kind === "node") {
-      const node = map.nodes[child.index];
-      if (node === undefined) throw new RangeError(`World visibility index ${child.index} outside ${map.nodes.length}`);
-      const remaining = map.kind === "q3-bsp" ? remainingFrustumPlanes(node.bounds, planes, item.planes)
-        : boundsInFrustum(node.bounds, planes) ? item.planes : null;
+  // Flat numeric stack: child encodes node index >= 0, leaf as -1 - index.
+  // Same push/pop order as the object stack it replaces, so traversal order
+  // (and therefore surface order) is unchanged; only allocation is removed.
+  const stackChild: number[] = [map.nodes.length === 0 ? -1 : 0];
+  const stackMask: number[] = [initialMask];
+  const stackPlanes: number[] = [(1 << planes.length) - 1];
+  const encode = (child: BspChild): number => child.kind === "node" ? child.index : -1 - child.index;
+  while (stackChild.length !== 0) {
+    const encoded = stackChild.pop() ?? 0, mask = stackMask.pop() ?? 0, itemPlanes = stackPlanes.pop() ?? 0;
+    if (encoded >= 0) {
+      const node = map.nodes[encoded];
+      if (node === undefined) throw new RangeError(`World visibility index ${encoded} outside ${map.nodes.length}`);
+      const remaining = map.kind === "q3-bsp" ? remainingFrustumPlanes(node.bounds, planes, itemPlanes)
+        : boundsInFrustum(node.bounds, planes) ? itemPlanes : null;
       if (remaining === null) continue;
       const plane = map.planes[node.plane];
       if (plane === undefined) throw new RangeError(`World visibility index ${node.plane} outside ${map.planes.length}`);
       if (map.kind === "q3-bsp") {
         const masks = splitDlightMask(lights, mask, plane);
-        pending.push({ child: node.children[1], mask: masks[1], planes: remaining }, { child: node.children[0], mask: masks[0], planes: remaining });
+        stackChild.push(encode(node.children[1]), encode(node.children[0]));
+        stackMask.push(masks[1], masks[0]);
+        stackPlanes.push(remaining, remaining);
       }
       else {
         const front = dot3(camera.origin, plane.normal) >= plane.distance ? 0 : 1;
-        pending.push({ child: node.children[front === 0 ? 1 : 0], mask, planes: remaining }, { child: node.children[front], mask, planes: remaining });
+        stackChild.push(encode(node.children[front === 0 ? 1 : 0]), encode(node.children[front]));
+        stackMask.push(mask, mask);
+        stackPlanes.push(remaining, remaining);
       }
       continue;
     }
-    if (!leafVisible(child.index)) continue;
-    const leaf = map.leaves[child.index];
-    if (leaf === undefined) throw new RangeError(`World visibility index ${child.index} outside ${map.leaves.length}`);
-    if (map.kind === "q3-bsp" ? remainingFrustumPlanes(leaf.bounds, planes, item.planes) === null : !boundsInFrustum(leaf.bounds, planes)) continue;
-    leaves.push(child.index);
+    const leafIndex = -1 - encoded;
+    if (!leafVisible(leafIndex)) continue;
+    const leaf = map.leaves[leafIndex];
+    if (leaf === undefined) throw new RangeError(`World visibility index ${leafIndex} outside ${map.leaves.length}`);
+    if (map.kind === "q3-bsp" ? remainingFrustumPlanes(leaf.bounds, planes, itemPlanes) === null : !boundsInFrustum(leaf.bounds, planes)) continue;
+    leaves.push(leafIndex);
     const range = "surfaces" in leaf ? leaf.surfaces : leaf.faces;
     const members = map.kind === "q3-bsp" ? map.leafSurfaces : map.leafFaces;
     for (let i = 0; i < range.count; i++) {

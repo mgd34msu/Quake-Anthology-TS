@@ -314,6 +314,10 @@ export class SoftwareRenderer implements RendererBackend {
   private portalView = false;
   private viewProjectionState: Mat4 | null = null;
   private closed = false;
+  /** Reused depth-atlas target; allocating its framebuffers per operation
+   * churned tens of MB per frame. Passes fully specify viewport/clear/draw
+   * state, so reuse is observationally identical to a fresh target. */
+  private atlasTarget: SoftwareRenderer | null = null;
 
   constructor(readonly width: number, readonly height: number, readonly owner: RendererResourceOwner,
     readonly subpixelBits = 8, readonly stencilBits = 8, readonly alphaBits: 0 | 8 = 8) {
@@ -421,6 +425,8 @@ export class SoftwareRenderer implements RendererBackend {
     if (this.closed) return;
     this.images.clear();
     this.opacityFramebuffer = null;
+    this.atlasTarget?.close();
+    this.atlasTarget = null;
     this.closed = true;
   }
 
@@ -615,28 +621,42 @@ export class SoftwareRenderer implements RendererBackend {
     switch (operation.kind) {
       case "q2-fog": applyQ2DepthFog(this.framebuffer, operation, this.alphaBits); return;
       case "depth-atlas": {
-        const image = this.images.depthImage(operation.image), target = new SoftwareRenderer(image.width, image.height, this.owner, this.subpixelBits, 0);
+        const image = this.images.depthImage(operation.image);
+        if (this.atlasTarget !== null && (this.atlasTarget.width !== image.width || this.atlasTarget.height !== image.height)) {
+          this.atlasTarget.close();
+          this.atlasTarget = null;
+        }
+        const target = this.atlasTarget ??= new SoftwareRenderer(image.width, image.height, this.owner, this.subpixelBits, 0);
         target.colorWrite = false;
-        // Atlas image row zero is V=0. Raster rows run from the top of the target.
-        for (let y = 0; y < image.height; y++)
-          target.depth.set(image.pixels.subarray(y * image.width, (y + 1) * image.width), (image.height - 1 - y) * image.width);
-        try {
-          for (const pass of operation.passes) {
-            target.beginView({ viewport: { ...pass.viewport, y: image.height - pass.viewport.y - pass.viewport.height },
-              clipPlane: null, clear: pass.clearDepth === null ? null : { depth: pass.clearDepth, color: null, stencil: false } });
-            for (const draw of pass.draws) {
-              const vertices: { position: { x: number; y: number; z: number; w: number }; texCoord: { x: number; y: number }; color: { x: number; y: number; z: number; w: number } }[] = [];
-              for (let offset = 0; offset < draw.positions.length; offset += 4)
-                vertices.push({ position: { x: draw.positions[offset] ?? 0, y: draw.positions[offset + 1] ?? 0, z: draw.positions[offset + 2] ?? 0, w: draw.positions[offset + 3] ?? 0 },
-                  texCoord: { x: 0, y: 0 }, color: { x: 1, y: 1, z: 1, w: 1 } });
-              target.draw({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single",
-                indices: draw.indices, texture: { kind: "retain-current-texture" },
-                state: { ...CPU_OPAQUE_STATE, cull: draw.cull, polygonOffset: draw.polygonOffset }, vertices });
-            }
+        // Atlas image row zero is V=0. Raster rows run from the top of the
+        // target. Only pass rects are copied: cleared passes overwrite their
+        // rect in beginView, and untouched regions round-trip identically.
+        const imageWidth = image.width, imageHeight = image.height;
+        const copyRect = (viewport: Rect, toTarget: boolean): void => {
+          const x0 = Math.max(0, viewport.x), x1 = Math.min(imageWidth, viewport.x + viewport.width);
+          const y0 = Math.max(0, viewport.y), y1 = Math.min(imageHeight, viewport.y + viewport.height);
+          if (x0 >= x1) return;
+          for (let y = y0; y < y1; y++) {
+            const imageRow = y * imageWidth, targetRow = (imageHeight - 1 - y) * imageWidth;
+            if (toTarget) target.depth.set(image.pixels.subarray(imageRow + x0, imageRow + x1), targetRow + x0);
+            else image.pixels.set(target.depth.subarray(targetRow + x0, targetRow + x1), imageRow + x0);
           }
-          for (let y = 0; y < image.height; y++)
-            image.pixels.set(target.depth.subarray((image.height - 1 - y) * image.width, (image.height - y) * image.width), y * image.width);
-        } finally { target.close(); }
+        };
+        for (const pass of operation.passes) if (pass.clearDepth === null) copyRect(pass.viewport, true);
+        for (const pass of operation.passes) {
+          target.beginView({ viewport: { ...pass.viewport, y: image.height - pass.viewport.y - pass.viewport.height },
+            clipPlane: null, clear: pass.clearDepth === null ? null : { depth: pass.clearDepth, color: null, stencil: false } });
+          for (const draw of pass.draws) {
+            const vertices: { position: { x: number; y: number; z: number; w: number }; texCoord: { x: number; y: number }; color: { x: number; y: number; z: number; w: number } }[] = [];
+            for (let offset = 0; offset < draw.positions.length; offset += 4)
+              vertices.push({ position: { x: draw.positions[offset] ?? 0, y: draw.positions[offset + 1] ?? 0, z: draw.positions[offset + 2] ?? 0, w: draw.positions[offset + 3] ?? 0 },
+                texCoord: { x: 0, y: 0 }, color: { x: 1, y: 1, z: 1, w: 1 } });
+            target.draw({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single",
+              indices: draw.indices, texture: { kind: "retain-current-texture" },
+              state: { ...CPU_OPAQUE_STATE, cull: draw.cull, polygonOffset: draw.polygonOffset }, vertices });
+          }
+        }
+        for (const pass of operation.passes) copyRect(pass.viewport, false);
         return;
       }
       case "disable-portal-clip": this.clipPlane = null; return;

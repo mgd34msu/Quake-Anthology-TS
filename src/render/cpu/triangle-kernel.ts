@@ -544,10 +544,17 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
   const fragmentVertexColor = { x: 0, y: 0, z: 0, w: 0 };
   const fragmentTexel: Sample = { r: 1, g: 1, b: 1, a: 1 };
   const fragmentShade: Sample = { r: 0, g: 0, b: 0, a: 0 };
+  // Per-triangle invariants hoisted out of the fragment loop.
+  const lighting = setup.lighting, fragmentLit = textureConsumed && lighting.parameters.kind !== "vertex";
+  const lightPos0 = lighting.positions[0], lightPos1 = lighting.positions[1], lightPos2 = lighting.positions[2];
+  const lightNor0 = lighting.normals[0], lightNor1 = lighting.normals[1], lightNor2 = lighting.normals[2];
+  const luminanceAlpha = setup.textureEffect === "luminance-alpha";
+  const fog = setup.fog, fogDepthScale = setup.fogDepthScale ?? 1;
+  const fbOriginX = framebuffer.originX, fbOriginY = framebuffer.originY, fbStride = framebuffer.stride;
   for (let y = Math.max(minY, firstY); y <= Math.min(maxY, lastY); y++) {
     const sampleY = y + 0.5, rowA = edgeAY * sampleY, rowB = edgeBY * sampleY, rowC = edgeCY * sampleY;
     const attributeRowA = attributeAY * sampleY, attributeRowB = attributeBY * sampleY, attributeRowC = attributeCY * sampleY;
-    const rowOffset = (y - framebuffer.originY) * framebuffer.stride - framebuffer.originX;
+    const rowOffset = (y - fbOriginY) * fbStride - fbOriginX;
     span.min = minX;
     span.max = maxX;
     trimSpan(span, edgeAX, rowA, edgeAC, edgeAInclusive);
@@ -585,14 +592,14 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
       fragmentVertexColor.x = r; fragmentVertexColor.y = g; fragmentVertexColor.z = blue; fragmentVertexColor.w = alpha;
       const vertexColor = fragmentVertexColor;
       let texelR = 1, texelG = 1, texelB = 1, texelA = 1;
-      if (textureConsumed && texture.kind !== "incomplete") {
+      if (texture.kind !== "incomplete") {
         const u = (au * wa + bu * wb + cu * wc) * reciprocal;
         const v = (av * wa + bv * wb + cv * wc) * reciprocal;
         if (primaryCursor !== null) sampleWorkerNearest(primaryCursor, u, v, reciprocal, derivative, sampled);
         else samplePerspectiveBound(texture, u, v, reciprocal, derivative, sampled);
         didSample = true;
         texelR = sampled.r; texelG = sampled.g; texelB = sampled.b; texelA = primaryAlpha ? sampled.a : 1;
-        if (setup.textureEffect === "luminance-alpha") {
+        if (luminanceAlpha) {
           const modulation = (sampled.r + sampled.g + sampled.b) / 3 * alpha;
           sampled.r *= modulation; sampled.g *= modulation; sampled.b *= modulation;
           texelR = sampled.r; texelG = sampled.g; texelB = sampled.b;
@@ -602,16 +609,16 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
         blue *= sampled.b;
         if (primaryAlpha) alpha *= sampled.a;
       }
-      if (textureConsumed && setup.lighting.parameters.kind !== "vertex") {
-        const lighting = setup.lighting, weightsA = aiw * wa * reciprocal, weightsB = biw * wb * reciprocal, weightsC = ciw * wc * reciprocal;
-        interpolateWorldInto(fragmentPosition, lighting.positions[0], lighting.positions[1], lighting.positions[2], weightsA, weightsB, weightsC);
-        interpolateWorldInto(fragmentNormal, lighting.normals[0], lighting.normals[1], lighting.normals[2], weightsA, weightsB, weightsC);
+      if (fragmentLit) {
+        const weightsA = aiw * wa * reciprocal, weightsB = biw * wb * reciprocal, weightsC = ciw * wc * reciprocal;
+        interpolateWorldInto(fragmentPosition, lightPos0, lightPos1, lightPos2, weightsA, weightsB, weightsC);
+        interpolateWorldInto(fragmentNormal, lightNor0, lightNor1, lightNor2, weightsA, weightsB, weightsC);
         fragmentTexel.r = texelR; fragmentTexel.g = texelG; fragmentTexel.b = texelB; fragmentTexel.a = texelA;
         shadeQ2FragmentInto(fragmentShade, lighting, fragmentPosition, fragmentNormal, vertexColor, fragmentTexel);
         const result = fragmentShade;
         r = result.r; g = result.g; blue = result.b; alpha = result.a;
       }
-      if (textureConsumed && secondaryEnvironment !== null && secondaryTexture.kind !== "incomplete") {
+      if (secondaryEnvironment !== null && secondaryTexture.kind !== "incomplete") {
         const u = (au2 * wa + bu2 * wb + cu2 * wc) * reciprocal;
         const v = (av2 * wa + bv2 * wb + cv2 * wc) * reciprocal;
         if (secondaryCursor !== null) sampleWorkerNearest(secondaryCursor, u, v, reciprocal, secondaryDerivative, sampled);
@@ -632,8 +639,8 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
             break;
         }
       }
-      if (setup.fog !== undefined) {
-        const fog = setup.fog, d = fog.kind === "exp2" ? fog.density * (setup.fogDepthScale ?? 1) * reciprocal / 64 : 0;
+      if (fog !== undefined) {
+        const d = fog.kind === "exp2" ? fog.density * fogDepthScale * reciprocal / 64 : 0;
         const amount = fog.kind === "constant" ? fog.amount : 1 - Math.exp(-d * d);
         const effect = fog.kind === "constant" ? "color" : fog.effect ?? "color";
         if (effect !== "none") { r = clamp(r); g = clamp(g); blue = clamp(blue); }
