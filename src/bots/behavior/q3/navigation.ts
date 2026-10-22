@@ -217,9 +217,13 @@ export class SourceBotNavigation implements BotNavigation {
   }
   bestReachableArea(origin: Vec3, bounds: Bounds): { readonly area: number; readonly origin: Vec3 } {
     let start = origin, area = this.pointArea(start);
+    const queried = new Set<string>([`${origin.x},${origin.y},${origin.z}`]);
     for (let i = 0; i < 5 && area === 0; i++) for (let j = 0; j < 5 && area === 0; j++) {
       for (let k = -1; k <= 1 && area === 0; k++) for (let l = -1; l <= 1 && area === 0; l++) {
         start = { x: origin.x + j * 4 * k, y: origin.y + j * 4 * l, z: origin.z + i * 4 };
+        const key = `${start.x},${start.y},${start.z}`;
+        if (queried.has(key)) continue;
+        queried.add(key);
         area = this.pointArea(start);
       }
     }

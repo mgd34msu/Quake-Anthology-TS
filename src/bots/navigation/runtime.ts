@@ -8,7 +8,7 @@ import { SaveReader } from "../../persistence/value.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import { aasBBoxAreas, aasPointArea, aasTraceAreas } from "./aas.ts";
 import { aasAreaTravelFlags, aasTravelFlag, navigationEdgeTravelFlag } from "./graph.ts";
-import { clear, contents, distance, nodeProfile, translated } from "./helpers.ts";
+import { clear, contents, distance, nodeProfile, trace, translated } from "./helpers.ts";
 import type { NavigationEdge, NavigationGraph, NavigationNode, NavigationRoute, NavigationRouteResult, NavigationWorld, TraversalAdmission, TraversalRequest } from "./types.ts";
 
 export interface NavigationRouteQuery {
@@ -70,6 +70,7 @@ export class NavigationRuntime {
   readonly #enabled = new Map<number, boolean>();
   readonly #blocked = new Map<number, string>();
   readonly #admissionSeconds = new Map<number, number>();
+  readonly #nodeAllowedCache = new Map<string, boolean>();
   #worldRevision: number;
   #generation = 0;
   constructor(readonly graph: NavigationGraph, readonly world: NavigationWorld) {
@@ -175,17 +176,39 @@ export class NavigationRuntime {
     if (reason === null) this.#blocked.delete(id); else this.#blocked.set(id, reason);
     this.#invalidate(); this.#estimates.invalidate();
   }
-  #invalidate(): void { this.#generation++; this.#admissionSeconds.clear(); }
+  #invalidate(): void { this.#generation++; this.#admissionSeconds.clear(); this.#nodeAllowedCache.clear(); }
   #refresh(): void { if (this.#worldRevision !== this.world.revision) { this.#worldRevision = this.world.revision; this.#invalidate(); } }
   areaAt(point: Vec3): number | null {
     if (this.graph.asset?.kind === "aas") { const area = aasPointArea(this.graph.asset, point); return this.#nodes.has(area) ? area : null; }
     return this.nearest(point)?.id ?? null;
   }
   nearest(point: Vec3, radius = 512): NavigationNode | null {
-    let selected: NavigationNode | null = null, best = radius;
+    this.#refresh();
+    // Eligibility and clearance traces dominate this scan, so visit
+    // candidates nearest-first (stable for equal distances, preserving the
+    // previous tie outcome) and stop once no closer candidate can win. A
+    // start box already in solid fails every clearance trace for that
+    // shape, so those candidates skip their trace outright.
+    const candidates: { readonly node: NavigationNode; readonly d: number; readonly profile: NonNullable<ReturnType<typeof nodeProfile>> }[] = [];
     for (const node of this.graph.nodes) {
-      const d = distance(point, node.origin), profile = nodeProfile(this.graph.profile, node);
-      if (d <= best && profile !== null && this.#nodeAllowed(node) && clear(this.world, profile, point, node.origin)) { best = d; selected = node; }
+      const d = distance(point, node.origin);
+      if (d > radius) continue;
+      const profile = nodeProfile(this.graph.profile, node);
+      if (profile !== null) candidates.push({ node, d, profile });
+    }
+    candidates.sort((a, b) => a.d - b.d);
+    const startSolid = new Map<object, boolean>();
+    let selected: NavigationNode | null = null, best = radius;
+    for (const { node, d, profile } of candidates) {
+      if (d > best) break;
+      let solid = startSolid.get(profile.shape);
+      if (solid === undefined) {
+        const probe = trace(this.world, profile, point, point);
+        solid = probe.startSolid || probe.allSolid;
+        startSolid.set(profile.shape, solid);
+      }
+      if (solid) continue;
+      if (this.#nodeAllowed(node) && clear(this.world, profile, point, node.origin)) { best = d; selected = node; }
     }
     return selected;
   }
@@ -224,6 +247,18 @@ export class NavigationRuntime {
     return true;
   }
   #nodeAllowed(node: NavigationNode, query?: NavigationRouteQuery, awaitElevator = false): boolean {
+    // Eligibility is query-independent here and only changes with the world
+    // revision or area/edge state, both of which clear this cache.
+    if (query === undefined) {
+      const key = `${this.world.revision}:${node.id}:${awaitElevator ? 1 : 0}`, cached = this.#nodeAllowedCache.get(key);
+      if (cached !== undefined) return cached;
+      const result = this.#evaluateNodeAllowed(node, query, awaitElevator);
+      this.#nodeAllowedCache.set(key, result);
+      return result;
+    }
+    return this.#evaluateNodeAllowed(node, query, awaitElevator);
+  }
+  #evaluateNodeAllowed(node: NavigationNode, query?: NavigationRouteQuery, awaitElevator = false): boolean {
     const profile = nodeProfile(this.graph.profile, node);
     if (profile === null || !this.#staticNodeAllowed(node, query)) return false;
     const medium = contents(this.world, profile, node.origin);
