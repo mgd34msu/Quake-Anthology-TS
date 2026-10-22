@@ -38,7 +38,11 @@ test("loose and packaged QW mods retain their execution dialect and base depende
       const preset = applicationPreset(catalog, command.options);
       expect(preset.execution).toMatchObject([{ kind: "quakec", artifact: { path: "qwprogs.dat", content: product.id }, api: { kind: "q1-quakeworld" } }]);
       expect(preset.timing.find(profile => profile.provider === preset.map.entities.provider)?.clock.kind).toBe("q1-quakeworld");
-      expect(() => applicationPreset(catalog, { ...command.options, dedicated: false })).toThrow("Native QuakeWorld");
+      // QuakeWorld mods also play locally: the same dialect and clock are
+      // selected without a dedicated server.
+      const local = applicationPreset(catalog, { ...command.options, dedicated: false });
+      expect(local.execution).toMatchObject([{ kind: "quakec", artifact: { path: "qwprogs.dat", content: product.id }, api: { kind: "q1-quakeworld" } }]);
+      expect(local.timing.find(profile => profile.provider === local.map.entities.provider)?.clock.kind).toBe("q1-quakeworld");
       expect(catalog.require(`q1-classic-${name}`).expectation.edition).toBe("classic");
     }
     expect(catalog.product("q1-classic-Broken").availability.kind).toBe("missing");

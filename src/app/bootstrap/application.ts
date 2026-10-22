@@ -2851,8 +2851,10 @@ export class Application {
         nextNetworkHost = await this.networkHost(simulation, content, this.nativeWorldCount + 1);
         this.validateNetworkHost(nextNetworkHost);
       } else if (simulation.q2Native() !== null) {
+        // Offline, this host only seeds future demo recording; wire support
+        // is admitted when recording actually starts (as at initial open),
+        // so foreign movement/character selections can still load and travel.
         nextNetworkHost = await this.networkHost(simulation, content, this.nativeWorldCount + 1);
-        this.validateNetworkHost(nextNetworkHost);
       } else if (this.localRecordingActive) {
         try {
           nextNetworkHost = await this.networkHost(simulation, content, this.nativeWorldCount + 1);

@@ -46,6 +46,9 @@ export interface Q1CharacterPresentation {
   readonly weaponVisible: boolean;
 }
 export interface Q1CharacterOptions {
+  /** A black-box guest owns this player's body, combat, sounds and death;
+   * only animation/lifecycle presentation is derived here. */
+  readonly presentationOnly?: boolean;
   /** The chosen inventory provider owns the contents and conversion of a death drop. */
   readonly dropInventory?: () => undefined;
   /** Admission/respawn placement belongs to the shared session. */
@@ -126,7 +129,7 @@ export class Q1CharacterActor {
     return { model, frame, viewOffset: this.viewOffset, life: this.life,
       solid: this.life === "alive" ? "slidebox" : "none", movement: this.life === "alive" ? "walk" : this.model === "progs/h_player.mdl" ? "bounce" : "toss", weaponVisible: this.life === "alive" };
   }
-  private sound(path: string, attenuation = 1): undefined { return this.game.sound(this.actor, path, "voice", attenuation); }
+  private sound(path: string, attenuation = 1): undefined { return this.options.presentationOnly === true ? undefined : this.game.sound(this.actor, path, "voice", attenuation); }
   private animate(animation: PlayerAnimation, attack = false): undefined {
     this.animation = animation; this.attackAnimation = attack; this.animationFrame = 0; this.modelFrame = animation.first; this.nextAnimation = this.game.time + 0.1; return undefined;
   }
@@ -146,7 +149,7 @@ export class Q1CharacterActor {
     const body = this.game.host.bodies.read(this.actor.id);
     const sourceAttack = this.life === "alive" && (pose?.frame ?? null) !== null;
     if (sourceAttack) { this.animation = null; this.attackAnimation = false; }
-    if ((this.life === "dead" || this.life === "respawnable") && body !== null && body.ground !== null) {
+    if (this.options.presentationOnly !== true && (this.life === "dead" || this.life === "respawnable") && body !== null && body.ground !== null) {
       const speed = Math.max(0, length(body.velocity) - 20); this.game.host.bodies.write(this.actor, { ...body, velocity: vscale(normalize(body.velocity), speed) });
     }
     if (seconds >= this.nextAnimation && !sourceAttack) {
@@ -204,25 +207,29 @@ export class Q1CharacterActor {
     const { game, actor } = this, body = game.host.bodies.read(actor.id); if (body === null) return undefined;
     const pose = this.options.sourcePose?.(), definition = pose?.definition;
     this.life = "dying"; this.model = definition?.model ?? "progs/player.mdl"; this.viewOffset = { x: 0, y: 0, z: -8 };
-    if (game.health(actor.id) < -99) game.host.combat.setHealth(actor, -99);
-    game.host.combat.setTraits(actor, { canTakeDamage: false });
-    const player = game.player(actor.id);
-    if (player !== null) { for (const powerup of player.powerups.keys()) game.host.powerup(actor, powerup, 0); player.powerups.clear(); }
-    if (game.options.deathmatch !== 0 || game.options.coop) this.options.dropInventory?.();
-    let velocity = body.velocity; if (velocity.z < 10) velocity = { ...velocity, z: velocity.z + game.host.random() * 300 };
-    game.host.bodies.write(actor, { ...body, velocity, ground: null });
-    const health = game.health(actor.id);
+    let health = game.health(actor.id);
+    if (this.options.presentationOnly !== true) {
+      if (health < -99) { game.host.combat.setHealth(actor, -99); health = game.health(actor.id); }
+      game.host.combat.setTraits(actor, { canTakeDamage: false });
+      const player = game.player(actor.id);
+      if (player !== null) { for (const powerup of player.powerups.keys()) game.host.powerup(actor, powerup, 0); player.powerups.clear(); }
+      if (game.options.deathmatch !== 0 || game.options.coop) this.options.dropInventory?.();
+      let velocity = body.velocity; if (velocity.z < 10) velocity = { ...velocity, z: velocity.z + game.host.random() * 300 };
+      game.host.bodies.write(actor, { ...body, velocity, ground: null });
+    }
     if (health < -40) {
       this.model = "progs/h_player.mdl"; this.modelFrame = 0; this.animation = null; this.life = "dead"; this.viewOffset = { x: 0, y: 0, z: 8 };
-      const scale = health > -50 ? 0.7 : health > -200 ? 2 : 10;
-      game.host.bodies.write(actor, { ...body, origin: vadd(body.origin, { x: 0, y: 0, z: -24 }), velocity: vscale({ x: 100 * (game.host.random() * 2 - 1), y: 100 * (game.host.random() * 2 - 1), z: 200 + 100 * game.host.random() }, scale), bounds: { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 56 } }, ground: null });
-      for (const model of ["gib1", "gib2", "gib3"]) throwGib(game, body.origin, model, health);
+      if (this.options.presentationOnly !== true) {
+        const scale = health > -50 ? 0.7 : health > -200 ? 2 : 10;
+        game.host.bodies.write(actor, { ...body, origin: vadd(body.origin, { x: 0, y: 0, z: -24 }), velocity: vscale({ x: 100 * (game.host.random() * 2 - 1), y: 100 * (game.host.random() * 2 - 1), z: 200 + 100 * game.host.random() }, scale), bounds: { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 56 } }, ground: null });
+        for (const model of ["gib1", "gib2", "gib3"]) throwGib(game, body.origin, model, health);
+      }
       const cause = attacker === null ? "" : game.host.classname(attacker);
       this.sound(cause === "teledeath" || cause === "teledeath2" ? "player/teledth1.wav" : game.host.random() < 0.5 ? "player/gib.wav" : "player/udeath.wav", 0); return undefined;
     }
     if (this.input.waterLevel === 3) { this.bubbles(20); this.sound("player/h2odeath.wav", 0); }
     else this.sound(`player/death${Math.floor(game.host.random() * 4 + 1.5)}.wav`, 0);
-    const current = game.host.bodies.read(actor.id); if (current !== null) game.host.bodies.write(actor, { ...current, angles: { x: 0, y: current.angles.y, z: 0 } });
+    const current = this.options.presentationOnly === true ? null : game.host.bodies.read(actor.id); if (current !== null) game.host.bodies.write(actor, { ...current, angles: { x: 0, y: current.angles.y, z: 0 } });
     const animation = definition !== undefined ? { ...definition.death, end: "dead" } satisfies PlayerAnimation :
       (pose?.axePose ?? this.input.axePose) ? { first: 41, count: 9, end: "dead" } satisfies PlayerAnimation : deaths[Math.floor(game.host.random() * 6)];
     if (animation === undefined) throw new Error("Player death animation selection outside source random range"); return this.animate(animation);
@@ -232,11 +239,12 @@ export class Q1CharacterActor {
     this.viewOffset = { x: 0, y: 0, z: 22 }; this.airFinished = this.game.time + 12; this.drownDamage = 2;
     this.hazardAt = 0; this.inWater = false; this.lastFallSpeed = 0;
     this.selectModel(this.options.sourcePose?.());
-    this.game.host.combat.setTraits(this.actor, { canTakeDamage: true }); if (health !== undefined) this.game.host.combat.setHealth(this.actor, health); return undefined;
+    if (this.options.presentationOnly !== true) { this.game.host.combat.setTraits(this.actor, { canTakeDamage: true }); if (health !== undefined) this.game.host.combat.setHealth(this.actor, health); } return undefined;
   }
   /** Source kill/disconnect pose; the session applies its score and respawn/disconnect policy. */
   setSuicideFrame(): undefined { this.modelFrame = 60; this.life = "dead"; this.animation = null; this.attackAnimation = false; this.nextAnimation = Infinity; return undefined; }
   private bubbles(count: number): undefined {
+    if (this.options.presentationOnly === true) return undefined;
     const timer = this.game.create("death_bubbles"); timer.owner = this.actor.id; timer.count = count;
     return this.game.schedule(timer, 0.1, this.game.named.action(timer, "base:death_bubbles"));
   }

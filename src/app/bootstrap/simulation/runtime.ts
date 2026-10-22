@@ -225,7 +225,7 @@ import { Q2Weapons, Q2WeaponState, Q2_BASE_WEAPONS } from "../../../content/q2/f
 import type { Q2WeaponEvent } from "../../../content/q2/foundation/weapons/index.ts";
 import { Q3CharacterActor, Q3DeathAnimationSequence, q3InitialCombat, stepQ3CharacterAnimation } from "../../../content/q3/foundation/character.ts";
 import type { Q3CharacterView } from "../../../content/q3/foundation/presentation.ts";
-import { q3RequestWeapon, q3RequestWeaponHolster, q3RequestWeaponResume, q3SpawnLoadout, q3SpawnArsenalRuntime, stepQ3Arsenal, q3WeaponItem, Q3_WEAPON_ITEMS } from "../../../content/q3/foundation/arsenal.ts";
+import { q3RequestWeapon, q3RequestWeaponHolster, q3RequestWeaponResume, q3SpawnAnimation, q3SpawnLoadout, q3SpawnArsenalRuntime, stepQ3Arsenal, q3WeaponItem, Q3_WEAPON_ITEMS } from "../../../content/q3/foundation/arsenal.ts";
 import type { Q3ArsenalRuntimeState } from "../../../content/q3/foundation/arsenal.ts";
 import type { GameEntity } from "../../../content/q3/base/game/state.ts";
 import type { UserCommand as Q3SourceCommand } from "../../../content/q3/base/shared/player-state.ts";
@@ -344,6 +344,10 @@ export class SharedSimulation implements Simulation {
    * the guest Pmove boundary; kept out of playerStates, whose lifecycle
    * (save/restore, TS stepping) the guest world owns itself. */
   private readonly nativeMovementPlayers = new Map<OwnedActor, MovementPlayer>();
+  /** Last guest command buttons per native client, for character animation. */
+  private readonly nativeCharacterCommands = new Map<ActorId, { readonly attack: boolean; readonly jump: boolean }>();
+  /** Last guest health per native client, to derive pain/death/respawn. */
+  private readonly nativeCharacterHealth = new Map<ActorId, number>();
   /** Clients whose combat binding is a movement-only mirror of guest state
    * (unqualified DLLs keep combat guest-private; the guest stays the damage
    * authority and the mirror only feeds the movement environment). */
@@ -740,7 +744,7 @@ export class SharedSimulation implements Simulation {
       this.nativeEquipmentPlayers.delete(actor.id); this.nativeEquipmentAlive.delete(actor.id); this.nativeEquipmentVelocity.delete(actor.id); this.nativeWeaponRequests.delete(actor.id);
       this.selectedPickupBindings.get(actor.id)?.(); this.selectedPickupBindings.delete(actor.id);
       this.selectedArsenal?.remove(actor.id);
-      this.scheduler.cancel(actor); this.nativeWeaponTimes.delete(actor.id); this.nativePrimaryWeapons?.release(actor.id); this.nativePrimaryInventory?.release(actor.id); this.restoredNativeInventorySelections.delete(actor.id); this.weaponSlots.delete(actor.id); this.playerStates.delete(actor); this.nativeMovementPlayers.delete(actor); this.nativeMirroredCombat.delete(actor.id); this.nativeExactMotions.delete(actor.id); this.characters.delete(actor); this.characterStarts.delete(actor); this.q3Arsenals.delete(actor); this.q3Commands.delete(actor); this.q1Characters.delete(actor); this.q2Views.delete(actor.id); this.q2Characters.delete(actor); this.characterTicks.delete(actor); this.entryCarry.delete(actor); this.detachedModels.delete(actor); this.sourceModels.delete(actor.id); this.viewModels.delete(actor.id); this.lastAttack.delete(actor);
+      this.scheduler.cancel(actor); this.nativeWeaponTimes.delete(actor.id); this.nativePrimaryWeapons?.release(actor.id); this.nativePrimaryInventory?.release(actor.id); this.restoredNativeInventorySelections.delete(actor.id); this.weaponSlots.delete(actor.id); this.playerStates.delete(actor); this.nativeMovementPlayers.delete(actor); this.nativeCharacterCommands.delete(actor.id); this.nativeCharacterHealth.delete(actor.id); this.nativeMirroredCombat.delete(actor.id); this.nativeExactMotions.delete(actor.id); this.characters.delete(actor); this.characterStarts.delete(actor); this.q3Arsenals.delete(actor); this.q3Commands.delete(actor); this.q1Characters.delete(actor); this.q2Views.delete(actor.id); this.q2Characters.delete(actor); this.characterTicks.delete(actor); this.entryCarry.delete(actor); this.detachedModels.delete(actor); this.sourceModels.delete(actor.id); this.viewModels.delete(actor.id); this.lastAttack.delete(actor);
       return undefined;
     });
     this.q1Movement = this.createMonsterMovement(timing.numeric, this.random);
@@ -6140,11 +6144,15 @@ export class SharedSimulation implements Simulation {
     const id = this.source.game.actor(client.slot + 1), actor = id === null ? null : this.actors.resolveOwned(id);
     if (actor === null) throw new Error("Native ClientConnect did not reserve its source actor");
     this.source.clients.set(client, actor);
-    if (mode === "live" && this.foreignNativeMovement()) {
+    // Restored clients need their host too: without it a loaded save would
+    // silently fall back to guest movement and the guest player model.
+    if (this.foreignNativeMovement() || this.foreignNativeCharacter()) {
       const body = this.bodies.read(actor.id);
       const arsenal: ArsenalState = { provider: this.weaponProvider.provider, activeWeapon: null, ammo: [],
         state: { kind: "q2", gunFrame: 0, state: 0, pendingWeapon: null, machinegunShots: 0, grenadeTime: { kind: "seconds", value: 0 }, grenadeBlewUp: false } };
-      this.nativeMovementPlayers.set(actor, this.createPlayer(actor, client, body?.origin ?? zero, body?.angles ?? zero, arsenal));
+      const player = this.createPlayer(actor, client, body?.origin ?? zero, body?.angles ?? zero, arsenal);
+      this.nativeMovementPlayers.set(actor, player);
+      this.attachNativeCharacter(player);
     }
     const selection = mode === "live" ? this.options.nativeQ2Travel?.clients.find(entry => entry.client.equals(client))?.nativeInventorySelection : undefined;
     if (selection !== undefined) this.restoredNativeInventorySelections.set(actor.id, selection);
@@ -6183,6 +6191,84 @@ export class SharedSimulation implements Simulation {
     if (source.kind !== "q2-native") return false;
     const clock = providerTiming(this.recipe, this.recipe.movement.provider).clock.kind;
     return clock !== (source.edition === "classic" ? "q2-classic" : "q2-rerelease");
+  }
+
+  /** The selected character is not a Q2 player model, so the guest edict's
+   * own model must yield to the selected character's presentation. */
+  private foreignNativeCharacter(): boolean {
+    return this.source.kind === "q2-native" && providerFamily(this.recipe.character.definition.provider) !== "q2";
+  }
+
+  /** Selected-character animators for native clients. The guest DLL owns
+   * the player's body, combat and death; these only derive the drawn
+   * model's animation from guest-observable state each guest frame. */
+  private attachNativeCharacter(player: MovementPlayer): void {
+    if (!this.foreignNativeCharacter()) return;
+    const actor = player.actor;
+    if (player.character === "q1" && !this.q1Characters.has(actor))
+      this.q1Characters.set(actor, new Q1CharacterActor(this.q1CharacterSource(), actor,
+        { presentationOnly: true, sourcePose: () => this.q1CharacterPose(actor.id) }));
+    if (player.character === "q3" && player.animation.state.kind !== "q3")
+      player.animation = { provider: this.recipe.character.definition.provider, state: q3SpawnAnimation() };
+  }
+
+  private nativeCharacterHost(actor: ActorId): MovementPlayer | undefined {
+    const owned = this.actors.resolveOwned(actor);
+    return owned === null ? undefined : this.nativeMovementPlayers.get(owned);
+  }
+
+  /** Players whose selected-character body is drawn by the shared loops:
+   * TS-owned players plus native character hosts. */
+  private presentationPlayers(): readonly MovementPlayer[] {
+    if (this.source.kind !== "q2-native") return [...this.playerStates.values()];
+    return [...this.playerStates.values(), ...[...this.nativeMovementPlayers.values()].filter(player => !this.playerStates.has(player.actor))];
+  }
+
+  private tickNativeCharacters(): void {
+    const source = this.source;
+    if (source.kind !== "q2-native" || !this.foreignNativeCharacter()) return;
+    for (const actor of source.clients.values()) {
+      const player = this.nativeMovementPlayers.get(actor);
+      if (player === undefined || this.playerStates.has(actor)) continue;
+      this.syncNativeMovementCombat(actor);
+      const health = this.nativePlayerUi(actor.id).health, previous = this.nativeCharacterHealth.get(actor.id);
+      this.nativeCharacterHealth.set(actor.id, health);
+      const buttons = this.nativeCharacterCommands.get(actor.id) ?? { attack: false, jump: false };
+      const body = this.bodies.read(actor.id); if (body === null) continue;
+      player.viewAngles = this.playerView(actor.id).angles;
+      if (player.character === "q1") {
+        const character = this.q1Characters.get(actor); if (character === undefined) continue;
+        if (previous !== undefined && previous > 0 && health <= 0) character.die(null);
+        else if (previous !== undefined && previous <= 0 && health > 0) character.respawn();
+        else if (previous !== undefined && health > 0 && health < previous) character.pain(null, previous - health);
+        const eye = this.contents({ x: body.origin.x, y: body.origin.y, z: body.origin.z + player.viewHeight }, "q2");
+        const waist = this.contents({ x: body.origin.x, y: body.origin.y, z: body.origin.z + (body.bounds.min.z + body.bounds.max.z) / 2 }, "q2");
+        const feet = this.contents({ x: body.origin.x, y: body.origin.y, z: body.origin.z + body.bounds.min.z + 1 }, "q2");
+        const wet = (eye & (32 | 64 | 128)) !== 0 ? eye : (waist & (32 | 64 | 128)) !== 0 ? waist : feet;
+        const frame = character.frame(this.timeSeconds, {
+          axePose: this.q1CharacterPose(actor.id).axePose ?? this.nativePlayerUi(actor.id).activeWeapon === "q1:weapon/axe",
+          attack: buttons.attack, jump: buttons.jump, use: false,
+          waterLevel: (eye & (32 | 64 | 128)) !== 0 ? 3 : (waist & (32 | 64 | 128)) !== 0 ? 2 : (feet & (32 | 64 | 128)) !== 0 ? 1 : 0,
+          waterType: (wet & 32) !== 0 ? "water" : (wet & 64) !== 0 ? "slime" : (wet & 128) !== 0 ? "lava" : "empty",
+          invisible: false, invulnerable: this.combat.read(actor.id)?.invulnerable ?? false });
+        player.animation = { provider: this.recipe.character.definition.provider,
+          state: { kind: "q1", frame: frame.frame, nextFrameSeconds: this.timeSeconds + 0.1 } };
+      } else if (player.character === "q3") {
+        if (previous !== undefined && previous <= 0 && health > 0)
+          player.animation = { provider: this.recipe.character.definition.provider, state: q3SpawnAnimation() };
+        if (player.animation.state.kind !== "q3") continue;
+        const state = source.game.playerState(this.nativeQ2Client(actor.id).slot + 1);
+        const moving = Math.hypot(body.velocity.x, body.velocity.y) !== 0;
+        const waist = this.contents({ x: body.origin.x, y: body.origin.y, z: body.origin.z + (body.bounds.min.z + body.bounds.max.z) / 2 }, "q2");
+        const locomotion = (waist & (32 | 64 | 128)) !== 0 ? "swim" : (state.movement.flags & 4) === 0 ? "jump"
+          : (state.movement.flags & 1) !== 0 ? "crouch" : moving ? "run" : "idle";
+        const view = this.playerView(actor.id), yaw = view.angles.y * Math.PI / 180;
+        const backwards = body.velocity.x * Math.cos(yaw) + body.velocity.y * Math.sin(yaw) < 0;
+        player.animation = stepQ3CharacterAnimation({ actor, frame: this.sourceFrame, animation: player.animation,
+          locomotion, backwards, force: false },
+        this.recipe.character.definition.content.includes("missionpack") ? "missionpack" : "baseq3", health <= 0).animation;
+      }
+    }
   }
 
   /** Movement providers read shared combat state. Qualified guests bind
@@ -6306,7 +6392,9 @@ export class SharedSimulation implements Simulation {
       movement: (identity, projection, command, aim, run) => {
         const velocity = this.nativeEquipmentVelocity.get(identity.actor);
         if (velocity !== undefined) { projection.write({ ...projection.read(), velocity }); this.nativeEquipmentVelocity.delete(identity.actor); }
-        const owned = this.actors.resolveOwned(identity.actor), player = owned === null ? undefined : this.nativeMovementPlayers.get(owned);
+        // A character-only host must never step movement: only a foreign
+        // selected movement provider interposes at this boundary.
+        const owned = this.actors.resolveOwned(identity.actor), player = owned === null || !this.foreignNativeMovement() ? undefined : this.nativeMovementPlayers.get(owned);
         if (owned === null || player === undefined) return source.game.services.withInputMovement(identity.actor, projection, run);
         // Selected foreign movement owns this Pmove call: step the unified
         // provider against the shared body and project the result back into
@@ -6405,6 +6493,8 @@ export class SharedSimulation implements Simulation {
     if (source.kind !== "q2-native") throw new Error("Native Quake II source is unavailable");
     for (const command of input.commands) {
       const slot = this.nativeQ2Client(command.actor).slot + 1;
+      this.nativeCharacterCommands.set(command.actor, { attack: (command.command.buttons & 1) !== 0,
+        jump: command.command.kind === "q2-rerelease" ? (command.command.buttons & 8) !== 0 : "upMove" in command.command && command.command.upMove > 0 });
       this.observeClientCommand(command);
       this.requireEquipmentPlayer(command.actor);
       this.grapple?.setJump(command.actor, command.command.kind === "q2-rerelease" ? (command.command.buttons & 8) !== 0 : "upMove" in command.command && command.command.upMove > 0);
@@ -6438,6 +6528,7 @@ export class SharedSimulation implements Simulation {
       this.selectedMilliseconds += frameMilliseconds;
       this.advanceQ1Punch(); this.beginNativeEquipmentFrame(); this.beginQvmSelectedFrame();
       source.game.frame(frameMilliseconds);
+      this.tickNativeCharacters();
       if (this.handGrenades !== null) for (const actor of this.players()) this.stepHandGrenade(actor, this.equipmentPlayerAvailable(actor) ? "alive" : "dead");
       this.runQvmSelectedActors(); this.sourceFrame = this.clock.enter("frame-exit");
       this.modOwner?.advance(this.sourceFrame);
@@ -6649,6 +6740,9 @@ export class SharedSimulation implements Simulation {
       for (const state of source.game.entityStates()) {
         const info = source.game.entityInfo(state.number);
         if (state.number === 0 || info.actor === null || !info.active || (info.serverFlags & 1) !== 0) continue;
+        // A foreign selected character replaces the guest player model;
+        // the selected-character presentation below draws this actor.
+        if (this.foreignNativeCharacter() && this.nativeCharacterHost(info.actor) !== undefined) continue;
         const appearance = source.game.modelAppearance(state.number);
         const delta = { x: state.origin.x - state.oldOrigin.x, y: state.origin.y - state.oldOrigin.y, z: state.origin.z - state.oldOrigin.z };
         const continuous = fraction < 1 && delta.x * delta.x + delta.y * delta.y + delta.z * delta.z <= 512 * 512;
@@ -6703,7 +6797,7 @@ export class SharedSimulation implements Simulation {
         for (const path of model?.attachedModels ?? [entity.model2, entity.model3, entity.model4]) if (path !== "") result.push({ ...presentation, path });
       }
     }
-    for (const player of this.playerStates.values()) {
+    for (const player of this.presentationPlayers()) {
       if (player.character === "q3" || player.intermission || player.cutscene !== null) continue;
       const body = this.bodies.read(player.actor.id); if (body === null) continue;
       const model = player.characterAppearance.provider.split("/").at(-1) ?? "male";
@@ -6760,7 +6854,8 @@ export class SharedSimulation implements Simulation {
 
   characterViews(): readonly Q3CharacterView[] {
     const appearances = this.modOwner?.appearanceOverrides();
-    return [...this.playerStates].flatMap(([owner, player]): Q3CharacterView[] => {
+    return this.presentationPlayers().flatMap((player): Q3CharacterView[] => {
+      const owner = player.actor;
       const character = this.characters.get(owner), body = this.bodies.read(owner.id), animation = character?.animation.state ?? player.animation.state;
       // Native Q3 renders its own intermission podium; foreign worlds show the chosen character.
       const nativeQ3 = this.source.kind === "q3" || this.source.kind === "q3-qvm";
@@ -7252,7 +7347,10 @@ export class SharedSimulation implements Simulation {
     return { schemaVersion: 3, recipe: this.recipe, frame: this.sourceFrame, nextEventSequence: this.events.nextSequence, ...(mods === undefined ? {} : { mods }),
       clocks: [{ provider, time: this.sourceFrame.time }], random: [{ provider, state: this.random.checkpoint() }], actors: this.actors.checkpoint(),
       bodies: captureSharedBodies(this.actors, this.bodies),
-      combat: actors.flatMap(actor => { const state = this.combat.read(actor.id); return state === null ? [] : [{ actor: savedActorId(actor.id), state }]; }),
+      // Mirrored native combat is derived from guest state every slice; the
+      // guest save already carries the authoritative values, so checkpointing
+      // the mirror would demand a source binding the guest never recreates.
+      combat: actors.flatMap(actor => { if (this.nativeMirroredCombat.has(actor.id)) return []; const state = this.combat.read(actor.id); return state === null ? [] : [{ actor: savedActorId(actor.id), state }]; }),
       inventories: actors.flatMap(actor => this.inventory.has(actor.id) ? [{ actor: savedActorId(actor.id), entries: this.inventory.entries(actor.id) }] : []),
       configurations: this.players().map(actor => ({ actor: savedActorId(actor), movement: this.recipe.movement, character: this.recipe.character, weapons: this.recipe.weapons, inventory: this.recipe.inventory })),
       thinks: actors.flatMap(actor => { const pending = this.scheduler.pending(actor.id); return pending === null ? [] : [{ actor: savedActorId(actor.id), callback: pending.callback,
