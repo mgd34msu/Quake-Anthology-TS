@@ -90,35 +90,87 @@ export function decodePng(bytes: Uint8Array, source = "<png>"): PngImage {
   const transparentView = transparency === null ? null : new DataView(transparency.buffer, transparency.byteOffset, transparency.byteLength);
   if (transparency !== null && (colorType === 0 && transparency.length !== 2 || colorType === 2 && transparency.length !== 6
     || colorType === 3 && transparency.length > (palette?.length ?? 0) / 3 || colorType === 4 || colorType === 6)) fail(8, "invalid transparency chunk");
-  if (bitDepth === 8 && interlace === 0 && (colorType === 2 || colorType === 6)) {
-    // Fast path for the common 8-bit RGB/RGBA case: direct typed-array
-    // unfilter and expansion, no DataView or per-pixel closures.
-    const stride = channels, rowLength = width * stride;
-    const transparentRed = transparentView !== null && colorType === 2 ? transparentView.getUint16(0) : -1;
-    const transparentGreen = transparentView !== null && colorType === 2 ? transparentView.getUint16(2) : -1;
-    const transparentBlue = transparentView !== null && colorType === 2 ? transparentView.getUint16(4) : -1;
-    let offset = 0;
+  if (bitDepth === 8 && interlace === 0) {
+    // Fast path for every 8-bit non-interlaced image: in-place typed-array
+    // unfilter (one specialized loop per filter) and direct expansion, no
+    // DataView or per-pixel closures. Byte-identical to the general path.
+    const stride = channels, rowLength = width * stride, rowStride = rowLength + 1;
     for (let py = 0; py < height; py++) {
-      const filter = raw[offset++] ?? 0;
+      const rowStart = py * rowStride, offset = rowStart + 1, filter = raw[rowStart] ?? 0;
       if (filter > 4) fail(8, `unknown scanline filter ${filter}`);
-      const outRow = py * width * 4;
-      for (let byte = 0; byte < rowLength; byte++) {
-        const a = byte >= stride ? (raw[offset + byte - stride] ?? 0) : 0;
-        const b = py > 0 ? (raw[offset + byte - rowLength - 1] ?? 0) : 0;
-        const c = py > 0 && byte >= stride ? (raw[offset + byte - rowLength - 1 - stride] ?? 0) : 0;
-        const prediction = filter === 0 ? 0 : filter === 1 ? a : filter === 2 ? b : filter === 3 ? (a + b) >> 1 : paeth(a, b, c);
-        raw[offset + byte] = (raw[offset + byte] ?? 0) + prediction;
+      if (filter === 1) {
+        for (let byte = stride; byte < rowLength; byte++) raw[offset + byte] = (raw[offset + byte] ?? 0) + (raw[offset + byte - stride] ?? 0);
+      } else if (filter === 2 && py > 0) {
+        const up = offset - rowStride;
+        for (let byte = 0; byte < rowLength; byte++) raw[offset + byte] = (raw[offset + byte] ?? 0) + (raw[up + byte] ?? 0);
+      } else if (filter === 3) {
+        const up = offset - rowStride;
+        for (let byte = 0; byte < rowLength; byte++) {
+          const a = byte >= stride ? (raw[offset + byte - stride] ?? 0) : 0;
+          const b = py > 0 ? (raw[up + byte] ?? 0) : 0;
+          raw[offset + byte] = (raw[offset + byte] ?? 0) + ((a + b) >> 1);
+        }
+      } else if (filter === 4) {
+        const up = offset - rowStride;
+        for (let byte = 0; byte < rowLength; byte++) {
+          const a = byte >= stride ? (raw[offset + byte - stride] ?? 0) : 0;
+          const b = py > 0 ? (raw[up + byte] ?? 0) : 0;
+          const c = py > 0 && byte >= stride ? (raw[up + byte - stride] ?? 0) : 0;
+          raw[offset + byte] = (raw[offset + byte] ?? 0) + paeth(a, b, c);
+        }
       }
-      for (let px = 0; px < width; px++) {
-        const source = offset + px * stride, out = outRow + px * 4;
-        const r = raw[source] ?? 0, g = raw[source + 1] ?? 0, b = raw[source + 2] ?? 0;
-        pixels[out] = r; pixels[out + 1] = g; pixels[out + 2] = b;
-        pixels[out + 3] = colorType === 6 ? (raw[source + 3] ?? 0)
-          : r === transparentRed && g === transparentGreen && b === transparentBlue ? 0 : 255;
-      }
-      offset += rowLength;
     }
-    return { width, height, pixels, bitDepth, colorType, gamma, srgbIntent, indexed: null };
+    if (colorType === 6) {
+      // RGBA rows already match the output layout; copy row-wise.
+      for (let py = 0; py < height; py++) pixels.set(raw.subarray(py * rowStride + 1, py * rowStride + 1 + rowLength), py * rowLength);
+    } else if (colorType === 2) {
+      const transparentRed = transparentView !== null ? transparentView.getUint16(0) : -1;
+      const transparentGreen = transparentView !== null ? transparentView.getUint16(2) : -1;
+      const transparentBlue = transparentView !== null ? transparentView.getUint16(4) : -1;
+      let out = 0;
+      for (let py = 0; py < height; py++) {
+        let source = py * rowStride + 1;
+        for (let px = 0; px < width; px++) {
+          const r = raw[source] ?? 0, g = raw[source + 1] ?? 0, b = raw[source + 2] ?? 0;
+          pixels[out] = r; pixels[out + 1] = g; pixels[out + 2] = b;
+          pixels[out + 3] = r === transparentRed && g === transparentGreen && b === transparentBlue ? 0 : 255;
+          source += 3; out += 4;
+        }
+      }
+    } else if (colorType === 0 || colorType === 4) {
+      const transparentGray = transparentView !== null && colorType === 0 ? transparentView.getUint16(0) : -1;
+      let out = 0;
+      for (let py = 0; py < height; py++) {
+        let source = py * rowStride + 1;
+        for (let px = 0; px < width; px++) {
+          const value = raw[source] ?? 0;
+          pixels[out] = value; pixels[out + 1] = value; pixels[out + 2] = value;
+          pixels[out + 3] = colorType === 4 ? (raw[source + 1] ?? 0) : value === transparentGray ? 0 : 255;
+          source += stride; out += 4;
+        }
+      }
+    } else if (indices !== null && palette !== null) {
+      const paletteLength = palette.length;
+      let out = 0, index = 0;
+      for (let py = 0; py < height; py++) {
+        let source = py * rowStride + 1;
+        for (let px = 0; px < width; px++) {
+          const value = raw[source++] ?? 0;
+          if (value * 3 + 3 > paletteLength) fail(8, "palette index out of range");
+          indices[index++] = value;
+          pixels[out] = palette[value * 3] ?? 0; pixels[out + 1] = palette[value * 3 + 1] ?? 0; pixels[out + 2] = palette[value * 3 + 2] ?? 0;
+          pixels[out + 3] = transparency !== null && value < transparency.length ? (transparency[value] ?? 255) : 255;
+          out += 4;
+        }
+      }
+    }
+    let indexed: PngImage["indexed"] = null;
+    if (indices !== null && palette !== null) {
+      const alpha = new Uint8Array(palette.length / 3).fill(255);
+      if (transparency !== null) alpha.set(transparency);
+      indexed = { indices, palette, alpha };
+    }
+    return { width, height, pixels, bitDepth, colorType, gamma, srgbIntent, indexed };
   }
   let rawOffset = 0;
   // Hoisted once: the per-pixel loop below used to re-read these per sample.
