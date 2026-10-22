@@ -18,7 +18,7 @@ import { DEFAULT_MODEL_REPLACEMENT_POLICY, selectModelEntity } from "./replaceme
 import { byteColor } from "./types.ts";
 import { md5ShadowEnvelope } from "./shadow-bounds.ts";
 import { q2BeamGeometry } from "../particles/legacy.ts";
-import type { ModelGroupContext, ModelImageSelection, ModelPreparationContext, ModelSourceOptions, ModelVertexLighting, PreparedModelEntity, PreparedModelSurface } from "./types.ts";
+import type { ModelGroupContext, ModelImageSelection, ModelPreparationContext, ModelSkinningFrame, ModelSourceOptions, ModelVertexLighting, PreparedModelEntity, PreparedModelSurface } from "./types.ts";
 
 const ZERO_LIGHTMAP_COORD = { x: 0, y: 0 };
 
@@ -75,6 +75,26 @@ function lodIndex(entity: SceneEntity, count: number, radius: number, context: M
 }
 
 const md2InterpolationCache = new WeakMap<Q2AliasModel, Map<string, readonly ModelVertex[]>>();
+
+/** Pose-geometry sharing for one skinning frame: the camera and shadow
+ * passes prepare the same entity poses, and interpolation/skinning is a
+ * pure function of the sampled frames, so both passes (and crowd members
+ * sharing a pose) reuse one result. Keyed by the frame object itself, so
+ * entries die with the frame. */
+interface PoseGeometryCaches {
+  readonly mdl: WeakMap<object, WeakMap<object, Map<string, ReturnType<typeof buildMdlGeometry>>>>;
+  readonly md3: WeakMap<object, Map<string, ReturnType<typeof interpolateMd3Frames>>>;
+  readonly md4: WeakMap<object, Map<string, ReturnType<typeof skinMd4Surface>>>;
+}
+const poseGeometryCaches = new WeakMap<ModelSkinningFrame, PoseGeometryCaches>();
+function poseCaches(context: ModelPreparationContext): PoseGeometryCaches | null {
+  const frame = context.skinningFrame;
+  if (frame === undefined) return null;
+  let caches = poseGeometryCaches.get(frame);
+  if (caches === undefined) { caches = { mdl: new WeakMap(), md3: new WeakMap(), md4: new WeakMap() }; poseGeometryCaches.set(frame, caches); }
+  return caches;
+}
+function lerpKey(backLerp: number): string { return Object.is(backLerp, -0) ? "-0" : `${backLerp}`; }
 
 /** Q2 stores scaled packed coordinates after interpolating translation and origin. */
 export function interpolateSceneMd2(model: Q2AliasModel, entity: SceneEntity, frame: number, oldFrame: number, backLerp: number,
@@ -234,7 +254,18 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
     case "q1-mdl": {
       const current = sampleTimedFrame(at(model.frames, frame, "MDL frame"), context.timeSeconds, options.syncBase ?? 0);
       const previous = sampleTimedFrame(at(model.frames, previousFrame, "MDL old frame"), context.timeSeconds, options.syncBase ?? 0);
-      const geometry = buildMdlGeometry(model, interpolateAliasFrames(current, previous, backLerp));
+      const mdlCache = poseCaches(context)?.mdl;
+      let geometry = mdlCache?.get(current)?.get(previous)?.get(lerpKey(backLerp));
+      if (geometry === undefined) {
+        geometry = buildMdlGeometry(model, interpolateAliasFrames(current, previous, backLerp));
+        if (mdlCache !== undefined) {
+          let byPrevious = mdlCache.get(current);
+          if (byPrevious === undefined) { byPrevious = new WeakMap(); mdlCache.set(current, byPrevious); }
+          let byLerp = byPrevious.get(previous);
+          if (byLerp === undefined) { byLerp = new Map(); byPrevious.set(previous, byLerp); }
+          byLerp.set(lerpKey(backLerp), geometry);
+        }
+      }
       const skin = entity.skin >= 0 && entity.skin < model.skins.length ? entity.skin : 0;
       const skinFrames = at(model.skins, skin, "MDL skin");
       const pixels = sampleTimedFrame(skinFrames, context.timeSeconds, options.syncBase ?? 0);
@@ -263,9 +294,19 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
         const envelope = md3WorldEnvelope(selected, frame, previousFrame, backLerp, entity.transform);
         if (envelope !== null && cullGeometry(envelope, context) === "out") { bounds = envelope; break; }
       }
+      const md3Cache = poseCaches(context)?.md3;
       for (const surface of selected.surfaces) {
         const current = at(surface.frames, frame, "MD3 frame");
-        const vertices = backLerp === 0 ? current : interpolateMd3Frames(current, at(surface.frames, previousFrame, "MD3 old frame"), backLerp);
+        let vertices: typeof current | ReturnType<typeof interpolateMd3Frames> = current;
+        if (backLerp !== 0) {
+          const key = `${frame}|${previousFrame}|${lerpKey(backLerp)}`;
+          vertices = md3Cache?.get(surface)?.get(key) ?? interpolateMd3Frames(current, at(surface.frames, previousFrame, "MD3 old frame"), backLerp);
+          if (md3Cache !== undefined) {
+            let byKey = md3Cache.get(surface);
+            if (byKey === undefined) { byKey = new Map(); md3Cache.set(surface, byKey); }
+            byKey.set(key, vertices);
+          }
+        }
         append(surface.name, selectedShader(surface.name, surface.shaders, entity, options),
           vertices.map((vertex, index) => ({ ...vertex, texCoord: at(surface.textureCoordinates, index, "MD3 UV") })), surface.indices);
       }
@@ -273,8 +314,18 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
     }
     case "q3-md4": {
       lod = lodIndex(entity, model.lods.length, at(model.frames, frame, "MD4 frame").radius, context, options);
+      const md4Cache = poseCaches(context)?.md4;
       for (const surface of at(model.lods, lod, "MD4 LOD").surfaces) {
-        const vertices = skinMd4Surface(model, surface, frame, previousFrame, backLerp);
+        const key = `${frame}|${previousFrame}|${lerpKey(backLerp)}`;
+        let vertices = md4Cache?.get(surface)?.get(key);
+        if (vertices === undefined) {
+          vertices = skinMd4Surface(model, surface, frame, previousFrame, backLerp);
+          if (md4Cache !== undefined) {
+            let byKey = md4Cache.get(surface);
+            if (byKey === undefined) { byKey = new Map(); md4Cache.set(surface, byKey); }
+            byKey.set(key, vertices);
+          }
+        }
         append(surface.name, selectedShader(surface.name, [surface.shader], entity, options),
           vertices.map((vertex, index) => ({ ...vertex, texCoord: at(surface.vertices, index, "MD4 UV").texCoords })), surface.triangles.flatMap(triangle => triangle.indices));
       }
