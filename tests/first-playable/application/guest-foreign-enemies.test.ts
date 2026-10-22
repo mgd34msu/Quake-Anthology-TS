@@ -123,4 +123,55 @@ describe("selected enemies on guest worlds", () => {
     }
     expect(frames.size).toBeGreaterThanOrEqual(3);
   }, 300_000);
+
+  test("TS Q3 source hosts a Q2 map through the foreign world adjunct", async () => {
+    const corpus = testCorpusRoot();
+    directory = await mkdtemp(join(tmpdir(), "foreign-world-q3-"));
+    const parsed = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map-game", "q2-classic-baseq2",
+      "--map", "base1", "--movement", "q3", "--character", "q3", "--mode", "singleplayer", "--dedicated", "--user-content-root", directory]);
+    if (parsed.kind !== "run") throw new Error("Missing foreign launch options");
+    const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+    const preset = applicationPreset(catalog, parsed.options);
+    application = await Application.open(parsed.options, { saveDirectory: join(directory, "saves"), print: () => undefined },
+      await resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) }));
+    const simulation = application.simulation;
+    expect(simulation.q3Source()).not.toBeNull();
+    const admission = simulation.admitPlayer(application.session.createClient(0).id);
+    const player = simulation.actors.resolveOwned(admission.actor);
+    if (player === null) throw new Error("Admitted player missing");
+    for (let step = 0; step < 20; step++) await application.step(50);
+    // The adjunct spawned the Q2 world the Q3 source has no spawns for:
+    // native soldiers, items, movers are live presentations.
+    const adjunctPresentations = simulation.presentations().filter(entry => entry.family === "q2");
+    expect(adjunctPresentations.length).toBeGreaterThanOrEqual(20);
+    // An adjunct-native soldier engages a teleported player.
+    const playerBody = simulation.bodies.read(player.id);
+    if (playerBody === null) throw new Error("Player body missing");
+    simulation.combat.setHealth(player, 10000);
+    let health = 10000;
+    for (const candidate of adjunctPresentations.slice(0, 30)) {
+      if (health < 10000) break;
+      const current = simulation.bodies.read(player.id);
+      if (current === null) break;
+      const dx = current.origin.x - candidate.origin.x, dy = current.origin.y - candidate.origin.y;
+      const length = Math.hypot(dx, dy) || 1;
+      simulation.bodies.write(player, { ...current, origin: {
+        x: candidate.origin.x + dx / length * 60, y: candidate.origin.y + dy / length * 60, z: candidate.origin.z } });
+      simulation.bodies.link(player);
+      for (let step = 0; step < 60 && health >= 10000; step++) {
+        await application.step(50);
+        health = Math.min(health, simulation.playerUi(admission.actor).health);
+      }
+      simulation.combat.setHealth(player, 10000);
+    }
+    expect(health).toBeLessThan(10000);
+    const before = simulation.presentations().length;
+    const save = join(directory, "saves", "foreign.sav");
+    await application.saveGame(save);
+    await application.loadGame(save);
+    expect(application.simulation.q3Source()).not.toBeNull();
+    expect(application.simulation.presentations().filter(entry => entry.family === "q2").length).toBeGreaterThanOrEqual(20);
+    expect(application.simulation.presentations().length).toBe(before);
+    for (let step = 0; step < 10; step++) await application.step(50);
+  }, 300_000);
 });
