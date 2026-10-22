@@ -29,6 +29,14 @@ function inhibited(fields: Q2SpawnFields, edition: "classic" | "rerelease", skil
   return (flags & (skill === 0 ? 256 : skill === 1 ? 512 : 1024)) !== 0;
 }
 
+/** Entity text restricted to the given authored ordinals, preserving exact
+ * authored bytes. Ordinal 0 (worldspawn) is always kept so the result stays
+ * a loadable entity string. */
+export function filterEntityText(text: string, keep: ReadonlySet<number>): string {
+  const spans = entitySpans(text);
+  return spans.flatMap((span, ordinal) => ordinal === 0 || keep.has(ordinal) ? [text.slice(span[0], span[1]) + "\n"] : []).join("");
+}
+
 /** Top-level brace spans of each entity in authored order, so unreplaced
  * entities keep their exact authored bytes (escapes included). */
 function entitySpans(text: string): readonly (readonly [number, number])[] {

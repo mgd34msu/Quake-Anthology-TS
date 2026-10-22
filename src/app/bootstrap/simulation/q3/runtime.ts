@@ -564,9 +564,16 @@ export class Q3SourceRuntime {
     }
     this.remapTeams(); this.settings.update(); this.loaded = true; this.loadedGameType = this.gameType;
     const unknown = this.mapReport.outcomes.filter(outcome => outcome.kind === "unknown");
-    if (unknown.length !== 0) throw new Error("Unimplemented authored Q3 spawns: " + unknown.map(outcome => outcome.classname).join(", "));
+    if (unknown.length !== 0 && this.options.foreignWorld !== true) throw new Error("Unimplemented authored Q3 spawns: " + unknown.map(outcome => outcome.classname).join(", "));
     this.host.configstrings.set(0, this.host.serverState.serverInfo());
     return this.mapReport;
+  }
+
+  /** Authored ordinals (worldspawn = 0) with no Q3 spawn, for the
+   * authored-family adjunct to spawn on foreign maps. */
+  foreignSpawns(): readonly { readonly ordinal: number; readonly classname: string | null }[] {
+    if (this.mapReport === null) return [];
+    return this.mapReport.outcomes.flatMap((outcome, index) => outcome.kind === "unknown" ? [{ ordinal: index + 1, classname: outcome.classname }] : []);
   }
 
   beginFrame(frame: FrameContext): void {
@@ -697,6 +704,9 @@ export class Q3SourceRuntime {
   }
 
   private adjustAreaPortalState(entity: GameEntity, open: boolean): void {
+    // Foreign BSPs have no Q3 area-pair portal graph; the authored family's
+    // own portal entities (adjunct-spawned) govern its visibility.
+    if (this.options.foreignWorld === true) return;
     const bounds = this.host.bodies.linked(entity.actor.id)?.absoluteBounds;
     if (bounds === undefined) throw new Error("Area portal mover must be linked");
     const leaves = this.host.scene.boxLeaves(bounds, 128);

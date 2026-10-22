@@ -9,6 +9,10 @@ import type { Q2MonstersCheckpoint } from "../../../content/q2/foundation/monste
 import type { Q2MoversCheckpoint } from "../../../content/q2/foundation/movers.ts";
 import type { Q2MissionPackMonstersCheckpoint } from "../../../content/q2/missionpacks/monsters/state.ts";
 import { readQ2MoversCheckpoint } from "../../../persistence/q2-movers.ts";
+import { readQ2ItemsCheckpoint } from "../../../persistence/q2-items.ts";
+import { readQ2BaseEntitiesCheckpoint } from "../../../persistence/q2-base-entities.ts";
+import type { Q2ItemsCheckpoint } from "../../../content/q2/foundation/items.ts";
+import type { Q2BaseEntitiesCheckpoint } from "../../../content/q2/base/entities/index.ts";
 import { readQ2MissionPackMonstersCheckpoint } from "../../../persistence/q2-missionpacks.ts";
 import type { FrameContext } from "../../../contracts/time.ts";
 import type { SourceRandom } from "./random.ts";
@@ -40,6 +44,35 @@ export interface SelectedMonstersCheckpoint {
   readonly version: 2;
   readonly authored: readonly SavedAuthoredMonster[];
   readonly sources: readonly MonsterSourceCheckpoint[];
+}
+/** Authored-family world adjunct state for foreign maps on a TS primary. */
+export interface ForeignQ2WorldCheckpoint {
+  readonly version: 1;
+  readonly reference: ProviderReference;
+  readonly edition: "classic" | "rerelease";
+  readonly program: "baseq2" | "xatrix" | "rogue" | "mg2";
+  readonly frame: FrameContext;
+  readonly random: ReturnType<SourceRandom["checkpoint"]>;
+  readonly entities: Q2FoundationCheckpoint;
+  readonly monsters: Q2MonstersCheckpoint;
+  readonly ballistics: ReturnType<Q2Ballistics["captureProjectiles"]>;
+  readonly movers: Q2MoversCheckpoint;
+  readonly items: Q2ItemsCheckpoint;
+  readonly baseEntities: Q2BaseEntitiesCheckpoint;
+  readonly packs: readonly { readonly pack: "xatrix" | "rogue"; readonly monsters: Q2MissionPackMonstersCheckpoint; readonly steamId: number }[];
+}
+export function readForeignQ2WorldCheckpoint(reader: SaveReader): ForeignQ2WorldCheckpoint {
+  const random = readRandom(reader.field("random"));
+  if (random.kind !== "glibc-random" && random.kind !== "q2-rerelease-mt19937") return reader.field("random").fail("Unsupported foreign world random stream");
+  return { version: reader.field("version").literal(1), reference: readProvider(reader.field("reference")),
+    edition: reader.field("edition").choice("classic", "rerelease"), program: reader.field("program").choice("baseq2", "xatrix", "rogue", "mg2"),
+    frame: readFrame(reader.field("frame")), random,
+    entities: readQ2FoundationCheckpoint(reader.field("entities")), monsters: readQ2MonstersCheckpoint(reader.field("monsters")),
+    ballistics: { blasterCauses: reader.field("ballistics").field("blasterCauses").list(cause => ({ actor: readSavedActor(cause.field("actor")), meansOfDeath: cause.field("meansOfDeath").integer() })) },
+    movers: readQ2MoversCheckpoint(reader.field("movers")), items: readQ2ItemsCheckpoint(reader.field("items")),
+    baseEntities: readQ2BaseEntitiesCheckpoint(reader.field("baseEntities")),
+    packs: reader.field("packs").list(pack => ({ pack: pack.field("pack").choice("xatrix", "rogue"),
+      monsters: readQ2MissionPackMonstersCheckpoint(pack.field("monsters")), steamId: pack.field("steamId").integer() })) };
 }
 export function readSelectedMonstersCheckpoint(reader: SaveReader): SelectedMonstersCheckpoint {
   return { version: reader.field("version").literal(2), authored: reader.field("authored").list(value => {

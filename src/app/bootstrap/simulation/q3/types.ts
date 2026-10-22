@@ -103,6 +103,9 @@ export interface Q3SourceOptions {
   readonly weaponProvider: ProviderReference;
   readonly product: Product;
   readonly entities: string;
+  /** Foreign-authored map: classes without a Q3 spawn are reported via
+   * foreignSpawns() for an authored-family adjunct instead of failing load. */
+  readonly foreignWorld?: boolean;
   readonly seed: number;
   readonly maxClients: number;
   readonly buildDate: string;

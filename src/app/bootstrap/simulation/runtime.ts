@@ -47,7 +47,8 @@ import type { WeaponBehaviorRuntimeCheckpoint } from "./weapon-behavior-runtime.
 import { quakeCFreeMovement } from "./quakec-client-adapter.ts";
 import { quakeWorldCommandSlices } from "../../../movement/q1/quakeworld.ts";
 import { prepareNativeQ2Map } from "./native-q2-map.ts";
-import { planGuestMonsters, type GuestMonsterPlan } from "./guest-monsters.ts";
+import { filterEntityText, planGuestMonsters, type GuestMonsterPlan } from "./guest-monsters.ts";
+import { createForeignQ2WorldModules, type ForeignQ2WorldModules } from "./foreign-q2-world.ts";
 import { q3GuestPlayerUi } from "./q3/guest-player.ts";
 import { quakeCCharacterAnimation } from "./quakec-character-animation.ts";
 import { advanceQ2PlayerAnimation } from "../../../content/q2/base/player/view.ts";
@@ -426,6 +427,11 @@ export class SharedSimulation implements Simulation {
   private readonly q1Movement: Q1MonsterMovement;
   private selectedMonsters: SelectedMonsters | null = null;
   private readonly monsterSources = new Map<ProviderId, SelectedMonsterSource>();
+  /** Authored-family world adjunct for foreign maps on a TS primary source:
+   * spawns and steps the authored entities the primary has no spawn for. */
+  private foreignWorld: { readonly reference: ProviderReference; readonly edition: "classic" | "rerelease";
+    readonly program: "baseq2" | "xatrix" | "rogue" | "mg2"; readonly modules: ForeignQ2WorldModules;
+    readonly random: SourceRandom; readonly clock: { frame: FrameContext; advanced: boolean } } | null = null;
   private readonly monsterMissions = new Map<ActorId, MonsterMission>();
   private q2ServerRegistry: CvarRegistry | null = null;
   private readonly debugLineStore = new WorldDebugLineStore();
@@ -738,7 +744,13 @@ export class SharedSimulation implements Simulation {
     });
     this.originalPickups = new SharedOriginalPickupAdmission(this.actors, this.combat, this.inventory, offer => this.selectedQ3Source?.pickupAllowed(offer) ?? true);
     this.registerCombat();
-    this.scheduler = new FrameScheduler({ actors: this.actors, ordering: this.recipe.ordering, clocks: this.recipe.timing.map(value => ({ provider: value.provider, profile: value.clock })),
+    const foreignIdentity = this.foreignQ2Identity();
+    // The foreign adjunct thinks last in mixed ordering: its world reacts
+    // to the primary source's frame, never the reverse.
+    const ordering = foreignIdentity === null || this.recipe.ordering.kind !== "mixed" || this.recipe.ordering.providers.includes(foreignIdentity.reference.provider)
+      ? this.recipe.ordering : { ...this.recipe.ordering, providers: [...this.recipe.ordering.providers, foreignIdentity.reference.provider] };
+    this.scheduler = new FrameScheduler({ actors: this.actors, ordering, clocks: [...this.recipe.timing.map(value => ({ provider: value.provider, profile: value.clock })),
+      ...(foreignIdentity === null ? [] : [{ provider: foreignIdentity.reference.provider, profile: nativeProviderTiming(foreignIdentity.reference, "q2", foreignIdentity.edition === "rerelease").clock }])],
       sourceSlot: actor => this.actors.sourceOf(actor)?.slot ?? null,
       executionProvider: actor => this.executionProvider(actor),
       resolve: (_provider, callback) => callback === "world:think" ? (actor, frame) => { this.callbacks.think(actor, frame); return undefined; } : null });
@@ -869,6 +881,7 @@ export class SharedSimulation implements Simulation {
       this.source.game.host.cvars.clearModified("sv_maxclients");
       if (providerFamily(this.recipe.combat.provider) === "q3") this.disposeSourceCombat = this.combat.register(this.source.game.bridge.policy());
       this.source.game.load();
+      if (options.restore === undefined) this.spawnForeignWorld();
       if (options.restore === undefined) this.admitGuestMonsters();
       this.source.game.host.cvars.clearModified("g_gametype");
     }
@@ -1121,6 +1134,82 @@ export class SharedSimulation implements Simulation {
     }
     this.monsterSources.set(reference.provider, source);
     return source;
+  }
+
+  /** Adjunct identity for a foreign Q2 map, derived from map provenance so
+   * the scheduler can register its clock before the adjunct exists. */
+  private foreignQ2Identity(): { readonly reference: ProviderReference; readonly edition: "classic" | "rerelease"; readonly program: "baseq2" | "xatrix" | "rogue" | "mg2" } | null {
+    if (this.options.world.kind !== "q2-bsp" || !this.recipe.map.entities.provider.startsWith("q3:")) return null;
+    const content = this.recipe.map.geometry.provenance.mount.identity.content;
+    const [, editionPart, campaign] = content.split(":");
+    const edition: "classic" | "rerelease" = editionPart === "rerelease" || campaign === "mg2" || campaign === "n64" ? "rerelease" : "classic";
+    const program: "baseq2" | "xatrix" | "rogue" | "mg2" = campaign === "xatrix" || campaign === "rogue" ? campaign : campaign === "mg2" || campaign === "n64" ? "mg2" : "baseq2";
+    return { reference: { provider: `q2:source/${edition}/${program}`, content }, edition, program };
+  }
+
+  /** Build the authored-family world adjunct for a foreign Q2 map. The
+   * primary TS source keeps players/match ownership; the adjunct spawns
+   * and steps the authored entities the primary has no spawn for. */
+  private createForeignQ2World(): void {
+    if (this.foreignWorld !== null) return;
+    const identity = this.foreignQ2Identity();
+    if (identity === null) return;
+    const { reference, edition, program } = identity;
+    const timing = nativeProviderTiming(reference, "q2", edition === "rerelease");
+    const world = providerTiming(this.recipe, this.recipe.map.entities.provider);
+    const random = new SourceRandom(this.options.seed, edition === "rerelease" ? "q2-rerelease" : "classic");
+    const initial = providerFrame({ ...this.sourceFrame, elapsed: { kind: "seconds", value: 0 } }, world.clock, timing.clock);
+    const clock = { frame: initial, advanced: false };
+    const runtime: ActorHostRuntime = { numeric: timing.numeric, random, now: () => seconds(clock.frame.time),
+      frameSeconds: () => edition === "classic" ? 0.1 : 0.025,
+      schedule: (actor, due) => due === null ? this.scheduler.cancel(actor) : this.schedule(actor, due) };
+    const common = { provider: reference.provider, edition, skill: this.options.skill, maxClients: this.options.maxClients,
+      campaign: this.recipe.campaign.kind === "campaign" ? this.recipe.campaign.mission.provider : this.recipe.map.entities.provider,
+      combatProvider: this.recipe.combat.provider, inventoryProvider: this.recipe.inventory.provider, movementProvider: this.recipe.movement.provider };
+    const modules = createForeignQ2WorldModules({ edition, program,
+      behavior: { mission: actor => this.monsterMissions.get(actor) ?? null },
+      weapons: { emit: event => this.weaponEvent(reference.content, event),
+        dodge: (actor, attacker, eta, trace) => this.q2MonsterDodge(actor, attacker, eta, trace),
+        ammoChanged: actor => this.events.message({ kind: "q2-inventory", counts: this.inventory.entries(actor).map(entry => entry.count) }, actor),
+        lagCompensation: { kind: "current-world" }, canTarget: (attacker, target) => attacker === null || !attacker.equals(target) },
+      gravity: () => this.physics.gravity,
+      powerups: actor => {
+        if (this.source.kind !== "q3") return { quadUntil: 0, doubleUntil: 0, invulnerabilityUntil: 0 };
+        const powers = this.source.game.records.nativeByActor(actor)?.client?.ps.powerups;
+        return { quadUntil: (powers?.get(Powerup.PW_QUAD) ?? 0) / 1000, doubleUntil: 0, invulnerabilityUntil: (powers?.get(Powerup.PW_INVULNERABILITY) ?? 0) / 1000 };
+      },
+      playerEffect: event => this.events.emit(reference.content, { kind: "q2-composition", event: { kind: "missionpack-player", event } }, clock.frame.time),
+      createGame: (monsters, spawnModules) => new Q2Foundation(this.q2ActorHost(reference, runtime, actor => monsters.context(actor)?.state),
+        { ...common, mode: this.options.mode === "coop" ? "coop" : "singleplayer", mapName: this.recipe.map.geometry.requestedPath, deathmatchFlags: 0 }, spawnModules),
+      teleportPlayer: (actor, origin, angles) => {
+        const player = this.requirePlayer(actor), body = this.bodies.read(actor);
+        return this.setPlayerMovement(actor, { kind: "teleport", origin, angles, velocity: body?.velocity ?? zero, commandAngles: player.commandAngles, holdMilliseconds: 160, spectator: false });
+      },
+      playerPush: (actor, velocity) => { const player = this.requirePlayer(actor), body = this.bodies.read(actor); if (body === null) return undefined;
+        this.bodies.write(player.actor, { ...body, velocity }); player.state = player.readState(); return undefined; },
+      setActorGravity: (actor, gravity) => { const player = this.player(actor); if (player !== null) {
+          player.gravityMultiplier = gravity;
+          if (player.state.kind === "q2-classic" || player.state.kind === "q2-rerelease" || player.state.kind === "q3") player.state = { ...player.state, gravity: Math.trunc(this.physics.gravity * gravity) };
+        } else { const entity = this.foreignWorld?.modules.game.entity(actor); if (entity !== null && entity !== undefined) entity.gravity = gravity; } return undefined; },
+      itemHooks: { weaponPicked: () => undefined, silencer: () => undefined,
+        powerArmor: (actor, kind) => this.events.message({ kind: "print", level: 2, text: `Power armor ${kind}\n` }, actor) },
+    });
+    this.foreignWorld = { reference, edition, program, modules, random, clock };
+  }
+
+  /** Spawn the primary's unclaimed authored entities in the adjunct. The
+   * primary's outcome ordinals index the same adapted entity text; selected
+   * monster replacements are excluded (admitted as shared adjuncts). */
+  private spawnForeignWorld(): void {
+    const foreign = this.foreignWorld, source = this.source;
+    if (foreign === null || source.kind !== "q3") return;
+    const plan = this.guestMonsterPlan(this.options.world.entities, foreign.edition);
+    const replaced = new Set(plan?.replacements.map(entry => entry.ordinal) ?? []);
+    const keep = new Set(source.game.foreignSpawns().map(entry => entry.ordinal).filter(ordinal => !replaced.has(ordinal)));
+    if (keep.size === 0) return;
+    const report = foreign.modules.game.load(filterEntityText(source.game.options.entities, keep));
+    if (report.unsupported.length !== 0)
+      throw new Error(`Unimplemented authored foreign spawns: ${[...new Set(report.unsupported.map(entity => entity.classname))].join(", ")}`);
   }
 
   private attachMonster(actor: OwnedActor, definition: MonsterDefinitionReference, mission: MonsterMission): undefined {
@@ -1556,6 +1645,58 @@ export class SharedSimulation implements Simulation {
       else if (source.kind === "q2" && state.kind === "q2") { source.game.restore(state.entities); source.monsters.restore(source.game, state.monsters); source.ballistics.restoreProjectiles(source.game, state.ballistics); if (state.movers !== null) source.movers.restore(source.game, state.movers);
         for (const savedPack of state.packs) { const pack = source.packs.find(value => value.pack === savedPack.pack); if (pack === undefined) throw new Error("Saved monster pack is not registered"); pack.monsters.restore(source.game, savedPack.state); } }
     }
+    return undefined;
+  }
+
+  private captureForeignWorld(): ForeignQ2WorldCheckpoint | null {
+    const foreign = this.foreignWorld;
+    if (foreign === null) return null;
+    const { modules } = foreign;
+    return { version: 1, reference: foreign.reference, edition: foreign.edition, program: foreign.program,
+      frame: foreign.clock.frame, random: foreign.random.checkpoint(), entities: modules.game.capture(),
+      monsters: modules.monsters.capture(), ballistics: modules.ballistics.captureProjectiles(),
+      movers: modules.movers.capture(modules.game), items: modules.items.capture(modules.game),
+      baseEntities: modules.baseEntities.capture(modules.game),
+      packs: modules.packs.map(pack => ({ pack: pack.pack, monsters: pack.monsters.capture(modules.game), steamId: pack.entities.capture().steamId })) };
+  }
+
+  private restoreForeignWorld(saved: ForeignQ2WorldCheckpoint): undefined {
+    const foreign = this.foreignWorld;
+    if (foreign === null) throw new Error("Saved foreign world has no adjunct");
+    if (foreign.reference.provider !== saved.reference.provider || foreign.reference.content !== saved.reference.content
+      || foreign.edition !== saved.edition || foreign.program !== saved.program) throw new Error("Saved foreign world differs from its adjunct");
+    foreign.clock.frame = saved.frame; foreign.clock.advanced = false; foreign.random.restore(saved.random);
+    const { modules } = foreign;
+    modules.game.restore(saved.entities);
+    modules.monsters.restore(modules.game, saved.monsters);
+    modules.ballistics.restoreProjectiles(modules.game, saved.ballistics);
+    modules.movers.restore(modules.game, saved.movers);
+    modules.items.restore(modules.game, saved.items);
+    modules.baseEntities.restore(modules.game, saved.baseEntities);
+    for (const savedPack of saved.packs) {
+      const pack = modules.packs.find(value => value.pack === savedPack.pack);
+      if (pack === undefined) throw new Error("Saved foreign mission pack is not registered");
+      pack.monsters.restore(modules.game, savedPack.monsters);
+      pack.entities.restore({ steamId: savedPack.steamId });
+    }
+    return undefined;
+  }
+
+  /** Advance the foreign adjunct's Q2 frame clock, mirroring monster sources. */
+  private beginForeignWorldFrame(milliseconds: number, map: boolean): undefined {
+    const foreign = this.foreignWorld;
+    if (foreign === null) return undefined;
+    foreign.clock.advanced = false;
+    if (!map) return undefined;
+    const interval = foreign.edition === "classic" ? 100 : 25;
+    const next = Math.round(seconds(foreign.clock.frame.time) * 1000) + interval;
+    if (milliseconds !== next) return undefined;
+    const kind = foreign.edition === "classic" ? "seconds" : "milliseconds";
+    const divisor = kind === "seconds" ? 1000 : 1;
+    foreign.clock.frame = { frame: foreign.clock.frame.frame + 1, phase: "frame-entry",
+      time: { kind, value: next / divisor }, elapsed: { kind, value: interval / divisor } };
+    foreign.clock.advanced = true;
+    foreign.modules.monsters.beginFrame(foreign.modules.game);
     return undefined;
   }
 
@@ -3305,7 +3446,9 @@ export class SharedSimulation implements Simulation {
       else host.cvars.set("cl_running", this.options.dedicated === true ? "0" : "1", true);
       const objectives = adaptForeignQ3Objectives(this.options.world, product, host.cvars.variableValue("g_gametype"));
       if (objectives.kind !== "ready") throw new Error(`Selected Q3 objectives are unavailable: ${JSON.stringify(objectives)}`);
+      if (this.options.world.kind === "q2-bsp") this.createForeignQ2World();
       return { kind: "q3", game: new Q3SourceRuntime({ recipe, weaponBehavior: this.weaponBehavior, weaponProvider: this.weaponProvider, product, entities: objectives.entities,
+        ...(this.foreignWorld === null ? {} : { foreignWorld: true }),
         seed: this.options.seed, maxClients: this.options.maxClients, buildDate: "TypeScript port",
         ...(this.options.q3Session === undefined ? {} : { sessionCarry: this.options.q3Session }) }, host,
         saved === undefined ? { kind: "new" } : { kind: "restore", state: decodeCheckpointValue(simulationProviderCheckpoint(saved, "q3:native").bytes) }) };
@@ -3588,7 +3731,11 @@ export class SharedSimulation implements Simulation {
 
   private schedule(actor: OwnedActor, dueSeconds: number): undefined {
     const executionProvider = this.executionProvider(actor.id) ?? actor.owner;
-    const kind = providerTiming(this.recipe, executionProvider).clock.kind;
+    // The foreign adjunct's provider is synthesized at runtime and has no
+    // recipe timing entry; its clock is the native Q2 clock for its edition.
+    const kind = this.foreignWorld !== null && executionProvider === this.foreignWorld.reference.provider
+      ? this.foreignWorld.edition === "classic" ? "q2-classic" : "q2-rerelease"
+      : providerTiming(this.recipe, executionProvider).clock.kind;
     return this.scheduler.schedule(actor, "world:think", { due: { kind: kind === "q2-rerelease" || kind === "q3" ? "milliseconds" : "seconds", value: kind === "q2-rerelease" || kind === "q3" ? dueSeconds * 1000 : dueSeconds },
       ...(executionProvider === actor.owner ? {} : { executionProvider }),
       boundary: "during-physics", order: { actor: actor.id, provider: actor.owner, sequence: this.attackSequence++ } });
@@ -3616,7 +3763,8 @@ export class SharedSimulation implements Simulation {
     if (entry?.kind !== "q2" || !this.actors.isLive(actor)) return undefined;
     const selected = this.monsterSources.get(entry.services.options.provider);
     const monsters = selected?.kind === "q2" && selected.game === entry.services ? selected.monsters
-      : this.source.kind === "q2" && this.source.game === entry.services ? this.source.monsters : null;
+      : this.source.kind === "q2" && this.source.game === entry.services ? this.source.monsters
+        : this.foreignWorld !== null && this.foreignWorld.modules.game === entry.services ? this.foreignWorld.modules.monsters : null;
     const context = monsters?.context(actor);
     if (monsters === null || context === null || context === undefined) return undefined;
     return monsters.dodge(context.entity, context.game, attacker, eta, trace);
@@ -4869,6 +5017,10 @@ export class SharedSimulation implements Simulation {
           const interval = source.game.options.edition === "classic" ? 100 : 25;
           for (let due = Math.round(seconds(source.clock.frame.time) * 1000) + interval; due <= mapEndMilliseconds; due += interval) deadlines.add(due);
         }
+        if (this.foreignWorld !== null) {
+          const interval = this.foreignWorld.edition === "classic" ? 100 : 25;
+          for (let due = Math.round(seconds(this.foreignWorld.clock.frame.time) * 1000) + interval; due <= mapEndMilliseconds; due += interval) deadlines.add(due);
+        }
       }
       const boundaries = [...deadlines].sort((a, b) => a - b).map(milliseconds => ({
         map: mapDeadlines.has(milliseconds), q2: weaponDeadlines.has(milliseconds), q3: q3Deadlines.has(milliseconds), milliseconds,
@@ -4891,7 +5043,7 @@ export class SharedSimulation implements Simulation {
           elapsed: { kind: milliseconds ? "milliseconds" : "seconds", value: milliseconds ? selectedQ2.intervalMilliseconds : selectedQ2.intervalMilliseconds / 1000 } };
         selectedQ2.nextMilliseconds = boundary.milliseconds + selectedQ2.intervalMilliseconds;
       }
-      if (mapRun && !run) this.beginMonsterFrames(boundary.milliseconds, false);
+      if (mapRun && !run) { this.beginMonsterFrames(boundary.milliseconds, false); this.beginForeignWorldFrame(boundary.milliseconds, false); }
       let botCommands: readonly ActorCommand[] = [];
       const pendingNetQuake = this.modClientApplications.active ? new Map<ActorId, ActorCommand>() : null;
       const pendingQ1PreThink = this.modClientApplications.active ? new Map<MovementPlayer, number>() : null;
@@ -4902,6 +5054,7 @@ export class SharedSimulation implements Simulation {
         else if (fixed === null) this.sourceFrame = { ...this.clock.frame, elapsed: { kind: "seconds", value: elapsed }, phase: "frame-entry" };
         else this.sourceFrame = this.clock.advance({ kind: this.clock.frame.time.kind, value: this.clock.frame.time.kind === "seconds" ? elapsed : fixed });
         this.beginMonsterFrames(boundary.milliseconds, true);
+        this.beginForeignWorldFrame(boundary.milliseconds, true);
         if (this.selectedArsenal?.family === "q1") {
           const frame = this.selectedQ1Frame();
           this.selectedArsenal.game.beginFrame(seconds(frame.time), seconds(frame.elapsed));
@@ -5128,6 +5281,15 @@ export class SharedSimulation implements Simulation {
             }
             continue;
           }
+          if (execution?.kind === "q2" && this.foreignWorld !== null && execution.services === this.foreignWorld.modules.game) {
+            if (mapRun && run && this.foreignWorld.clock.advanced && this.actors.isLive(actor.id)) {
+              const frame = this.foreignWorld.clock.frame;
+              executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
+                frame, timeSeconds: seconds(frame.time), elapsed: seconds(frame.elapsed), visited });
+              this.physics.commitAttachments();
+            }
+            continue;
+          }
           if (!run || this.selectedMonsters?.beforeTurn(actor.id) === false) continue;
           const equipmentPlayer = this.playerStates.get(actor);
           if (equipmentPlayer !== undefined) {
@@ -5161,6 +5323,7 @@ export class SharedSimulation implements Simulation {
         }
       }
       if (mapRun) for (const source of this.monsterSources.values()) if (source.kind === "q2" && source.clock.advanced) source.monsters.endFrame(source.game);
+      if (mapRun && this.foreignWorld !== null && this.foreignWorld.clock.advanced) this.foreignWorld.modules.monsters.endFrame(this.foreignWorld.modules.game);
       if (run) for (const slot of this.weaponSlots.values()) slot.reconcile();
       if (run || paused) {
         if (this.source.kind === "q2") for (const player of this.playerStates.values()) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) {
@@ -7731,7 +7894,7 @@ export class SharedSimulation implements Simulation {
         const selected = this.nativePrimaryInventory?.read(actor); return selected == null ? [] : [{ actor: savedActorId(actor), item: selected.selected }];
       }),
       nativeWeaponTimes: [...this.nativeWeaponTimes].map(([actor, time]) => ({ actor: savedActorId(actor), time })),
-      selectedMonsters: this.captureSelectedMonsters(), weaponBehaviors: weaponBehaviors ?? this.weaponBehavior.checkpoint(),
+      selectedMonsters: this.captureSelectedMonsters(), foreignWorld: this.captureForeignWorld(), weaponBehaviors: weaponBehaviors ?? this.weaponBehavior.checkpoint(),
       selectedAmmoTimers: this.selectedAmmoTimers?.capture(this.selectedAmmoActors()) ?? null,
       selectedWeaponSource: this.selectedWeaponSource === null ? null : this.selectedWeaponSource.kind === "q1" ? {
         kind: "q1", entities: this.selectedWeaponSource.game.capture(), random: this.selectedWeaponSource.random.checkpoint() } : {
@@ -8061,6 +8224,11 @@ export class SharedSimulation implements Simulation {
     const monsters = reader.field("selectedMonsters");
     if (savedSelectedMonsters !== null) this.restoreSelectedMonsters(savedSelectedMonsters);
     else if (monsters.value !== null) monsters.fail("Saved selected monsters have no matching admission");
+    const foreign = reader.field("foreignWorld");
+    if (this.foreignWorld !== null) {
+      if (foreign.value === undefined || foreign.value === null) foreign.fail("Foreign world adjunct has no saved state");
+      this.restoreForeignWorld(readForeignQ2WorldCheckpoint(foreign));
+    } else if (foreign.value !== undefined && foreign.value !== null) foreign.fail("Saved foreign world has no matching adjunct");
     const grapple = reader.field("grapple");
     if (this.grapple !== null) this.grapple.restore(readGrappleRuntimeCheckpoint(grapple));
     else if (this.recipe.equipment.grapple.kind === "enabled" && this.recipe.equipment.grapple.mechanic === "q3-qvm")
@@ -8199,7 +8367,7 @@ export class SharedSimulation implements Simulation {
 }
 
 export function createSimulation(options: SimulationOptions): SharedSimulation { return new SharedSimulation(options); }
-import { readSelectedMonstersCheckpoint } from "./monster-checkpoint.ts";
+import { readForeignQ2WorldCheckpoint, readSelectedMonstersCheckpoint, type ForeignQ2WorldCheckpoint } from "./monster-checkpoint.ts";
 import type { SelectedMonstersCheckpoint } from "./monster-checkpoint.ts";
 
 
