@@ -159,6 +159,9 @@ export class WorldScene {
   private readonly staticWorldArrays = new WeakMap<MaterialGeometry, { readonly worldPositions: readonly Vec3[]; readonly normals: readonly Vec3[] }>();
   /** Prepared legacy batches for static world surfaces in world-space mode. */
   private readonly legacyBatchCache = new Map<WorldSurface, { readonly key: string; readonly operations: readonly SceneOperation[] }>();
+  /** Fragment-lit batch templates: geometry/colors are static per surface;
+   * only the q2-world lighting's lights/atlas rebind per frame. */
+  private readonly fragmentBatchCache = new Map<WorldSurface, { readonly key: string; readonly batches: readonly DrawBatch[] }>();
   /** Modulated fragment-light lists are identical for every surface in a view; build once per lights array. */
   private readonly fragmentLightsCache = new WeakMap<readonly Q2FragmentLight[], { all: readonly Q2FragmentLight[] | null; shadowOnly: readonly Q2FragmentLight[] | null }>();
 
@@ -607,33 +610,47 @@ export class WorldScene {
     const worldSpace = input.worldSpaceBatches === true && input.camera.clip.kind === "none";
     // Static world surfaces in world space are camera-independent: cache the
     // prepared batches until an input that shapes them changes. Liquids and
-    // flowing/warp textures animate texcoords continuously, and fragment
-    // lighting embeds per-frame light state, so those stay uncached.
+    // flowing/warp textures animate texcoords continuously, so those stay
+    // uncached. Fragment lighting shapes batch structure by its presence
+    // only — the light list and atlas rebind onto a cached template.
     const liquid = material.kind === "q1"
       ? material.surface === "water" || material.surface === "slime" || material.surface === "lava" || material.surface === "teleport"
       : material.warp || material.flowing;
-    const cacheable = worldSpace && model === undefined && !liquid && fragmentLighting === undefined;
+    const cacheable = worldSpace && model === undefined && !liquid;
     const animBucket = !cacheable ? 0 : material.kind === "q1"
       ? (material.animation.length !== 0 || material.alternateAnimation.length !== 0 ? Math.trunc(context.time * 10) : 0)
       : (input.animationFrame ?? Math.trunc(context.time * 2));
     const cacheKey = !cacheable ? "" : [animBucket, input.alternateAnimation === true ? 1 : 0,
       context.entityRGBA.x, context.entityRGBA.y, context.entityRGBA.z, context.entityRGBA.w,
-      (input.q1Fog?.density ?? 0) > 0 ? 1 : 0, material.kind === "q1" ? this.fullbrightByTexture.get(q1AnimatedTexture(material, context.time, input.alternateAnimation ?? false)) !== undefined ? 1 : 0 : 0].join("|");
-    if (cacheable) {
+      (input.q1Fog?.density ?? 0) > 0 ? 1 : 0, material.kind === "q1" ? this.fullbrightByTexture.get(q1AnimatedTexture(material, context.time, input.alternateAnimation ?? false)) !== undefined ? 1 : 0 : 0,
+      context.deformView.mirror ? 1 : 0, context.depthRange[0], context.depthRange[1]].join("|");
+    if (cacheable && fragmentLighting === undefined) {
       const hit = this.legacyBatchCache.get(surface);
       if (hit?.key === cacheKey) return hit.operations;
     }
     const project = worldSpace
       ? (point: Vec3) => { const world = model === undefined ? point : worldPoint(point, model); return { x: world.x, y: world.y, z: world.z, w: 1 }; }
       : context.project;
-    const batches = prepareLegacyMaterialBatches(material, surface.geometry, { time: context.time, entityRGBA: context.entityRGBA, animationFrame: input.animationFrame ?? Math.trunc(context.time * 2),
+    const buildBatches = (lights: readonly Q2FragmentLight[]): readonly DrawBatch[] => prepareLegacyMaterialBatches(material, surface.geometry, { time: context.time, entityRGBA: context.entityRGBA, animationFrame: input.animationFrame ?? Math.trunc(context.time * 2),
       alternateAnimation: input.alternateAnimation ?? false,
       fullbright: material.kind === "q1" ? this.fullbrightByTexture.get(q1AnimatedTexture(material, context.time, input.alternateAnimation ?? false)) ?? null : surface.fullbright,
       q1FogActive: (input.q1Fog?.density ?? 0) > 0,
       q1LightmapEncoding: surface.lightmap?.encoding ?? "rgb",
       ...(fragmentLighting === undefined ? {} : { fragmentLighting: { kind: "q2-world",
-        ...this.worldArrays(surface.geometry, model), pass: "texture", lights: this.fragmentLights(fragmentLighting.lights, material.kind === "q1"), atlas: fragmentLighting.atlas } }),
+        ...this.worldArrays(surface.geometry, model), pass: "texture", lights, atlas: fragmentLighting.atlas } }),
       ...(surface.lightmap === null ? {} : { translucentLightmap: surface.lightmap.direct }), cull: context.deformView.mirror !== (model !== undefined && modelScale(model) < 0) ? "back" : "front", depthRange: context.depthRange, project });
+    if (cacheable && fragmentLighting !== undefined) {
+      let template = this.fragmentBatchCache.get(surface);
+      if (template?.key !== cacheKey) {
+        template = { key: cacheKey, batches: buildBatches([]).map((batch): DrawBatch => ({ ...batch, space: "world" })) };
+        this.fragmentBatchCache.set(surface, template);
+      }
+      const lights = this.fragmentLights(fragmentLighting.lights, material.kind === "q1");
+      const batches = template.batches.map((batch): DrawBatch => batch.lighting.kind === "q2-world" && batch.lighting.pass !== "model"
+        ? { ...batch, lighting: { ...batch.lighting, lights, atlas: fragmentLighting.atlas } } : batch);
+      return [sequenceDrawGroup(material.alpha * context.entityRGBA.w / 255 < 1 ? "translucent" : "opaque", batches)];
+    }
+    const batches = buildBatches(fragmentLighting === undefined ? [] : this.fragmentLights(fragmentLighting.lights, material.kind === "q1"));
     const operations = [sequenceDrawGroup(material.alpha * context.entityRGBA.w / 255 < 1 ? "translucent" : "opaque",
       worldSpace ? batches.map((batch): DrawBatch => ({ ...batch, space: "world" })) : batches)];
     if (cacheable) this.legacyBatchCache.set(surface, { key: cacheKey, operations });
