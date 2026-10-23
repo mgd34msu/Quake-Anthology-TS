@@ -8,7 +8,8 @@ import { Worker } from "node:worker_threads";
 import { availableParallelism } from "node:os";
 import type { BatchLighting, BlendFactor, DepthImageLevel } from "../../contracts/render.ts";
 import type { Vec3 } from "../../contracts/math.ts";
-import type { BoundTexture, TriangleSetup } from "./triangle-kernel.ts";
+import { runTriangleRows } from "./triangle-kernel.ts";
+import type { BoundTexture, Framebuffer, Sample, TriangleSetup } from "./triangle-kernel.ts";
 
 export interface RowSharedFramebuffer {
   readonly width: number;
@@ -204,6 +205,8 @@ export class RowParallelPool implements RowRegistries {
   readonly #control: Int32Array<SharedArrayBuffer>;
   readonly #errorBytes: Uint8Array<SharedArrayBuffer>;
   readonly #shared: RowSharedFramebuffer;
+  readonly #framebuffer: Framebuffer;
+  readonly #sampled: Sample = { r: 1, g: 1, b: 1, a: 1 };
   #jobBuffer: SharedArrayBuffer | null = null;
   #closed = false;
   readonly #textureIds = new WeakMap<object, number>();
@@ -219,6 +222,8 @@ export class RowParallelPool implements RowRegistries {
 
   private constructor(shared: RowSharedFramebuffer, count: number) {
     this.#shared = shared;
+    this.#framebuffer = { width: shared.width, height: shared.height, pixels: new Uint8Array(shared.color), colorWords: new Int32Array(shared.color),
+      depth: new Float64Array(shared.depth), stencil: shared.stencil === null ? null : new Uint32Array(shared.stencil), originX: 0, originY: 0, stride: shared.width };
     const controlBuffer = new SharedArrayBuffer(32);
     this.#control = new Int32Array(controlBuffer);
     const errorBuffer = new SharedArrayBuffer(ERROR_BYTES);
@@ -300,6 +305,19 @@ export class RowParallelPool implements RowRegistries {
     const message: RowJobMessage = { kind: "job", count: setups.length, bandRows, jobBuffer: freshBuffer,
       textures: this.#pendingTextures, lightings: this.#pendingLightings, depths: this.#pendingDepths };
     for (const worker of this.#workers) worker.postMessage(message);
+    // The coordinator claims bands alongside the workers instead of only
+    // blocking on the barrier: bands are row-disjoint and setups run in
+    // order within a band, so the output is identical.
+    const bandCount = Math.ceil(this.#shared.height / bandRows), height = this.#shared.height;
+    let failure: unknown = null;
+    try {
+      for (;;) {
+        const band = Atomics.add(this.#control, CONTROL_NEXT, 1);
+        if (band >= bandCount) break;
+        const firstY = band * bandRows, lastY = Math.min(height - 1, firstY + bandRows - 1);
+        for (const setup of setups) runTriangleRows(setup, this.#framebuffer, this.#sampled, firstY, lastY);
+      }
+    } catch (error) { failure = error; }
     const deadline = Date.now() + 120_000;
     for (;;) {
       const done = Atomics.load(this.#control, CONTROL_DONE);
@@ -313,6 +331,7 @@ export class RowParallelPool implements RowRegistries {
       const text = new TextDecoder().decode(this.#errorBytes.slice(0, length));
       throw new Error(`Row-parallel worker failed: ${text}`);
     }
+    if (failure !== null) throw failure;
   }
 
   close(): void {
