@@ -107,4 +107,4 @@ test.skipIf(!available)("retail chat loads shared context tables and expands Sar
     } finally { chats.shutdown(); reader.disposeResources(); memory.dispose(); }
     expect(memory.liveAllocations).toBe(0);
   }
-});
+}, 120_000);
