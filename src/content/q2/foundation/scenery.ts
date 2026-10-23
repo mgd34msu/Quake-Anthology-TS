@@ -93,6 +93,11 @@ export function createQ2SceneryModule(): Q2SpawnModule {
       case "func_wall": wall(entity, game); return true;
       case "func_explosive": explosive(entity, game); return true;
       case "misc_explobox": barrel(entity, game); return true;
+      case "misc_model": {
+        // Q3 static display model: render the authored model in place.
+        entity.model = entity.spawn.values.get("model") ?? "";
+        game.show(entity); return true;
+      }
       case "misc_banner": {
         entity.model = "models/objects/banner/tris.md2"; entity.frame = Math.floor(game.host.random() * 16);
         

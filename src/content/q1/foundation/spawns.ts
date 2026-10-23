@@ -120,7 +120,17 @@ export function spawnMapActor(game: Q1EntityServices, entity: Q1Actor): undefine
     case "trigger_hurt": initTrigger(game, entity); entity.damage ||= 5; entity.touch = game.named.touch(entity, "hurt_touch"); return undefined;
     case "trigger_push": if (game.usesId1Precaches) game.precacheSound("ambience/windfly.wav"); initTrigger(game, entity); entity.speed ||= 1000; entity.touch = game.named.touch(entity, "push_touch"); return undefined;
     case "info_teleport_destination": entity.mangle = game.body(entity).angles; game.setBody(entity, { angles: ZERO }); game.setOrigin(entity, vadd(game.body(entity).origin, { x: 0, y: 0, z: 27 })); if (entity.targetname === "") throw new Error("teleport destination has no targetname"); return undefined;
-    case "testplayerstart": case "info_player_start": case "info_player_coop": case "info_player_deathmatch": case "info_player_start2": case "info_intermission": case "info_notnull": return undefined;
+    case "testplayerstart": case "info_player_start": case "info_player_coop": case "info_player_deathmatch": case "info_player_start2": case "info_intermission": case "info_notnull":
+    // Q3-authored maps use these as inert aiming/info targets.
+    case "target_location": case "target_position":
+    case "info_null": case "info_player_intermission": case "info_player_team1": case "info_player_team2":
+    case "info_player_single": case "info_spectator": case "info_camp": case "info_podium": return undefined;
+    case "misc_model": {
+      // Q3 static display model: render the authored model in place.
+      entity.model = entity.text("model");
+      if (entity.model !== "" && game.usesId1Precaches) game.precacheModel(entity.model);
+      return undefined;
+    }
     case "path_corner": {
       if (entity.targetname === "") throw new Error("monster_movetarget has no targetname");
       entity.solid = "trigger"; game.setBounds(entity, { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } });

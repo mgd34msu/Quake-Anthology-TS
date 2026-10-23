@@ -92,7 +92,11 @@ export function createQ2TargetModule(): Q2SpawnModule {
         return true;
       }
       case "info_player_start": case "info_player_coop": case "info_player_deathmatch": case "info_player_intermission":
-      case "info_notnull": case "info_landmark": case "func_group": return true;
+      case "info_notnull": case "info_landmark": case "func_group":
+      // Q3-authored maps use these as inert aiming/info targets.
+      case "target_location": case "target_position":
+      case "info_player_team1": case "info_player_team2": case "info_player_single":
+      case "info_spectator": case "info_camp": case "info_podium": return true;
       case "info_null": game.remove(entity); return true;
       case "light": {
         const style = integerField(entity.spawn, "style");
