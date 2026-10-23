@@ -111,7 +111,13 @@ export function createQ2TargetModule(): Q2SpawnModule {
       case "target_speaker": speaker(entity, game); return true;
       case "func_timer": timer(entity, game); return true;
       case "trigger_once": case "trigger_multiple": triggerMultiple(entity, game); return true;
-      case "trigger_relay": entity.use = trigger_relay_use; return true;
+      case "trigger_relay": case "target_relay": entity.use = trigger_relay_use; return true;
+      case "trigger_teleport": {
+        entity.visible = false; entity.touch = teleport_touch; game.solid(entity, "trigger"); return true;
+      }
+      case "target_delay": entity.use = target_delay_use; return true;
+      case "func_static": game.solid(entity, "brush"); entity.use = func_static_use; return true;
+      case "misc_portal_surface": case "misc_portal_camera": return true;
       case "trigger_always":
         entity.delay = Math.max(entity.delay, 0.2);
         game.useTargets(entity, entity.actor.id);
@@ -318,8 +324,31 @@ const use_target_poi: Q2Use = (self, services) => services.host.emit({ kind: "po
 
 const Use_Areaportal: Q2Use = (self, services) => { self.count ^= 1; return services.host.setAreaPortal(self.style, self.count !== 0); };
 
+const teleport_touch: Q2Touch = (entity, game, contact) => {
+  if ((entity.spawnflags & 1) !== 0 && !game.host.isPlayer(contact.other)) return undefined;
+  if ((game.host.combat.read(contact.other)?.health ?? 0) < 1) return undefined;
+  const destination = game.targets(entity.target)[0];
+  const owned = game.host.actors.resolveOwned(contact.other), body = game.host.bodies.read(contact.other);
+  if (destination === undefined || owned === null || body === null) return undefined;
+  const target = game.body(destination);
+  game.host.bodies.unlink(owned);
+  game.host.bodies.write(owned, { ...body, origin: target.origin, velocity: zero, angles: target.angles, ground: null });
+  game.host.bodies.link(owned);
+  game.host.emit({ kind: "effect", effect: "q2:player-teleport", origin: body.origin, direction: zero, count: 1, color: 0 });
+  game.host.emit({ kind: "effect", effect: "q2:player-teleport", origin: target.origin, direction: zero, count: 1, color: 0 });
+  game.useTargets(entity, contact.other);
+  return undefined;
+};
+const target_delay_fire: Q2Think = (entity, game) => game.useTargets(entity, entity.activator);
+const target_delay_use: Q2Use = (entity, game, _other, activator) => {
+  entity.activator = activator; return game.schedule(entity, Math.max(0, entity.wait), target_delay_fire);
+};
+const func_static_use: Q2Use = (entity, game) => {
+  if (entity.solid === "brush") { entity.visible = false; return game.solid(entity, "none"); }
+  entity.visible = true; return game.solid(entity, "brush");
+};
 const targetCallbacks = {
-think: { multi_wait, func_timer_think, target_explosion_explode: explode },
-use: { dynamic_light_use, Use_Multi, Use_Target_Speaker, func_timer_use, use_target_changelevel, light_use, trigger_relay_use, trigger_counter_use, trigger_key_use, use_target_help, use_target_secret_or_goal, use_target_explosion, use_target_splash, use_target_poi, Use_Areaportal },
-touch: { Touch_Multi }
+think: { multi_wait, func_timer_think, target_explosion_explode: explode, target_delay_fire },
+use: { dynamic_light_use, Use_Multi, Use_Target_Speaker, func_timer_use, use_target_changelevel, light_use, trigger_relay_use, trigger_counter_use, trigger_key_use, use_target_help, use_target_secret_or_goal, use_target_explosion, use_target_splash, use_target_poi, Use_Areaportal, target_delay_use, func_static_use },
+touch: { Touch_Multi, teleport_touch }
 };

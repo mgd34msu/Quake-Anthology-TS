@@ -517,7 +517,18 @@ export class Q1EntityServices {
       if (health > player.maxHealth) { this.host.combat.setHealth(actor, health - 1); player.megaRotAt = seconds + 1; }
       else player.megaRotAt = -1;
     }
-    for (const [powerup, expires] of player.powerups) if (expires <= seconds) { player.powerups.delete(powerup); this.host.powerup(actor, powerup, 0); }
+    for (const [powerup, expires] of player.powerups) if (expires <= seconds) {
+      player.powerups.delete(powerup); this.host.powerup(actor, powerup, 0);
+      if (powerup === "q3:flight" && this.host.setGravity !== undefined) this.setGravity(actor.id, 1);
+    }
+    // Foreign Q3 powerups granted by Q3-authored items on this primary.
+    if ((player.powerups.get("q3:regen") ?? 0) > seconds && this.frameSeconds > 0) {
+      const health = this.health(actor.id);
+      if (health > 0 && health < 200) this.host.combat.setHealth(actor, Math.min(200, health + 5 * this.frameSeconds));
+    }
+    if ((player.powerups.get("q3:haste") ?? 0) > seconds && this.frameSeconds > 0 && player.attackFinished > seconds) {
+      player.attackFinished = Math.max(seconds, player.attackFinished - 0.3 * this.frameSeconds);
+    }
     if (this.intermission !== null || this.health(actor.id) < 0) return undefined;
     const suit = (player.powerups.get("suit") ?? 0) > seconds;
     const lavaSuit = (player.powerups.get("mg3:lavasuit") ?? 0) > seconds;

@@ -268,7 +268,8 @@ export class Q2ProductRuntime {
   }
 
   weaponInput(actor: ActorId, input: Q2WeaponInput): Q2WeaponInput {
-    const adjusted = this.armory?.items.input(actor, input) ?? input, entity = this.game.entity(actor);
+    const foreign = this.items.playerPowerups(actor).hasteUntil > this.game.host.now() ? { ...input, haste: true } : input;
+    const adjusted = this.armory?.items.input(actor, foreign) ?? foreign, entity = this.game.entity(actor);
     return this.match.source instanceof Q2Ctf && entity !== null ? this.match.source.weaponInput(entity, this.game, adjusted) : adjusted;
   }
 

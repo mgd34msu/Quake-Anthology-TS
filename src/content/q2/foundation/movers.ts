@@ -88,7 +88,7 @@ export class Q2MoverModule implements Q2SpawnModule {
   get callbacks(): Q2CallbackDefinitions {
     return { think: { ...this.linear.callbacks.think, ...this.angular.callbacks.think, door_hit_bottom: this.bottom, door_go_down: this.down, door_hit_top: this.top,
       Think_SpawnDoorTrigger: this.prepareDoor, smart_water_go_up: this.smartWater, train_wait: this.trainWait, train_next: this.trainNext,
-      train_piece_wait: this.trainPieceWait, func_train_find: this.trainFind },
+      train_piece_wait: this.trainPieceWait, func_train_find: this.trainFind, bob_hit_top: this.bobTop, bob_hit_bottom: this.bobBottom, bob_go_up: this.bobUp, bob_go_down: this.bobDown },
       use: { door_use: this.doorUse, Door_Activate: this.doorActivate, train_use: this.trainUse, rotating_use: this.rotatingUse },
       touch: { button_touch: this.buttonTouch, door_touch: this.doorTouch, Touch_DoorTrigger: this.doorTriggerTouch, rotating_touch: this.rotatingTouch, q2_path_touch: this.pathTouch },
       die: { door_killed: this.doorKilled }, blocked: { door_blocked: this.doorBlocked, smart_water_blocked: this.smartWaterBlocked, train_blocked: this.trainBlocked, rotating_blocked: this.rotatingDamage } };
@@ -122,6 +122,26 @@ export class Q2MoverModule implements Q2SpawnModule {
   }
 
   private readonly trainPieceWait: Q2Think = () => undefined;
+
+  /** Q3 func_bobbing: ping-pong between authored origin and origin+movedir*height. */
+  private spawnBobbing(entity: Q2Entity, game: Q2GameServices): undefined {
+    const body = game.body(entity), height = numberField(entity.spawn, "height") || 32;
+    entity.movedir = body.angles.x === 0 && body.angles.y === 0 && body.angles.z === 0 ? { x: 0, y: 0, z: 1 } : movedir(body.angles);
+    entity.pos1 = body.origin;
+    entity.pos2 = add(body.origin, scale(entity.movedir, height));
+    entity.speed = 2 * height / Math.max(numberField(entity.spawn, "speed") || 4, 0.1);
+    entity.accel = entity.speed; entity.decel = entity.speed;
+    game.motion(entity, "push"); game.solid(entity, "brush");
+    return this.linear.moveTo(entity, game, entity.pos2, this.bobTop);
+  }
+  private readonly bobTop: Q2Think = (entity, game) => entity.wait > 0
+    ? game.schedule(entity, entity.wait, this.bobDown)
+    : this.linear.moveTo(entity, game, entity.pos1, this.bobBottom);
+  private readonly bobDown: Q2Think = (entity, game) => this.linear.moveTo(entity, game, entity.pos1, this.bobBottom);
+  private readonly bobBottom: Q2Think = (entity, game) => entity.wait > 0
+    ? game.schedule(entity, entity.wait, this.bobUp)
+    : this.linear.moveTo(entity, game, entity.pos2, this.bobTop);
+  private readonly bobUp: Q2Think = (entity, game) => this.linear.moveTo(entity, game, entity.pos2, this.bobTop);
   private readonly rotatingTouch: Q2Touch = (entity, game, contact) => this.rotatingDamage(entity, game, contact.other);
 
   spawn(entity: Q2Entity, game: Q2GameServices): boolean {
@@ -129,6 +149,7 @@ export class Q2MoverModule implements Q2SpawnModule {
       case "func_door": case "func_door_rotating": case "func_water": case "func_button": this.spawnDoor(entity, game); return true;
       case "func_train": case "misc_strogg_ship": case "misc_viper": this.spawnTrain(entity, game); return true;
       case "func_rotating": this.spawnRotating(entity, game); return true;
+      case "func_bobbing": this.spawnBobbing(entity, game); return true;
       case "path_corner": case "point_combat": this.spawnPath(entity, game); return true;
       default: return false;
     }

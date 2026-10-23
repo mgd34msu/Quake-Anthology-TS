@@ -118,7 +118,39 @@ export function spawnMapActor(game: Q1EntityServices, entity: Q1Actor): undefine
       entity.touch = game.named.touch(entity, "changelevel_touch"); return undefined;
     }
     case "trigger_hurt": initTrigger(game, entity); entity.damage ||= 5; entity.touch = game.named.touch(entity, "hurt_touch"); return undefined;
-    case "trigger_push": if (game.usesId1Precaches) game.precacheSound("ambience/windfly.wav"); initTrigger(game, entity); entity.speed ||= 1000; entity.touch = game.named.touch(entity, "push_touch"); return undefined;
+    case "trigger_push": {
+      initTrigger(game, entity);
+      // Q3 jump pads target a target_position apex; Q1 wind tunnels do not.
+      if (entity.target !== "") { entity.touch = game.named.touch(entity, "q3_push_touch"); return undefined; }
+      if (game.usesId1Precaches) game.precacheSound("ambience/windfly.wav"); entity.speed ||= 1000; entity.touch = game.named.touch(entity, "push_touch"); return undefined;
+    }
+    case "misc_teleporter_dest": entity.mangle = game.body(entity).angles; game.setBody(entity, { angles: ZERO }); return undefined;
+    case "target_speaker": {
+      entity.use = game.named.use(entity, "speaker_use");
+      if ((entity.spawnflags & 1) !== 0 && entity.text("noise") !== "") game.host.emit({ kind: "ambient", origin: game.body(entity).origin, path: entity.text("noise"), volume: 1, attenuation: 3 });
+      return undefined;
+    }
+    case "target_relay": entity.use = game.named.use(entity, "trigger_relay_use"); return undefined;
+    case "target_delay": entity.use = game.named.use(entity, "delay_use"); return undefined;
+    case "target_remove_powerups": entity.use = game.named.use(entity, "remove_powerups_use"); return undefined;
+    case "func_timer": {
+      entity.wait ||= 1; entity.activated = true; entity.use = game.named.use(entity, "timer_use");
+      return game.schedule(entity, timerInterval(game, entity), game.named.action(entity, "timer_fire"));
+    }
+    case "trigger_always": return game.schedule(entity, entity.delay > 0 ? entity.delay : 0.1, game.named.action(entity, "always_fire"));
+    case "func_static": entity.solid = "bsp"; entity.movement = "push"; entity.use = game.named.use(entity, "static_use"); return undefined;
+    case "func_bobbing": {
+      entity.solid = "bsp"; entity.movement = "push";
+      const body = game.body(entity);
+      entity.movedir = body.angles.x === 0 && body.angles.y === 0 && body.angles.z === 0 ? { x: 0, y: 0, z: 1 } : moveDirection(body.angles, game);
+      game.setBody(entity, { angles: ZERO });
+      entity.pos1 = body.origin;
+      entity.pos2 = vadd(body.origin, vscale(entity.movedir, entity.number("height") || 32));
+      entity.speed = 2 * (entity.number("height") || 32) / Math.max(entity.number("speed") || 4, 0.1);
+      entity.state = "up";
+      return game.calcMove(entity, entity.pos2, entity.speed, game.named.action(entity, "bob_top"));
+    }
+    case "misc_portal_surface": case "misc_portal_camera": return undefined;
     case "info_teleport_destination": entity.mangle = game.body(entity).angles; game.setBody(entity, { angles: ZERO }); game.setOrigin(entity, vadd(game.body(entity).origin, { x: 0, y: 0, z: 27 })); if (entity.targetname === "") throw new Error("teleport destination has no targetname"); return undefined;
     case "testplayerstart": case "info_player_start": case "info_player_coop": case "info_player_deathmatch": case "info_player_start2": case "info_intermission": case "info_notnull":
     // Q3-authored maps use these as inert aiming/info targets.
@@ -225,7 +257,72 @@ function activateCoopSpawns(game: Q1EntityServices, entity: Q1Actor, activator: 
   if (game.live(entity)) { entity.touch = null; game.schedule(entity, 0.1, game.named.action(entity, "SUB_Remove")); }
   return undefined;
 }
+function timerInterval(game: Q1EntityServices, entity: Q1Actor): number {
+  const random = entity.number("random");
+  return Math.max(0.05, entity.wait + (random > 0 ? game.host.random() * random : 0));
+}
 export function registerSpawnCallbacks(game: Q1EntityServices): undefined {
+  game.named.register("speaker_use", { use: (runtime, entity) => {
+    const noise = entity.text("noise"); if (noise !== "") runtime.sound(entity, noise); return undefined;
+  } });
+  game.named.register("timer_use", { use: (runtime, entity) => {
+    entity.activated = !entity.activated;
+    if (entity.activated) return runtime.schedule(entity, timerInterval(runtime, entity), runtime.named.action(entity, "timer_fire"));
+    return runtime.cancel(entity);
+  } });
+  game.named.register("timer_fire", { action: (runtime, entity) => {
+    if (!entity.activated) return undefined;
+    runtime.useTargets(entity, entity.actor.id);
+    if (runtime.live(entity) && entity.activated) return runtime.schedule(entity, timerInterval(runtime, entity), runtime.named.action(entity, "timer_fire"));
+    return undefined;
+  } });
+  game.named.register("delay_use", { use: (runtime, entity, _other, activator) => {
+    entity.activator = activator; return runtime.schedule(entity, Math.max(0, entity.wait), runtime.named.action(entity, "delay_fire"));
+  } });
+  game.named.register("delay_fire", { action: (runtime, entity) => runtime.useTargets(entity, entity.activator) });
+  game.named.register("remove_powerups_use", { use: (runtime, _entity, _other, activator) => {
+    if (activator === null) return undefined;
+    const player = runtime.player(activator); if (player === null) return undefined;
+    const flight = (player.powerups.get("q3:flight") ?? 0) > runtime.time;
+    for (const powerup of [...player.powerups.keys()]) { player.powerups.delete(powerup); runtime.host.powerup(player.actor, powerup, 0); }
+    if (flight && runtime.host.setGravity !== undefined) runtime.setGravity(activator, 1);
+    return undefined;
+  } });
+  game.named.register("always_fire", { action: (runtime, entity) => { runtime.useTargets(entity, null); if (runtime.live(entity)) return runtime.remove(entity); return undefined; } });
+  game.named.register("static_use", { use: (runtime, entity) => {
+    if (entity.solid === "bsp") { entity.solid = "none"; entity.model = ""; } else { entity.solid = "bsp"; entity.model = entity.originalModel; }
+    return runtime.link(entity);
+  } });
+  game.named.register("bob_top", { action: (runtime, entity) => {
+    entity.state = "top"; const wait = entity.number("wait");
+    if (wait > 0) return runtime.schedule(entity, wait, runtime.named.action(entity, "bob_down"));
+    return runtime.calcMove(entity, entity.pos1, entity.speed, runtime.named.action(entity, "bob_bottom"));
+  } });
+  game.named.register("bob_down", { action: (runtime, entity) => runtime.calcMove(entity, entity.pos1, entity.speed, runtime.named.action(entity, "bob_bottom")) });
+  game.named.register("bob_bottom", { action: (runtime, entity) => {
+    entity.state = "bottom"; const wait = entity.number("wait");
+    if (wait > 0) return runtime.schedule(entity, wait, runtime.named.action(entity, "bob_up"));
+    return runtime.calcMove(entity, entity.pos2, entity.speed, runtime.named.action(entity, "bob_top"));
+  } });
+  game.named.register("bob_up", { action: (runtime, entity) => runtime.calcMove(entity, entity.pos2, entity.speed, runtime.named.action(entity, "bob_top")) });
+  game.named.register("q3_push_touch", { touch: (runtime, entity, other) => {
+    if (runtime.health(other) <= 0 && runtime.entity(other)?.classname !== "grenade") return undefined;
+    const actor = runtime.host.actors.resolveOwned(other), body = runtime.host.bodies.read(other);
+    if (actor === null || body === null) return undefined;
+    if (!entity.activated) {
+      const target = runtime.find(entity.target)[0]; if (target === undefined) return undefined;
+      const bounds = runtime.body(entity).bounds, source = runtime.body(entity);
+      const center = vscale(vadd(vadd(source.origin, bounds.min), vadd(source.origin, bounds.max)), 0.5);
+      const dest = runtime.body(target).origin, height = dest.z - center.z, gravity = runtime.options.gravity;
+      if (height <= 0 || gravity <= 0) return undefined;
+      const time = Math.sqrt(height / (0.5 * gravity));
+      const dx = dest.x - center.x, dy = dest.y - center.y, distance = Math.hypot(dx, dy);
+      entity.pos1 = { x: distance === 0 ? 0 : dx / time, y: distance === 0 ? 0 : dy / time, z: time * gravity };
+      entity.activated = true;
+    }
+    runtime.host.bodies.write(actor, { ...body, velocity: entity.pos1, ground: null });
+    runtime.host.bodies.link(actor); return undefined;
+  } });
   game.named.register("activate_coop_spawns_use", { use: (runtime, entity, _other, activator) => activateCoopSpawns(runtime, entity, activator) });
   game.named.register("activate_coop_spawns_touch", { touch: (runtime, entity, other) => runtime.isPlayer(other) ? activateCoopSpawns(runtime, entity, other) : undefined });
   game.named.register("multi_use", { use: (runtime, entity, _other, activator) => multiFire(runtime, entity, activator) });

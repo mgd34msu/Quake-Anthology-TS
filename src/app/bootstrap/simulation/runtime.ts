@@ -4557,7 +4557,8 @@ export class SharedSimulation implements Simulation {
         standingBounds: player.standingBounds, animateQ2: true }; },
       pointContents: point => this.contents(point, "q2"), powerups: actor => {
         const powers = this.source.kind === "q1" ? this.source.game.player(actor)?.powerups : undefined;
-        return { quadUntil: powers?.get("quad") ?? 0, invulnerabilityUntil: powers?.get("invulnerability") ?? 0, breatherUntil: powers?.get("suit") ?? 0, enviroUntil: powers?.get("suit") ?? 0 };
+        return { quadUntil: powers?.get("quad") ?? 0, invulnerabilityUntil: powers?.get("invulnerability") ?? 0, breatherUntil: powers?.get("suit") ?? 0, enviroUntil: powers?.get("suit") ?? 0,
+          hasteUntil: powers?.get("q3:haste") ?? 0, regenUntil: powers?.get("q3:regen") ?? 0, flightUntil: powers?.get("q3:flight") ?? 0, invisUntil: powers?.get("invisibility") ?? 0 };
       }, weapon: actor => { return { q2Name: null, ammo: this.playerUi(actor).ammo?.item ?? null,
         kickAngles: zero, kickOrigin: zero, loopSound: "" }; },
       emit: event => this.events.emit(content, { kind: "q2", event }), view: (actor, view) => { this.q2Views.set(actor, view); return undefined; },
@@ -5344,7 +5345,8 @@ export class SharedSimulation implements Simulation {
           } else {
             const gravityMultiplier = player.gravityMultiplier;
             const matchGravity = this.source.kind === "q2" ? this.source.product.match.gravityScale(player.actor.id) : 1;
-            player.gravityMultiplier *= matchGravity * (this.grapple?.gravityScale(player.actor.id) ?? 1);
+            const flightGravity = this.source.kind === "q2" && this.source.product.items.playerPowerups(player.actor.id).flightUntil > this.timeSeconds ? 0.1 : 1;
+            player.gravityMultiplier *= matchGravity * flightGravity * (this.grapple?.gravityScale(player.actor.id) ?? 1);
             if ((this.source.kind === "q2" || this.grapple !== null) && (player.state.kind === "q2-classic" || player.state.kind === "q2-rerelease" || player.state.kind === "q3"))
               player.state = { ...player.state, gravity: Math.trunc(this.physics.gravity * player.gravityMultiplier) };
             try { const relative = relativeMovementCommand(command, player.readState());

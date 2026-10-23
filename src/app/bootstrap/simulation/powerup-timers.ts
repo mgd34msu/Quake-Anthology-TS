@@ -15,6 +15,10 @@ export function q2PowerupTimers(base: Readonly<Q2PlayerPowerups>, expansion: Rea
     { item: "q2:item_enviro", label: "Environment Suit", remainingSeconds: base.enviroUntil - now },
     { item: "q2:item_breather", label: "Rebreather", remainingSeconds: base.breatherUntil - now },
     { item: "q2:item_ir_goggles", label: "IR Goggles", remainingSeconds: (expansion?.irUntil ?? 0) - now },
+    { item: "q3:item_haste", label: "Haste", remainingSeconds: base.hasteUntil - now },
+    { item: "q3:item_regen", label: "Regeneration", remainingSeconds: base.regenUntil - now },
+    { item: "q3:item_flight", label: "Flight", remainingSeconds: base.flightUntil - now },
+    { item: "q3:item_invis", label: "Invisibility", remainingSeconds: base.invisUntil - now },
   ];
   return timers.filter(timer => timer.remainingSeconds > 0);
 }
@@ -29,6 +33,9 @@ const q1Timers: Readonly<Record<Q1Powerup, { readonly item: ActivePowerupTimer["
   "hipnotic:empathy": { item: "q1:item_artifact_empathy_shields", label: "Empathy Shields" },
   "rogue:shield": { item: "q1:item_powerup_shield", label: "Power Shield" },
   "rogue:antigrav": { item: "q1:item_powerup_belt", label: "Anti-gravity Belt" },
+  "q3:haste": { item: "q3:item_haste", label: "Haste" },
+  "q3:regen": { item: "q3:item_regen", label: "Regeneration" },
+  "q3:flight": { item: "q3:item_flight", label: "Flight" },
 };
 
 export function q1PowerupTimers(powerups: ReadonlyMap<Q1Powerup, number>, nowSeconds: number): readonly ActivePowerupTimer[] {

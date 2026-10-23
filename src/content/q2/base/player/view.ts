@@ -152,6 +152,7 @@ export function q2ClientEffects(context: Q2CharacterContext): undefined {
     }
     if (flashing(powers.quadUntil)) entity.effects |= 0x8000;
     if (flashing(powers.invulnerabilityUntil)) entity.effects |= 0x10000;
+    if (powers.invisUntil > now) entity.renderFlags |= 32;
     if (state.god) { entity.effects |= 0x100; entity.renderFlags |= 0x1c00; }
   }
   const weapon = context.weaponState();

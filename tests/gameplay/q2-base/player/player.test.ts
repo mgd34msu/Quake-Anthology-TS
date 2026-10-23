@@ -29,7 +29,7 @@ function character() {
     grounded: false, ducked: false, buttons: 0, standingBounds: bounds, animateQ2: true } };
   const host: Q2CharacterHost = { bodies, combat, inventory, now: () => now, random: () => 0.5, movement: () => movement.value,
     pointContents: () => movement.value.waterType,
-    powerups: () => ({ quadUntil: 0, invulnerabilityUntil: 0, breatherUntil: 0, enviroUntil: 0 }), weapon: () => null,
+    powerups: () => ({ quadUntil: 0, invulnerabilityUntil: 0, breatherUntil: 0, enviroUntil: 0, hasteUntil: 0, regenUntil: 0, flightUntil: 0, invisUntil: 0 }), weapon: () => null,
     emit: event => { presentation.push(event); return undefined; }, view: (_actor, value) => { views.push(value); return undefined; }, noise: () => undefined,
     environmentDamage: (owner, amount, means, flags) => {
       combat.apply({ target: owner.id, amount, knockback: 0, direction: zero, point: zero, normal: zero, delivery: "direct",
