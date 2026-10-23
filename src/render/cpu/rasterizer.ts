@@ -112,6 +112,17 @@ function snapshotSourceBatch(batch: SourceStageData["batch"], state: RenderState
     get texture() { return batch.texture; } };
 }
 
+/** Setup derivations that cannot vary within one drawBatch. */
+interface BatchSetupConstants {
+  readonly depthNear: number;
+  readonly depthFar: number;
+  readonly blending: TriangleSetup["blending"];
+  readonly textureConsumed: boolean;
+  readonly primaryAlpha: boolean;
+  readonly secondaryAlpha: boolean;
+  readonly secondaryEnvironment: TriangleSetup["secondaryEnvironment"];
+}
+
 const ZERO_TEXCOORD = { x: 0, y: 0 };
 
 function indexedVertex(batch: DrawBatch, offset: number): CpuVertex {
@@ -995,6 +1006,7 @@ export class SoftwareRenderer implements RendererBackend {
               const uv0 = { x: 0, y: 0 }, uv1 = { x: 0, y: 0 };
               const current0: CurrentTexCoord = { kind: "known", value: uv0 }, current1: CurrentTexCoord = { kind: "known", value: uv1 };
               let first: CpuVertex | null = null, second: CpuVertex | null = null, even = true;
+              let stripInvariants: BatchSetupConstants | null = null;
               emitSourceTriangleStrips(batch.indices, {
                 begin: () => { first = null; second = null; even = true; },
                 element: index => {
@@ -1018,7 +1030,8 @@ export class SoftwareRenderer implements RendererBackend {
                     // exactly the source triples, including their third/provoking vertex.
                     const primaryTexture = discrete || this.primaryClientEnabled ? texture : this.immediateTexture(0);
                     const secondaryTexture = !discrete && this.secondaryClientEnabled ? secondary : this.immediateTexture(1);
-                    this.drawTriangle(even ? first : second, even ? second : first, vertex, batch, primaryTexture, secondaryTexture);
+                    stripInvariants ??= this.batchSetupConstants(batch, primaryTexture, secondaryTexture);
+                    this.drawTriangle(even ? first : second, even ? second : first, vertex, batch, primaryTexture, secondaryTexture, stripInvariants);
                     first = second; second = vertex; even = !even;
                   }
                 },
@@ -1076,6 +1089,23 @@ export class SoftwareRenderer implements RendererBackend {
     }
   }
 
+  private batchSetupConstants(batch: DrawBatch, texture: BoundTexture, secondary: BoundTexture): BatchSetupConstants {
+    const state = batch.state;
+    return {
+      depthNear: clamp(state.depthRange[0]), depthFar: clamp(state.depthRange[1]),
+      blending: state.blend.source === "one" && state.blend.destination === "zero" ? "opaque"
+        : state.blend.source === "src-alpha" && state.blend.destination === "one-minus-src-alpha" ? "alpha"
+        : state.blend.source === "one" && state.blend.destination === "one" ? "add"
+          : (state.blend.source === "dst-color" && state.blend.destination === "zero")
+            || (state.blend.source === "zero" && state.blend.destination === "src-color") ? "multiply"
+            : state.blend.source === "dst-color" && state.blend.destination === "one-minus-dst-alpha" ? "dst-color-inverse-dst-alpha" : "general",
+      textureConsumed: this.colorWrite || state.alphaTest !== "none",
+      primaryAlpha: texture.kind !== "incomplete" && textureHasAlpha(texture.internalFormat),
+      secondaryAlpha: secondary.kind !== "incomplete" && textureHasAlpha(secondary.internalFormat),
+      secondaryEnvironment: batch.texturing === "pair" ? batch.secondTexture.environment : null,
+    };
+  }
+
   private drawBatch(batch: DrawBatch, texture: BoundTexture, secondary: BoundTexture): void {
     if (batch.indices.length === 0) return;
     if (batch.primitive === "lines") {
@@ -1084,9 +1114,10 @@ export class SoftwareRenderer implements RendererBackend {
       }
       return;
     }
+    const invariants = this.batchSetupConstants(batch, texture, secondary);
     const drawAll = (): void => {
       for (let offset = 0; offset < batch.indices.length; offset += 3) {
-        this.drawTriangle(indexedVertex(batch, offset), indexedVertex(batch, offset + 1), indexedVertex(batch, offset + 2), batch, texture, secondary);
+        this.drawTriangle(indexedVertex(batch, offset), indexedVertex(batch, offset + 1), indexedVertex(batch, offset + 2), batch, texture, secondary, invariants);
       }
     };
     // Row-parallel dispatch collects this batch's setups and rasterizes
@@ -1138,7 +1169,7 @@ export class SoftwareRenderer implements RendererBackend {
   }
 
   private drawTriangle(a: CpuVertex, b: CpuVertex, c: CpuVertex,
-    batch: DrawBatch, texture: BoundTexture, secondary: BoundTexture): void {
+    batch: DrawBatch, texture: BoundTexture, secondary: BoundTexture, invariants: BatchSetupConstants): void {
     const original: readonly [CpuVertex, CpuVertex, CpuVertex] = [a, b, c];
     let magnitude = 0;
     if (batch.fog !== undefined) for (const { position: p } of original) magnitude = Math.max(magnitude, Math.abs(p.x), Math.abs(p.y), Math.abs(p.z), Math.abs(p.w));
@@ -1171,7 +1202,7 @@ export class SoftwareRenderer implements RendererBackend {
       if (second === undefined || third === undefined) throw new RangeError("Missing clipped vertex");
       const wScale = Math.min(first.position.w, second.position.w, third.position.w);
       this.triangle(project(first, this.viewport, wScale, this.subpixelScale, fogScale),
-        project(second, this.viewport, wScale, this.subpixelScale, fogScale), project(third, this.viewport, wScale, this.subpixelScale, fogScale), batch, texture, secondary, interpolation);
+        project(second, this.viewport, wScale, this.subpixelScale, fogScale), project(third, this.viewport, wScale, this.subpixelScale, fogScale), batch, texture, secondary, interpolation, invariants);
     }
   }
 
@@ -1238,7 +1269,8 @@ export class SoftwareRenderer implements RendererBackend {
   }
 
   private triangle(a: ScreenVertex, b: ScreenVertex, c: ScreenVertex, batch: DrawBatch,
-    texture: BoundTexture, secondaryTexture: BoundTexture, interpolation: readonly [ScreenVertex, ScreenVertex, ScreenVertex] | null): void {
+    texture: BoundTexture, secondaryTexture: BoundTexture, interpolation: readonly [ScreenVertex, ScreenVertex, ScreenVertex] | null,
+    invariants: BatchSetupConstants): void {
     let area = edge(a, b, c.x, c.y);
     if (!Number.isFinite(area) || area === 0) return;
     if ((batch.state.cull === "back" && area > 0) || (batch.state.cull === "front" && area < 0)) return;
@@ -1259,22 +1291,17 @@ export class SoftwareRenderer implements RendererBackend {
     const [ia, ib, ic] = attributes;
     const inverseArea = 1 / (interpolation === null ? area : edge(ia, ib, ic.x, ic.y));
     const state = batch.state;
-    const depthNear = clamp(state.depthRange[0]), depthFar = clamp(state.depthRange[1]);
+    const depthNear = invariants.depthNear, depthFar = invariants.depthFar;
     const white = ia.r === ia.inverseW && ia.g === ia.inverseW && ia.b === ia.inverseW && ia.a === ia.inverseW
       && ib.r === ib.inverseW && ib.g === ib.inverseW && ib.b === ib.inverseW && ib.a === ib.inverseW
       && ic.r === ic.inverseW && ic.g === ic.inverseW && ic.b === ic.inverseW && ic.a === ic.inverseW;
-    const blending = state.blend.source === "one" && state.blend.destination === "zero" ? "opaque"
-      : state.blend.source === "src-alpha" && state.blend.destination === "one-minus-src-alpha" ? "alpha"
-      : state.blend.source === "one" && state.blend.destination === "one" ? "add"
-        : (state.blend.source === "dst-color" && state.blend.destination === "zero")
-          || (state.blend.source === "zero" && state.blend.destination === "src-color") ? "multiply"
-          : state.blend.source === "dst-color" && state.blend.destination === "one-minus-dst-alpha" ? "dst-color-inverse-dst-alpha" : "general";
+    const blending = invariants.blending;
     const depthTest = state.depthTest, depthWrite = state.depthWrite, alphaTest = state.alphaTest;
     const stencilEnabled = this.stencilEnabled, colorWrite = this.colorWrite;
-    const textureConsumed = colorWrite || alphaTest !== "none";
-    const primaryAlpha = texture.kind !== "incomplete" && textureHasAlpha(texture.internalFormat);
-    const secondaryAlpha = secondaryTexture.kind !== "incomplete" && textureHasAlpha(secondaryTexture.internalFormat);
-    const secondaryEnvironment = batch.texturing === "pair" ? batch.secondTexture.environment : null;
+    const textureConsumed = invariants.textureConsumed;
+    const primaryAlpha = invariants.primaryAlpha;
+    const secondaryAlpha = invariants.secondaryAlpha;
+    const secondaryEnvironment = invariants.secondaryEnvironment;
     const edgeAX = b.y - c.y, edgeAY = c.x - b.x, edgeAC = b.x * c.y - b.y * c.x;
     const edgeBX = c.y - a.y, edgeBY = a.x - c.x, edgeBC = c.x * a.y - c.y * a.x;
     const edgeCX = a.y - b.y, edgeCY = b.x - a.x, edgeCC = a.x * b.y - a.y * b.x;
@@ -1283,10 +1310,10 @@ export class SoftwareRenderer implements RendererBackend {
     const attributeCX = ia.y - ib.y, attributeCY = ib.x - ia.x, attributeCC = ia.x * ib.y - ia.y * ib.x;
     const az = ia.z, bz = ib.z, cz = ic.z;
     const constantDepth = az === bz && bz === cz;
-    const slope = Math.max(Math.abs(az * attributeAX + bz * attributeBX + cz * attributeCX), Math.abs(az * attributeAY + bz * attributeBY + cz * attributeCY))
-      * Math.abs(inverseArea) * 0.5 * Math.abs(depthFar - depthNear);
     // Fixed-point 24-bit depth resolution, matching the SDL GL depth buffer.
-    const polygonDepthOffset = state.polygonOffset === null ? 0 : slope * Math.fround(state.polygonOffset.factor) + 2 ** -CPU_OFFSET_DEPTH_BITS * Math.fround(state.polygonOffset.units);
+    const polygonDepthOffset = state.polygonOffset === null ? 0
+      : Math.max(Math.abs(az * attributeAX + bz * attributeBX + cz * attributeCX), Math.abs(az * attributeAY + bz * attributeBY + cz * attributeCY))
+        * Math.abs(inverseArea) * 0.5 * Math.abs(depthFar - depthNear) * Math.fround(state.polygonOffset.factor) + 2 ** -CPU_OFFSET_DEPTH_BITS * Math.fround(state.polygonOffset.units);
     const planeDepth = clamp(clamp(az * 0.5 + 0.5) * (depthFar - depthNear) + depthNear + polygonDepthOffset);
     const aiw = ia.inverseW, biw = ib.inverseW, ciw = ic.inverseW;
     // Delay UV/W until a common anchor is known. Subtracting U' - s*Q' with
