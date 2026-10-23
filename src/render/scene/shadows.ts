@@ -6,7 +6,6 @@ import type { DepthAtlasDraw, DepthAtlasPass, Q2FragmentLight, Q2ShadowAtlas, Q2
 import type { SceneLight } from "../../contracts/scene.ts";
 import type { MaterialGeometry } from "../../materials/geometry.ts";
 import type { SceneImageRegistry } from "./resources.ts";
-import { float32ToBits } from "../../core/numeric.ts";
 
 export const Q2_SHADOW_ATLAS_SIZE = 2048;
 export const Q2_SHADOW_NEAR = 4;
@@ -207,14 +206,19 @@ function depthPass(candidate: Candidate, viewport: Rect, matrix: Mat4, worldDraw
  * caster geometry between frames, so collisions at worst reuse one stale
  * shadow frame — never worth SHA-256 over every vertex every frame.
  */
+const digestFloats = new Float32Array(1);
+const digestBits = new Uint32Array(digestFloats.buffer);
+
 function geometryDigest(meshes: readonly ShadowMesh[]): string {
   let hash = 0x811c9dc5;
-  const mix = (value: number): void => {
-    hash = Math.imul(hash ^ float32ToBits(value), 0x01000193);
-  };
   for (const mesh of meshes) {
-    mix(mesh.positions.length); mix(mesh.indices.length);
-    for (const position of mesh.positions) { mix(position.x); mix(position.y); mix(position.z); }
+    digestFloats[0] = mesh.positions.length; hash = Math.imul(hash ^ (digestBits[0] ?? 0), 0x01000193);
+    digestFloats[0] = mesh.indices.length; hash = Math.imul(hash ^ (digestBits[0] ?? 0), 0x01000193);
+    for (const position of mesh.positions) {
+      digestFloats[0] = position.x; hash = Math.imul(hash ^ (digestBits[0] ?? 0), 0x01000193);
+      digestFloats[0] = position.y; hash = Math.imul(hash ^ (digestBits[0] ?? 0), 0x01000193);
+      digestFloats[0] = position.z; hash = Math.imul(hash ^ (digestBits[0] ?? 0), 0x01000193);
+    }
     for (const index of mesh.indices) hash = Math.imul(hash ^ index, 0x01000193);
   }
   return (hash >>> 0).toString(16);

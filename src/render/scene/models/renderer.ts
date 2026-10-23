@@ -224,7 +224,10 @@ export class SceneModelRenderer {
       if (prepared !== undefined) return prepared;
       let light: Vec3 | undefined, entityLighting: EntityLighting | undefined;
       let basis: { readonly yaw: number; readonly row: number; direction: Vec3 | null } | undefined;
-      const vertexLights = this.provider.family === "q2" ? new Map<Vec3, Vec3>() : null;
+      // Skinned MD5 normals are fresh objects every frame and each is lit
+      // exactly once, so the identity-keyed caches can never hit for them.
+      const skinned = entity.model.kind === "md5";
+      const vertexLights = this.provider.family === "q2" && !skinned ? new Map<Vec3, Vec3>() : null;
       const indexedLights: (Vec3 | undefined)[] = [];
       // Triangle strips/fans repeat the same vertex on consecutive corners.
       let lastNormal: Vec3 | null = null, lastLight: Vec3 | null = null;
@@ -248,7 +251,7 @@ export class SceneModelRenderer {
         // Q2 shade depends only on the table index once the entity light
         // and basis row are fixed, so indexed results are shared by every
         // vertex object carrying that table normal.
-        const normalIndex = aliasNormalIndex(normal);
+        const normalIndex = skinned ? (normalIndices.get(normal.x)?.get(normal.y)?.get(normal.z) ?? -1) : aliasNormalIndex(normal);
         if (normalIndex >= 0) {
           const indexed = indexedLights[normalIndex];
           if (indexed !== undefined) { lastNormal = normal; lastLight = indexed; return indexed; }
