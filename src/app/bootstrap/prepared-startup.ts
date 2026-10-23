@@ -124,7 +124,7 @@ export class PreparedStartup {
         this.source.set("public", "1");
       return this.forward(name, name === "addlrconcmd" || name === "dellrconcmd" ? [invocation.argsText] : invocation.args, invocation.source);
     });
-    for (const name of ["mvdconnect", "mvdisconnect", "in_restart", "midiinfo", "local_join", "local_drop", "downloadstatus", "stopdownload", "retrydownload", "demopause"])
+    for (const name of ["mvdconnect", "mvdisconnect", "in_restart", "midiinfo", "local_join", "local_drop", "downloadstatus", "stopdownload", "retrydownload", "demopause", "quit", "connect", "disconnect"])
       this.commands.register(name, invocation => this.forward(name, invocation.args, invocation.source));
     this.commands.register("snd_restart", invocation => this.forward("snd_restart", invocation.args, invocation.source));
     this.commands.register("cd", invocation => this.forward("cd", invocation.args, invocation.source), cdCommandDocumentation);

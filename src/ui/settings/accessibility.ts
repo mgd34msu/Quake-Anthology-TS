@@ -26,6 +26,8 @@ export function registerAccessibilitySettings(cvars: CvarRegistry): void {
       cvars.bindValue(name(seat, key), { validate: value => choices.includes(value) ? null : `Expected ${choices.join(", ")}`, changed: () => {} });
     }
   }
+  cvars.registerAlias({ name: "crosshair", target: name(0, "crosshair"), conversion: { kind: "identity" },
+    documentation: { summary: "Show the first seat's crosshair. Alias of ui_seat1_crosshair and the Crosshair accessibility preference.", usage: "crosshair <0|1>", examples: ["crosshair 1", "crosshair 0"] } });
 }
 export function readUiPreferences(cvars: SettingCvars, seat: number): UiPreferenceValues {
   const read = (key: keyof UiPreferenceValues): string => {

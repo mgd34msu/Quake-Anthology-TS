@@ -1069,7 +1069,7 @@ export class Application {
       this.dedicatedConsole = new DedicatedConsole();
       return;
     }
-    const commands = new CommandBuffer({ dialect: this.sourceDialect(),
+    const commands = new CommandBuffer({ dialect: this.sourceDialect(), ...(this.imageSettings === null ? {} : { cvars: this.imageSettings.cvars }),
       context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => { this.host.print(text); } });
     commands.register("quit", () => this.requestQuit());
     for (const name of ["save", "load", "map", "say", "addbot", "removebot", "botlist"]) commands.register(name, invocation => this.queueCommand(name, invocation.args, null), saveCommandDocumentation(name));
@@ -1261,11 +1261,14 @@ export class Application {
       options = { ...selected,
         cvarRouting: {
           owner: (name, source) => {
+            const shared = this.imageSettings?.cvars;
+            if (shared !== undefined && shared !== null && shared.find(name) !== undefined) return shared;
             const registry = mods?.cvars(source) ?? selected.cvarRouting?.owner(name, source) ?? selected.cvars;
             if (registry === undefined) throw new Error("Source command has no cvar registry"); return registry;
           },
-          visible: source => { const registry = mods?.cvars(source);
-            return registry === undefined || registry === null ? selected.cvarRouting?.visible(source) ?? (selected.cvars === undefined ? [] : [selected.cvars]) : [registry]; },
+          visible: source => { const registry = mods?.cvars(source), shared = this.imageSettings?.cvars;
+            const base = registry === undefined || registry === null ? selected.cvarRouting?.visible(source) ?? (selected.cvars === undefined ? [] : [selected.cvars]) : [registry];
+            return shared === undefined || shared === null || base.includes(shared) ? base : [shared, ...base]; },
         },
         readScript: (name, source) => {
           if (source.producer?.instance !== undefined) return mods?.readScript(name, source);

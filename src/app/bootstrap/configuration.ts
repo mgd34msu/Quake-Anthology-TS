@@ -361,7 +361,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
     rules: options.rules ?? (campaign === "ctf" || campaign === "lrctf" ? "ctf" : "standard") }, dialect, context, defaultCapacity, text => host.print(text));
   registerGtvCvars(source);
   const inputCvars = new CvarRegistry({ dialect: movement, context, print: text => host.print(text) });
-  const image = options.dedicated ? null : await ApplicationImageSettings.open({ deferPersistence: true, context, dialect,
+  const image = await ApplicationImageSettings.open({ deferPersistence: true, context, dialect,
     ...(options.renderWorker === undefined ? {} : { renderWorker: options.renderWorker }),
     audioOutputFormat: (await loadAudioSettings(settings)).outputFormat ?? defaultAudioOutputFormat,
     ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => host.print(text) });
