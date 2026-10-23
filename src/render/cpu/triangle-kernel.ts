@@ -551,6 +551,53 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
   const luminanceAlpha = setup.textureEffect === "luminance-alpha";
   const fog = setup.fog, fogDepthScale = setup.fogDepthScale ?? 1;
   const fbOriginX = framebuffer.originX, fbOriginY = framebuffer.originY, fbStride = framebuffer.stride;
+  // Opaque-span specialization: the dominant world/model case (single
+  // textured surface, vertex lighting, opaque blending, no alpha test,
+  // stencil or fog) runs the identical fragment arithmetic without the
+  // per-fragment invariant branches of the general loop below.
+  const opaqueFast = textureConsumed && !white && !fragmentLit && secondaryEnvironment === null
+    && fog === undefined && !luminanceAlpha && alphaTest === "none" && !stencilEnabled
+    && blending === "opaque" && colorWrite && depthWrite && texture.kind !== "incomplete" && primaryCursor === null;
+  if (opaqueFast) {
+    for (let y = Math.max(minY, firstY); y <= Math.min(maxY, lastY); y++) {
+      const sampleY = y + 0.5, rowA = edgeAY * sampleY, rowB = edgeBY * sampleY, rowC = edgeCY * sampleY;
+      const attributeRowA = attributeAY * sampleY, attributeRowB = attributeBY * sampleY, attributeRowC = attributeCY * sampleY;
+      const rowOffset = (y - fbOriginY) * fbStride - fbOriginX;
+      span.min = minX;
+      span.max = maxX;
+      trimSpan(span, edgeAX, rowA, edgeAC, edgeAInclusive);
+      trimSpan(span, edgeBX, rowB, edgeBC, edgeBInclusive);
+      trimSpan(span, edgeCX, rowC, edgeCC, edgeCInclusive);
+      for (let x = span.min; x <= span.max; x++) {
+        const sampleX = x + 0.5;
+        const wa = (attributeAX * sampleX + attributeRowA + attributeAC) * inverseArea;
+        const wb = (attributeBX * sampleX + attributeRowB + attributeBC) * inverseArea;
+        const wc = (attributeCX * sampleX + attributeRowC + attributeCC) * inverseArea;
+        const depth = constantDepth ? planeDepth : clamp(clamp((az * wa + bz * wb + cz * wc) * 0.5 + 0.5) * (depthFar - depthNear) + depthNear + polygonDepthOffset);
+        const pixel = rowOffset + x;
+        const oldDepth = depths[pixel];
+        if (oldDepth === undefined) throw new RangeError("Fragment is outside the depth buffer");
+        if ((depthTest === "less-equal" && depth > oldDepth) || (depthTest === "equal" && depth !== oldDepth)) continue;
+        const inverseW = aiw * wa + biw * wb + ciw * wc;
+        const reciprocal = 1 / inverseW;
+        let r = clamp((ar * wa + br * wb + cr * wc) * reciprocal);
+        let g = clamp((ag * wa + bg * wb + cg * wc) * reciprocal);
+        let blue = clamp((ab * wa + bb * wb + cb * wc) * reciprocal);
+        let alpha = clamp((aa * wa + ba * wb + ca * wc) * reciprocal);
+        const u = (au * wa + bu * wb + cu * wc) * reciprocal;
+        const v = (av * wa + bv * wb + cv * wc) * reciprocal;
+        samplePerspectiveBound(texture, u, v, reciprocal, derivative, sampled);
+        didSample = true;
+        r *= sampled.r;
+        g *= sampled.g;
+        blue *= sampled.b;
+        if (primaryAlpha) alpha *= sampled.a;
+        colors[pixel] = colorWord(r, g, blue, alphaBits === 0 ? 1 : alpha);
+        depths[pixel] = depth;
+      }
+    }
+    return didSample;
+  }
   for (let y = Math.max(minY, firstY); y <= Math.min(maxY, lastY); y++) {
     const sampleY = y + 0.5, rowA = edgeAY * sampleY, rowB = edgeBY * sampleY, rowC = edgeCY * sampleY;
     const attributeRowA = attributeAY * sampleY, attributeRowB = attributeBY * sampleY, attributeRowC = attributeCY * sampleY;
