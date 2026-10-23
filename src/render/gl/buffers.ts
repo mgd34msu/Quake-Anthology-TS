@@ -14,6 +14,28 @@ export interface GeometryArrays {
 
 type AllocateGeometry = (vertices: number, indices: number, lighting: DrawBatch["lighting"]["kind"]) => GeometryArrays;
 
+interface PackedCacheEntry {
+  readonly indices: DrawBatch["indices"];
+  readonly lighting: DrawBatch["lighting"]["kind"];
+  readonly texturing: DrawBatch["texturing"];
+  readonly worldPositions: readonly unknown[] | null;
+  readonly normals: readonly unknown[] | null;
+  seen: number;
+  arrays: GeometryArrays | null;
+}
+
+function packKeyParts(batch: DrawBatch): { readonly worldPositions: readonly unknown[] | null; readonly normals: readonly unknown[] | null } {
+  if (batch.lighting.kind === "vertex") return { worldPositions: null, normals: null };
+  return { worldPositions: batch.lighting.worldPositions,
+    normals: batch.lighting.kind === "q2-world" ? batch.lighting.normals : null };
+}
+
+/** Packed copies of vertex arrays that repeat across frames (world batch
+ * templates keep stable vertex/index arrays and only rebind lighting).
+ * Keyed by array identity; entries own their storage and die with the
+ * source arrays. Dynamic geometry seen once never gets promoted. */
+const packedCache = new WeakMap<object, PackedCacheEntry>();
+
 /** Storage belongs to one prepared draw until its native pointers are disabled. */
 export class GeometryBuffer {
   private storage = new ArrayBuffer(0);
@@ -56,7 +78,23 @@ export class GeometryBuffer {
     return this.arrays;
   };
 
-  pack(batch: DrawBatch): GeometryArrays { return pack(batch, this.allocate); }
+  pack(batch: DrawBatch): GeometryArrays {
+    const parts = packKeyParts(batch);
+    const entry = packedCache.get(batch.vertices);
+    if (entry !== undefined && entry.indices === batch.indices && entry.lighting === batch.lighting.kind && entry.texturing === batch.texturing
+      && entry.worldPositions === parts.worldPositions && entry.normals === parts.normals) {
+      if (entry.arrays !== null) return entry.arrays;
+      entry.seen++;
+      if (entry.seen >= 2) {
+        entry.arrays = pack(batch, allocateFresh);
+        return entry.arrays;
+      }
+    } else if (batch.vertices.length >= 64) {
+      packedCache.set(batch.vertices, { indices: batch.indices, lighting: batch.lighting.kind, texturing: batch.texturing,
+        worldPositions: parts.worldPositions, normals: parts.normals, seen: 1, arrays: null });
+    }
+    return pack(batch, this.allocate);
+  }
 }
 
 const allocateFresh: AllocateGeometry = (vertices, indices, lighting) => ({

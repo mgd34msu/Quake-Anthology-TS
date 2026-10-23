@@ -206,8 +206,59 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
   function append(name: string, image: ModelImageSelection, vertices: readonly (ModelVertex & { readonly texCoord: Vec2; readonly color?: Vec4 })[],
     indices: readonly number[], unlit = false, world = false, poseKey?: object): void {
     if (context.purpose !== "shadow") vertexLighting ??= context.prepareVertexLighting?.(entity, options);
-    const localGeometry: MaterialGeometry = { indices, vertices: vertices.map((vertex, corner) => localVertex(vertex, vertex.texCoord, corner, unlit, vertex.color)) };
-    appendGeometry(name, image, localGeometry, unlit, world, poseKey);
+    if (world) {
+      const localGeometry: MaterialGeometry = { indices, vertices: vertices.map((vertex, corner) => localVertex(vertex, vertex.texCoord, corner, unlit, vertex.color)) };
+      appendGeometry(name, image, localGeometry, unlit, world, poseKey);
+      return;
+    }
+    // Fused single pass: lit local vertices and world-transformed vertices
+    // are produced in one loop (same float operations as the previous
+    // map-then-transform two-pass form).
+    const caches = poseCaches(context);
+    const transform = entity.transform, [forward, left, up] = transform.axis;
+    let shared = poseKey !== undefined && caches !== null ? caches.world.get(poseKey)?.get(transform) : undefined;
+    if (shared !== undefined && shared.positions.length !== vertices.length) shared = undefined;
+    const localVertices: MaterialVertex[] = [], worldVertices: MaterialVertex[] = [];
+    const positions: Vec3[] = [], normals: Vec3[] = [];
+    for (let index = 0; index < vertices.length; index++) {
+      const vertex = vertices[index];
+      if (vertex === undefined) throw new RangeError("Model vertex is missing");
+      const local = localVertex(vertex, vertex.texCoord, index, unlit, vertex.color);
+      localVertices.push(local);
+      if (shared !== undefined) {
+        const position = shared.positions[index], normal = shared.normals[index];
+        if (position === undefined || normal === undefined) throw new RangeError("Shared world geometry is shorter than its pose");
+        worldVertices.push({ position, normal, texCoord: local.texCoord, lightmapCoord: local.lightmapCoord, color: local.color });
+      } else {
+        const px = vertex.position.x * transform.scale.x, py = vertex.position.y * transform.scale.y, pz = vertex.position.z * transform.scale.z;
+        const nx = vertex.normal.x * transform.scale.x, ny = vertex.normal.y * transform.scale.y, nz = vertex.normal.z * transform.scale.z;
+        const position: Vec3 = {
+          x: Math.fround(transform.origin.x + Math.fround(Math.fround(Math.fround(forward.x * px) + Math.fround(left.x * py)) + Math.fround(up.x * pz))),
+          y: Math.fround(transform.origin.y + Math.fround(Math.fround(Math.fround(forward.y * px) + Math.fround(left.y * py)) + Math.fround(up.y * pz))),
+          z: Math.fround(transform.origin.z + Math.fround(Math.fround(Math.fround(forward.z * px) + Math.fround(left.z * py)) + Math.fround(up.z * pz))),
+        };
+        const normal: Vec3 = {
+          x: Math.fround(Math.fround(Math.fround(forward.x * nx) + Math.fround(left.x * ny)) + Math.fround(up.x * nz)),
+          y: Math.fround(Math.fround(Math.fround(forward.y * nx) + Math.fround(left.y * ny)) + Math.fround(up.y * nz)),
+          z: Math.fround(Math.fround(Math.fround(forward.z * nx) + Math.fround(left.z * ny)) + Math.fround(up.z * nz)),
+        };
+        positions.push(position); normals.push(normal);
+        worldVertices.push({ position, normal, texCoord: local.texCoord, lightmapCoord: local.lightmapCoord, color: local.color });
+      }
+    }
+    if (shared === undefined && poseKey !== undefined && caches !== null) {
+      let byTransform = caches.world.get(poseKey);
+      if (byTransform === undefined) { byTransform = new WeakMap<object, { readonly positions: readonly Vec3[]; readonly normals: readonly Vec3[] }>(); caches.world.set(poseKey, byTransform); }
+      byTransform.set(transform, { positions, normals });
+    }
+    pushSurface(name, image, { indices, vertices: localVertices }, { indices, vertices: worldVertices }, unlit);
+  }
+  function pushSurface(name: string, image: ModelImageSelection, localGeometry: MaterialGeometry, geometry: MaterialGeometry, unlit: boolean): void {
+    const depthHack = flags.kind === "q1" ? options.viewModel === true : flags.kind === "q2" ? (bits & 16) !== 0 : (bits & 8) !== 0;
+    surfaces.push({ surfaceIndex: surfaces.length, fogSphere, name, entity, options, transform: entity.transform, image, localGeometry, geometry,
+      depthRange: depthHack ? [0, 0.3] : [0, 1], cull: model.kind === "q1-spr" || model.kind === "q2-sp2" ? "none" : model.kind === "q1-mdl" || model.kind === "q2-md2" || model.kind === "md5" && (model.skinSelection.kind === "q1-mdl-replacement" || model.skinSelection.kind === "q2-md2-replacement") ? "front" : "back",
+      alphaTest: model.kind === "q1-spr" ? "gt0" : model.kind === "q2-sp2" && alpha === 1 ? "ge128" : "none",
+      translucent, unlit: unlit || shell !== null, mirrorWeapon: flags.kind === "q2" && (bits & 4) !== 0 && options.leftHand === 1 });
   }
   function appendGeometry(name: string, image: ModelImageSelection, localGeometry: MaterialGeometry, unlit: boolean, world = false, poseKey?: object): void {
     const indices = localGeometry.indices;
@@ -255,11 +306,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
         }) };
       }
     }
-    const depthHack = flags.kind === "q1" ? options.viewModel === true : flags.kind === "q2" ? (bits & 16) !== 0 : (bits & 8) !== 0;
-    surfaces.push({ surfaceIndex: surfaces.length, fogSphere, name, entity, options, transform: entity.transform, image, localGeometry, geometry,
-      depthRange: depthHack ? [0, 0.3] : [0, 1], cull: model.kind === "q1-spr" || model.kind === "q2-sp2" ? "none" : model.kind === "q1-mdl" || model.kind === "q2-md2" || model.kind === "md5" && (model.skinSelection.kind === "q1-mdl-replacement" || model.skinSelection.kind === "q2-md2-replacement") ? "front" : "back",
-      alphaTest: model.kind === "q1-spr" ? "gt0" : model.kind === "q2-sp2" && alpha === 1 ? "ge128" : "none",
-      translucent, unlit: unlit || shell !== null, mirrorWeapon: flags.kind === "q2" && (bits & 4) !== 0 && options.leftHand === 1 });
+    pushSurface(name, image, localGeometry, geometry, unlit);
   }
   const { frame, previousFrame, backLerp } = pose;
   let bounds: Bounds | null = null;
