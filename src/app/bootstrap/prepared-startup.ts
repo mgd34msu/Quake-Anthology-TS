@@ -78,7 +78,7 @@ export class PreparedStartup {
   private worldAction = false;
   get pending(): boolean { return this.profileContinuations.length !== 0 || this.continuation !== undefined; }
   private readonly q3Policy: Q3ProductPolicy;
-  private readonly deferredCommands = ["map", "save", "load", "weapnext", "weapprev", "use", "weapon", "say", "say_team"];
+  private readonly deferredCommands = ["map", "save", "load", "weapnext", "weapprev", "use", "weapon", "say", "say_team", "quit", "connect", "disconnect"];
   private forward: (name: string, args: readonly string[], source: CommandContext) => undefined;
   constructor(public source: CvarRegistry, public movement: CvarRegistry, public scripts: ConsoleScriptFiles,
     private readonly options: {
@@ -124,7 +124,7 @@ export class PreparedStartup {
         this.source.set("public", "1");
       return this.forward(name, name === "addlrconcmd" || name === "dellrconcmd" ? [invocation.argsText] : invocation.args, invocation.source);
     });
-    for (const name of ["mvdconnect", "mvdisconnect", "in_restart", "midiinfo", "local_join", "local_drop", "downloadstatus", "stopdownload", "retrydownload", "demopause", "quit", "connect", "disconnect"])
+    for (const name of ["mvdconnect", "mvdisconnect", "in_restart", "midiinfo", "local_join", "local_drop", "downloadstatus", "stopdownload", "retrydownload", "demopause"])
       this.commands.register(name, invocation => this.forward(name, invocation.args, invocation.source));
     this.commands.register("snd_restart", invocation => this.forward("snd_restart", invocation.args, invocation.source));
     this.commands.register("cd", invocation => this.forward("cd", invocation.args, invocation.source), cdCommandDocumentation);
