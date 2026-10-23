@@ -2,7 +2,7 @@ import { md3WorldEnvelope } from "./md3-bounds.ts";
 /* Scene model assembly from Q1 r_alias.c/r_sprite.c, Q2 gl_mesh.c and
  * Q3 tr_mesh.c/tr_surface.c. Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import { GameRandom } from "../../../core/game-numeric.ts";
-import type { Bounds, Vec2, Vec4 } from "../../../contracts/math.ts";
+import type { Bounds, Vec2, Vec3, Vec4 } from "../../../contracts/math.ts";
 import type { SceneModelGroup } from "../submissions.ts";
 import type { DecodedModel, ModelVertex, Q2AliasModel, SceneEntity } from "../../../contracts/scene.ts";
 import { anglesToAxis, vectorToAngles, add3, addPointToBounds, dot3, emptyBounds, length3, radiusFromBounds, scale3, sub3 } from "../../../core/math.ts";
@@ -85,13 +85,17 @@ interface PoseGeometryCaches {
   readonly mdl: WeakMap<object, WeakMap<object, Map<string, ReturnType<typeof buildMdlGeometry>>>>;
   readonly md3: WeakMap<object, Map<string, ReturnType<typeof interpolateMd3Frames>>>;
   readonly md4: WeakMap<object, Map<string, ReturnType<typeof skinMd4Surface>>>;
+  /** World-transformed positions/normals per pose array + transform:
+   * the camera and shadow passes transform identical poses with the same
+   * transform, so the fround-heavy world step runs once per frame. */
+  readonly world: WeakMap<object, WeakMap<object, { readonly positions: readonly Vec3[]; readonly normals: readonly Vec3[] }>>;
 }
 const poseGeometryCaches = new WeakMap<ModelSkinningFrame, PoseGeometryCaches>();
 function poseCaches(context: ModelPreparationContext): PoseGeometryCaches | null {
   const frame = context.skinningFrame;
   if (frame === undefined) return null;
   let caches = poseGeometryCaches.get(frame);
-  if (caches === undefined) { caches = { mdl: new WeakMap(), md3: new WeakMap(), md4: new WeakMap() }; poseGeometryCaches.set(frame, caches); }
+  if (caches === undefined) { caches = { mdl: new WeakMap(), md3: new WeakMap(), md4: new WeakMap(), world: new WeakMap() }; poseGeometryCaches.set(frame, caches); }
   return caches;
 }
 function lerpKey(backLerp: number): string { return Object.is(backLerp, -0) ? "-0" : `${backLerp}`; }
@@ -199,32 +203,57 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
     return { position: vertex.position, normal: vertex.normal, texCoord, lightmapCoord: ZERO_LIGHTMAP_COORD, color: lit };
   }
   function append(name: string, image: ModelImageSelection, vertices: readonly (ModelVertex & { readonly texCoord: Vec2; readonly color?: Vec4 })[],
-    indices: readonly number[], unlit = false, world = false): void {
+    indices: readonly number[], unlit = false, world = false, poseKey?: object): void {
     if (context.purpose !== "shadow") vertexLighting ??= context.prepareVertexLighting?.(entity, options);
     const localGeometry: MaterialGeometry = { indices, vertices: vertices.map((vertex, corner) => localVertex(vertex, vertex.texCoord, corner, unlit, vertex.color)) };
-    appendGeometry(name, image, localGeometry, unlit, world);
+    appendGeometry(name, image, localGeometry, unlit, world, poseKey);
   }
-  function appendGeometry(name: string, image: ModelImageSelection, localGeometry: MaterialGeometry, unlit: boolean, world = false): void {
+  function appendGeometry(name: string, image: ModelImageSelection, localGeometry: MaterialGeometry, unlit: boolean, world = false, poseKey?: object): void {
     const indices = localGeometry.indices;
     // modelWorldPoint/modelWorldDirection inlined with the transform scalars
     // hoisted; the fround placement (source float discipline) is unchanged.
     const transform = entity.transform, [forward, left, up] = transform.axis;
-    const geometry = world ? localGeometry : { indices, vertices: localGeometry.vertices.map(vertex => {
-      const px = vertex.position.x * transform.scale.x, py = vertex.position.y * transform.scale.y, pz = vertex.position.z * transform.scale.z;
-      const nx = vertex.normal.x * transform.scale.x, ny = vertex.normal.y * transform.scale.y, nz = vertex.normal.z * transform.scale.z;
-      return {
-        position: {
-          x: Math.fround(transform.origin.x + Math.fround(Math.fround(Math.fround(forward.x * px) + Math.fround(left.x * py)) + Math.fround(up.x * pz))),
-          y: Math.fround(transform.origin.y + Math.fround(Math.fround(Math.fround(forward.y * px) + Math.fround(left.y * py)) + Math.fround(up.y * pz))),
-          z: Math.fround(transform.origin.z + Math.fround(Math.fround(Math.fround(forward.z * px) + Math.fround(left.z * py)) + Math.fround(up.z * pz))),
-        },
-        normal: {
-          x: Math.fround(Math.fround(Math.fround(forward.x * nx) + Math.fround(left.x * ny)) + Math.fround(up.x * nz)),
-          y: Math.fround(Math.fround(Math.fround(forward.y * nx) + Math.fround(left.y * ny)) + Math.fround(up.y * nz)),
-          z: Math.fround(Math.fround(Math.fround(forward.z * nx) + Math.fround(left.z * ny)) + Math.fround(up.z * nz)),
-        },
-        texCoord: vertex.texCoord, lightmapCoord: vertex.lightmapCoord, color: vertex.color };
-    }) };
+    let geometry: MaterialGeometry;
+    if (world) geometry = localGeometry;
+    else {
+      const caches = poseCaches(context);
+      let shared = poseKey !== undefined && caches !== null ? caches.world.get(poseKey)?.get(transform) : undefined;
+      if (shared !== undefined && shared.positions.length !== localGeometry.vertices.length) shared = undefined;
+      if (shared !== undefined) {
+        const sharedPositions = shared.positions, sharedNormals = shared.normals;
+        geometry = { indices, vertices: localGeometry.vertices.map((vertex, index) => {
+          const position = sharedPositions[index], normal = sharedNormals[index];
+          if (position === undefined || normal === undefined) throw new RangeError("Shared world geometry is shorter than its pose");
+          return { position, normal, texCoord: vertex.texCoord, lightmapCoord: vertex.lightmapCoord, color: vertex.color };
+        }) };
+      } else {
+        const positions: Vec3[] = [], normals: Vec3[] = [];
+        for (const vertex of localGeometry.vertices) {
+          const px = vertex.position.x * transform.scale.x, py = vertex.position.y * transform.scale.y, pz = vertex.position.z * transform.scale.z;
+          const nx = vertex.normal.x * transform.scale.x, ny = vertex.normal.y * transform.scale.y, nz = vertex.normal.z * transform.scale.z;
+          positions.push({
+            x: Math.fround(transform.origin.x + Math.fround(Math.fround(Math.fround(forward.x * px) + Math.fround(left.x * py)) + Math.fround(up.x * pz))),
+            y: Math.fround(transform.origin.y + Math.fround(Math.fround(Math.fround(forward.y * px) + Math.fround(left.y * py)) + Math.fround(up.y * pz))),
+            z: Math.fround(transform.origin.z + Math.fround(Math.fround(Math.fround(forward.z * px) + Math.fround(left.z * py)) + Math.fround(up.z * pz))),
+          });
+          normals.push({
+            x: Math.fround(Math.fround(Math.fround(forward.x * nx) + Math.fround(left.x * ny)) + Math.fround(up.x * nz)),
+            y: Math.fround(Math.fround(Math.fround(forward.y * nx) + Math.fround(left.y * ny)) + Math.fround(up.y * nz)),
+            z: Math.fround(Math.fround(Math.fround(forward.z * nx) + Math.fround(left.z * ny)) + Math.fround(up.z * nz)),
+          });
+        }
+        if (poseKey !== undefined && caches !== null) {
+          let byTransform = caches.world.get(poseKey);
+          if (byTransform === undefined) { byTransform = new WeakMap<object, { readonly positions: readonly Vec3[]; readonly normals: readonly Vec3[] }>(); caches.world.set(poseKey, byTransform); }
+          byTransform.set(transform, { positions, normals });
+        }
+        geometry = { indices, vertices: localGeometry.vertices.map((vertex, index) => {
+          const position = positions[index], normal = normals[index];
+          if (position === undefined || normal === undefined) throw new RangeError("World geometry is shorter than its pose");
+          return { position, normal, texCoord: vertex.texCoord, lightmapCoord: vertex.lightmapCoord, color: vertex.color };
+        }) };
+      }
+    }
     const depthHack = flags.kind === "q1" ? options.viewModel === true : flags.kind === "q2" ? (bits & 16) !== 0 : (bits & 8) !== 0;
     surfaces.push({ surfaceIndex: surfaces.length, fogSphere, name, entity, options, transform: entity.transform, image, localGeometry, geometry,
       depthRange: depthHack ? [0, 0.3] : [0, 1], cull: model.kind === "q1-spr" || model.kind === "q2-sp2" ? "none" : model.kind === "q1-mdl" || model.kind === "q2-md2" || model.kind === "md5" && (model.skinSelection.kind === "q1-mdl-replacement" || model.skinSelection.kind === "q2-md2-replacement") ? "front" : "back",
@@ -272,7 +301,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       const skinFrame = skinFrames.kind === "single" ? 0 : skinFrames.frames.findIndex(item => item.frame === pixels);
       append("alias", options.indexedSkin === undefined ? { kind: "indexed", name: `${entity.resource.id}:skin:${skin}:${skinFrame}`, width: model.skinWidth,
         height: model.skinHeight, pixels, transparentIndex: null, fullbright: true }
-        : { kind: "indexed", ...options.indexedSkin, transparentIndex: null, fullbright: true }, geometry.vertices, geometry.indices);
+        : { kind: "indexed", ...options.indexedSkin, transparentIndex: null, fullbright: true }, geometry.vertices, geometry.indices, false, false, geometry.vertices);
       break;
     }
     case "q2-md2": {
@@ -280,7 +309,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       const image = shell === null ? selectedShader("alias", model.skins, entity, options) : { kind: "white" } satisfies ModelImageSelection;
       if (context.purpose !== "shadow") vertexLighting ??= context.prepareVertexLighting?.(entity, options);
       const geometry = mapMd2Geometry(model, vertices, (vertex, texCoord, corner) => localVertex(vertex, texCoord, corner, shell !== null));
-      appendGeometry("alias", image, geometry, shell !== null);
+      appendGeometry("alias", image, geometry, shell !== null, false, vertices);
       break;
     }
     case "q3-md3": {
@@ -308,7 +337,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
           }
         }
         append(surface.name, selectedShader(surface.name, surface.shaders, entity, options),
-          vertices.map((vertex, index) => ({ ...vertex, texCoord: at(surface.textureCoordinates, index, "MD3 UV") })), surface.indices);
+          vertices.map((vertex, index) => ({ ...vertex, texCoord: at(surface.textureCoordinates, index, "MD3 UV") })), surface.indices, false, false, vertices);
       }
       break;
     }
@@ -327,7 +356,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
           }
         }
         append(surface.name, selectedShader(surface.name, [surface.shader], entity, options),
-          vertices.map((vertex, index) => ({ ...vertex, texCoord: at(surface.vertices, index, "MD4 UV").texCoords })), surface.triangles.flatMap(triangle => triangle.indices));
+          vertices.map((vertex, index) => ({ ...vertex, texCoord: at(surface.vertices, index, "MD4 UV").texCoords })), surface.triangles.flatMap(triangle => triangle.indices), false, false, vertices);
       }
       break;
     }
@@ -375,7 +404,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
           }
         }
         const vertices = shell === null ? skinned : skinned.map(vertex => ({ ...vertex, position: add3(vertex.position, scale3(vertex.normal, 4)) }));
-        append(`mesh${index}`, at(images, index, "MD5 material"), vertices, mesh.indices, shell !== null);
+        append(`mesh${index}`, at(images, index, "MD5 material"), vertices, mesh.indices, shell !== null, false, shell === null ? vertices : undefined);
       }
       break;
     }
