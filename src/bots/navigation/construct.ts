@@ -95,6 +95,7 @@ function geometryCandidates(world: DecodedWorld, spacing: number, slope: number,
   }
 }
 
+const keyNumber = (value: number): string => Object.is(value, -0) ? "-0" : `${value}`;
 function grounded(world: NavigationWorld, profile: NavigationProfile, point: Vec3): Vec3 | null {
   const height = -profile.shape.bounds.min.z;
   const end = { ...point, z: point.z + height - profile.maximumStep - 4 };
@@ -123,11 +124,22 @@ export function constructNavigation(options: NavigationConstruction): Navigation
     nodes.push({ id: nodes.length, origin, bounds: translated(origin, posture.shape.bounds), radius: spacing / 2,
       contents: medium, flags: 0, presence: posture === profile ? 2 : 4, sourceCluster: null, source });
   };
+  // Adjacent faces publish the same candidate points (shared vertices and
+  // edge midpoints, grid points on shared edges); the world is static during
+  // construction, so each distinct probe traces once.
+  const groundedCache = new Map<string, Vec3 | null>();
+  const groundedOnce = (posture: NavigationProfile, point: Vec3): Vec3 | null => {
+    const key = `${posture === profile ? "s" : "c"}:${keyNumber(point.x)}:${keyNumber(point.y)}:${keyNumber(point.z)}`;
+    if (groundedCache.has(key)) return groundedCache.get(key) ?? null;
+    const result = grounded(world, posture, point);
+    groundedCache.set(key, result);
+    return result;
+  };
   geometryCandidates(geometry, spacing, profile.minimumFloorNormal, candidate => {
-    const origin = grounded(world, profile, candidate.point);
+    const origin = groundedOnce(profile, candidate.point);
     if (origin !== null) insert(origin, candidate.source);
     else if (crouched !== null) {
-      const crouchOrigin = grounded(world, crouched, candidate.point);
+      const crouchOrigin = groundedOnce(crouched, candidate.point);
       if (crouchOrigin !== null) insert(crouchOrigin, candidate.source, crouched);
     }
   });
@@ -166,7 +178,7 @@ export function constructNavigation(options: NavigationConstruction): Navigation
       let supported = pairGrounded.get(key);
       if (supported === undefined) {
         const middle = midpoint(node.origin, other.origin), foot = { ...middle, z: middle.z + profile.shape.bounds.min.z };
-        supported = grounded(world, posture, foot) !== null;
+        supported = groundedOnce(posture, foot) !== null;
         pairGrounded.set(key, supported);
       }
       if (!supported) continue;

@@ -42,7 +42,7 @@ export function boxCell(bounds: Bounds): ConvexCell {
   const p010 = { x: a.x, y: b.y, z: a.z }, p011 = { x: a.x, y: b.y, z: b.z };
   const p100 = { x: b.x, y: a.y, z: a.z }, p101 = { x: b.x, y: a.y, z: b.z };
   const p110 = { x: b.x, y: b.y, z: a.z }, p111 = { x: b.x, y: b.y, z: b.z };
-  return { faces: [
+  const cell = { faces: [
     { plane: { normal: AXES[0], distance: b.x }, vertices: [p100, p110, p111, p101] },
     { plane: { normal: scale(AXES[0], -1), distance: -a.x }, vertices: [p000, p001, p011, p010] },
     { plane: { normal: AXES[1], distance: b.y }, vertices: [p010, p011, p111, p110] },
@@ -50,6 +50,9 @@ export function boxCell(bounds: Bounds): ConvexCell {
     { plane: { normal: AXES[2], distance: b.z }, vertices: [p001, p101, p111, p011] },
     { plane: { normal: scale(AXES[2], -1), distance: -a.z }, vertices: [p000, p010, p110, p100] },
   ] };
+  cellBounds.set(cell, { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), minZ: Math.min(a.z, b.z),
+    maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y), maxZ: Math.max(a.z, b.z) });
+  return cell;
 }
 
 /** Keep n.p <= d. The query envelope bounds otherwise unbounded BSP cells. */
@@ -87,8 +90,9 @@ function closeCell(faces: CellFace[], cap: Vec3[], plane: Plane): ConvexCell | n
     const center = scale(cap.reduce(add, { x: 0, y: 0, z: 0 }), 1 / cap.length);
     const axis = Math.abs(plane.normal.z) < 0.9 ? AXES[2] : AXES[1];
     const u = unit(cross(axis, plane.normal)), v = cross(plane.normal, u);
-    cap.sort((a, b) => Math.atan2(dot(sub(a, center), v), dot(sub(a, center), u)) - Math.atan2(dot(sub(b, center), v), dot(sub(b, center), u)));
-    faces.push({ plane, vertices: cap });
+    const angled = cap.map(point => ({ point, angle: Math.atan2(dot(sub(point, center), v), dot(sub(point, center), u)) }));
+    angled.sort((a, b) => a.angle - b.angle);
+    faces.push({ plane, vertices: angled.map(entry => entry.point) });
   }
   return faces.length >= 4 ? { faces } : null;
 }
