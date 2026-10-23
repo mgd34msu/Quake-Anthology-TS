@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
-import type { DrawBatch, RendererImage, RendererResourceOwner, RenderVertex } from "../../../src/contracts/render.ts";
+import { identityMat4 } from "../../../src/core/math.ts";
+import type { DrawBatch, Q2FragmentLight, Q2ShadowAtlas, RendererImage, RendererResourceOwner, RenderVertex } from "../../../src/contracts/render.ts";
 import { CPU_OPAQUE_STATE, SoftwareRenderer } from "../../../src/render/cpu/index.ts";
 
 const WIDTH = 320, HEIGHT = 240;
 
-function render(workers: string): { pixels: Uint8Array; batches: number; depths: number[] } {
+function render(workers: string, fragmentLit = false): { pixels: Uint8Array; batches: number; depths: number[] } {
   process.env["QTS_CPU_WORKERS"] = workers;
   const owner: RendererResourceOwner = { identity: Symbol("cpu-parallel"), session: createIdentityOwner("cpu parallel test").session, generation: 0 };
   const renderer = new SoftwareRenderer(WIDTH, HEIGHT, owner, 8, 8, 8);
@@ -36,8 +37,20 @@ function render(workers: string): { pixels: Uint8Array; batches: number; depths:
         vertices.push({ position: { x, y, z, w: 1 }, texCoord: { x: u, y: v }, color });
       indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
     }
+    let lighting: DrawBatch["lighting"] = { kind: "vertex" };
+    if (fragmentLit) {
+      const depthImage: RendererImage = { owner, ordinal: 1, source: { kind: "generated", name: "shadow" }, width: 8, height: 8 };
+      renderer.applyImageResource({ kind: "create-image", image: depthImage, content: { kind: "depth32f",
+        levels: [{ width: 8, height: 8, pixels: new Float32Array(64).fill(0.9) }] }, sampling: { filter: "nearest", wrap: "clamp" } });
+      const atlas: Q2ShadowAtlas = { image: depthImage, texelSize: 1 / 8, nearPlane: 4 };
+      const light: Q2FragmentLight = { origin: { x: 0, y: 0, z: 64 }, radius: 128, color: { x: 1, y: 0.5, z: 0.25 },
+        scale: 1, cone: null, shadow: { kind: "cone", matrix: identityMat4(), atlasRect: { x: 0, y: 0, z: 1, w: 1 } } };
+      lighting = { kind: "q2-world", pass: "texture", lights: [light], atlas,
+        worldPositions: vertices.map(vertex => ({ x: vertex.position.x * 32, y: vertex.position.y * 32, z: vertex.position.z * 32 + 16 })),
+        normals: vertices.map(() => ({ x: 0, y: 0, z: 1 })) };
+    }
     const batch: Extract<DrawBatch, { readonly texturing: "single" }> = {
-      lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single",
+      lighting, primitive: "triangles", texturing: "single",
       texture: { kind: "bind-image", image }, indices, state: CPU_OPAQUE_STATE, vertices };
     renderer.draw(batch);
     const depths: number[] = [];
@@ -55,6 +68,13 @@ test("row-parallel rasterization is bit-identical to the serial kernel", () => {
     expect(parallel.batches).toBeGreaterThan(0);
     expect(parallel.pixels).toEqual(serial.pixels);
     expect(parallel.depths).toEqual(serial.depths);
+    // Fragment-lit batches serialize their lighting (including the shadow
+    // atlas handle) across postMessage; they must stay bit-identical too.
+    const litSerial = render("0", true);
+    const litParallel = render("3", true);
+    expect(litParallel.batches).toBeGreaterThan(0);
+    expect(litParallel.pixels).toEqual(litSerial.pixels);
+    expect(litParallel.depths).toEqual(litSerial.depths);
   } finally {
     if (previous === undefined) delete process.env["QTS_CPU_WORKERS"];
     else process.env["QTS_CPU_WORKERS"] = previous;

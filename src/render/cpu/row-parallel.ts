@@ -156,7 +156,7 @@ const CONTROL_NEXT = 0, CONTROL_DONE = 1, CONTROL_READY = 2, CONTROL_ERROR = 3, 
 const ERROR_BYTES = 4096;
 
 export interface RowTextureRegistration { readonly id: number; readonly texture: unknown }
-export interface RowLightingRegistration { readonly id: number; readonly parameters: BatchLighting }
+export interface RowLightingRegistration { readonly id: number; readonly parameters: unknown }
 export interface RowDepthRegistration { readonly id: number; readonly depth: DepthImageLevel }
 export interface RowJobMessage {
   readonly kind: "job";
@@ -177,6 +177,16 @@ function serializeTexture(texture: BoundTexture): unknown {
     levels: texture.levels.map(level => ({ width: level.width, height: level.height, pixels: level.pixels,
       internalFormat: level.internalFormat, hasAlpha: level.hasAlpha, componentMaximum: level.componentMaximum,
       uniform: level.uniform === null ? null : { ...level.uniform } })) };
+}
+
+/** Lighting parameters cross postMessage, but the shadow atlas carries a
+ * RendererImage whose owner identity is a symbol. Workers only sample the
+ * registered depth image and read texelSize/nearPlane, so the atlas is
+ * reduced to those scalars. */
+function serializeLighting(parameters: BatchLighting): unknown {
+  if (parameters.kind === "vertex") return parameters;
+  const atlas = parameters.atlas;
+  return { ...parameters, atlas: atlas === null ? null : { texelSize: atlas.texelSize, nearPlane: atlas.nearPlane } };
 }
 
 function configuredWorkerCount(): number {
@@ -252,7 +262,7 @@ export class RowParallelPool implements RowRegistries {
     if (known !== undefined) return known;
     const id = this.#nextLighting++;
     this.#lightingIds.set(parameters, id);
-    this.#pendingLightings.push({ id, parameters });
+    this.#pendingLightings.push({ id, parameters: serializeLighting(parameters) });
     return id;
   }
 
