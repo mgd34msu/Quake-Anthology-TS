@@ -131,6 +131,11 @@ export function splitCell(cell: ConvexCell, plane: Plane): { readonly front: Con
   if (!outside || !inside) return { front: inside ? null : cell, back: outside ? null : cell };
   const opposite = negatePlane(plane);
   const front: CellFace[] = [], back: CellFace[] = [], cap: Vec3[] = [];
+  // Child bounds accumulate over the same vertex visits so boundsForCell
+  // never needs its second pass; a NaN component poisons the product and
+  // skips seeding, matching boundsForCell's null for non-finite points.
+  let fMinX = Infinity, fMinY = Infinity, fMinZ = Infinity, fMaxX = -Infinity, fMaxY = -Infinity, fMaxZ = -Infinity, fPoison = 1;
+  let bMinX = Infinity, bMinY = Infinity, bMinZ = Infinity, bMaxX = -Infinity, bMaxY = -Infinity, bMaxZ = -Infinity, bPoison = 1;
   for (const face of cell.faces) {
     const frontVertices: Vec3[] = [], backVertices: Vec3[] = [];
     for (let i = 0; i < face.vertices.length; i++) {
@@ -138,18 +143,36 @@ export function splitCell(cell: ConvexCell, plane: Plane): { readonly front: Con
       if (a === undefined || b === undefined) continue;
       const da = dot(a, plane.normal) - plane.distance, db = dot(b, plane.normal) - plane.distance;
       if (!Number.isFinite(da) || !Number.isFinite(db)) return { front: clipCell(cell, opposite), back: clipCell(cell, plane) };
-      if (da >= 0) frontVertices.push(a);
-      if (da <= 0) backVertices.push(a);
+      if (da >= 0) { frontVertices.push(a); fPoison *= a.x * a.y * a.z;
+        if (a.x < fMinX) fMinX = a.x; if (a.x > fMaxX) fMaxX = a.x;
+        if (a.y < fMinY) fMinY = a.y; if (a.y > fMaxY) fMaxY = a.y;
+        if (a.z < fMinZ) fMinZ = a.z; if (a.z > fMaxZ) fMaxZ = a.z; }
+      if (da <= 0) { backVertices.push(a); bPoison *= a.x * a.y * a.z;
+        if (a.x < bMinX) bMinX = a.x; if (a.x > bMaxX) bMaxX = a.x;
+        if (a.y < bMinY) bMinY = a.y; if (a.y > bMaxY) bMaxY = a.y;
+        if (a.z < bMinZ) bMinZ = a.z; if (a.z > bMaxZ) bMaxZ = a.z; }
       if ((da < 0 && db > 0) || (da > 0 && db < 0)) {
         const point = lerp(a, b, da / (da - db));
         frontVertices.push(point); backVertices.push(point);
+        const product = point.x * point.y * point.z; fPoison *= product; bPoison *= product;
+        if (point.x < fMinX) fMinX = point.x; if (point.x > fMaxX) fMaxX = point.x;
+        if (point.y < fMinY) fMinY = point.y; if (point.y > fMaxY) fMaxY = point.y;
+        if (point.z < fMinZ) fMinZ = point.z; if (point.z > fMaxZ) fMaxZ = point.z;
+        if (point.x < bMinX) bMinX = point.x; if (point.x > bMaxX) bMaxX = point.x;
+        if (point.y < bMinY) bMinY = point.y; if (point.y > bMaxY) bMaxY = point.y;
+        if (point.z < bMinZ) bMinZ = point.z; if (point.z > bMaxZ) bMaxZ = point.z;
         if (!capContainsPoint(cap, point)) cap.push(point);
       } else if (da === 0 && !capContainsPoint(cap, a)) cap.push(a);
     }
     if (frontVertices.length >= 3) front.push({ plane: face.plane, vertices: frontVertices });
     if (backVertices.length >= 3) back.push({ plane: face.plane, vertices: backVertices });
   }
-  return { front: closeCell(front, cap.slice(), opposite), back: closeCell(back, cap, plane) };
+  const frontCell = closeCell(front, cap.slice(), opposite), backCell = closeCell(back, cap, plane);
+  if (frontCell !== null && fMinX !== Infinity && fPoison === fPoison)
+    cellBounds.set(frontCell, { minX: fMinX, minY: fMinY, minZ: fMinZ, maxX: fMaxX, maxY: fMaxY, maxZ: fMaxZ });
+  if (backCell !== null && bMinX !== Infinity && bPoison === bPoison)
+    cellBounds.set(backCell, { minX: bMinX, minY: bMinY, minZ: bMinZ, maxX: bMaxX, maxY: bMaxY, maxZ: bMaxZ });
+  return { front: frontCell, back: backCell };
 }
 
 export function cellVertices(cell: ConvexCell): readonly Vec3[] {
