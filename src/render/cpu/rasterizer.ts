@@ -1094,6 +1094,10 @@ export class SoftwareRenderer implements RendererBackend {
     // is unchanged; the dispatch barrier is synchronous, so nothing outside
     // this call can observe a partially rasterized batch.
     if (this.framebuffer !== this.mainFramebuffer || this.opacityActive || this.pendingSetups !== null) { drawAll(); return; }
+    if (this.rowPool === undefined) this.rowPool = RowParallelPool.tryCreate(this.mainShared);
+    // Without a worker pool the setups would run serially anyway; execute
+    // them immediately instead of collecting the whole batch first.
+    if (this.rowPool === null) { drawAll(); return; }
     this.pendingSetups = [];
     this.pendingPixels = 0;
     let collected: TriangleSetup[];
@@ -1106,10 +1110,7 @@ export class SoftwareRenderer implements RendererBackend {
       throw error;
     }
     this.pendingSetups = null;
-    if (collected.length >= 4 && collectedPixels >= 50_000) {
-      if (this.rowPool === undefined) this.rowPool = RowParallelPool.tryCreate(this.mainShared);
-      if (this.rowPool !== null) { this.rowPool.run(collected); return; }
-    }
+    if (collected.length >= 4 && collectedPixels >= 50_000) { this.rowPool.run(collected); return; }
     for (const setup of collected) runTriangleRows(setup, this.framebuffer, this.sampled);
   }
 

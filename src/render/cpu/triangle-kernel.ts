@@ -117,11 +117,13 @@ function wrapTexel(index: number, size: number): number {
   return index < 0 ? index + size : index >= size ? index - size : index;
 }
 
-function sampleLevel(texture: TextureStorage, border: Vec4, u: number, v: number,
-  wrap: TextureSampling["wrap"], linear: boolean, output: Sample): void {
+/** Repeat-wrap sampling: the world/model hot path. Arithmetic expressions
+ * and evaluation order are identical to the general sampler below; only
+ * index wrapping differs (power-of-two masks replace conditional wraps). */
+function sampleLevelRepeat(texture: TextureStorage, u: number, v: number, linear: boolean, output: Sample): void {
   const width = texture.width, height = texture.height, data = texture.pixels, maximum = texture.componentMaximum;
-  u = wrap === "repeat" ? u - Math.floor(u) : clamp(u);
-  v = wrap === "repeat" ? v - Math.floor(v) : clamp(v);
+  u -= Math.floor(u);
+  v -= Math.floor(v);
   if (!linear) {
     const x = Math.min(width - 1, Math.floor(u * width));
     const y = Math.min(height - 1, Math.floor(v * height));
@@ -139,7 +141,10 @@ function sampleLevel(texture: TextureStorage, border: Vec4, u: number, v: number
   const fx = x - x0;
   const fy = y - y0;
   let x1 = x0 + 1, y1 = y0 + 1;
-  if (wrap === "repeat") {
+  if ((width & (width - 1)) === 0 && (height & (height - 1)) === 0) {
+    x0 &= width - 1; x1 &= width - 1;
+    y0 &= height - 1; y1 &= height - 1;
+  } else {
     x0 = wrapTexel(x0, width); x1 = wrapTexel(x1, width);
     y0 = wrapTexel(y0, height); y1 = wrapTexel(y1, height);
   }
@@ -147,7 +152,41 @@ function sampleLevel(texture: TextureStorage, border: Vec4, u: number, v: number
   const w10 = fx * (1 - fy) / maximum;
   const w01 = (1 - fx) * fy / maximum;
   const w11 = fx * fy / maximum;
-  const hasBorder = wrap === "clamp" && (x0 < 0 || y0 < 0 || x1 >= width || y1 >= height);
+  const p00 = (y0 * width + x0) * 4, p10 = (y0 * width + x1) * 4, p01 = (y1 * width + x0) * 4, p11 = (y1 * width + x1) * 4;
+  output.r = (data[p00] ?? 0) * w00 + (data[p10] ?? 0) * w10 + (data[p01] ?? 0) * w01 + (data[p11] ?? 0) * w11;
+  output.g = (data[p00 + 1] ?? 0) * w00 + (data[p10 + 1] ?? 0) * w10 + (data[p01 + 1] ?? 0) * w01 + (data[p11 + 1] ?? 0) * w11;
+  output.b = (data[p00 + 2] ?? 0) * w00 + (data[p10 + 2] ?? 0) * w10 + (data[p01 + 2] ?? 0) * w01 + (data[p11 + 2] ?? 0) * w11;
+  output.a = texture.hasAlpha ? (data[p00 + 3] ?? 0) * w00 + (data[p10 + 3] ?? 0) * w10 + (data[p01 + 3] ?? 0) * w01 + (data[p11 + 3] ?? 0) * w11 : 1;
+}
+
+function sampleLevel(texture: TextureStorage, border: Vec4, u: number, v: number,
+  wrap: TextureSampling["wrap"], linear: boolean, output: Sample): void {
+  if (wrap === "repeat") { sampleLevelRepeat(texture, u, v, linear, output); return; }
+  const width = texture.width, height = texture.height, data = texture.pixels, maximum = texture.componentMaximum;
+  u = clamp(u);
+  v = clamp(v);
+  if (!linear) {
+    const x = Math.min(width - 1, Math.floor(u * width));
+    const y = Math.min(height - 1, Math.floor(v * height));
+    const offset = (y * width + x) * 4;
+    output.r = (data[offset] ?? 0) / maximum;
+    output.g = (data[offset + 1] ?? 0) / maximum;
+    output.b = (data[offset + 2] ?? 0) / maximum;
+    output.a = (data[offset + 3] ?? 0) / maximum;
+    return;
+  }
+  const x = u * width - 0.5;
+  const y = v * height - 0.5;
+  let x0 = Math.floor(x);
+  let y0 = Math.floor(y);
+  const fx = x - x0;
+  const fy = y - y0;
+  const x1 = x0 + 1, y1 = y0 + 1;
+  const w00 = (1 - fx) * (1 - fy) / maximum;
+  const w10 = fx * (1 - fy) / maximum;
+  const w01 = (1 - fx) * fy / maximum;
+  const w11 = fx * fy / maximum;
+  const hasBorder = x0 < 0 || y0 < 0 || x1 >= width || y1 >= height;
   let borderWeight = 0;
   if (hasBorder) {
     // A negative offset denotes a GL_CLAMP border tap, not the nearest edge texel.
@@ -549,6 +588,7 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
   const lightPos0 = lighting.positions[0], lightPos1 = lighting.positions[1], lightPos2 = lighting.positions[2];
   const lightNor0 = lighting.normals[0], lightNor1 = lighting.normals[1], lightNor2 = lighting.normals[2];
   const luminanceAlpha = setup.textureEffect === "luminance-alpha";
+  const depthRange = depthFar - depthNear;
   const fog = setup.fog, fogDepthScale = setup.fogDepthScale ?? 1;
   const fbOriginX = framebuffer.originX, fbOriginY = framebuffer.originY, fbStride = framebuffer.stride;
   // Opaque-span specialization: the dominant world/model case (single
@@ -573,7 +613,7 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
         const wa = (attributeAX * sampleX + attributeRowA + attributeAC) * inverseArea;
         const wb = (attributeBX * sampleX + attributeRowB + attributeBC) * inverseArea;
         const wc = (attributeCX * sampleX + attributeRowC + attributeCC) * inverseArea;
-        const depth = constantDepth ? planeDepth : clamp(clamp((az * wa + bz * wb + cz * wc) * 0.5 + 0.5) * (depthFar - depthNear) + depthNear + polygonDepthOffset);
+        const depth = constantDepth ? planeDepth : clamp(clamp((az * wa + bz * wb + cz * wc) * 0.5 + 0.5) * depthRange + depthNear + polygonDepthOffset);
         const pixel = rowOffset + x;
         const oldDepth = depths[pixel];
         if (oldDepth === undefined) throw new RangeError("Fragment is outside the depth buffer");
@@ -613,7 +653,7 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
       const wa = (attributeAX * sampleX + attributeRowA + attributeAC) * inverseArea;
       const wb = (attributeBX * sampleX + attributeRowB + attributeBC) * inverseArea;
       const wc = (attributeCX * sampleX + attributeRowC + attributeCC) * inverseArea;
-      const depth = constantDepth ? planeDepth : clamp(clamp((az * wa + bz * wb + cz * wc) * 0.5 + 0.5) * (depthFar - depthNear) + depthNear + polygonDepthOffset);
+      const depth = constantDepth ? planeDepth : clamp(clamp((az * wa + bz * wb + cz * wc) * 0.5 + 0.5) * depthRange + depthNear + polygonDepthOffset);
       const pixel = rowOffset + x;
       const oldDepth = depths[pixel];
       if (oldDepth === undefined) throw new RangeError("Fragment is outside the depth buffer");
