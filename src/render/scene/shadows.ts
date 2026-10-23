@@ -239,10 +239,34 @@ export class StaticShadowWorld {
   get digest(): string { return this.#digest ??= geometryDigest(this.#meshes); }
 }
 
+interface CasterSignature { readonly ox: number; readonly oy: number; readonly oz: number; readonly radius: number; readonly key: string }
+interface LightSignature {
+  readonly ox: number; readonly oy: number; readonly oz: number; readonly radius: number;
+  readonly cone: { readonly dx: number; readonly dy: number; readonly dz: number; readonly cos: number } | null;
+  readonly slotX: number; readonly slotY: number; readonly slotWidth: number; readonly slotHeight: number;
+  readonly worldKey: string; readonly casters: readonly CasterSignature[];
+}
+/** JSON number equality: -0 equals 0, NaN equals NaN (both serialize as null). */
+const sameNumber = (a: number, b: number): boolean => a === b || (a !== a && b !== b);
+function sameSignature(a: LightSignature | undefined, b: LightSignature): boolean {
+  if (a === undefined) return false;
+  if (!sameNumber(a.ox, b.ox) || !sameNumber(a.oy, b.oy) || !sameNumber(a.oz, b.oz) || !sameNumber(a.radius, b.radius)) return false;
+  if (a.cone === null || b.cone === null) { if (a.cone !== b.cone) return false; }
+  else if (!sameNumber(a.cone.dx, b.cone.dx) || !sameNumber(a.cone.dy, b.cone.dy) || !sameNumber(a.cone.dz, b.cone.dz) || !sameNumber(a.cone.cos, b.cone.cos)) return false;
+  if (!sameNumber(a.slotX, b.slotX) || !sameNumber(a.slotY, b.slotY) || !sameNumber(a.slotWidth, b.slotWidth) || !sameNumber(a.slotHeight, b.slotHeight)) return false;
+  if (a.worldKey !== b.worldKey || a.casters.length !== b.casters.length) return false;
+  for (let index = 0; index < a.casters.length; index++) {
+    const first = a.casters[index], second = b.casters[index];
+    if (first === undefined || second === undefined || first.key !== second.key
+      || !sameNumber(first.ox, second.ox) || !sameNumber(first.oy, second.oy) || !sameNumber(first.oz, second.oz) || !sameNumber(first.radius, second.radius)) return false;
+  }
+  return true;
+}
+
 /** An atlas belongs to one prepared scene, including every seat using that scene. */
 export class Q2ShadowScene {
   private image: RendererImage | null = null;
-  private cached = new Map<number, string>();
+  private cached = new Map<number, LightSignature>();
   /** Projected static-world draws per light/face; casters are re-projected per rebuild. */
   private worldDrawCache = new Map<string, readonly DepthAtlasDraw[]>();
   constructor(readonly images: SceneImageRegistry) {}
@@ -269,7 +293,7 @@ export class Q2ShadowScene {
     if (candidates.length === 0) return { lighting: { lights, atlas: null }, operations: [], stats: { lights: 0, cachedLights: 0, rebuiltLights: 0, facesRendered: 0, entityCasters: 0 } };
     if (this.image === null) this.image = this.images.register("*q2-shadow-atlas", { kind: "depth32f",
       levels: [{ width: Q2_SHADOW_ATLAS_SIZE, height: Q2_SHADOW_ATLAS_SIZE, pixels: new Float32Array(Q2_SHADOW_ATLAS_SIZE ** 2).fill(1) }] }, { wrap: "clamp", filter: "nearest" });
-    const slots = fit(candidates), passes: DepthAtlasPass[] = [], signatures = new Map<number, string>();
+    const slots = fit(candidates), passes: DepthAtlasPass[] = [], signatures = new Map<number, LightSignature>();
     const world = worldInput instanceof StaticShadowWorld ? worldInput.meshes : worldInput;
     const worldKey = worldInput instanceof StaticShadowWorld ? worldInput.digest : geometryDigest(world), casterKeys = new Map<ShadowCaster, string>();
     let cachedLights = 0, rebuiltLights = 0, entityCasters = 0;
@@ -279,13 +303,16 @@ export class Q2ShadowScene {
       const atlasRect: Vec4 = { x: slot.x / Q2_SHADOW_ATLAS_SIZE, y: slot.y / Q2_SHADOW_ATLAS_SIZE, z: slot.width / Q2_SHADOW_ATLAS_SIZE, w: slot.height / Q2_SHADOW_ATLAS_SIZE };
       const shadow: Q2ShadowProjection = matrix === null ? { kind: "point", atlasRect } : { kind: "cone", atlasRect, matrix: shadowMatrixMultiply(depthBias, matrix) };
       lights[candidate.index] = { ...light, shadow };
-      const signature = JSON.stringify([light.origin, light.radius, light.cone, slot, worldKey, candidate.casters.map(caster => {
-        let key = casterKeys.get(caster);
-        if (key === undefined) { key = geometryDigest(caster.meshes); casterKeys.set(caster, key); }
-        return [caster.origin, caster.radius, key];
-      })]);
+      const signature: LightSignature = { ox: light.origin.x, oy: light.origin.y, oz: light.origin.z, radius: light.radius,
+        cone: light.cone === null ? null : { dx: light.cone.direction.x, dy: light.cone.direction.y, dz: light.cone.direction.z, cos: light.cone.cosHalfAngle },
+        slotX: slot.x, slotY: slot.y, slotWidth: slot.width, slotHeight: slot.height, worldKey,
+        casters: candidate.casters.map(caster => {
+          let key = casterKeys.get(caster);
+          if (key === undefined) { key = geometryDigest(caster.meshes); casterKeys.set(caster, key); }
+          return { ox: caster.origin.x, oy: caster.origin.y, oz: caster.origin.z, radius: caster.radius, key };
+        }) };
       signatures.set(candidate.index, signature);
-      if (this.cached.get(candidate.index) === signature) { cachedLights++; continue; }
+      if (sameSignature(this.cached.get(candidate.index), signature)) { cachedLights++; continue; }
       rebuiltLights++; entityCasters += candidate.casters.length;
       const worldKeyPrefix = JSON.stringify([candidate.index, slot, light.origin, light.radius, light.cone, worldKey]);
       if (matrix !== null) passes.push(depthPass(candidate, slot, matrix,
