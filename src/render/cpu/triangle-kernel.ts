@@ -598,6 +598,36 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
   const opaqueFast = textureConsumed && !white && !fragmentLit && secondaryEnvironment === null
     && fog === undefined && !luminanceAlpha && alphaTest === "none" && !stencilEnabled
     && blending === "opaque" && colorWrite && depthWrite && texture.kind !== "incomplete";
+  // Depth-only specialization (shadow atlas casters): with no texture
+  // consumed, no color write, no stencil and no alpha test, the general
+  // loop's only observable effects are the depth test and depth write;
+  // the perspective divide it still performs per fragment is dead work.
+  const depthOnly = !textureConsumed && !colorWrite && depthWrite && !stencilEnabled && alphaTest === "none";
+  if (depthOnly) {
+    for (let y = Math.max(minY, firstY); y <= Math.min(maxY, lastY); y++) {
+      const sampleY = y + 0.5, rowA = edgeAY * sampleY, rowB = edgeBY * sampleY, rowC = edgeCY * sampleY;
+      const attributeRowA = attributeAY * sampleY, attributeRowB = attributeBY * sampleY, attributeRowC = attributeCY * sampleY;
+      const rowOffset = (y - fbOriginY) * fbStride - fbOriginX;
+      span.min = minX;
+      span.max = maxX;
+      trimSpan(span, edgeAX, rowA, edgeAC, edgeAInclusive);
+      trimSpan(span, edgeBX, rowB, edgeBC, edgeBInclusive);
+      trimSpan(span, edgeCX, rowC, edgeCC, edgeCInclusive);
+      for (let x = span.min; x <= span.max; x++) {
+        const sampleX = x + 0.5;
+        const wa = (attributeAX * sampleX + attributeRowA + attributeAC) * inverseArea;
+        const wb = (attributeBX * sampleX + attributeRowB + attributeBC) * inverseArea;
+        const wc = (attributeCX * sampleX + attributeRowC + attributeCC) * inverseArea;
+        const depth = constantDepth ? planeDepth : clamp(clamp((az * wa + bz * wb + cz * wc) * 0.5 + 0.5) * depthRange + depthNear + polygonDepthOffset);
+        const pixel = rowOffset + x;
+        const oldDepth = depths[pixel];
+        if (oldDepth === undefined) throw new RangeError("Fragment is outside the depth buffer");
+        if ((depthTest === "less-equal" && depth > oldDepth) || (depthTest === "equal" && depth !== oldDepth)) continue;
+        depths[pixel] = depth;
+      }
+    }
+    return didSample;
+  }
   if (opaqueFast) {
     for (let y = Math.max(minY, firstY); y <= Math.min(maxY, lastY); y++) {
       const sampleY = y + 0.5, rowA = edgeAY * sampleY, rowB = edgeBY * sampleY, rowC = edgeCY * sampleY;
