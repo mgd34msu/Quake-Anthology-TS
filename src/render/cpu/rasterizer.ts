@@ -112,6 +112,8 @@ function snapshotSourceBatch(batch: SourceStageData["batch"], state: RenderState
     get texture() { return batch.texture; } };
 }
 
+const ZERO_WORLD_TRIPLE: readonly [Vec3, Vec3, Vec3] = [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }];
+
 /** Setup derivations that cannot vary within one drawBatch. */
 interface BatchSetupConstants {
   readonly depthNear: number;
@@ -121,6 +123,9 @@ interface BatchSetupConstants {
   readonly primaryAlpha: boolean;
   readonly secondaryAlpha: boolean;
   readonly secondaryEnvironment: TriangleSetup["secondaryEnvironment"];
+  /** Shared setup lighting for vertex-lit batches; the kernel never reads
+   * positions/normals unless fragment-lit, so zero triples stand in. */
+  readonly vertexLighting: TriangleSetup["lighting"] | null;
 }
 
 const ZERO_TEXCOORD = { x: 0, y: 0 };
@@ -552,7 +557,8 @@ export class SoftwareRenderer implements RendererBackend {
       if (batch.lighting.lights.length > 8) throw new RangeError("Q2 fragment lighting accepts at most eight selected lights per draw");
       for (const index of batch.indices) {
         const { worldPosition, worldNormal } = worldAttributes(batch.lighting, index);
-        if (![worldPosition.x, worldPosition.y, worldPosition.z, worldNormal.x, worldNormal.y, worldNormal.z].every(Number.isFinite))
+        if (!(Number.isFinite(worldPosition.x) && Number.isFinite(worldPosition.y) && Number.isFinite(worldPosition.z)
+          && Number.isFinite(worldNormal.x) && Number.isFinite(worldNormal.y) && Number.isFinite(worldNormal.z)))
           throw new RangeError("CPU fragment lighting attributes must be finite");
       }
       this.fragmentLighting(batch);
@@ -1103,6 +1109,8 @@ export class SoftwareRenderer implements RendererBackend {
       primaryAlpha: texture.kind !== "incomplete" && textureHasAlpha(texture.internalFormat),
       secondaryAlpha: secondary.kind !== "incomplete" && textureHasAlpha(secondary.internalFormat),
       secondaryEnvironment: batch.texturing === "pair" ? batch.secondTexture.environment : null,
+      vertexLighting: batch.lighting.kind === "vertex"
+        ? { ...this.fragmentLighting(batch), positions: ZERO_WORLD_TRIPLE, normals: ZERO_WORLD_TRIPLE } : null,
     };
   }
 
@@ -1358,7 +1366,7 @@ export class SoftwareRenderer implements RendererBackend {
       white, depthWrite, stencilEnabled, colorWrite, textureConsumed, primaryAlpha,
       secondaryAlpha, constantDepth, blending, depthTest, alphaTest, secondaryEnvironment,
       texture, secondaryTexture, derivative, secondaryDerivative,
-      lighting: { ...cullTriangleLights(this.fragmentLighting(batch), [ia.worldPosition, ib.worldPosition, ic.worldPosition]), positions: [ia.worldPosition, ib.worldPosition, ic.worldPosition],
+      lighting: invariants.vertexLighting ?? { ...cullTriangleLights(this.fragmentLighting(batch), [ia.worldPosition, ib.worldPosition, ic.worldPosition]), positions: [ia.worldPosition, ib.worldPosition, ic.worldPosition],
         normals: [ia.worldNormal, ib.worldNormal, ic.worldNormal] },
       width: this.width, height: this.height,
       state: { blend: { ...state.blend } }, alphaBits: this.alphaBits,
