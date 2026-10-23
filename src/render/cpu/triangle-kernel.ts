@@ -506,17 +506,17 @@ export interface TriangleSetup {
 /** Limits restrict iteration only; coverage and interpolation retain absolute coordinates. */
 export function runTriangleRows(setup: TriangleSetup, framebuffer: Framebuffer, sampled: Sample,
   firstY = setup.minY, lastY = setup.maxY): boolean {
-  return runTriangleRowsInternal(setup, framebuffer, sampled, firstY, lastY, "public");
+  return runTriangleRowsInternal(setup, framebuffer, sampled, firstY, lastY);
 }
 
 /** The fixed worker calls this only after decoding its native-cloned job. */
 export function runWorkerTriangleRows(setup: TriangleSetup, framebuffer: Framebuffer, sampled: Sample,
   firstY: number, lastY: number): boolean {
-  return runTriangleRowsInternal(setup, framebuffer, sampled, firstY, lastY, "decoded-worker");
+  return runTriangleRowsInternal(setup, framebuffer, sampled, firstY, lastY);
 }
 
 function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer, sampled: Sample,
-  firstY: number, lastY: number, mode: "public" | "decoded-worker"): boolean {
+  firstY: number, lastY: number): boolean {
   const {
     minX, maxX, minY, maxY, inverseArea, depthNear, depthFar, edgeAX,
     edgeAY, edgeAC, edgeBX, edgeBY, edgeBC, edgeCX, edgeCY, edgeCC,
@@ -532,9 +532,9 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
   } = setup;
   const depths = framebuffer.depth, colors = framebuffer.colorWords;
   const span: RowSpan = { min: minX, max: maxX };
-  const primaryCursor: NearestMipCursor | null = textureConsumed && mode === "decoded-worker" && texture.kind === "image" && texture.mipmapping === "nearest"
+  const primaryCursor: NearestMipCursor | null = textureConsumed && texture.kind === "image" && texture.mipmapping === "nearest"
     ? { texture, selected: 0, lowerSquared: Infinity, upperSquared: -Infinity } : null;
-  const secondaryCursor: NearestMipCursor | null = textureConsumed && secondaryEnvironment !== null && mode === "decoded-worker"
+  const secondaryCursor: NearestMipCursor | null = textureConsumed && secondaryEnvironment !== null
     && secondaryTexture.kind === "image" && secondaryTexture.mipmapping === "nearest"
     ? { texture: secondaryTexture, selected: 0, lowerSquared: Infinity, upperSquared: -Infinity } : null;
   let didSample = false;
@@ -557,7 +557,7 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
   // per-fragment invariant branches of the general loop below.
   const opaqueFast = textureConsumed && !white && !fragmentLit && secondaryEnvironment === null
     && fog === undefined && !luminanceAlpha && alphaTest === "none" && !stencilEnabled
-    && blending === "opaque" && colorWrite && depthWrite && texture.kind !== "incomplete" && primaryCursor === null;
+    && blending === "opaque" && colorWrite && depthWrite && texture.kind !== "incomplete";
   if (opaqueFast) {
     for (let y = Math.max(minY, firstY); y <= Math.min(maxY, lastY); y++) {
       const sampleY = y + 0.5, rowA = edgeAY * sampleY, rowB = edgeBY * sampleY, rowC = edgeCY * sampleY;
@@ -586,7 +586,8 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
         let alpha = clamp((aa * wa + ba * wb + ca * wc) * reciprocal);
         const u = (au * wa + bu * wb + cu * wc) * reciprocal;
         const v = (av * wa + bv * wb + cv * wc) * reciprocal;
-        samplePerspectiveBound(texture, u, v, reciprocal, derivative, sampled);
+        if (primaryCursor !== null) sampleWorkerNearest(primaryCursor, u, v, reciprocal, derivative, sampled);
+        else samplePerspectiveBound(texture, u, v, reciprocal, derivative, sampled);
         didSample = true;
         r *= sampled.r;
         g *= sampled.g;
