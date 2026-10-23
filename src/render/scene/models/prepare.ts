@@ -18,7 +18,7 @@ import { DEFAULT_MODEL_REPLACEMENT_POLICY, selectModelEntity } from "./replaceme
 import { byteColor } from "./types.ts";
 import { md5ShadowEnvelope } from "./shadow-bounds.ts";
 import { q2BeamGeometry } from "../particles/legacy.ts";
-import type { ModelGroupContext, ModelImageSelection, ModelPreparationContext, ModelSkinningFrame, ModelSourceOptions, ModelVertexLighting, PreparedModelEntity, PreparedModelSurface } from "./types.ts";
+import type { ModelGroupContext, ModelImageSelection, ModelPreparationContext, ModelSourceOptions, ModelVertexLighting, PreparedModelEntity, PreparedModelSurface } from "./types.ts";
 
 const ZERO_LIGHTMAP_COORD = { x: 0, y: 0 };
 
@@ -90,13 +90,14 @@ interface PoseGeometryCaches {
    * transform, so the fround-heavy world step runs once per frame. */
   readonly world: WeakMap<object, WeakMap<object, { readonly positions: readonly Vec3[]; readonly normals: readonly Vec3[] }>>;
 }
-const poseGeometryCaches = new WeakMap<ModelSkinningFrame, PoseGeometryCaches>();
+/** Persistent across presented frames, like the MD2 interpolation cache:
+ * pose interpolation is a pure function of the sampled frame pair and
+ * backLerp, and world transforms are keyed by transform object identity
+ * (fresh objects each frame simply miss and are garbage-collected). */
+const persistentPoseCaches: PoseGeometryCaches = { mdl: new WeakMap(), md3: new WeakMap(), md4: new WeakMap(), world: new WeakMap() };
 function poseCaches(context: ModelPreparationContext): PoseGeometryCaches | null {
-  const frame = context.skinningFrame;
-  if (frame === undefined) return null;
-  let caches = poseGeometryCaches.get(frame);
-  if (caches === undefined) { caches = { mdl: new WeakMap(), md3: new WeakMap(), md4: new WeakMap(), world: new WeakMap() }; poseGeometryCaches.set(frame, caches); }
-  return caches;
+  void context;
+  return persistentPoseCaches;
 }
 function lerpKey(backLerp: number): string { return Object.is(backLerp, -0) ? "-0" : `${backLerp}`; }
 
@@ -292,6 +293,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
           if (byPrevious === undefined) { byPrevious = new WeakMap(); mdlCache.set(current, byPrevious); }
           let byLerp = byPrevious.get(previous);
           if (byLerp === undefined) { byLerp = new Map<string, ReturnType<typeof buildMdlGeometry>>(); byPrevious.set(previous, byLerp); }
+          if (byLerp.size >= 512) byLerp.clear();
           byLerp.set(lerpKey(backLerp), geometry);
         }
       }
@@ -333,6 +335,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
           if (md3Cache !== undefined) {
             let byKey = md3Cache.get(surface);
             if (byKey === undefined) { byKey = new Map<string, ReturnType<typeof interpolateMd3Frames>>(); md3Cache.set(surface, byKey); }
+            if (byKey.size >= 512) byKey.clear();
             byKey.set(key, vertices);
           }
         }
@@ -352,6 +355,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
           if (md4Cache !== undefined) {
             let byKey = md4Cache.get(surface);
             if (byKey === undefined) { byKey = new Map<string, ReturnType<typeof skinMd4Surface>>(); md4Cache.set(surface, byKey); }
+            if (byKey.size >= 512) byKey.clear();
             byKey.set(key, vertices);
           }
         }

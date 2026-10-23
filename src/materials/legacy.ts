@@ -138,10 +138,12 @@ export function prepareLegacyMaterialBatches(material: Q1Material | Q2Material, 
     if (q1Liquid) uv = liquidTexCoords(uv, context.time, "q1");
     else if (q2Warp) uv = liquidTexCoords(uv, context.time, "q2", q2Flow);
     else if (q2Flowing) uv = q2FlowingTexCoords(uv, context.time);
-    const color = vertexLit ? { x: vertex.color.x / 255, y: vertex.color.y / 255, z: vertex.color.z / 255, w: alpha }
-      : { x: intensity, y: intensity, z: intensity, w: alpha };
-    return { position: context.project(vertex.position), texCoord: uv,
-      color: { x: color.x * tint.x / 255, y: color.y * tint.y / 255, z: color.z * tint.z / 255, w: color.w } };
+    // One color object per vertex, with the same arithmetic order as the
+    // previous two-object form.
+    const color = vertexLit
+      ? { x: vertex.color.x / 255 * tint.x / 255, y: vertex.color.y / 255 * tint.y / 255, z: vertex.color.z / 255 * tint.z / 255, w: alpha }
+      : { x: intensity * tint.x / 255, y: intensity * tint.y / 255, z: intensity * tint.z / 255, w: alpha };
+    return { position: context.project(vertex.position), texCoord: uv, color };
   });
   const fragmentLighting = context.fragmentLighting;
   const textureLighting: BatchLighting = fragmentLighting !== undefined && lightmap === null
