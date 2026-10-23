@@ -12,7 +12,12 @@ remain unavailable. Preserve the original archive names and loose companion file
 
 ## Installed content
 
-Use this layout:
+An unmodified Steam installation needs no layout work at all. If you keep
+your own collection folder instead, the shape below works. The `q1/`,
+`q2/`, and `q3a/` family names are the engine's preferred names, but they
+are not required: any folder that contains `id1`, `baseq2`, or `baseq3`
+is recognized as that game, whatever it is called, and links to existing
+install folders work the same as real folders.
 
 ```text
 games/
@@ -56,7 +61,9 @@ even when their filenames match.
 
 ## Writable content
 
-Add-ons and overrides can live separately from the installed base data:
+Add-ons and overrides can live separately from the installed base data.
+Unlike installed games, this writable tree is addressed with the engine's
+canonical family names (`q1`, `q2`, `q3a`):
 
 ```text
 ~/.local/share/quake-typescript/
@@ -95,7 +102,7 @@ install each complete package according to its instructions. Selecting only one
 DLL, QVM, `progs.dat`, or BSP can omit required companion assets. Retain the
 original distribution and README so the version and dependencies remain identifiable.
 
-For Quake 1 Threewave 4.0, `q1/ctf` needs the 3.01 client `pak0.pak`, the 4.0 client
+For Quake 1 Threewave 4.0, the `ctf` folder beside `id1` needs the 3.01 client `pak0.pak`, the 4.0 client
 `pak1.pak`, and the 4.0 server programs. These packages include the original
 Morning Star model and chain links. Keep rerelease packages in their own tree.
 
@@ -106,14 +113,12 @@ and current limits.
 ## Install maps
 
 For a map using base-game rules, place its loose BSP in the game's `maps/`
-directory and its companion assets in their authored locations. Examples:
+directory and its companion assets in their authored locations — for
+example `id1/maps/example.bsp` inside your Quake folder, or
+`baseq2/maps/example.bsp` inside your Quake II folder. To keep an install
+pristine, put loose maps in the writable content tree instead (below).
 
-```text
-q1/id1/maps/example.bsp
-q2/baseq2/maps/example.bsp
-```
-
-Keep a Q3 map's complete PK3 in `q3a/baseq3/`; it can include required textures,
+Keep a Q3 map's complete PK3 in the `baseq3` folder; it can include required textures,
 shaders, arena definitions, and bot navigation. Maps that require a mod belong
 with that mod. A BSP filename alone does not describe gameplay dependencies.
 
@@ -123,12 +128,9 @@ supported combinations without moving map assets between game directories.
 ## Install music
 
 For Q1/Q2 CD tracks backed by files, use the selected game's or mod's `music/`
-directory:
-
-```text
-q1/id1/music/track02.ogg
-q2/baseq2/music/track02.ogg
-```
+directory — for example `id1/music/track02.ogg` or
+`baseq2/music/track02.ogg` inside the respective game folder (or the same
+relative path in the writable content tree).
 
 `02.ogg`, `track02.wav`, and `02.wav` are also recognized. Q3 uses paths authored
 by its maps or music commands; retain those supplied paths and files. Installed

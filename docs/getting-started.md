@@ -15,8 +15,20 @@ Install Bun 1.3.14 or newer and these native libraries:
 A compiled executable includes the Bun runtime. It still needs the native
 libraries used by the selected renderer and media, plus your game data.
 
-Copy your game installations into the [recommended content layout](content-layout.md).
-Preserve original archives and loose companion files, including music.
+No copying is required: existing Steam installations are found
+automatically, and `--content-root` accepts any folder containing your
+game folders (GOG, original media, or a hand-made collection — see the
+[content layout guide](content-layout.md)). Wherever the data lives,
+preserve original archives and loose companion files, including music.
+
+## Run the release executable
+
+Download the Linux x64 tarball from
+[GitHub Releases](https://github.com/mgd34msu/Quake-Anthology-TS/releases),
+extract it, and run `./quake-typescript`. Steam installs are detected
+automatically; for anything else pass `--content-root /path/to/games`
+(see [content discovery](content-layout.md)). Verify detection with
+`--list-content`.
 
 ## Run from source
 

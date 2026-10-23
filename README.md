@@ -1,134 +1,179 @@
 # Quake Anthology
 
-Quake, Quake II, and Quake III gameplay in one engine and executable, written in
-strict TypeScript and run or compiled with Bun. Mix movement, characters, weapons,
-monsters, and equipment while retaining each selected source's behavior.
+Quake, Quake II, and Quake III Arena — plus their expansions, rerelease
+editions, QuakeWorld, and supported mods — in one engine and one executable,
+written in strict TypeScript. Play each game as itself, or mix rules,
+movement, characters, weapons, monsters, maps, and equipment across games
+while each selected source keeps its own behavior.
 
-**Version 1.2.0** is available from [GitHub Releases](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.2.0),
-with a Linux x64 executable and source. See the [release notes](docs/releases/1.2.0.md).
-1.2.0 is a performance release: rendering and presentation are faster on every
-game with bit-identical output. The CPU renderer still lags GL on shadow-heavy
-rerelease scenes; further performance work continues.
-Supported mod interfaces and compatibility limits are documented below.
+**Version 1.2.1** is available from
+[GitHub Releases](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.2.1)
+as a Linux x64 executable. See the [release notes](docs/releases/1.2.1.md).
 
-Classic Quake and Quake II components must preserve their original gameplay,
-feedback, and presentation. Rerelease additions belong to the selected rerelease
-component and must not appear in an all-classic setup. This is the fidelity
-requirement; every combination has not yet been verified.
+Game data is **not** included. You need your own legally obtained copies of
+whichever games you want to play. Classic components preserve original
+gameplay, feedback, and presentation; rerelease additions belong to the
+rerelease components and do not leak into an all-classic setup.
 
-## Run on Linux
+## Install (release executable)
 
-Install Bun 1.3.14 or newer, SDL2, OpenGL, FreeType, and libvorbisfile. Supply your
-own game data in the layout below, then run from this repository:
+You need a 64-bit Linux system with these native libraries installed
+(usually already present on a gaming setup):
+
+- SDL2
+- OpenGL
+- FreeType
+- libvorbisfile (Ogg Vorbis music)
+- libtheoradec (OGV video cutscenes)
+
+Download `quake-anthology-1.2.1-linux-x64.tar.gz` from the
+[release page](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.2.1),
+extract it anywhere, and run the executable:
+
+```sh
+tar -xzf quake-anthology-1.2.1-linux-x64.tar.gz
+./quake-typescript
+```
+
+That opens the menu. The next section explains how your game data is found.
+
+## Point it at your games
+
+Games are recognized by the base directory every install ships: `id1`
+(Quake), `baseq2` (Quake II), `baseq3` (Quake III Arena). The folder
+*containing* that directory is treated as the game folder, and expansions,
+rerelease data (in its `rerelease/` subfolder), and mods are found as its
+siblings. Folder names and letter case do not matter.
+
+### Steam
+
+Nothing to set up. If the games are installed through Steam (native,
+Flatpak, or an extra library folder), they are found automatically:
+
+```sh
+./quake-typescript
+```
+
+Use `--steam` to search *only* Steam libraries. Nightdive add-ons
+downloaded inside the rereleases (under Steam's Saved Games) are picked up
+too, below any local copies.
+
+### GOG, original media, or any other layout
+
+Pass `--content-root` once, pointing at a folder that contains your games
+in any of these shapes — all work:
+
+```text
+games/                  <- --content-root games
+  Quake/Id1/…
+  Quake 2/baseq2/…
+  Quake 3 Arena/baseq3/…
+```
+
+```sh
+./quake-typescript --content-root /path/to/games
+```
+
+Pointing `--content-root` directly at a single game's folder (the one
+containing `id1`, `baseq2`, or `baseq3`) also works. If your games live in
+unrelated places (say Quake from Steam and Quake II from GOG), put links to
+their folders in one place instead of copying anything:
+
+```sh
+mkdir -p ~/quake-games
+ln -s ~/.local/share/Steam/steamapps/common/Quake ~/quake-games/
+ln -s "/path/to/Quake II" ~/quake-games/
+./quake-typescript --content-root ~/quake-games
+```
+
+Check what was found before playing:
+
+```sh
+./quake-typescript --content-root /path/to/games --list-content
+```
+
+Without `--content-root`, the executable searches its own folder, then the
+folder above it, then Steam, and stops at the first folder holding a game —
+so dropping the executable (or a link to it) next to your game folders also
+works. Note the search stops at the first matching root; if your games are
+split across several roots, gather them (or links to them) under one root
+as above.
+
+Writable add-ons, saves, and settings live under
+`~/.local/share/quake-typescript/` by default; installed game folders are
+never written to. See the [content layout guide](docs/content-layout.md)
+for expansions, mods, maps, and music placement.
+
+## Play
+
+From the menu, **Play a game** lists everything discovered.
+**Play a game → Custom game** mixes components on one screen: the map set
+is chosen independently from the game supplying the rules, so (for example)
+Quake II rules can run on Quake or Quake III maps, with any game's
+movement, character, weapons, and monsters. Character appearance (Q1
+colors, Q2/Q3 model and skin) has a live preview under **Character**.
+**Custom game → Mods** toggles installed mod components individually,
+including components from different games. Under **Kit** you can add a
+grappling hook (Threewave, LMCTF, or LRCTF style) and hand grenades.
+Settings persist as you change them.
+
+Command-line launches work too:
+
+```sh
+# Quake II rules and movement on a Quake III map
+./quake-typescript --game q2-classic-baseq2 --map-game q3-baseq3 --map q3dm17 \
+  --movement q2 --character q2 --mode deathmatch
+
+# Dedicated server, no window
+./quake-typescript --content-root /path/to/games --game q1-classic-id1 \
+  --map e1m1 --mode deathmatch --dedicated
+```
+
+`--renderer` selects `gl` (default) or the `cpu` software renderer;
+`--gamma 0.5…3` adjusts brightness. Run with `--help` for every option,
+including multiplayer hosting/joining and protocol selections. The
+[playing guide](docs/playing.md) has more examples, and
+[mod compatibility](docs/mod-compatibility.md) documents which original
+mod interfaces (QuakeC, Q2 DLLs, QVM) are supported.
+
+Use `find <text>` and `help <name>` in the console to inspect commands and
+settings. An optional LLM assistant can answer console questions and run
+validated commands — see the [console and LLM guide](docs/console-and-llm.md).
+
+## Build from source
+
+Requires [Bun](https://bun.sh) 1.3.14 or newer plus the native libraries
+above.
 
 ```sh
 bun install --frozen-lockfile
-bun run start --content-root /path/to/games
+bun run start --content-root /path/to/games   # run from source
+bun run build                                 # compile a standalone executable
 ```
 
-Starting without launch selections opens the menu. Without `--content-root`, the
-executable searches its own folder, then the folder above it, then the default
-Steam library locations, and stops at the first folder holding a game. Use
-`--steam` to search only the Steam locations. Games are recognized by their base
-directories — `id1` (Quake), `baseq2` (Quake II), `baseq3` (Quake III Arena) —
-under any parent folder names, including Steam's `Quake`, `Quake 2`, and
-`Quake 3 Arena`; expansions, rerelease trees, and mods resolve as siblings of
-those base directories. To compile a standalone executable:
+The build typechecks and policy-checks an immutable source snapshot,
+compiles the runtime, and prints its output directory
+(`dist/runtime.json` records the details). The compiled executable still
+needs the native libraries and your game data. See
+[setup and build instructions](docs/getting-started.md).
 
-```sh
-bun run build
-```
+Checks for a change: `bun run typecheck`, `bun run policy`, and
+`bun test` (some tests need game data via `QTS_TEST_CORPUS`).
 
-The build prints its output directory. Run from that directory:
-
-```sh
-./quake-typescript --content-root /path/to/games --menu --renderer gl
-```
-
-The executable includes Bun but still needs native libraries and game data.
-See [setup and build instructions](docs/getting-started.md) for rendering options,
-video dependencies, content discovery, and build records.
-
-## Recommended content layout
-
-An existing Steam installation works as-is. For a curated corpus, keep each
-game's original archives and companion files together. Keep classic
-and rerelease data separate, including files with identical names.
-
-```text
-games/
-  q1/id1/                         # classic Quake
-  q1/rerelease/id1/                # Quake rerelease
-  q2/baseq2/                       # classic Quake II
-  q2/rerelease/baseq2/             # Quake II rerelease
-  q3a/baseq3/                      # Quake III Arena
-  q3a/missionpack/                 # Team Arena
-```
-
-Writable add-ons mirror this layout under
-`~/.local/share/quake-typescript/content/`. Saves and settings live in sibling
-`saves/` and `settings/` directories. Use `--user-content-root PATH` to choose a
-different writable content root.
-
-The [full content layout](docs/content-layout.md) covers expansions, QuakeWorld,
-mod packages, maps, music, and configuration files. Game data is not bundled.
-
-## Play and customize
-
-Choose an installed game or expansion under **Play a game**. Use
-**Play a game → Custom game** to mix the world, movement, character, weapons,
-monsters, and equipment on one screen. Pickers group titles under Quake,
-Quake II, and Quake III Arena categories with a Classic/Rerelease toggle for
-which edition of the chosen title is in effect. Under **World**, choose a
-**Map set** independently from the game or mod that supplies the rules, then
-a **Map** from that set. Character appearance (Q1 shirt/pants colors, Q2/Q3
-model and skin) is chosen under **Character** with a live rotating preview.
-On Quake III maps, **Monsters** selects which game's player models the
-single-player bots use. Settings changes persist as you make them.
-
-**Custom game → Mods** enables or disables independent components individually.
-Multiple compatible components can run together, including components from
-different games. The project requires general cross-game mod composition;
-installed packages still need supported source interfaces and dependencies.
-Discovery alone does not establish compatibility.
-
-Under **Kit**, **Hook** selects **Off**, **Weapon slot**, or **Offhand**.
-**Hook style** independently selects Threewave for Q1/Q2/Q3, LMCTF for Q2, or
-LRCTF for Q3. **Grenades** is one **Off/On** option.
-
-Use **Options → Controls → Bindings (Player 1)** to edit keys and mouse buttons.
-See [playing and selections](docs/playing.md) for command-line examples, equipment,
-multiplayer, and saves, or [mod compatibility](docs/mod-compatibility.md) for
-supported original interfaces and component declarations.
-
-## Console and optional LLM
-
-Use `find <text>` and `help <name>` in the console to inspect commands and settings.
-Tab completes commands; Up/Down recalls history; PageUp/PageDown scrolls output.
-
-**Options → LLM options** configures subscription or API access. One LLM
-session is primed with the console catalog at startup and reused for the
-whole program run, so in-game queries start warm. The
-[console and LLM guide](docs/console-and-llm.md) explains authentication, credential
-locations, `llm_ask`, `llm_exec`, and command validation.
-
-## Documentation and development
+## Documentation
 
 - [Documentation index](docs/README.md)
+- [Set up, run, and build](docs/getting-started.md)
+- [Organize game data, mods, maps, and music](docs/content-layout.md)
+- [Playing and selections](docs/playing.md)
+- [Mod compatibility](docs/mod-compatibility.md)
+- [Console and LLM](docs/console-and-llm.md)
 - [Functional targets and acceptance status](docs/functional-targets/status.md)
-- [Remaining work](docs/remaining-work.md)
-- [Gameplay tick and optimization targets](docs/tick-execution.md)
-- [Installed executable and runtime evidence](docs/execution-status.md#installed-executable-and-recent-fixes)
 - [Architecture contracts](docs/contracts.md)
-- [Performance, caching rules, and fidelity](docs/functional-targets/performance.md)
-- [Development checks](docs/getting-started.md#check-a-change)
-
-Keep this README short. Put detailed setup, commands, and feature documentation
-in `docs/`; keep implementation history and qualification evidence in the linked
-status pages. Update the relevant guide when user-visible behavior changes.
 
 ## License
 
-Engine code is licensed under GNU GPL version 2 or later; see [LICENSE](LICENSE).
-Existing source headers retain attribution and applicable terms. Original game
-data is separate and is not relicensed by this repository.
+Engine code is licensed under GNU GPL version 2 or later; see
+[LICENSE](LICENSE). Existing source headers retain attribution and
+applicable terms. Original game data is separate and is not relicensed by
+this repository.
