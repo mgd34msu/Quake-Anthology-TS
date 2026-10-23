@@ -262,7 +262,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
           let byPrevious = mdlCache.get(current);
           if (byPrevious === undefined) { byPrevious = new WeakMap(); mdlCache.set(current, byPrevious); }
           let byLerp = byPrevious.get(previous);
-          if (byLerp === undefined) { byLerp = new Map(); byPrevious.set(previous, byLerp); }
+          if (byLerp === undefined) { byLerp = new Map<string, ReturnType<typeof buildMdlGeometry>>(); byPrevious.set(previous, byLerp); }
           byLerp.set(lerpKey(backLerp), geometry);
         }
       }
@@ -303,7 +303,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
           vertices = md3Cache?.get(surface)?.get(key) ?? interpolateMd3Frames(current, at(surface.frames, previousFrame, "MD3 old frame"), backLerp);
           if (md3Cache !== undefined) {
             let byKey = md3Cache.get(surface);
-            if (byKey === undefined) { byKey = new Map(); md3Cache.set(surface, byKey); }
+            if (byKey === undefined) { byKey = new Map<string, ReturnType<typeof interpolateMd3Frames>>(); md3Cache.set(surface, byKey); }
             byKey.set(key, vertices);
           }
         }
@@ -322,7 +322,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
           vertices = skinMd4Surface(model, surface, frame, previousFrame, backLerp);
           if (md4Cache !== undefined) {
             let byKey = md4Cache.get(surface);
-            if (byKey === undefined) { byKey = new Map(); md4Cache.set(surface, byKey); }
+            if (byKey === undefined) { byKey = new Map<string, ReturnType<typeof skinMd4Surface>>(); md4Cache.set(surface, byKey); }
             byKey.set(key, vertices);
           }
         }
