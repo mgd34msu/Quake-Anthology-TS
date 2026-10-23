@@ -70,7 +70,6 @@ export class NavigationRuntime {
   readonly #enabled = new Map<number, boolean>();
   readonly #blocked = new Map<number, string>();
   readonly #admissionSeconds = new Map<number, number>();
-  readonly #nodeAllowedCache = new Map<string, boolean>();
   #worldRevision: number;
   #generation = 0;
   constructor(readonly graph: NavigationGraph, readonly world: NavigationWorld) {
@@ -176,7 +175,7 @@ export class NavigationRuntime {
     if (reason === null) this.#blocked.delete(id); else this.#blocked.set(id, reason);
     this.#invalidate(); this.#estimates.invalidate();
   }
-  #invalidate(): void { this.#generation++; this.#admissionSeconds.clear(); this.#nodeAllowedCache.clear(); }
+  #invalidate(): void { this.#generation++; this.#admissionSeconds.clear(); }
   #refresh(): void { if (this.#worldRevision !== this.world.revision) { this.#worldRevision = this.world.revision; this.#invalidate(); } }
   areaAt(point: Vec3): number | null {
     if (this.graph.asset?.kind === "aas") { const area = aasPointArea(this.graph.asset, point); return this.#nodes.has(area) ? area : null; }
@@ -247,15 +246,11 @@ export class NavigationRuntime {
     return true;
   }
   #nodeAllowed(node: NavigationNode, query?: NavigationRouteQuery, awaitElevator = false): boolean {
-    // Eligibility is query-independent here and only changes with the world
-    // revision or area/edge state, both of which clear this cache.
-    if (query === undefined) {
-      const key = `${this.world.revision}:${node.id}:${awaitElevator ? 1 : 0}`, cached = this.#nodeAllowedCache.get(key);
-      if (cached !== undefined) return cached;
-      const result = this.#evaluateNodeAllowed(node, query, awaitElevator);
-      this.#nodeAllowedCache.set(key, result);
-      return result;
-    }
+    // Contents, hazards, and clearance are live world reads that can change
+    // without a world-revision bump (doors and hurt triggers toggle within a
+    // tick), so eligibility must be evaluated fresh on every call. The
+    // trace-bounded nearest() scan keeps this cheap by visiting candidates
+    // nearest-first and stopping at the first winner.
     return this.#evaluateNodeAllowed(node, query, awaitElevator);
   }
   #evaluateNodeAllowed(node: NavigationNode, query?: NavigationRouteQuery, awaitElevator = false): boolean {
