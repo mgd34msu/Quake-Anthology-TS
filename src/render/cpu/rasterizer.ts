@@ -16,6 +16,8 @@ import type { LineFragment } from "./lines.ts";
 import { cullTriangleLights, worldAttributes, shadeQ2Fragment } from "./lighting.ts";
 import type { CpuVertex, CpuLighting } from "./lighting.ts";
 import { CpuImages } from "./textures.ts";
+import { RowParallelPool } from "./row-parallel.ts";
+import type { RowSharedFramebuffer } from "./row-parallel.ts";
 import { applyQ1DepthFog, applyQ2DepthFog } from "./fog.ts";
 import type { Q1Fog } from "../../materials/legacy-fog.ts";
 import { emitSourceTriangleStrips, sourcePrimitiveMode } from "./source.ts";
@@ -271,6 +273,11 @@ export class SoftwareRenderer implements RendererBackend {
   private gammaTable: Uint8Array | null = null;
   readonly capabilities = { textureUnits: 2, textureEnvAdd: true };
   private framebuffer: Framebuffer;
+  private readonly mainFramebuffer: Framebuffer;
+  private readonly mainShared: RowSharedFramebuffer;
+  private rowPool: RowParallelPool | null | undefined;
+  private pendingSetups: TriangleSetup[] | null = null;
+  private pendingPixels = 0;
   private opacityFramebuffer: Framebuffer | null = null;
   private opacityActive = false;
   private get drawPixels(): Uint8Array { return this.framebuffer.pixels; }
@@ -328,14 +335,21 @@ export class SoftwareRenderer implements RendererBackend {
       throw new RangeError("CPU stencil precision must be between 0 and 32 bits");
     this.subpixelScale = 2 ** subpixelBits;
     this.viewport = { x: 0, y: 0, width, height };
-    const pixels = new Uint8Array(width * height * 4), colorWords = new Int32Array(pixels.buffer);
+    // The draw framebuffer lives in shared memory so row-parallel workers
+    // can rasterize disjoint row bands of it directly.
+    const colorBuffer = new SharedArrayBuffer(width * height * 4);
+    const pixels = new Uint8Array(colorBuffer), colorWords = new Int32Array(colorBuffer);
     if (alphaBits === 0) colorWords.fill(colorWord(0, 0, 0, 1));
-    const depth = new Float64Array(width * height);
+    const depthBuffer = new SharedArrayBuffer(width * height * 8);
+    const depth = new Float64Array(depthBuffer);
     depth.fill(1);
-    const stencil = stencilBits === 0 ? null : new Uint32Array(width * height);
+    const stencilBuffer = stencilBits === 0 ? null : new SharedArrayBuffer(width * height * 4);
+    const stencil = stencilBuffer === null ? null : new Uint32Array(stencilBuffer);
     this.stencilMaximum = 2 ** stencilBits - 1;
     this.images = new CpuImages(owner);
     this.framebuffer = { width, height, pixels, colorWords, depth, stencil, originX: 0, originY: 0, stride: width };
+    this.mainFramebuffer = this.framebuffer;
+    this.mainShared = { width, height, color: colorBuffer, depth: depthBuffer, stencil: stencilBuffer };
   }
 
   private assertOpen(): void {
@@ -343,6 +357,9 @@ export class SoftwareRenderer implements RendererBackend {
   }
 
   get pixels(): Uint8Array { return this.outputPixels ?? this.drawPixels; }
+
+  /** Completed row-parallel batch dispatches (diagnostics/tests). */
+  get rowParallelBatches(): number { return this.rowPool?.jobsRun ?? 0; }
 
   withObjectOpacity(opacity: number, draw: () => undefined): undefined {
     this.assertOpen();
@@ -423,6 +440,8 @@ export class SoftwareRenderer implements RendererBackend {
 
   close(): undefined {
     if (this.closed) return;
+    this.rowPool?.close();
+    this.rowPool = null;
     this.images.clear();
     this.opacityFramebuffer = null;
     this.atlasTarget?.close();
@@ -1065,9 +1084,33 @@ export class SoftwareRenderer implements RendererBackend {
       }
       return;
     }
-    for (let offset = 0; offset < batch.indices.length; offset += 3) {
-      this.drawTriangle(indexedVertex(batch, offset), indexedVertex(batch, offset + 1), indexedVertex(batch, offset + 2), batch, texture, secondary);
+    const drawAll = (): void => {
+      for (let offset = 0; offset < batch.indices.length; offset += 3) {
+        this.drawTriangle(indexedVertex(batch, offset), indexedVertex(batch, offset + 1), indexedVertex(batch, offset + 2), batch, texture, secondary);
+      }
+    };
+    // Row-parallel dispatch collects this batch's setups and rasterizes
+    // them by disjoint row bands on the worker pool. Draw order per pixel
+    // is unchanged; the dispatch barrier is synchronous, so nothing outside
+    // this call can observe a partially rasterized batch.
+    if (this.framebuffer !== this.mainFramebuffer || this.opacityActive || this.pendingSetups !== null) { drawAll(); return; }
+    this.pendingSetups = [];
+    this.pendingPixels = 0;
+    let collected: TriangleSetup[];
+    let collectedPixels: number;
+    try { drawAll(); collected = this.pendingSetups; collectedPixels = this.pendingPixels; }
+    catch (error) {
+      const setups = this.pendingSetups;
+      this.pendingSetups = null;
+      if (setups !== null) for (const setup of setups) runTriangleRows(setup, this.framebuffer, this.sampled);
+      throw error;
     }
+    this.pendingSetups = null;
+    if (collected.length >= 4 && collectedPixels >= 50_000) {
+      if (this.rowPool === undefined) this.rowPool = RowParallelPool.tryCreate(this.mainShared);
+      if (this.rowPool !== null) { this.rowPool.run(collected); return; }
+    }
+    for (const setup of collected) runTriangleRows(setup, this.framebuffer, this.sampled);
   }
 
   private drawLine(first: CpuVertex, second: CpuVertex, width: number,
@@ -1294,6 +1337,9 @@ export class SoftwareRenderer implements RendererBackend {
       stencilFunction: this.stencilFunction, stencilCompareMask: this.stencilCompareMask, stencilWriteMask: this.stencilWriteMask,
       stencilMaximum: this.stencilMaximum, stencilDepthFail: this.stencilDepthFail, stencilDepthPass: this.stencilDepthPass,
     };
-    runTriangleRows(setup, this.framebuffer, this.sampled);
+    if (this.pendingSetups !== null) {
+      this.pendingSetups.push(setup);
+      this.pendingPixels += Math.max(0, setup.maxX - setup.minX + 1) * Math.max(0, setup.maxY - setup.minY + 1);
+    } else runTriangleRows(setup, this.framebuffer, this.sampled);
   }
 }
