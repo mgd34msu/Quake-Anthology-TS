@@ -58,16 +58,16 @@ describe("Quake hulls and derived solid cells", () => {
     const geometry: Q1WorldGeometry = { ...map,
       planes: map.planes.map((plane, index) => index < 6 ? plane : { ...plane, distance: plane.distance + plane.normal.x * 4 }),
       models: [{ ...model, headnodes: [0, 0, 6, -1] }] };
-    const derive = spyOn(clipspace, "deriveQ1ClipSolids");
+    const prepare = spyOn(clipspace, "prepareQ1ClipSolids");
     try {
       for (const kind of ["box", "capsule"] satisfies readonly TraceShape["kind"][]) {
         const collision = createQ1Collision(geometry);
         const shape: TraceShape = { kind, bounds: { min: { x: -2, y: -2, z: -2 }, max: { x: 2, y: 2, z: 2 } } };
-        const before = derive.mock.calls.length;
+        const before = prepare.mock.calls.length;
         const hit = collision.trace(query({ x: 10, y: 0, z: 0 }, { x: -10000, y: 0, z: 0 }, shape));
         expect(hit.end.x).toBeCloseTo(7 + 1 / 32, 5);
         expect(hit.startSolid).toBe(false);
-        expect(derive.mock.calls[before]?.[1].min.x).toBeGreaterThan(-1);
+        expect(prepare.mock.calls.length).toBe(before + 1);
         const exiting = collision.trace(query({ x: 5, y: 0, z: 0 }, { x: -10, y: 0, z: 0 }, shape));
         expect(exiting.startSolid).toBe(true);
         expect(exiting.allSolid).toBe(false);
@@ -76,10 +76,10 @@ describe("Quake hulls and derived solid cells", () => {
         expect(trapped.startSolid).toBe(true);
         expect(trapped.allSolid).toBe(true);
       }
-    } finally { derive.mockRestore(); }
+    } finally { prepare.mockRestore(); }
   });
   test("exact derived cells retain policy checks and separate hull and collision owners", () => {
-    const derive = spyOn(clipspace, "deriveQ1ClipSolids");
+    const derive = spyOn(clipspace, "prepareQ1ClipSolids");
     try {
       const map = clipOnlyCube(), first = map.models[0];
       if (first === undefined) throw new Error("Missing fixture model");
@@ -104,17 +104,17 @@ describe("Quake hulls and derived solid cells", () => {
     } finally { derive.mockRestore(); }
   });
   test("exact derived-cell entries evict without changing rederived results", () => {
-    const derive = spyOn(clipspace, "deriveQ1ClipSolids");
+    const derive = spyOn(clipspace, "prepareQ1ClipSolids");
     try {
       const collision = createQ1Collision(clipOnlyCube());
       const input = query({ x: 5, y: 0, z: 0 }, zero, { kind: "box", bounds: { min: { x: -2, y: -2, z: -2 }, max: { x: 2, y: 2, z: 2 } } });
       const firstHit = collision.trace(input);
+      expect(derive).toHaveBeenCalledTimes(1);
       for (let index = 1; index <= 128; index++) collision.trace({ ...input, start: { ...input.start, y: index * 10 }, end: { ...input.end, y: index * 10 } });
-      const before = derive.mock.calls.length;
       deepStrictEqual(collision.trace(input), firstHit);
-      expect(derive.mock.calls.length).toBe(before + 1);
+      expect(derive).toHaveBeenCalledTimes(1);
       deepStrictEqual(collision.trace(input), firstHit);
-      expect(derive.mock.calls.length).toBe(before + 1);
+      expect(derive).toHaveBeenCalledTimes(1);
     } finally { derive.mockRestore(); }
   });
   test("nonfinite derived envelopes retain the uncached behavior", () => {

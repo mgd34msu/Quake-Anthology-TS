@@ -138,6 +138,12 @@ export function constructNavigation(options: NavigationConstruction): Navigation
   const bins = new Map<string, number[]>();
   const key = (point: Vec3, dx = 0, dy = 0): string => `${Math.floor(point.x / linkDistance) + dx}:${Math.floor(point.y / linkDistance) + dy}`;
   for (const node of nodes) { const bucket = bins.get(key(node.origin)) ?? []; bucket.push(node.id); bins.set(key(node.origin), bucket); }
+  // Walk/crouch/swim clearance between two known-clear node origins is
+  // symmetric, and both directions share the same midpoint grounded trace;
+  // evaluate each unordered pair once.
+  const pairClear = new Map<string, boolean>(), pairGrounded = new Map<string, boolean>();
+  const pairKey = (a: number, b: number, posture: NavigationProfile): string =>
+    `${a < b ? a : b}:${a < b ? b : a}:${posture === profile ? "s" : "c"}`;
   for (const node of nodes) for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (const otherId of bins.get(key(node.origin, x, y)) ?? []) {
     if (node.id === otherId) continue;
     const other = at(nodes, otherId), rise = other.origin.z - node.origin.z;
@@ -148,12 +154,28 @@ export function constructNavigation(options: NavigationConstruction): Navigation
     if (!profile.capabilities.has(mode) || mode === "drop" && -rise > profile.maximumDrop) continue;
     if (mode === "walk" || mode === "crouch") {
       const posture = mode === "crouch" ? crouched ?? profile : profile;
-      const up = profile.maximumStep + 1;
-      if (!clear(world, posture, node.origin, other.origin, mapTarget)
-        && !clear(world, posture, { ...node.origin, z: node.origin.z + up }, { ...other.origin, z: other.origin.z + up }, mapTarget)) continue;
-      const middle = midpoint(node.origin, other.origin), foot = { ...middle, z: middle.z + profile.shape.bounds.min.z };
-      if (grounded(world, posture, foot) === null) continue;
-    } else if (mode === "swim" && !clear(world, profile, node.origin, other.origin, mapTarget)) continue;
+      const key = pairKey(node.id, otherId, posture);
+      let passable = pairClear.get(key);
+      if (passable === undefined) {
+        const up = profile.maximumStep + 1;
+        passable = clear(world, posture, node.origin, other.origin, mapTarget)
+          || clear(world, posture, { ...node.origin, z: node.origin.z + up }, { ...other.origin, z: other.origin.z + up }, mapTarget);
+        pairClear.set(key, passable);
+      }
+      if (!passable) continue;
+      let supported = pairGrounded.get(key);
+      if (supported === undefined) {
+        const middle = midpoint(node.origin, other.origin), foot = { ...middle, z: middle.z + profile.shape.bounds.min.z };
+        supported = grounded(world, posture, foot) !== null;
+        pairGrounded.set(key, supported);
+      }
+      if (!supported) continue;
+    } else if (mode === "swim") {
+      const key = pairKey(node.id, otherId, profile);
+      let passable = pairClear.get(key);
+      if (passable === undefined) { passable = clear(world, profile, node.origin, other.origin, mapTarget); pairClear.set(key, passable); }
+      if (!passable) continue;
+    }
     edges.push({ id: edges.length, from: node.id, to: other.id, mode, start: node.origin, end: other.origin,
       travelSeconds: Math.max(0.01, distance(node.origin, other.origin) / 320), sourceTravelType: 0, sourceFlags: 0, hint: null, entity: null, source: node.source });
   }

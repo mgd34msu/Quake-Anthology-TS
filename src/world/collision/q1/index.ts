@@ -9,7 +9,8 @@ import { createNumericOperations } from "../../../core/numeric.ts";
 import { q1SurfaceKind } from "../../../materials/legacy.ts";
 import { q1FaceAtContact, q1LeafPvs } from "../../../formats/q1-map/queries.ts";
 import { Q1SolidSpace } from "../../geometry/q1-solid/index.ts";
-import { deriveQ1ClipSolids } from "../../geometry/q1-solid/clipspace.ts";
+import { deriveQ1ClipSolids, prepareQ1ClipSolids } from "../../geometry/q1-solid/clipspace.ts";
+import type { PreparedClipDeriver } from "../../geometry/q1-solid/clipspace.ts";
 import { add, AXES, boxCell, clipCell, dot, lerp, scale, sub } from "../../geometry/q1-solid/polyhedron.ts";
 import type { ConvexCell } from "../../geometry/q1-solid/polyhedron.ts";
 import { shapeSupport, sweepBoxCell, sweepCapsuleCell } from "../../geometry/q1-solid/sweep.ts";
@@ -46,6 +47,7 @@ export class Q1Collision implements SceneQueries {
   private readonly phs = new Map<number, Uint8Array>();
   private readonly blocks: (contents: number, policy: TracePolicy) => boolean;
   private readonly clipHullIds = new WeakMap<readonly Q1Hull[], number>();
+  private readonly preparedClip = new WeakMap<readonly Q1Hull[], PreparedClipDeriver>();
   private nextClipHullId = 0;
   private readonly clipCells = new Map<string, { readonly cells: readonly ConvexCell[]; readonly faces: number; readonly vertices: number }>();
   private clipCellCount = 0;
@@ -195,7 +197,9 @@ export class Q1Collision implements SceneQueries {
     const key = `${hullId}:${envelopeCoordinate(min.x)},${envelopeCoordinate(min.y)},${envelopeCoordinate(min.z)},${envelopeCoordinate(max.x)},${envelopeCoordinate(max.y)},${envelopeCoordinate(max.z)}`;
     const cached = this.clipCells.get(key);
     if (cached !== undefined) { this.clipCells.delete(key); this.clipCells.set(key, cached); return cached.cells; }
-    const cells = deriveQ1ClipSolids(hulls, envelope);
+    let prepared = this.preparedClip.get(hulls);
+    if (prepared === undefined) { prepared = prepareQ1ClipSolids(hulls); this.preparedClip.set(hulls, prepared); }
+    const cells = prepared(envelope) ?? deriveQ1ClipSolids(hulls, envelope);
     if (cells.length > 1024) return cells;
     let faces = 0, vertices = 0;
     for (const cell of cells) {
