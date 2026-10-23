@@ -136,12 +136,23 @@ void main() {
 
 const alphaModes: Record<RenderState["alphaTest"], number> = { none: 0, gt0: 1, lt128: 2, ge128: 3 };
 const secondaryModes: Record<TextureBundle["environment"], number> = { modulate: 1, add: 2, replace: 3 };
-function finiteUniforms(values: readonly number[]): void {
+function finiteUniforms(values: readonly number[]): void;
+function finiteUniforms(a: number, b?: number, c?: number, d?: number): void;
+function finiteUniforms(a: readonly number[] | number, b = 0, c = 0, d = 0): void {
   // A value rounds to a finite float32 exactly when its magnitude stays
   // under the float32 overflow midpoint; NaN poisons the running maximum.
   let worst = 0;
-  for (let index = 0; index < values.length; index++) {
-    const magnitude = Math.abs(values[index] ?? 0);
+  if (typeof a === "number") {
+    let magnitude = Math.abs(a);
+    if (worst === worst && !(magnitude <= worst)) worst = magnitude;
+    magnitude = Math.abs(b);
+    if (worst === worst && !(magnitude <= worst)) worst = magnitude;
+    magnitude = Math.abs(c);
+    if (worst === worst && !(magnitude <= worst)) worst = magnitude;
+    magnitude = Math.abs(d);
+    if (worst === worst && !(magnitude <= worst)) worst = magnitude;
+  } else for (let index = 0; index < a.length; index++) {
+    const magnitude = Math.abs(a[index] ?? 0);
     if (worst === worst && !(magnitude <= worst)) worst = magnitude;
   }
   if (!(worst < 3.4028235677973366e38)) throw new RangeError("OpenGL lighting uniforms must be finite float32 values");
@@ -283,7 +294,7 @@ void main() { gl_FragColor = vec4(1.0); }
     if (lighting.lights.length > 8) throw new RangeError("Q2 fragment lighting accepts at most eight selected lights per draw");
     this.integer((this.locations.u_light_count ??= this.uniform("u_light_count")), lighting.lights.length);
     if (lighting.atlas !== null) {
-      finiteUniforms([lighting.atlas.texelSize, lighting.atlas.nearPlane]);
+      finiteUniforms(lighting.atlas.texelSize, lighting.atlas.nearPlane);
       if (!Number.isFinite(lighting.atlas.texelSize) || lighting.atlas.texelSize <= 0 || !Number.isFinite(lighting.atlas.nearPlane) || lighting.atlas.nearPlane <= 0)
         throw new RangeError("Q2 shadow atlas texel size and near plane must be positive");
       this.scalar((this.locations.u_shadow_texel ??= this.uniform("u_shadow_texel")), lighting.atlas.texelSize);
@@ -291,20 +302,20 @@ void main() { gl_FragColor = vec4(1.0); }
     }
     if (lighting.kind === "q2-model-shadow" || lighting.pass === "model") {
       const scale = lighting.shadeScale ?? 0;
-      finiteUniforms([scale]);
+      finiteUniforms(scale);
       this.scalar((this.locations.u_shade_scale ??= this.uniform("u_shade_scale")), scale);
     }
     for (let index = 0; index < lighting.lights.length; index++) {
       const light = lighting.lights[index];
       if (light === undefined) continue;
       const locations = this.lightLocations[index] ??= {};
-      finiteUniforms([light.origin.x, light.origin.y, light.origin.z, light.radius]);
+      finiteUniforms(light.origin.x, light.origin.y, light.origin.z, light.radius);
       if (light.radius <= 0) throw new RangeError("Q2 fragment light radius must be positive");
       this.vector3((locations.u_light_pos ??= this.uniform(`u_light_pos[${index}]`)), light.origin.x, light.origin.y, light.origin.z);
       this.scalar((locations.u_light_radius ??= this.uniform(`u_light_radius[${index}]`)), light.radius);
       if ("color" in light) {
-        finiteUniforms([light.color.x, light.color.y, light.color.z, light.scale]);
-        if (light.cone !== null) finiteUniforms([light.cone.direction.x, light.cone.direction.y, light.cone.direction.z, light.cone.cosHalfAngle]);
+        finiteUniforms(light.color.x, light.color.y, light.color.z, light.scale);
+        if (light.cone !== null) finiteUniforms(light.cone.direction.x, light.cone.direction.y, light.cone.direction.z, light.cone.cosHalfAngle);
         this.vector3((locations.u_light_color ??= this.uniform(`u_light_color[${index}]`)), light.color.x, light.color.y, light.color.z);
         this.scalar((locations.u_light_scale ??= this.uniform(`u_light_scale[${index}]`)), light.scale);
         this.scalar((locations.u_light_cone_cos ??= this.uniform(`u_light_cone_cos[${index}]`)), light.cone?.cosHalfAngle ?? 0);
@@ -312,7 +323,7 @@ void main() { gl_FragColor = vec4(1.0); }
         this.vector3((locations.u_light_cone_dir ??= this.uniform(`u_light_cone_dir[${index}]`)), direction?.x ?? 0, direction?.y ?? 0, direction?.z ?? 0);
       }
       if ("fraction" in light) {
-        finiteUniforms([light.fraction.x, light.fraction.y, light.fraction.z]);
+        finiteUniforms(light.fraction.x, light.fraction.y, light.fraction.z);
         this.vector3((locations.u_light_frac ??= this.uniform(`u_light_frac[${index}]`)), light.fraction.x, light.fraction.y, light.fraction.z);
       } else this.vector3((locations.u_light_frac ??= this.uniform(`u_light_frac[${index}]`)), 0, 0, 0);
       const shadow = light.shadow;
@@ -320,7 +331,7 @@ void main() { gl_FragColor = vec4(1.0); }
       this.scalar((locations.u_light_shadow ??= this.uniform(`u_light_shadow[${index}]`)), shadow.kind === "none" ? 0 : shadow.kind === "cone" ? 1 : 2);
       if (shadow.kind !== "none") {
         const rect = shadow.atlasRect;
-        finiteUniforms([rect.x, rect.y, rect.z, rect.w]);
+        finiteUniforms(rect.x, rect.y, rect.z, rect.w);
         this.vector4((locations.u_light_atlas ??= this.uniform(`u_light_atlas[${index}]`)), rect.x, rect.y, rect.z, rect.w);
         if (shadow.kind === "cone") {
           finiteUniforms(shadow.matrix);

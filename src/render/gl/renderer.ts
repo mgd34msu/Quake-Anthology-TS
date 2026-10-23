@@ -303,7 +303,8 @@ export class GlRenderer implements RendererBackend {
 
   prepareGeometry(batch: DrawBatch): PreparedBackendDraw {
     this.opened();
-    const resolveTexture = createTextureResolver(resource => this.applyImageResource(resource));
+    const dynamic = batch.texture.kind === "dynamic-image" || batch.texturing === "pair" && batch.secondTexture.binding.kind === "dynamic-image";
+    const resolveTexture = dynamic ? createTextureResolver(resource => this.applyImageResource(resource)) : undefined;
     const buffer = this.idleGeometry ?? new GeometryBuffer();
     this.idleGeometry = null;
     let arrays: GeometryArrays;
@@ -356,7 +357,7 @@ export class GlRenderer implements RendererBackend {
         this.opened();
         if (phase !== "active" || unit !== nextUnit || unit !== 0 && unit !== 1 || unit === 1 && !paired)
           throw new Error("OpenGL prepared texture order is invalid");
-        const binding = resolveTexture(operation);
+        const binding = resolveTexture === undefined ? operation : resolveTexture(operation);
         this.selectTexture(unit);
         this.textures.bind(binding);
         const coordinates = unit === 0 ? arrays.coordinates : arrays.coordinates2;

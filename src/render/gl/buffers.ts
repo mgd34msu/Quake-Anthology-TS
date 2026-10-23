@@ -97,6 +97,10 @@ export class GeometryBuffer {
   }
 }
 
+/** Index arrays are immutable batch inputs; validate each once per the
+ * vertex count it was checked against instead of every frame. */
+const validatedIndices = new WeakMap<readonly number[], number>();
+
 const allocateFresh: AllocateGeometry = (vertices, indices, lighting) => ({
   positions: new Float32Array(vertices * 4), colors: new Float32Array(vertices * 4),
   coordinates: new Float32Array(vertices * 2), coordinates2: new Float32Array(vertices * 2),
@@ -117,10 +121,13 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
   if (vertices.length > 0x1fffffff) throw new RangeError("OpenGL vertex allocation is too large");
   if (batch.primitive === "lines" && (!Number.isFinite(Math.fround(batch.lineWidth)) || batch.lineWidth <= 0))
     throw new RangeError("OpenGL line width must be positive and finite");
-  for (let offset = 0; offset < indices.length; offset++) {
-    const index = indices[offset] ?? -1;
-    if (!(index >= 0) || index >= vertices.length || (index | 0) !== index)
-      throw new RangeError("OpenGL vertex index is outside its allocation");
+  if (validatedIndices.get(indices) !== vertices.length) {
+    for (let offset = 0; offset < indices.length; offset++) {
+      const index = indices[offset] ?? -1;
+      if (!(index >= 0) || index >= vertices.length || (index | 0) !== index)
+        throw new RangeError("OpenGL vertex index is outside its allocation");
+    }
+    validatedIndices.set(indices, vertices.length);
   }
   const arrays = allocate(vertices.length, indices.length, batch.lighting.kind);
   arrays.indices.set(indices);
