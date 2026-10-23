@@ -118,7 +118,11 @@ function pickupDefinition(game: Q1EntityServices, entity: Q1Actor): Pickup | nul
 
 let q3ItemsByClassname: ReadonlyMap<string, ItemDefinition> | null = null;
 function q3ItemFor(classname: string): ItemDefinition | null {
-  q3ItemsByClassname ??= new Map(itemList("missionpack").flatMap(item => item.className === null ? [] : [[item.className, item] as const]));
+  if (q3ItemsByClassname === null) {
+    const entries: (readonly [string, ItemDefinition])[] = [];
+    for (const item of itemList("missionpack")) if (item.className !== null) entries.push([item.className, item]);
+    q3ItemsByClassname = new Map(entries);
+  }
   return q3ItemsByClassname.get(classname) ?? null;
 }
 
@@ -131,7 +135,8 @@ function foreignQ3Pickup(entity: Q1Actor): Pickup | null {
   if (item === null || item.type === ItemType.IT_BAD) return null;
   const model = item.worldModels[0] ?? "", sound = item.pickupSound ?? "items/health1.wav";
   const quantity = entity.count !== 0 ? entity.count : item.quantity;
-  const base = { model, sound, bounds: "weapon" as const, skin: 0 };
+  const base: { readonly model: string; readonly sound: string; readonly bounds: Pickup["bounds"]; readonly skin: number } =
+    { model, sound, bounds: "weapon", skin: 0 };
   switch (item.type) {
     case ItemType.IT_HEALTH: {
       const cap = entity.classname === "item_health_mega" || entity.classname === "item_health_small" ? 200 : null;
@@ -193,7 +198,8 @@ function foreignQ3Pickup(entity: Q1Actor): Pickup | null {
       if (kind === null && item.tag !== Powerup.PW_AMMOREGEN) return null;
       return { ...base, bounds: "artifact", respawn: persistent ? -1 : 120, take: (runtime, _item, player) => {
         if (item.tag === Powerup.PW_AMMOREGEN) {
-          for (const ammo of ["q1:ammo/shells", "q1:ammo/nails", "q1:ammo/rockets", "q1:ammo/cells"] as const) runtime.host.inventory.give(player.actor, ammo, 999);
+          const ammos: readonly ItemId[] = ["q1:ammo/shells", "q1:ammo/nails", "q1:ammo/rockets", "q1:ammo/cells"];
+          for (const ammo of ammos) runtime.host.inventory.give(player.actor, ammo, 999);
           return "taken";
         }
         if (kind === null) return "refused";

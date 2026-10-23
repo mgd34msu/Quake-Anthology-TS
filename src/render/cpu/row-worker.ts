@@ -11,8 +11,9 @@ import type { BoundTexture, Framebuffer, Sample, TextureStorage } from "./triang
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
+function unknownArray(value: unknown): value is readonly unknown[] { return Array.isArray(value); }
 function list(value: unknown): readonly unknown[] {
-  if (!Array.isArray(value)) throw new Error("Invalid row worker list");
+  if (!unknownArray(value)) throw new Error("Invalid row worker list");
   return value;
 }
 function num(value: unknown): number {

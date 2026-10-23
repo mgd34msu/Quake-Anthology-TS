@@ -33,7 +33,8 @@ function render(workers: string, fragmentLit = false): { pixels: Uint8Array; bat
       const z = ((col * 31 + row * 17) % 89) / 89 * 0.8 - 0.4;
       const color = { x: ((col * 53) % 101) / 100, y: ((row * 41) % 103) / 102, z: ((col + row * 7) % 97) / 96, w: 1 };
       const base = vertices.length;
-      for (const [x, y, u, v] of [[x0, y0, 0, 0], [x1, y0, 2, 0], [x0, y1, 0, 2], [x1, y1, 2, 2]] as const)
+      const corners: readonly (readonly [number, number, number, number])[] = [[x0, y0, 0, 0], [x1, y0, 2, 0], [x0, y1, 0, 2], [x1, y1, 2, 2]];
+      for (const [x, y, u, v] of corners)
         vertices.push({ position: { x, y, z, w: 1 }, texCoord: { x: u, y: v }, color });
       indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
     }
