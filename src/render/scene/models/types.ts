@@ -48,6 +48,14 @@ export interface ModelSourceOptions {
 
 export type ModelVertexLighting = (normal: Vec3, position: Vec3, corner: number) => Vec3;
 
+/** Vertex shading plus, when the shade is a pure function of keyable
+ * entity inputs, a retention key letting lit geometry be reused across
+ * frames while every input to the shading stays identical. */
+export interface PreparedVertexLighting {
+  readonly shade: ModelVertexLighting;
+  readonly key: string | null;
+}
+
 export interface ModelPreparationContext {
   readonly skinningFrame?: ModelSkinningFrame;
   readonly modelPolicy?: ModelReplacementPolicy;
@@ -62,7 +70,7 @@ export interface ModelPreparationContext {
   /** Normalized alias-light modulation; Q3 keeps local normals for its stages. */
   lightVertex?(entity: SceneEntity, normal: Vec3, position: Vec3): Vec3;
   /** A resource/lighting join may supply the complete source vertex modulation. */
-  prepareVertexLighting?(entity: SceneEntity, options: ModelSourceOptions): ModelVertexLighting;
+  prepareVertexLighting?(entity: SceneEntity, options: ModelSourceOptions): PreparedVertexLighting;
   /** Palette byte colors used by Q2 RF_BEAM, independent of a model skin. */
   paletteColor?(entity: SceneEntity, index: number): Vec3;
 }

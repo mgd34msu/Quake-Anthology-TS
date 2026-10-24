@@ -30,7 +30,7 @@ import type { ModelReplacementPolicy } from "./replacements.ts";
 import { r_avertexnormal_dots } from "./shadedots.ts";
 import { attachSceneEntity, modelAttachmentTag, modelWorldPoint, modelWorldDirection, q3ModelViewOrigin } from "./transform.ts";
 import { byteColor, modelImage } from "./types.ts";
-import type { ModelVertexLighting, ModelImageSelection, ModelSkinningFrame, ModelSourceOptions, PreparedModelSurface } from "./types.ts";
+import type { ModelVertexLighting, ModelImageSelection, ModelSkinningFrame, ModelSourceOptions, PreparedModelSurface, PreparedVertexLighting } from "./types.ts";
 
 export interface ModelRenderProvider {
   readonly modelPolicy?: ModelReplacementPolicy;
@@ -63,6 +63,7 @@ function aliasNormalIndex(normal: Vec3): number {
   return index;
 }
 
+const keyNumber = (value: number): string => Object.is(value, -0) ? "-0" : `${value}`;
 function frames<T>(value: TimedFrames<T>): readonly T[] { return value.kind === "single" ? [value.frame] : value.frames.map(item => item.frame); }
 function materialKey(entity: ModelResource, image: ModelImageSelection, options: ModelSourceOptions): string {
   const translated = image.kind === "indexed" || entity.model.kind === "md5" && entity.model.skinSelection.kind === "q1-mdl-replacement";
@@ -203,7 +204,7 @@ export class SceneModelRenderer {
   prepare(entities: readonly SceneEntity[], input: WorldViewInput, sourceOptions: SourceOptions = () => ({}), skinningFrame?: ModelSkinningFrame): readonly SceneModelGroup[] {
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     const lightCache = new Map<SceneEntity, Vec3>();
-    const preparedLights = new Map<SceneEntity, ModelVertexLighting>();
+    const preparedLights = new Map<SceneEntity, PreparedVertexLighting>();
     const optionCache = new Map<SceneEntity, ModelSourceOptions>();
 
     const options: SourceOptions = entity => {
@@ -219,7 +220,7 @@ export class SceneModelRenderer {
         ? (coneLights === null ? input.q2FragmentLighting.lights : input.q2FragmentLighting.lights.filter(light => light.cone === null)).map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 }))
         : [...input.lights, ...input.q2FragmentLighting.lights.filter(light => light.cone === null && light.shadow.kind !== "none")
           .map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 }))] } : input;
-    const prepareVertexLighting = (entity: SceneEntity, source: ModelSourceOptions): ModelVertexLighting => {
+    const prepareVertexLighting = (entity: SceneEntity, source: ModelSourceOptions): PreparedVertexLighting => {
       const prepared = preparedLights.get(entity);
       if (prepared !== undefined) return prepared;
       let light: Vec3 | undefined, entityLighting: EntityLighting | undefined;
@@ -309,8 +310,21 @@ export class SceneModelRenderer {
         if (previousNormalIndex === undefined) { lastNormal = normal; lastLight = result; }
         return result;
       };
-      preparedLights.set(entity, illuminate);
-      return illuminate;
+      let key: string | null = null;
+      if (this.provider.family === "q3") key = "q3";
+      else if (this.provider.family === "q2") {
+        const bits = entity.flags.kind === "q2" ? entity.flags.bits : 0;
+        // Shell and pulse terms are time-varying; everything else in the
+        // shade is captured by the resolved light and basis below.
+        if (q2ShellColor(bits) === null && (bits & 512) === 0) {
+          illuminate({ x: 0, y: 0, z: 1 }, entity.transform.origin, 0);
+          if (light !== undefined && basis !== undefined)
+            key = `q2|${keyNumber(light.x)},${keyNumber(light.y)},${keyNumber(light.z)}|${basis.row}|${keyNumber(basis.yaw)}`;
+        }
+      }
+      const built: PreparedVertexLighting = { shade: illuminate, key };
+      preparedLights.set(entity, built);
+      return built;
     };
     return entities.flatMap(entity => preparedModelGroups(prepareSceneEntity(entity, { camera: input.camera, timeSeconds: time,
       ...(skinningFrame === undefined ? {} : { skinningFrame }),

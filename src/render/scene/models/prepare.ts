@@ -18,7 +18,7 @@ import { DEFAULT_MODEL_REPLACEMENT_POLICY, selectModelEntity } from "./replaceme
 import { byteColor } from "./types.ts";
 import { md5ShadowEnvelope } from "./shadow-bounds.ts";
 import { q2BeamGeometry } from "../particles/legacy.ts";
-import type { ModelGroupContext, ModelImageSelection, ModelPreparationContext, ModelSourceOptions, ModelVertexLighting, PreparedModelEntity, PreparedModelSurface } from "./types.ts";
+import type { ModelGroupContext, ModelImageSelection, ModelPreparationContext, ModelSourceOptions, PreparedModelEntity, PreparedModelSurface, PreparedVertexLighting } from "./types.ts";
 
 const ZERO_LIGHTMAP_COORD = { x: 0, y: 0 };
 
@@ -89,17 +89,27 @@ interface PoseGeometryCaches {
    * the camera and shadow passes transform identical poses with the same
    * transform, so the fround-heavy world step runs once per frame. */
   readonly world: WeakMap<object, WeakMap<object, { readonly positions: readonly Vec3[]; readonly normals: readonly Vec3[] }>>;
+  /** Fully lit local+world geometry per pose array + indices + every
+   * other append input (transform values, entity color, unlit flag,
+   * resolved lighting key), retained across frames while all match. */
+  readonly lit: WeakMap<object, WeakMap<object, Map<string, { readonly local: MaterialGeometry; readonly world: MaterialGeometry }>>>;
 }
 /** Persistent across presented frames, like the MD2 interpolation cache:
  * pose interpolation is a pure function of the sampled frame pair and
  * backLerp, and world transforms are keyed by transform object identity
  * (fresh objects each frame simply miss and are garbage-collected). */
-const persistentPoseCaches: PoseGeometryCaches = { mdl: new WeakMap(), md3: new WeakMap(), md4: new WeakMap(), world: new WeakMap() };
+const persistentPoseCaches: PoseGeometryCaches = { mdl: new WeakMap(), md3: new WeakMap(), md4: new WeakMap(), world: new WeakMap(), lit: new WeakMap() };
 function poseCaches(context: ModelPreparationContext): PoseGeometryCaches | null {
   void context;
   return persistentPoseCaches;
 }
 function lerpKey(backLerp: number): string { return Object.is(backLerp, -0) ? "-0" : `${backLerp}`; }
+function transformKey(transform: SceneEntity["transform"]): string {
+  const [forward, left, up] = transform.axis;
+  return [transform.origin.x, transform.origin.y, transform.origin.z,
+    forward.x, forward.y, forward.z, left.x, left.y, left.z, up.x, up.y, up.z,
+    transform.scale.x, transform.scale.y, transform.scale.z].map(lerpKey).join("|");
+}
 
 /** Q2 stores scaled packed coordinates after interpolating translation and origin. */
 export function interpolateSceneMd2(model: Q2AliasModel, entity: SceneEntity, frame: number, oldFrame: number, backLerp: number,
@@ -191,12 +201,12 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
   const color = byteColor({ ...entity.color, w: alpha });
   let lod = 0;
   let fogSphere: PreparedModelSurface["fogSphere"] = null;
-  let vertexLighting: ModelVertexLighting | undefined;
+  let preparedLighting: PreparedVertexLighting | undefined;
   function localVertex(vertex: ModelVertex, texCoord: Vec2, corner: number, unlit: boolean, vertexColor?: Vec4): MaterialVertex {
     if (context.purpose === "shadow") return { position: vertex.position, normal: vertex.normal, texCoord,
       lightmapCoord: ZERO_LIGHTMAP_COORD, color: vertexColor ?? color };
     const sampled = context.lightVertex?.(entity, vertex.normal, vertex.position);
-    const light = vertexLighting?.(vertex.normal, vertex.position, corner) ?? (flags.kind === "q2"
+    const light = preparedLighting?.shade(vertex.normal, vertex.position, corner) ?? (flags.kind === "q2"
       ? q2AliasLight(bits, sampled ?? { x: 1, y: 1, z: 1 }, context.timeSeconds, false, options.infrared)
       : sampled ?? { x: 1, y: 1, z: 1 });
     const base = vertexColor ?? color;
@@ -205,7 +215,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
   }
   function append(name: string, image: ModelImageSelection, vertices: readonly (ModelVertex & { readonly texCoord: Vec2; readonly color?: Vec4 })[],
     indices: readonly number[], unlit = false, world = false, poseKey?: object): void {
-    if (context.purpose !== "shadow") vertexLighting ??= context.prepareVertexLighting?.(entity, options);
+    if (context.purpose !== "shadow") preparedLighting ??= context.prepareVertexLighting?.(entity, options);
     if (world) {
       const localGeometry: MaterialGeometry = { indices, vertices: vertices.map((vertex, corner) => localVertex(vertex, vertex.texCoord, corner, unlit, vertex.color)) };
       appendGeometry(name, image, localGeometry, unlit, world, poseKey);
@@ -216,6 +226,14 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
     // map-then-transform two-pass form).
     const caches = poseCaches(context);
     const transform = entity.transform, [forward, left, up] = transform.axis;
+    const lightingKey = context.purpose === "shadow" ? "shadow" : preparedLighting?.key ?? null;
+    const retentionKey = poseKey === undefined || caches === null || lightingKey === null || shell !== null
+      || context.purpose !== "shadow" && context.lightVertex !== undefined ? undefined
+      : `${transformKey(transform)}|${lerpKey(color.x)},${lerpKey(color.y)},${lerpKey(color.z)},${lerpKey(color.w)}|${unlit ? 1 : 0}|${lightingKey}`;
+    if (retentionKey !== undefined && poseKey !== undefined && caches !== null) {
+      const retained = caches.lit.get(poseKey)?.get(indices)?.get(retentionKey);
+      if (retained !== undefined) { pushSurface(name, image, retained.local, retained.world, unlit); return; }
+    }
     let shared = poseKey !== undefined && caches !== null ? caches.world.get(poseKey)?.get(transform) : undefined;
     if (shared !== undefined && shared.positions.length !== vertices.length) shared = undefined;
     const localVertices: MaterialVertex[] = [], worldVertices: MaterialVertex[] = [];
@@ -251,7 +269,17 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       if (byTransform === undefined) { byTransform = new WeakMap<object, { readonly positions: readonly Vec3[]; readonly normals: readonly Vec3[] }>(); caches.world.set(poseKey, byTransform); }
       byTransform.set(transform, { positions, normals });
     }
-    pushSurface(name, image, { indices, vertices: localVertices }, { indices, vertices: worldVertices }, unlit);
+    const localGeometry: MaterialGeometry = { indices, vertices: localVertices };
+    const worldGeometry: MaterialGeometry = { indices, vertices: worldVertices };
+    if (retentionKey !== undefined && poseKey !== undefined && caches !== null) {
+      let byIndices = caches.lit.get(poseKey);
+      if (byIndices === undefined) { byIndices = new WeakMap<object, Map<string, { readonly local: MaterialGeometry; readonly world: MaterialGeometry }>>(); caches.lit.set(poseKey, byIndices); }
+      let byKey = byIndices.get(indices);
+      if (byKey === undefined) { byKey = new Map(); byIndices.set(indices, byKey); }
+      if (byKey.size >= 512) byKey.clear();
+      byKey.set(retentionKey, { local: localGeometry, world: worldGeometry });
+    }
+    pushSurface(name, image, localGeometry, worldGeometry, unlit);
   }
   function pushSurface(name: string, image: ModelImageSelection, localGeometry: MaterialGeometry, geometry: MaterialGeometry, unlit: boolean): void {
     const depthHack = flags.kind === "q1" ? options.viewModel === true : flags.kind === "q2" ? (bits & 16) !== 0 : (bits & 8) !== 0;
@@ -356,7 +384,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
     case "q2-md2": {
       const vertices = interpolateSceneMd2(model, entity, frame, previousFrame, backLerp, shell !== null);
       const image = shell === null ? selectedShader("alias", model.skins, entity, options) : { kind: "white" } satisfies ModelImageSelection;
-      if (context.purpose !== "shadow") vertexLighting ??= context.prepareVertexLighting?.(entity, options);
+      if (context.purpose !== "shadow") preparedLighting ??= context.prepareVertexLighting?.(entity, options);
       const geometry = mapMd2Geometry(model, vertices, (vertex, texCoord, corner) => localVertex(vertex, texCoord, corner, shell !== null));
       appendGeometry("alias", image, geometry, shell !== null, false, vertices);
       break;
