@@ -275,7 +275,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       let byIndices = caches.lit.get(poseKey);
       if (byIndices === undefined) { byIndices = new WeakMap<object, Map<string, { readonly local: MaterialGeometry; readonly world: MaterialGeometry }>>(); caches.lit.set(poseKey, byIndices); }
       let byKey = byIndices.get(indices);
-      if (byKey === undefined) { byKey = new Map(); byIndices.set(indices, byKey); }
+      if (byKey === undefined) { byKey = new Map<string, { readonly local: MaterialGeometry; readonly world: MaterialGeometry }>(); byIndices.set(indices, byKey); }
       if (byKey.size >= 512) byKey.clear();
       byKey.set(retentionKey, { local: localGeometry, world: worldGeometry });
     }
