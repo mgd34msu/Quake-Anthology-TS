@@ -6,9 +6,9 @@ written in strict TypeScript. Play each game as itself, or mix rules,
 movement, characters, weapons, monsters, maps, and equipment across games
 while each selected source keeps its own behavior.
 
-**Version 1.2.5** is available from
-[GitHub Releases](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.2.5)
-as a Linux x64 executable. See the [release notes](docs/releases/1.2.5.md).
+**Version 1.2.6** is available from
+[GitHub Releases](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.2.6)
+as a Linux x64 executable. See the [release notes](docs/releases/1.2.6.md).
 
 Game data is **not** included. You need your own legally obtained copies of
 whichever games you want to play. Classic components preserve original
@@ -26,12 +26,12 @@ You need a 64-bit Linux system with these native libraries installed
 - libvorbisfile (Ogg Vorbis music)
 - libtheoradec (OGV video cutscenes)
 
-Download `quake-anthology-1.2.5-linux-x64.tar.gz` from the
-[release page](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.2.5),
+Download `quake-anthology-1.2.6-linux-x64.tar.gz` from the
+[release page](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.2.6),
 extract it anywhere, and run the executable:
 
 ```sh
-tar -xzf quake-anthology-1.2.5-linux-x64.tar.gz
+tar -xzf quake-anthology-1.2.6-linux-x64.tar.gz
 ./quake-typescript
 ```
 
