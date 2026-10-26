@@ -702,18 +702,32 @@ export class SharedPhysics {
     if (state.ground !== null) return undefined;
     if (motion.kind !== "fly" && motion.kind !== "fly-missile" && motion.kind !== "wall-bounce") velocity = this.add(velocity, this.scale(motion.gravityVector, motion.gravity * this.worldGravity * elapsed));
     this.writeLive(actor, { velocity, angles: this.add(state.angles, this.scale(motion.angularVelocity, elapsed)) });
-    const trace = this.pushEntity(actor, this.scale(velocity, elapsed));
+    let trace = this.pushEntity(actor, this.scale(velocity, elapsed));
     if (family !== "q1") this.waterTransition(actor, state.origin);
     state = this.bodies.read(actor.id);
     if (state === null || trace.fraction === 1) return undefined;
-    const currentMotion = this.motion(actor) ?? motion;
-    const normal = trace.contact.kind === "plane" ? trace.contact.plane.normal : trace.sourcePlane.normal;
-    velocity = this.clip(state.velocity, normal, currentMotion.kind === "wall-bounce" ? 2 : currentMotion.kind === "bounce" ? 1.5 : 1);
-    if (currentMotion.kind !== "wall-bounce" && this.dot(normal, currentMotion.gravityVector) < -0.7 && (this.dot(velocity, currentMotion.gravityVector) > -60 || currentMotion.kind !== "bounce")) {
-      this.writeLive(actor, { velocity: zero, ground: this.hitActor(trace) });
-      this.motions.set(actor, { ...currentMotion, velocity: zero, angularVelocity: zero });
-      this.writeAngularVelocity(actor, zero);
-    } else this.writeLive(actor, { velocity });
+    // A zero-fraction push against a steep plane or corner otherwise wedges
+    // forever: each step gravity re-adds the into-plane component the clip
+    // removed, the trace again reports fraction 0, and dropped items hang
+    // mid-air out of reach. Clip and retry within the step (FlyMove bumps)
+    // so the body can slide along the contact; paths that already move
+    // (fraction > 0) keep the exact single-push behavior.
+    for (let bump = 0; ; bump++) {
+      const currentMotion = this.motion(actor) ?? motion;
+      const normal = trace.contact.kind === "plane" ? trace.contact.plane.normal : trace.sourcePlane.normal;
+      velocity = this.clip(state.velocity, normal, currentMotion.kind === "wall-bounce" ? 2 : currentMotion.kind === "bounce" ? 1.5 : 1);
+      if (currentMotion.kind !== "wall-bounce" && this.dot(normal, currentMotion.gravityVector) < -0.7 && (this.dot(velocity, currentMotion.gravityVector) > -60 || currentMotion.kind !== "bounce")) {
+        this.writeLive(actor, { velocity: zero, ground: this.hitActor(trace) });
+        this.motions.set(actor, { ...currentMotion, velocity: zero, angularVelocity: zero });
+        this.writeAngularVelocity(actor, zero);
+        break;
+      }
+      this.writeLive(actor, { velocity });
+      if (trace.fraction > 0 || bump >= 3 || !this.live(actor)) break;
+      trace = this.pushEntity(actor, this.scale(velocity, elapsed));
+      state = this.bodies.read(actor.id);
+      if (state === null || trace.fraction === 1) break;
+    }
     if (family === "q1" && this.live(actor)) { const source = this.sources.get(actor); if (source === undefined) this.options.q1WaterTransition?.(actor); else source.waterTransition(); }
     return undefined;
   }
