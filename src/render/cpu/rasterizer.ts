@@ -81,6 +81,15 @@ function snapshotSourceCells(scratch: readonly SourceStageCell[]): readonly Sour
     rawTexCoord: { ...cell.rawTexCoord }, rawTexCoord2: { ...cell.rawTexCoord2 } }));
 }
 
+/** Index arrays are immutable batch inputs (the same contract the GL
+ * packer relies on); validate each once per the vertex count it was
+ * checked against instead of every prepare. */
+const validatedCpuIndices = new WeakMap<readonly number[], number>();
+/** Fragment-attribute finiteness is a pure function of the index,
+ * world-position and normal arrays; memoize the scan by identity. */
+const validatedFragmentAttributes = new WeakMap<readonly number[], WeakMap<readonly Vec3[], WeakSet<object>>>();
+const NO_NORMALS: object = {};
+
 function snapshotBatch(batch: DrawBatch, viewProjection: Mat4 | null = null): DrawBatch {
   const state = snapshotState(batch.state);
   const project = (position: Vec4): Vec4 => {
@@ -551,15 +560,31 @@ export class SoftwareRenderer implements RendererBackend {
 
   prepareGeometry(input: DrawBatch): PreparedBackendDraw {
     this.assertOpen();
+    return this.prepareBatch(snapshotBatch(input, this.viewProjectionState), input);
+  }
+
+  /** Validation and prepared-draw construction for an already-snapshotted
+   * batch; `keys` supplies the pre-snapshot array identities the
+   * validation memos key on. Source draws arrive already snapshotted and
+   * must not pay for (or warm caches against) a second discarded copy. */
+  private prepareBatch(batch: DrawBatch, keys: DrawBatch): PreparedBackendDraw {
     const resolveTexture = createTextureResolver(resource => this.applyImageResource(resource));
-    const batch = snapshotBatch(input, this.viewProjectionState);
     if (batch.lighting.kind !== "vertex") {
       if (batch.lighting.lights.length > 8) throw new RangeError("Q2 fragment lighting accepts at most eight selected lights per draw");
-      for (const index of batch.indices) {
-        const { worldPosition, worldNormal } = worldAttributes(batch.lighting, index);
-        if (!(Number.isFinite(worldPosition.x) && Number.isFinite(worldPosition.y) && Number.isFinite(worldPosition.z)
-          && Number.isFinite(worldNormal.x) && Number.isFinite(worldNormal.y) && Number.isFinite(worldNormal.z)))
-          throw new RangeError("CPU fragment lighting attributes must be finite");
+      const lighting = batch.lighting;
+      const normals: object = lighting.kind === "q2-world" ? lighting.normals : NO_NORMALS;
+      let byPositions = validatedFragmentAttributes.get(keys.indices);
+      if (byPositions?.get(lighting.worldPositions)?.has(normals) !== true) {
+        for (const index of batch.indices) {
+          const { worldPosition, worldNormal } = worldAttributes(batch.lighting, index);
+          if (!(Number.isFinite(worldPosition.x) && Number.isFinite(worldPosition.y) && Number.isFinite(worldPosition.z)
+            && Number.isFinite(worldNormal.x) && Number.isFinite(worldNormal.y) && Number.isFinite(worldNormal.z)))
+            throw new RangeError("CPU fragment lighting attributes must be finite");
+        }
+        if (byPositions === undefined) { byPositions = new WeakMap<readonly Vec3[], WeakSet<object>>(); validatedFragmentAttributes.set(keys.indices, byPositions); }
+        let byNormals = byPositions.get(lighting.worldPositions);
+        if (byNormals === undefined) { byNormals = new WeakSet<object>(); byPositions.set(lighting.worldPositions, byNormals); }
+        byNormals.add(normals);
       }
       this.fragmentLighting(batch);
     }
@@ -567,8 +592,11 @@ export class SoftwareRenderer implements RendererBackend {
     if (batch.indices.length % step !== 0) throw new RangeError("Incomplete CPU primitive indices");
     if (batch.primitive === "lines" && (!Number.isFinite(batch.lineWidth) || batch.lineWidth <= 0))
       throw new RangeError("CPU line width must be positive");
-    for (const index of batch.indices) if (!Number.isSafeInteger(index) || index < 0 || index >= batch.vertices.length)
-      throw new RangeError("CPU vertex index is outside its array");
+    if (validatedCpuIndices.get(keys.indices) !== batch.vertices.length) {
+      for (const index of batch.indices) if (!Number.isSafeInteger(index) || index < 0 || index >= batch.vertices.length)
+        throw new RangeError("CPU vertex index is outside its array");
+      validatedCpuIndices.set(keys.indices, batch.vertices.length);
+    }
     for (const vertex of batch.vertices) if (!finiteVector(vertex.position) || !finiteVector(vertex.color)
       || !Number.isFinite(vertex.texCoord.x) || !Number.isFinite(vertex.texCoord.y))
       throw new RangeError("CPU vertex attributes must be finite");
@@ -868,7 +896,7 @@ export class SoftwareRenderer implements RendererBackend {
     this.assertOpen();
     const resolveTexture = createTextureResolver(resource => this.applyImageResource(resource));
     let batch = source === null ? snapshotBatch(input) : snapshotSourceBatch(source.batch, this.retainedState);
-    this.prepareGeometry(batch);
+    this.prepareBatch(batch, source === null ? input : batch);
     const paired = batch.texturing === "pair";
     const sourceKind = source === null ? null : source.kind;
     const scratch = source === null ? null : snapshotSourceCells(source.scratch);
