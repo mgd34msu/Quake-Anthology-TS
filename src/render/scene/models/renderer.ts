@@ -10,6 +10,7 @@ import { ALIAS_NORMALS, sampleTimedFrame } from "../../../formats/q12-model/inde
 import { currentRemap } from "../material-registrations.ts";
 import type { RegisteredSceneMaterial } from "../material-registrations.ts";
 import { diffuseColor } from "../../../materials/color.ts";
+import type { MaterialGeometry } from "../../../materials/geometry.ts";
 import type { EntityLighting } from "../../../materials/q3-lighting.ts";
 import { prepareMaterialBatches } from "../../../materials/evaluate.ts";
 import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches } from "../../../materials/legacy.ts";
@@ -76,6 +77,11 @@ export class SceneModelRenderer {
   readonly lighting: ModelLightSampler;
   private readonly materials = new Map<string, Material>();
   private readonly pending = new Map<string, Promise<void>>();
+  /** World-space legacy batches per retained geometry + texture: stable
+   * batch vertex arrays are what let the GL pack cache hit across frames. */
+  private readonly legacyBatchCache = new WeakMap<MaterialGeometry, WeakMap<object, Map<string, readonly DrawBatch[]>>>();
+  private readonly modelWorldArrays = new WeakMap<MaterialGeometry, { readonly worldPositions: readonly Vec3[]; readonly normals: readonly Vec3[] }>();
+  private readonly shadeVertexCache = new WeakMap<object, Map<string, DrawBatch["vertices"]>>();
   private textures: SceneTextureLoader;
 
   constructor(readonly provider: ModelRenderProvider, readonly world: WorldScene) {
@@ -414,6 +420,36 @@ export class SceneModelRenderer {
       && center.z - radius < volume.bounds.max.z && center.z + radius > volume.bounds.min.z) ?? null;
   }
 
+  /** World positions/normals of retained geometry are fixed; share the
+   * extracted arrays so shadow lighting keeps pack-key identity. */
+  private worldArraysFor(geometry: MaterialGeometry): { readonly worldPositions: readonly Vec3[]; readonly normals: readonly Vec3[] } {
+    let arrays = this.modelWorldArrays.get(geometry);
+    if (arrays === undefined) {
+      arrays = { worldPositions: geometry.vertices.map(vertex => vertex.position),
+        normals: geometry.vertices.map(vertex => normalize3(vertex.normal)) };
+      this.modelWorldArrays.set(geometry, arrays);
+    }
+    return arrays;
+  }
+
+  private shadeDivided(batch: Extract<DrawBatch, { texturing: "single" }>, shadeScale: number): Extract<DrawBatch, { texturing: "single" }>["vertices"];
+  private shadeDivided(batch: Extract<DrawBatch, { texturing: "pair" }>, shadeScale: number): Extract<DrawBatch, { texturing: "pair" }>["vertices"];
+  private shadeDivided(batch: DrawBatch, shadeScale: number): DrawBatch["vertices"] {
+    let byScale = this.shadeVertexCache.get(batch.vertices);
+    if (byScale === undefined) { byScale = new Map<string, DrawBatch["vertices"]>(); this.shadeVertexCache.set(batch.vertices, byScale); }
+    const key = `${batch.texturing}|${Object.is(shadeScale, -0) ? "-0" : `${shadeScale}`}`;
+    const hit = byScale.get(key);
+    if (hit !== undefined) return hit;
+    const divide = (value: DrawBatch["vertices"][number]["color"]): DrawBatch["vertices"][number]["color"] =>
+      ({ x: value.x / shadeScale, y: value.y / shadeScale, z: value.z / shadeScale, w: value.w });
+    const mapped = batch.texturing === "single"
+      ? batch.vertices.map(vertex => ({ ...vertex, color: divide(vertex.color) }))
+      : batch.vertices.map(vertex => ({ ...vertex, color: divide(vertex.color) }));
+    if (byScale.size >= 64) byScale.clear();
+    byScale.set(key, mapped);
+    return mapped;
+  }
+
   private draw(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions, coneLights: readonly Q2FragmentLight[] | null, shade?: Vec3): readonly SceneModelGroup[] {
     const material = this.materials.get(materialKey(surface.entity, surface.image, options));
     if (material === undefined) throw new Error(`Model material was not preloaded: ${surface.entity.resource.requestedPath}/${surface.name}`);
@@ -449,9 +485,35 @@ export class SceneModelRenderer {
     const definition = this.provider.family === "q1" ? createQ1Material(texture.name, texture.image, lighting, { alpha })
       : { ...createQ2Material(texture.name, [texture.image], lighting), alpha };
     const project = createViewProjector(input.camera);
-    const batches = prepareLegacyMaterialBatches(definition, surface.geometry, { time, animationFrame: 0, alternateAnimation: false,
-      fullbright: surface.unlit ? null : texture.fullbright, q1LightmapEncoding: "rgb", cull: surface.cull, depthRange: surface.depthRange,
-      project: point => { const projected = project(point); return surface.mirrorWeapon ? { ...projected, x: -projected.x } : projected; } });
+    // World-space emission (same gate as world surfaces) makes the mapped
+    // vertices camera-independent, so retained geometry reuses one batch —
+    // and one GL pack — across frames. Liquids animate UVs by time and the
+    // mirror flip is a clip-space operation; both stay per-frame.
+    const liquid = definition.kind === "q1"
+      ? definition.surface === "water" || definition.surface === "slime" || definition.surface === "lava" || definition.surface === "teleport"
+      : definition.warp || definition.flowing;
+    const worldSpace = input.worldSpaceBatches === true && input.camera.clip.kind === "none" && !surface.mirrorWeapon && !liquid;
+    let batches: readonly DrawBatch[];
+    if (worldSpace) {
+      const key = `${alpha}|${surface.unlit ? 1 : 0}|${surface.cull}|${surface.depthRange[0]},${surface.depthRange[1]}`;
+      let byTexture = this.legacyBatchCache.get(surface.geometry);
+      if (byTexture === undefined) { byTexture = new WeakMap<object, Map<string, readonly DrawBatch[]>>(); this.legacyBatchCache.set(surface.geometry, byTexture); }
+      let byKey = byTexture.get(texture);
+      if (byKey === undefined) { byKey = new Map<string, readonly DrawBatch[]>(); byTexture.set(texture, byKey); }
+      const hit = byKey.get(key);
+      if (hit !== undefined) batches = hit;
+      else {
+        batches = prepareLegacyMaterialBatches(definition, surface.geometry, { time, animationFrame: 0, alternateAnimation: false,
+          fullbright: surface.unlit ? null : texture.fullbright, q1LightmapEncoding: "rgb", cull: surface.cull, depthRange: surface.depthRange,
+          project: point => ({ x: point.x, y: point.y, z: point.z, w: 1 }) }).map((batch): DrawBatch => ({ ...batch, space: "world" }));
+        if (byKey.size >= 16) byKey.clear();
+        byKey.set(key, batches);
+      }
+    } else {
+      batches = prepareLegacyMaterialBatches(definition, surface.geometry, { time, animationFrame: 0, alternateAnimation: false,
+        fullbright: surface.unlit ? null : texture.fullbright, q1LightmapEncoding: "rgb", cull: surface.cull, depthRange: surface.depthRange,
+        project: point => { const projected = project(point); return surface.mirrorWeapon ? { ...projected, x: -projected.x } : projected; } });
+    }
 
     const receives = this.provider.family === "q2" && shade !== undefined && shadows !== undefined && shadows.atlas !== null
       && !surface.unlit && options.viewModel !== true && (flags & (Q2_SHELL_MASK | 8 | 4 | 16)) === 0
@@ -463,15 +525,14 @@ export class SceneModelRenderer {
         cull: surface.mirrorWeapon ? batch.state.cull === "front" ? "back" : batch.state.cull === "back" ? "front" : "none" : batch.state.cull } satisfies DrawBatch["state"];
       if (index !== 0) return { ...batch, state };
       const alias: DrawBatch["lighting"] = affecting.length === 0 || shadows === undefined || shadows.atlas === null ? batch.lighting
-        : { kind: "q2-model-shadow", worldPositions: surface.geometry.vertices.map(vertex => vertex.position), lights: affecting, shadeScale, atlas: shadows.atlas };
-      const color = (value: DrawBatch["vertices"][number]["color"]): DrawBatch["vertices"][number]["color"] =>
-        ({ x: value.x / shadeScale, y: value.y / shadeScale, z: value.z / shadeScale, w: value.w });
+        : { kind: "q2-model-shadow", worldPositions: this.worldArraysFor(surface.geometry).worldPositions, lights: affecting, shadeScale, atlas: shadows.atlas };
       const corrected: DrawBatch = alias.kind !== "q2-model-shadow" ? { ...batch, state } : batch.texturing === "single"
-        ? { ...batch, state, lighting: alias, vertices: batch.vertices.map(vertex => ({ ...vertex, color: color(vertex.color) })) }
-        : { ...batch, state, lighting: alias, vertices: batch.vertices.map(vertex => ({ ...vertex, color: color(vertex.color) })) };
+        ? { ...batch, state, lighting: alias, vertices: this.shadeDivided(batch, shadeScale) }
+        : { ...batch, state, lighting: alias, vertices: this.shadeDivided(batch, shadeScale) };
       if (!receivesCone) return corrected;
+      const arrays = this.worldArraysFor(surface.geometry);
       const lighting = { kind: "q2-world", pass: "model", shadeScale: corrected.lighting.kind === "q2-model-shadow" ? shadeScale : null,
-        worldPositions: surface.geometry.vertices.map(vertex => vertex.position), normals: surface.geometry.vertices.map(vertex => normalize3(vertex.normal)), atlas: shadows.atlas,
+        worldPositions: arrays.worldPositions, normals: arrays.normals, atlas: shadows.atlas,
         lights: shadows.lights.map(light => ({ ...light, color: light.cone === null ? { x: 0, y: 0, z: 0 } : light.color,
           scale: light.cone === null ? 0 : light.scale,
           fraction: affecting.find(point => point.origin === light.origin)?.fraction ?? { x: 0, y: 0, z: 0 } })) } satisfies DrawBatch["lighting"];
