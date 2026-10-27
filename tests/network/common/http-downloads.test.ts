@@ -69,6 +69,26 @@ test('shared metadata reads enforce bounded optional filelists and HTTP response
   } finally { await server.stop(true); }
 });
 
+test('gzip whole-file responses publish decoded bytes instead of failing the compressed length check', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'http-gzip-'));
+  const payload = new TextEncoder().encode('quake asset payload '.repeat(85));
+  const compressed = Bun.gzipSync(payload);
+  expect(compressed.length).toBeLessThan(payload.length);
+  let encoding: string | null = null;
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
+    encoding = req.headers.get('accept-encoding');
+    // Deliberately ignore the identity request, as a misconfigured mirror can.
+    return new Response(compressed, { headers: { 'Content-Encoding': 'gzip', 'Content-Length': String(compressed.length) } });
+  } });
+  const queue = new HttpDownloadQueue({ root, assertCurrent() {}, resolved: () => false, async refreshPackage() {}, progress() {} });
+  try {
+    const result = await queue.enqueue({ ...request(server.port ?? 0, 'asset'), expected: { kind: 'protocol-completion', maximumBytes: 4096 } });
+    expect(result.kind).toBe('downloaded');
+    expect(encoding).toBe('identity');
+    expect(readFileSync(join(root, 'asset'))).toEqual(Buffer.from(payload));
+  } finally { queue.cancel(); await server.stop(true); rmSync(root, { recursive: true, force: true }); }
+});
+
 test('staged cleanup failure settles the transfer and cancels pending package work', async () => {
   const root = mkdtempSync(join(tmpdir(), 'http-cleanup-'));
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() { return new Response('bytes'); } });

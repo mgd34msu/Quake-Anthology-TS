@@ -58,7 +58,7 @@ async function downloadResponse(url: URL, signal: AbortSignal, method: 'GET' | '
 
 async function openResponse(url: URL, signal: AbortSignal, identity?: string): Promise<{ readonly headers: Headers; readonly body: ReadableStream<unknown> }> {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new RangeError('Download URL requires HTTP or HTTPS');
-  const response = await downloadResponse(url, signal, 'GET', identity === undefined ? {} : { 'Accept-Encoding': 'identity', 'If-Match': identity });
+  const response = await downloadResponse(url, signal, 'GET', identity === undefined ? { 'Accept-Encoding': 'identity' } : { 'Accept-Encoding': 'identity', 'If-Match': identity });
   const body: unknown = response.body;
   if (response.status !== 200 || !isReadableStream(body) || identity !== undefined
     && (response.headers.get('etag') !== identity || !identityEncoding(response.headers))) {
@@ -317,7 +317,11 @@ export class HttpDownloadQueue {
           catch (cleanup) { throw new AggregateError([error, cleanup], 'HTTP download epoch and response cleanup failed'); }
           throw error;
         }
-        const total = contentLength(response.headers);
+        // A server may ignore the identity request; fetch then yields decoded
+        // bytes while Content-Length counts the encoded form, so only an
+        // identity representation has a comparable total. The sink still
+        // bounds and validates the decoded size.
+        const total = identityEncoding(response.headers) ? contentLength(response.headers) : null;
         const reader = response.body?.getReader();
         if (reader === undefined) throw new Error('HTTP download has no response body');
         try {
