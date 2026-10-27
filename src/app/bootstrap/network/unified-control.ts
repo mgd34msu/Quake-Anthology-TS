@@ -56,17 +56,29 @@ function angles(r: SaveReader): IntegerTriple {
   if (values.length !== 3 || a === undefined || b === undefined || c === undefined) return r.fail('expected three command angles');
   return [a, b, c];
 }
+// Movement-provider limits: Q3 axes are signed bytes; Q1/QW/Q2 durations fit one byte.
+const q3AxisMinimum = -128, q3AxisMaximum = 127, commandDurationMaximum = 255;
+/** True when every movement field satisfies the authoritative provider for its family. */
+export function unifiedCommandInBounds(command: UserCommand): boolean {
+  const duration = (milliseconds: number): boolean => Number.isInteger(milliseconds) && milliseconds >= 0 && milliseconds <= commandDurationMaximum;
+  switch (command.kind) {
+    case 'q3': return [command.forwardMove, command.rightMove, command.upMove].every(axis => Number.isInteger(axis) && axis >= q3AxisMinimum && axis <= q3AxisMaximum);
+    case 'q1-quakeworld': case 'q2-classic': case 'q2-rerelease': return duration(command.milliseconds);
+    case 'q1-netquake': return true;
+  }
+}
 function readCommand(r: SaveReader): UserCommand {
   const kind = r.field('kind').choice('q1-netquake', 'q1-quakeworld', 'q2-classic', 'q2-rerelease', 'q3');
   const buttons = bounded(r.field('buttons'), 0, 4294967295);
   const movement = (name: string): number => bounded(r.field(name), -32768, 32767);
+  const q3Movement = (name: string): number => bounded(r.field(name), q3AxisMinimum, q3AxisMaximum);
   if (kind === 'q3') return { kind, buttons, serverTimeMilliseconds: bounded(r.field('serverTimeMilliseconds'), 0, 2147483647),
-    angleWords: angles(r.field('angleWords')), weapon: bounded(r.field('weapon'), 0, 255), forwardMove: movement('forwardMove'), rightMove: movement('rightMove'), upMove: movement('upMove') };
-  if (kind === 'q2-rerelease') return { kind, buttons, milliseconds: bounded(r.field('milliseconds'), 0, 1000), angles: vector(r.field('angles')),
+    angleWords: angles(r.field('angleWords')), weapon: bounded(r.field('weapon'), 0, 255), forwardMove: q3Movement('forwardMove'), rightMove: q3Movement('rightMove'), upMove: q3Movement('upMove') };
+  if (kind === 'q2-rerelease') return { kind, buttons, milliseconds: bounded(r.field('milliseconds'), 0, commandDurationMaximum), angles: vector(r.field('angles')),
     forwardMove: r.field('forwardMove').finite(), sideMove: r.field('sideMove').finite(), serverFrame: bounded(r.field('serverFrame'), -1, 2147483647) };
   const common = { buttons, forwardMove: movement('forwardMove'), sideMove: movement('sideMove'), upMove: movement('upMove'), impulse: bounded(r.field('impulse'), 0, 255) };
   if (kind === 'q1-netquake') return { ...common, kind, acknowledgedServerTimeSeconds: r.field('acknowledgedServerTimeSeconds').finite(), viewAngles: vector(r.field('viewAngles')) };
-  const milliseconds = bounded(r.field('milliseconds'), 0, 255);
+  const milliseconds = bounded(r.field('milliseconds'), 0, commandDurationMaximum);
   if (kind === 'q1-quakeworld') return { ...common, kind, milliseconds, angles: vector(r.field('angles')) };
   return { ...common, kind, milliseconds, angleShorts: angles(r.field('angleShorts')), lightLevel: bounded(r.field('lightLevel'), 0, 255) };
 }

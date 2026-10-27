@@ -16,6 +16,7 @@ import type { EngineSession } from '../../../world/session/session.ts';
 import type { LoadedApplicationContent } from '../content.ts';
 import type { UnifiedResourceKey } from '../network/unified-frame-codec.ts';
 import { unifiedResourceId } from '../network/unified-content.ts';
+import { unifiedCommandInBounds } from '../network/unified-control.ts';
 import type { UnifiedPresentationFrame } from '../network/unified-types.ts';
 import { Q3ClientAdmissionDenied } from './q3/runtime.ts';
 import type { SharedSimulation } from './runtime.ts';
@@ -233,6 +234,7 @@ export function createUnifiedApplicationServerHost(options: { readonly session: 
       if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error('Invalid unified input sequence');
       const movement = simulation.movementPlayer(player.actor);
       if (movement === null || movement.state.kind !== command.kind) throw new Error('Unified command does not match selected movement');
+      if (!unifiedCommandInBounds(command)) throw new Error('Unified command movement outside provider bounds');
       return { actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command, angleSpace: "absolute", ...(arsenal === undefined ? {} : { arsenal }) };
     },
     resources(player, output) { requirePlayer(player); const result = new Map<ResourceId, UnifiedResourceKey>(); for (const event of output.events) if (permitted(player, event) && event.payload.kind === 'sound') { const value = resource(event.payload.resource); result.set(value.id, key(value)); } return [...result.values()]; },

@@ -93,6 +93,35 @@ test('NetQuake input bursts apply only the newest command for one server frame',
 });
 
 
+test('movement values outside provider bounds drop the peer instead of reaching simulation', async () => {
+  const invalid: readonly { readonly sequence: number; readonly command: Parameters<typeof encodeUnifiedInputs>[0]['commands'][number]['command'] }[] = [
+    { sequence: 7, command: { kind: 'q3', serverTimeMilliseconds: 100, angleWords: [0, 0, 0], buttons: 0, weapon: 0, forwardMove: 128, rightMove: 0, upMove: 0 } },
+    { sequence: 7, command: { kind: 'q3', serverTimeMilliseconds: 100, angleWords: [0, 0, 0], buttons: 0, weapon: 0, forwardMove: 0, rightMove: -129, upMove: 0 } },
+    { sequence: 7, command: { kind: 'q2-rerelease', milliseconds: 256, angles: { x: 0, y: 0, z: 0 }, forwardMove: 0, sideMove: 0, buttons: 0, serverFrame: 0 } },
+  ];
+  for (const input of invalid) {
+    const f = await fixture();
+    try {
+      f.channel.queueFrame(encodeUnifiedInputs({ epoch: 1, commands: [input] }), 1);
+      for (const bytes of f.channel.flush(10)) f.socket.send(f.transport.address, bytes);
+      expect(await f.server.poll(10)).toEqual([]);
+      expect(f.disconnected()).toBe(1); expect(f.server.phase).toBe('active');
+    } finally { f.server.close(); f.hub.close(); }
+  }
+});
+
+test('movement values at provider bounds are admitted', async () => {
+  const f = await fixture();
+  try {
+    f.channel.queueFrame(encodeUnifiedInputs({ epoch: 1, commands: [
+      { sequence: 7, command: { kind: 'q3', serverTimeMilliseconds: 100, angleWords: [0, 0, 0], buttons: 0, weapon: 0, forwardMove: 127, rightMove: -128, upMove: 0 } },
+    ] }), 1);
+    for (const bytes of f.channel.flush(10)) f.socket.send(f.transport.address, bytes);
+    expect((await f.server.poll(10)).map(command => command.sequence)).toEqual([7]);
+    expect(f.disconnected()).toBe(0);
+  } finally { f.server.close(); f.hub.close(); }
+});
+
 test('retired component command admission rejects its peer without stopping the authoritative host', async () => {
   const f = await fixture(undefined, () => false);
   try {
