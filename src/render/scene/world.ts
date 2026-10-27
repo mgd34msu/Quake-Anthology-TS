@@ -542,14 +542,24 @@ export class WorldScene {
     const visibility: VisibleWorld = input.noWorldModel === true ? { leaf: -1, leaves: [], surfaces: [], surfaceDlightMasks: new Map<number, number>() }
       : visibleWorld(this.map, input.camera, input), operations: SceneOperation[] = [];
     const surfaces = visibility.surfaces.map(index => at(this.surfaces, index));
-    operations.push(...this.prepareWorldOperations(input, visibility));
+    // Legacy sequence groups keep insertion order downstream, so translucent
+    // world/brush surfaces must be deferred until opaque model and entity
+    // submission is complete or later opaque draws overwrite the blend.
+    const translucent = (operation: SceneOperation): boolean =>
+      operation.kind === "scene-group" && operation.order.kind === "sequence" && operation.order.phase === "translucent";
+    const deferred: SceneOperation[] = [];
+    const submit = (prepared: readonly SceneOperation[]): void => {
+      for (const operation of prepared) (translucent(operation) ? deferred : operations).push(operation);
+    };
+    submit(this.prepareWorldOperations(input, visibility));
     for (const model of input.inlineModels ?? []) {
       const childInput = { ...input, animationFrame: model.animationFrame ?? input.animationFrame ?? 0,
         materialContext: { ...input.materialContext, ...(model.entityRGBA === undefined ? {} : { entityRGBA: model.entityRGBA }) },
         alternateAnimation: model.alternateAnimation ?? input.alternateAnimation ?? false };
-      operations.push(...this.prepareModel(model.model, model.transform, childInput));
+      submit(this.prepareModel(model.model, model.transform, childInput));
     }
     operations.push(...input.operations ?? []);
+    operations.push(...deferred);
     if (input.noWorldModel !== true && input.q2Fog !== undefined) operations.push({ kind: "q2-fog", camera: input.camera, fog: input.q2Fog, farDepth: 1 - 1e-6,
       skyDrawn: surfaces.some(surface => (this.remap(surface)?.material ?? surface.shader) !== null
         ? (this.remap(surface)?.material ?? surface.shader)?.finished.iterator.kind === "sky"
