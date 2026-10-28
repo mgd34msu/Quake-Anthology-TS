@@ -18,10 +18,13 @@ function balancedMap(depth: number, row: number, counts?: { reads: number }): Q3
   const leafCount = 2 ** depth, nodeCount = leafCount - 1;
   const child = (heap: number): BspChild => heap < nodeCount ? { kind: "node", index: heap } : { kind: "leaf", index: heap - nodeCount };
   const plain: Omit<BspNode, "faces">[] = Array.from({ length: nodeCount }, (_, index) => ({ plane: 0, bounds, children: [child(2 * index + 1), child(2 * index + 2)] }));
-  const counting: ProxyHandler<Omit<BspNode, "faces">[]> = { get(target, property, receiver) {
-    const value: unknown = Reflect.get(target, property, receiver);
-    if (typeof property === "string" && /^\d+$/.test(property) && counts !== undefined) counts.reads++;
-    return value;
+  const counting: ProxyHandler<Omit<BspNode, "faces">[]> = { get(target, property) {
+    if (property === "length") return target.length;
+    if (typeof property === "string" && /^\d+$/.test(property)) {
+      if (counts !== undefined) counts.reads++;
+      return target[Number(property)];
+    }
+    return undefined;
   } };
   const nodes = counts === undefined ? plain : new Proxy(plain, counting);
   return { kind: "q3-bsp", format: "ibsp46", entities: "", shaders: [{ name: "test", surfaceFlags: 0, contentFlags: 0 }],
