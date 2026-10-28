@@ -268,6 +268,29 @@ test("range write observers follow aliases and stop after removal or backing rep
   expect(lateCalls).toBe(0);
 });
 
+test("many disjoint write observers stay silent for unrelated writes and report cross-page hits", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+  const base = memory.allocate({ byteLength: 256 * 1024 });
+  const fired: number[] = [];
+  const removes: (() => void)[] = [];
+  // 256 field observers, one 4-byte field per page; writes between them hit nothing.
+  for (let index = 0; index < 256; index++)
+    removes.push(memory.observeWrites(memory.offset(base, BigInt(index * 1024)), 4, () => { fired.push(index); }));
+  for (let index = 0; index < 1000; index++) memory.writeUint32(memory.offset(base, 512n), index);
+  expect(fired).toEqual([]);
+  memory.writeUint32(memory.offset(base, 200n * 1024n), 7);
+  expect(fired).toEqual([200]);
+  const seen: (readonly GuestWrittenRange[])[] = [];
+  const removeWide = memory.observeWrites(memory.offset(base, 4090n), 12, ranges => { seen.push(ranges); });
+  memory.write(memory.offset(base, 4094n), new Uint8Array([1, 2, 3, 4]));
+  expect(seen).toEqual([[{ byteOffset: 4, byteLength: 4 }]]);
+  removeWide();
+  memory.write(memory.offset(base, 4094n), new Uint8Array([5, 6, 7, 8]));
+  expect(seen).toHaveLength(1);
+  for (const remove of removes) remove();
+  expect(memory.hasWriteObservers).toBe(false);
+});
+
 test("mapping locality preserves live code, protection splits, holes and remapped backing", () => {
   const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
   const base = memory.map({ base: 0x10000n, byteLength: 32, permissions: "read-write-execute" });

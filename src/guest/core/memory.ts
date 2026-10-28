@@ -54,6 +54,19 @@ function mappedBytes(mapping: Omit<Mapping, "view" | "active" | "end" | "numeric
     numericBase: mapping.base >= 0n && end <= 0x1fffffffffffffn ? Number(mapping.base) : null, active: true };
 }
 interface Chunk { readonly mapping: Mapping; readonly offset: number; readonly byteLength: number; }
+interface WriteObserver {
+  readonly chunks: readonly Chunk[];
+  readonly notify: (ranges: readonly GuestWrittenRange[]) => void;
+  readonly sequence: number;
+}
+interface WatchedRange {
+  readonly observer: WriteObserver;
+  readonly chunk: number;
+  readonly start: number;
+  readonly end: number;
+  readonly displacement: number;
+}
+const observerPageBytes = 4096;
 function invalidateCode(mapping: Mapping, offset: number, byteLength: number): void {
   if (byteLength === 0) return;
   const changes = mapping.changes, start = mapping.bytes.byteOffset + offset;
@@ -87,7 +100,11 @@ export class SparseGuestMemory implements MappedGuestMemory {
   #nextWorkingMapping = 0;
   // Checked scalar callers capture this offset before any write observer can reenter.
   #lookupOffset = 0;
-  readonly #writeObservers = new Set<{ readonly chunks: readonly Chunk[]; readonly notify: (ranges: readonly GuestWrittenRange[]) => void }>();
+  readonly #writeObservers = new Set<WriteObserver>();
+  // Watched ranges indexed by backing buffer and 4 KiB page so an unrelated
+  // write never scans the observer set.
+  readonly #watchedPages = new Map<ArrayBufferLike, Map<number, Set<WatchedRange>>>();
+  #observerSequence = 0;
 
   static readonly #managed = new WeakSet<MappedGuestMemory>();
   /** Managed memory pins its implementation while retaining ordinary mapping and observer semantics. */
@@ -449,20 +466,40 @@ export class SparseGuestMemory implements MappedGuestMemory {
 
   #notifyWrite(chunks: readonly Chunk[]): undefined {
     if (this.#writeObservers.size === 0) return undefined;
-    const errors: unknown[] = [];
-    for (const observer of [...this.#writeObservers]) {
-      if (!this.#writeObservers.has(observer)) continue;
-      const ranges: GuestWrittenRange[] = []; let displacement = 0;
-      for (const watched of observer.chunks) {
-        for (const written of chunks) {
-          const a = watched.mapping.bytes, b = written.mapping.bytes;
-          const start = a.byteOffset + watched.offset, other = b.byteOffset + written.offset;
-          const first = Math.max(start, other), last = Math.min(start + watched.byteLength, other + written.byteLength);
-          if (a.buffer === b.buffer && first < last) ranges.push({ byteOffset: displacement + first - start, byteLength: last - first });
+    // Collect only observers whose watched pages intersect this write, then
+    // deliver in registration order with ranges in watched-then-written
+    // chunk order, matching a full scan of the observer set.
+    let pending: Map<WriteObserver, { readonly chunk: number; readonly written: number; readonly range: GuestWrittenRange }[]> | undefined;
+    for (let writtenIndex = 0; writtenIndex < chunks.length; writtenIndex++) {
+      const written = chunks[writtenIndex];
+      if (written === undefined) continue;
+      if (written.byteLength === 0) continue;
+      const bytes = written.mapping.bytes, pages = this.#watchedPages.get(bytes.buffer);
+      if (pages === undefined) continue;
+      const other = bytes.byteOffset + written.offset, otherEnd = other + written.byteLength;
+      const firstPage = Math.floor(other / observerPageBytes), lastPage = Math.floor((otherEnd - 1) / observerPageBytes);
+      const seen = firstPage === lastPage ? null : new Set<WatchedRange>();
+      for (let page = firstPage; page <= lastPage; page++) {
+        const ranges = pages.get(page);
+        if (ranges === undefined) continue;
+        for (const watched of ranges) {
+          if (seen !== null) { if (seen.has(watched)) continue; seen.add(watched); }
+          const first = Math.max(watched.start, other), last = Math.min(watched.end, otherEnd);
+          if (first >= last) continue;
+          const range = { byteOffset: watched.displacement + first - watched.start, byteLength: last - first };
+          pending ??= new Map();
+          const list = pending.get(watched.observer);
+          if (list === undefined) pending.set(watched.observer, [{ chunk: watched.chunk, written: writtenIndex, range }]);
+          else list.push({ chunk: watched.chunk, written: writtenIndex, range });
         }
-        displacement += watched.byteLength;
       }
-      if (ranges.length > 0) { try { observer.notify(ranges); } catch (error) { errors.push(error); } }
+    }
+    if (pending === undefined) return undefined;
+    const errors: unknown[] = [];
+    for (const [observer, hits] of [...pending].sort((a, b) => a[0].sequence - b[0].sequence)) {
+      if (!this.#writeObservers.has(observer)) continue;
+      hits.sort((a, b) => a.chunk - b.chunk || a.written - b.written);
+      try { observer.notify(hits.map(hit => hit.range)); } catch (error) { errors.push(error); }
     }
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, "Guest write observers failed");
@@ -470,9 +507,36 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
 
   observeWrites(address: GuestAddress, byteLength: number, afterWrite: (ranges: readonly GuestWrittenRange[]) => void): () => void {
-    const observer = { chunks: this.#chunks(address, byteLength, "read"), notify: afterWrite };
+    const observer: WriteObserver = { chunks: this.#chunks(address, byteLength, "read"), notify: afterWrite, sequence: this.#observerSequence++ };
+    const watched: { readonly buffer: ArrayBufferLike; readonly range: WatchedRange }[] = [];
+    let displacement = 0;
+    for (const [chunk, part] of observer.chunks.entries()) {
+      const start = part.mapping.bytes.byteOffset + part.offset;
+      if (part.byteLength > 0) watched.push({ buffer: part.mapping.bytes.buffer,
+        range: { observer, chunk, start, end: start + part.byteLength, displacement } });
+      displacement += part.byteLength;
+    }
+    for (const { buffer, range } of watched) {
+      let pages = this.#watchedPages.get(buffer);
+      if (pages === undefined) { pages = new Map<number, Set<WatchedRange>>(); this.#watchedPages.set(buffer, pages); }
+      for (let page = Math.floor(range.start / observerPageBytes); page <= Math.floor((range.end - 1) / observerPageBytes); page++) {
+        const ranges = pages.get(page);
+        if (ranges === undefined) pages.set(page, new Set([range])); else ranges.add(range);
+      }
+    }
     this.#writeObservers.add(observer);
-    return () => { this.#writeObservers.delete(observer); };
+    return () => {
+      if (!this.#writeObservers.delete(observer)) return;
+      for (const { buffer, range } of watched) {
+        const pages = this.#watchedPages.get(buffer);
+        if (pages === undefined) continue;
+        for (let page = Math.floor(range.start / observerPageBytes); page <= Math.floor((range.end - 1) / observerPageBytes); page++) {
+          const ranges = pages.get(page);
+          if (ranges !== undefined && ranges.delete(range) && ranges.size === 0) pages.delete(page);
+        }
+        if (pages.size === 0) this.#watchedPages.delete(buffer);
+      }
+    };
   }
 
   readUint8(address: GuestAddress): number { const view = this.#readView(address, 1), offset = this.#lookupOffset; return view.getUint8(offset); }
