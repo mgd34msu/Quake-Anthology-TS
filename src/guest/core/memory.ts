@@ -66,6 +66,7 @@ interface WatchedRange {
   readonly end: number;
   readonly displacement: number;
 }
+interface ObserverHit { readonly chunk: number; readonly written: number; readonly range: GuestWrittenRange; }
 const observerPageBytes = 4096;
 function invalidateCode(mapping: Mapping, offset: number, byteLength: number): void {
   if (byteLength === 0) return;
@@ -469,7 +470,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
     // Collect only observers whose watched pages intersect this write, then
     // deliver in registration order with ranges in watched-then-written
     // chunk order, matching a full scan of the observer set.
-    let pending: Map<WriteObserver, { readonly chunk: number; readonly written: number; readonly range: GuestWrittenRange }[]> | undefined;
+    let pending: Map<WriteObserver, ObserverHit[]> | undefined;
     for (let writtenIndex = 0; writtenIndex < chunks.length; writtenIndex++) {
       const written = chunks[writtenIndex];
       if (written === undefined) continue;
@@ -487,7 +488,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
           const first = Math.max(watched.start, other), last = Math.min(watched.end, otherEnd);
           if (first >= last) continue;
           const range = { byteOffset: watched.displacement + first - watched.start, byteLength: last - first };
-          pending ??= new Map();
+          pending ??= new Map<WriteObserver, ObserverHit[]>();
           const list = pending.get(watched.observer);
           if (list === undefined) pending.set(watched.observer, [{ chunk: watched.chunk, written: writtenIndex, range }]);
           else list.push({ chunk: watched.chunk, written: writtenIndex, range });

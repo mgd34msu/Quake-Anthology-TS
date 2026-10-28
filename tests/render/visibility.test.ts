@@ -18,10 +18,12 @@ function balancedMap(depth: number, row: number, counts?: { reads: number }): Q3
   const leafCount = 2 ** depth, nodeCount = leafCount - 1;
   const child = (heap: number): BspChild => heap < nodeCount ? { kind: "node", index: heap } : { kind: "leaf", index: heap - nodeCount };
   const plain: Omit<BspNode, "faces">[] = Array.from({ length: nodeCount }, (_, index) => ({ plane: 0, bounds, children: [child(2 * index + 1), child(2 * index + 2)] }));
-  const nodes = counts === undefined ? plain : new Proxy(plain, { get(target, property, receiver) {
-    if (typeof property === "string" && /^\d+$/.test(property)) counts.reads++;
-    return Reflect.get(target, property, receiver);
-  } });
+  const counting: ProxyHandler<Omit<BspNode, "faces">[]> = { get(target, property, receiver) {
+    const value: unknown = Reflect.get(target, property, receiver);
+    if (typeof property === "string" && /^\d+$/.test(property) && counts !== undefined) counts.reads++;
+    return value;
+  } };
+  const nodes = counts === undefined ? plain : new Proxy(plain, counting);
   return { kind: "q3-bsp", format: "ibsp46", entities: "", shaders: [{ name: "test", surfaceFlags: 0, contentFlags: 0 }],
     planes: [{ normal: { x: 1, y: 0, z: 0 }, distance: 0, type: 0, signbits: 0 }], nodes,
     leaves: Array.from({ length: leafCount }, (_, index) => ({ cluster: index === leafCount - 1 ? 0 : index === 0 ? 1 : 2,
