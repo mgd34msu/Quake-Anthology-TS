@@ -360,15 +360,19 @@ export class SharedPhysics {
       const trace = this.bodyTrace(actor, initial.origin, end, exclude), current = this.bodies.read(actor.id);
       if (current === null) return trace;
       this.bodies.write(actor, { ...current, origin: trace.end }); this.bodies.link(actor);
+      // Q1 SV_PushEntity links with trigger touching before SV_Impact; Q2
+      // impacts first and may retry the push when the obstacle was removed.
+      const q1 = this.family(actor) === "q1";
+      if (q1 && this.live(actor)) this.touchTriggers(actor);
       if (trace.fraction !== 1) {
         const hit = this.hitActor(trace);
-        this.impact(actor, trace);
-        if (this.family(actor) !== "q1" && hit !== null && !this.options.actors.isLive(hit) && this.live(actor)) {
+        if (this.live(actor)) this.impact(actor, trace);
+        if (!q1 && hit !== null && !this.options.actors.isLive(hit) && this.live(actor)) {
           const changed = this.bodies.read(actor.id);
           if (changed !== null) { this.bodies.write(actor, { ...changed, origin: initial.origin }); this.bodies.link(actor); continue; }
         }
       }
-      if (this.live(actor)) this.touchTriggers(actor);
+      if (!q1 && this.live(actor)) this.touchTriggers(actor);
       return trace;
     }
   }

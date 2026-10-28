@@ -248,6 +248,29 @@ test("Q2 push retries after an impact removes the obstacle and triggers observe 
   expect(seen).toEqual([10]);
 });
 
+test("Q1 push touches triggers before impact, rechecking mover liveness after each callback", () => {
+  const releaseModes: readonly ("impact" | "trigger")[] = ["impact", "trigger"];
+  for (const releaseOn of releaseModes) {
+    const s = setup("q1"), mover = s.actor("test:flyer", zero, "fly"), blocker = s.actor("test:blocker", { x: 5, y: 0, z: 0 }, "stationary");
+    const trigger = s.actor("test:trigger", { x: 3, y: 0, z: 0 }, "stationary");
+    s.physics.setSolid(trigger, "trigger", null, "q1");
+    const log: string[] = [];
+    s.callbacks.bind(mover, { think: null, use: null, pain: null, die: null, touch: contact => {
+      if (contact.other.equals(blocker.id)) { log.push("impact"); if (releaseOn === "impact") s.actors.release(mover); }
+      return undefined;
+    } });
+    s.callbacks.bind(trigger, { think: null, use: null, pain: null, die: null, touch: () => {
+      log.push("trigger"); if (releaseOn === "trigger") s.actors.release(mover); return undefined;
+    } });
+    s.physics.setMotion({ actor: mover, kind: "fly", velocity: { x: 100, y: 0, z: 0 }, angularVelocity: zero, gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null });
+    const body = s.physics.bodies.read(mover.id); if (body === null) throw new Error("Missing flyer body");
+    s.physics.bodies.write(mover, { ...body, velocity: { x: 100, y: 0, z: 0 } });
+    s.physics.step(mover, 0.1);
+    expect(log).toEqual(releaseOn === "impact" ? ["trigger", "impact"] : ["trigger"]);
+    s.actors.close();
+  }
+});
+
 test("Q1 blocked callback sees earlier riders moved and rollback retains callback velocity", () => {
   const observed: number[] = [];
   let pushed: OwnedActor | null = null;
