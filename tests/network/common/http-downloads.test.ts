@@ -74,9 +74,9 @@ test('gzip whole-file responses publish decoded bytes instead of failing the com
   const payload = new TextEncoder().encode('quake asset payload '.repeat(85));
   const compressed = Bun.gzipSync(payload);
   expect(compressed.length).toBeLessThan(payload.length);
-  let encoding: string | null = null;
+  const encodings: (string | null)[] = [];
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
-    encoding = req.headers.get('accept-encoding');
+    encodings.push(req.headers.get('accept-encoding'));
     // Deliberately ignore the identity request, as a misconfigured mirror can.
     return new Response(compressed, { headers: { 'Content-Encoding': 'gzip', 'Content-Length': String(compressed.length) } });
   } });
@@ -84,7 +84,7 @@ test('gzip whole-file responses publish decoded bytes instead of failing the com
   try {
     const result = await queue.enqueue({ ...request(server.port ?? 0, 'asset'), expected: { kind: 'protocol-completion', maximumBytes: 4096 } });
     expect(result.kind).toBe('downloaded');
-    expect(encoding).toBe('identity');
+    expect(encodings).toEqual(['identity']);
     expect(readFileSync(join(root, 'asset'))).toEqual(Buffer.from(payload));
   } finally { queue.cancel(); await server.stop(true); rmSync(root, { recursive: true, force: true }); }
 });
