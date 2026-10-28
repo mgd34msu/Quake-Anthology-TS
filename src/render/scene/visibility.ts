@@ -82,6 +82,50 @@ export interface VisibleWorld {
   readonly surfaceDlightMasks: ReadonlyMap<number, number>;
 }
 
+interface AncestorCache {
+  readonly pvsBuffer: ArrayBufferLike | null;
+  readonly pvsOffset: number;
+  readonly pvsLength: number;
+  readonly fromCluster: number;
+  readonly areas: readonly number[] | null;
+  readonly marks: Uint8Array;
+}
+interface AncestorIndex {
+  readonly nodeParents: Int32Array;
+  readonly leafParents: Int32Array;
+  /** Shared or invalid children make single-parent marks unsafe. */
+  readonly unsafe: boolean;
+  cache: AncestorCache | null;
+}
+const ancestorIndexes = new WeakMap<DecodedWorld, AncestorIndex>();
+function ancestorIndex(map: DecodedWorld): AncestorIndex {
+  let index = ancestorIndexes.get(map);
+  if (index !== undefined) return index;
+  const nodeParents = new Int32Array(map.nodes.length).fill(-1), leafParents = new Int32Array(map.leaves.length).fill(-1);
+  const seenNodes = new Uint8Array(map.nodes.length), seenLeaves = new Uint8Array(map.leaves.length);
+  let unsafe = map.nodes.length === 0;
+  if (!unsafe) {
+    seenNodes[0] = 1;
+    const stack: number[] = [0];
+    while (stack.length !== 0 && !unsafe) {
+      const current = stack.pop() ?? 0, node = map.nodes[current];
+      if (node === undefined) { unsafe = true; break; }
+      for (const child of node.children) {
+        if (child.kind === "node") {
+          if (child.index < 0 || child.index >= map.nodes.length || seenNodes[child.index] === 1) { unsafe = true; break; }
+          seenNodes[child.index] = 1; nodeParents[child.index] = current; stack.push(child.index);
+        } else {
+          if (child.index < 0 || child.index >= map.leaves.length || seenLeaves[child.index] === 1) { unsafe = true; break; }
+          seenLeaves[child.index] = 1; leafParents[child.index] = current;
+        }
+      }
+    }
+  }
+  index = { nodeParents, leafParents, unsafe, cache: null };
+  ancestorIndexes.set(map, index);
+  return index;
+}
+
 function remainingFrustumPlanes(bounds: Bounds, planes: readonly Plane[], bits: number): number | null {
   for (const [index, plane] of planes.entries()) {
     const bit = 1 << index;
@@ -148,6 +192,32 @@ export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: Wo
     if (map.kind === "q3-bsp" && fromCluster < 0) return leaf.cluster !== -1;
     return pvs === null || leaf.cluster >= 0 && ((pvs[leaf.cluster >> 3] ?? 0) & (1 << (leaf.cluster & 7))) !== 0;
   };
+  // Nodes with no PVS/area-visible descendant leaf can be skipped whole:
+  // frustum work on their subtrees is wasted. Marks are cached per map and
+  // invalidated by PVS bits, camera cluster, or visible-area contents.
+  let marks: Uint8Array | null = null;
+  if (map.nodes.length !== 0) {
+    const index = ancestorIndex(map);
+    if (!index.unsafe) {
+      const areas = options.visibleAreas === undefined || options.visibleAreas === null ? null : [...options.visibleAreas];
+      const cached = index.cache;
+      const hit = cached !== null && cached.fromCluster === fromCluster
+        && cached.pvsBuffer === (pvs?.buffer ?? null) && cached.pvsOffset === (pvs?.byteOffset ?? 0)
+        && cached.pvsLength === (pvs?.byteLength ?? 0)
+        && (cached.areas === null && areas === null || cached.areas !== null && areas !== null
+          && cached.areas.length === areas.length && cached.areas.every((area, position) => area === areas[position]));
+      if (hit) marks = cached.marks;
+      else {
+        marks = new Uint8Array(map.nodes.length);
+        for (let leafIndex = 0; leafIndex < map.leaves.length; leafIndex++) {
+          if (!leafVisible(leafIndex)) continue;
+          let parent = index.leafParents[leafIndex] ?? -1;
+          while (parent >= 0 && marks[parent] === 0) { marks[parent] = 1; parent = index.nodeParents[parent] ?? -1; }
+        }
+        index.cache = { pvsBuffer: pvs?.buffer ?? null, pvsOffset: pvs?.byteOffset ?? 0, pvsLength: pvs?.byteLength ?? 0, fromCluster, areas, marks };
+      }
+    }
+  }
   const lights = options.q3Lights ?? [], surfaceDlightMasks = new Map<number, number>();
   if (lights.length > 32) throw new RangeError("Q3 world lighting supports the source 32-light mask");
   const initialMask = lights.length === 32 ? -1 : (1 << lights.length) - 1;
@@ -161,6 +231,7 @@ export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: Wo
   while (stackChild.length !== 0) {
     const encoded = stackChild.pop() ?? 0, mask = stackMask.pop() ?? 0, itemPlanes = stackPlanes.pop() ?? 0;
     if (encoded >= 0) {
+      if (marks !== null && encoded < marks.length && marks[encoded] === 0) continue;
       const node = map.nodes[encoded];
       if (node === undefined) throw new RangeError(`World visibility index ${encoded} outside ${map.nodes.length}`);
       const remaining = map.kind === "q3-bsp" ? remainingFrustumPlanes(node.bounds, planes, itemPlanes)
