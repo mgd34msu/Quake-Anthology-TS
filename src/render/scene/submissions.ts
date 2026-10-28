@@ -217,34 +217,92 @@ function finishBuilder(builder: BatchBuilder): DrawBatch {
     ? { ...builder.template, lighting, vertices: builder.vertices, indices: builder.indices }
     : { ...builder.template, lighting, vertices: builder.vertices, indices: builder.indices };
 }
+interface MergeSignature {
+  readonly indices: DrawBatch["indices"];
+  readonly worldPositions: readonly unknown[] | null;
+  readonly normals: readonly unknown[] | null;
+}
+interface MergeNode {
+  readonly next: WeakMap<object, MergeNode>;
+  entry?: { readonly template: DrawBatch; readonly signature: readonly MergeSignature[]; readonly merged: DrawBatch };
+}
+/** Merged geometry retained by constituent array identity, like the GL pack
+ * cache: a repeated run of the same immutable vertex/index (and lighting)
+ * arrays reuses the previously merged batch, whose own arrays then keep a
+ * stable identity for packing instead of being rebuilt every frame. */
+const mergeRoots = new WeakMap<object, MergeNode>();
+function mergeSignature(batch: DrawBatch): MergeSignature {
+  if (batch.lighting.kind === "vertex") return { indices: batch.indices, worldPositions: null, normals: null };
+  return { indices: batch.indices, worldPositions: batch.lighting.worldPositions,
+    normals: batch.lighting.kind === "q2-world" ? batch.lighting.normals : null };
+}
+function retainedMerge(run: readonly DrawBatch[]): DrawBatch {
+  const build = (): DrawBatch => {
+    const first = run[0];
+    if (first === undefined) throw new RangeError("Cannot merge an empty draw run");
+    const builder = startBuilder(first);
+    for (let index = 1; index < run.length; index++) {
+      const batch = run[index];
+      if (batch !== undefined) extendBuilder(builder, batch);
+    }
+    return finishBuilder(builder);
+  };
+  let vertices = 0;
+  for (const batch of run) vertices += batch.vertices.length;
+  if (run.length < 2 || vertices < 64) return build();
+  const root = run[0];
+  if (root === undefined) return build();
+  let node: MergeNode = mergeRoots.get(root.vertices) ?? { next: new WeakMap() };
+  mergeRoots.set(root.vertices, node);
+  for (let index = 1; index < run.length; index++) {
+    const batch = run[index];
+    if (batch === undefined) break;
+    const existing: MergeNode | undefined = node.next.get(batch.vertices);
+    const next: MergeNode = existing ?? { next: new WeakMap() };
+    if (existing === undefined) node.next.set(batch.vertices, next);
+    node = next;
+  }
+  const entry = node.entry, template = run[0];
+  if (entry !== undefined && template !== undefined && mergeable(entry.template, template)) {
+    let valid = entry.signature.length === run.length;
+    for (let index = 0; valid && index < run.length; index++) {
+      const batch = run[index], part = entry.signature[index];
+      if (batch === undefined || part === undefined || part.indices !== batch.indices) { valid = false; break; }
+      const lighting = batch.lighting;
+      valid = lighting.kind === "vertex" ? part.worldPositions === null && part.normals === null
+        : part.worldPositions === lighting.worldPositions
+          && part.normals === (lighting.kind === "q2-world" ? lighting.normals : null);
+    }
+    if (valid) return entry.merged;
+  }
+  const merged = build();
+  if (template !== undefined) node.entry = { template, signature: run.map(mergeSignature), merged };
+  return merged;
+}
+
 /**
  * Adjacent draws with identical state render identically when concatenated
  * (primitive order is preserved), so merge them: static world surfaces share
  * materials heavily, and each unmerged batch pays full pack + bind costs.
- * Merged runs accumulate into a builder's fresh arrays instead of re-copying
- * the accumulated geometry on every merge.
+ * Runs of mergeable batches keep their merged geometry across frames when
+ * the constituent arrays repeat (see retainedMerge).
  */
 export function mergeDrawOperations(input: readonly RenderOperation[]): readonly RenderOperation[] {
   const result: RenderOperation[] = [];
   let pending: DrawBatch[] = [];
-  let builder: BatchBuilder | null = null;
-  const flushBuilder = (): void => { if (builder !== null) { pending.push(finishBuilder(builder)); builder = null; } };
-  const flush = (): void => { flushBuilder(); if (pending.length !== 0) { result.push({ kind: "draw", batches: pending }); pending = []; } };
+  let run: DrawBatch[] = [];
+  const flushRun = (): void => {
+    if (run.length === 1) { const only = run[0]; if (only !== undefined) pending.push(only); }
+    else if (run.length > 1) pending.push(retainedMerge(run));
+    run = [];
+  };
+  const flush = (): void => { flushRun(); if (pending.length !== 0) { result.push({ kind: "draw", batches: pending }); pending = []; } };
   for (const operation of input) {
     if (operation.kind !== "draw") { flush(); result.push(operation); continue; }
     for (const batch of operation.batches) {
-      if (builder !== null) {
-        if (mergeable(builder.template, batch)) { extendBuilder(builder, batch); continue; }
-        flushBuilder();
-      }
-      const last = pending[pending.length - 1];
-      if (last !== undefined && mergeable(last, batch)) {
-        pending.pop();
-        builder = startBuilder(last);
-        extendBuilder(builder, batch);
-        continue;
-      }
-      pending.push(batch);
+      const template = run[0];
+      if (template !== undefined && !mergeable(template, batch)) flushRun();
+      run.push(batch);
     }
   }
   flush();
