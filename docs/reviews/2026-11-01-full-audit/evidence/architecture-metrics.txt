@@ -1,0 +1,857 @@
+## Reachability from runtime entries
+src ts files=2104 reachable=2040 unreachable=64
+unreachable lines=4119
+  src/guest/elf/parse.ts lines=392 testImports=0
+  src/guest/runtime/system-v/runtime.ts lines=263 testImports=0
+  src/guest/runtime/system-v/stdio.ts lines=233 testImports=0
+  src/guest/runtime/system-v/locale.ts lines=227 testImports=0
+  src/guest/elf/relocate.ts lines=217 testImports=0
+  src/guest/elf/index.ts lines=208 testImports=3
+  src/guest/runtime/system-v/iostream.ts lines=206 testImports=0
+  src/guest/runtime/system-v/libc.ts lines=176 testImports=0
+  src/guest/elf/unwind.ts lines=163 testImports=0
+  src/ui/common/legacy/input.ts lines=136 testImports=1
+  src/content/q2/rerelease/monsters/generate-tables.ts lines=124 testImports=0
+  src/network/common/commands.ts lines=120 testImports=2
+  src/compat/q3/native/module.ts lines=101 testImports=0
+  src/network/q1/prediction.ts lines=96 testImports=0
+  src/formats/q3-model/animation.ts lines=94 testImports=0
+  src/bots/behavior/rerelease/q2-exports.ts lines=93 testImports=2
+  src/compat/q3/native/imports.ts lines=92 testImports=0
+  src/guest/runtime/system-v/cxx-data.ts lines=82 testImports=0
+  src/compat/q2/rerelease/cgame.ts lines=81 testImports=0
+  src/network/services/rank-codec.ts lines=81 testImports=0
+  src/formats/q3-model/lod.ts lines=76 testImports=0
+  src/compat/qvm/raw-entities.ts lines=58 testImports=0
+  src/network/common/fragments.ts lines=57 testImports=2
+  src/compat/q3/native/syscall.ts lines=42 testImports=0
+  src/media/roq-presentation.ts lines=39 testImports=0
+  src/network/common/loopback.ts lines=39 testImports=9
+  src/network/q3/rcon.ts lines=37 testImports=0
+  src/guest/runtime/system-v/cxx.ts lines=36 testImports=0
+  src/content/q1/foundation/index.ts lines=35 testImports=9
+  src/media/transitions.ts lines=33 testImports=1
+  src/network/q3/index.ts lines=33 testImports=0
+  src/platform/runtime.ts lines=33 testImports=1
+  src/core/diagnostics.ts lines=31 testImports=0
+  src/content/q3/base/index.ts lines=28 testImports=0
+  src/content/q3/presentation/index.ts lines=28 testImports=0
+  src/compat/qvm/index.ts lines=21 testImports=10
+  src/console/log.ts lines=21 testImports=0
+  src/content/q2/foundation/index.ts lines=21 testImports=0
+  src/materials/index.ts lines=20 testImports=0
+  src/media/index.ts lines=19 testImports=0
+  src/contracts/index.ts lines=16 testImports=0
+  src/input/index.ts lines=16 testImports=0
+  src/network/q1/index.ts lines=16 testImports=1
+  src/bots/behavior/rerelease/index.ts lines=15 testImports=0
+  src/content/q1/missionpacks/index.ts lines=15 testImports=8
+  src/content/q3/team-arena/index.ts lines=15 testImports=0
+  src/compat/q2/rerelease/index.ts lines=14 testImports=6
+  src/app/bootstrap/player-service-status.ts lines=12 testImports=0
+  src/text/index.ts lines=12 testImports=0
+  src/platform/index.ts lines=11 testImports=1
+  src/network/common/index.ts lines=10 testImports=0
+  src/app/bootstrap/network/index.ts lines=9 testImports=2
+  src/formats/q3-model/index.ts lines=9 testImports=6
+  src/app/bootstrap/index.ts lines=8 testImports=0
+  src/console/index.ts lines=8 testImports=0
+  src/guest/runtime/system-v/index.ts lines=8 testImports=4
+  src/network/services/index.ts lines=7 testImports=0
+  src/render/scene/particles/index.ts lines=5 testImports=2
+  src/types/png.d.ts lines=5 testImports=0
+  src/compat/q3/native/index.ts lines=4 testImports=1
+  src/content/q2/multiplayer/lmctf/index.ts lines=4 testImports=0
+  src/render/commands/index.ts lines=3 testImports=0
+  src/settings/index.ts lines=3 testImports=0
+  src/content/q3/base/shared/slide-move.ts lines=2 testImports=0
+
+## Exports never imported anywhere (excluding star-imported modules): 1816
+  src/app/bootstrap/addon-library.ts: AddonLibraryOptions
+  src/app/bootstrap/application-tools.ts: ApplicationToolServices
+  src/app/bootstrap/audio/q2-events.ts: Q2EventSound
+  src/app/bootstrap/authored-start.ts: AuthoredCampaignStart
+  src/app/bootstrap/base-arena-progression.ts: ArenaProgressionCatalog
+  src/app/bootstrap/base-arena-progression.ts: ArenaAward
+  src/app/bootstrap/base-arena-selection.ts: ArenaSelectionRow
+  src/app/bootstrap/campaign-unit.ts: CampaignUnitVisit
+  src/app/bootstrap/capture.ts: ApplicationCaptureServices
+  src/app/bootstrap/character-turntable.ts: CharacterTurntableScene
+  src/app/bootstrap/character-turntable.ts: CharacterTurntableOptions
+  src/app/bootstrap/client-bootstrap.ts: ClientBootstrapSeat
+  src/app/bootstrap/client-bootstrap.ts: ClientInputPublication
+  src/app/bootstrap/component-bodies.ts: BodyMaterial
+  src/app/bootstrap/console.ts: ApplicationConsoleRoutingOptions
+  src/app/bootstrap/demo-commands.ts: ClientDemoCommandHost
+  src/app/bootstrap/demo-library.ts: DemoLibraryEntry
+  src/app/bootstrap/demo-library.ts: DemoLibraryMounts
+  src/app/bootstrap/demo-recording-commands.ts: DemoRecordingHost
+  src/app/bootstrap/demo-recording.ts: DemoRecordingIdentity
+  src/app/bootstrap/diagnostic-tools.ts: DiagnosticToolServices
+  src/app/bootstrap/effects.ts: SourceEffectSound
+  src/app/bootstrap/effects/q2-muzzle.ts: MonsterMuzzle
+  src/app/bootstrap/effects/q2-muzzle.ts: q2MonsterMuzzles
+  src/app/bootstrap/frame-time.ts: FrameTimeControls
+  src/app/bootstrap/index.ts: applicationHelp (no local use either)
+  src/app/bootstrap/index.ts: mapResourcePath (no local use either)
+  src/app/bootstrap/index.ts: parseApplicationCommand (no local use either)
+  src/app/bootstrap/index.ts: ApplicationCommand (no local use either)
+  src/app/bootstrap/index.ts: ApplicationOptions (no local use either)
+  src/app/bootstrap/index.ts: applicationPreset (no local use either)
+  src/app/bootstrap/index.ts: loadApplicationContent (no local use either)
+  src/app/bootstrap/index.ts: LoadedApplicationContent (no local use either)
+  src/app/bootstrap/index.ts: ApplicationWorld (no local use either)
+  src/app/bootstrap/index.ts: NativeRenderer (no local use either)
+  src/app/bootstrap/index.ts: Application (no local use either)
+  src/app/bootstrap/index.ts: openApplication (no local use either)
+  src/app/bootstrap/index.ts: ApplicationHost (no local use either)
+  src/app/bootstrap/input.ts: Q3CommandSelection
+  src/app/bootstrap/local-lobby.ts: LocalLobbyTransitions
+  src/app/bootstrap/local-seat-change.ts: LocalSeatIdentity
+  src/app/bootstrap/local-seat-change.ts: PreparedLocalSeatChange
+  src/app/bootstrap/match-modes.ts: MatchModeSelection
+  src/app/bootstrap/mod-presentation.ts: ComponentPresentationMediaRequest
+  src/app/bootstrap/mod-presentations.ts: ComponentClientCommandTarget
+  src/app/bootstrap/network/client-download-policy.ts: ClientDownloadCategory
+  src/app/bootstrap/network/q1-demo.ts: Q1DemoFrame
+  src/app/bootstrap/network/q1-demo.ts: Q1DemoEnd
+  src/app/bootstrap/network/q1-demo.ts: Q1DemoProgress
+  src/app/bootstrap/network/q2-client-receiver.ts: Q2ClientReceiverSource
+  src/app/bootstrap/network/q2-demo.ts: Q2PlaybackHeader
+  src/app/bootstrap/network/q2-demo.ts: Q2DemoAdvance
+  src/app/bootstrap/network/q2-downloads.ts: Q2DownloadPreparation
+  src/app/bootstrap/network/q2-service-presentation.ts: q2ServicePlayerInfo
+  src/app/bootstrap/network/q3-client-downloads.ts: Q3ApplicationDownloadBindings
+  src/app/bootstrap/network/q3-demo.ts: Q3DemoFrame
+  src/app/bootstrap/network/qw-camera.ts: QwCameraTrace
+  src/app/bootstrap/network/qw-camera.ts: QwCameraFrame
+  src/app/bootstrap/network/qw-camera.ts: QwCameraView
+  src/app/bootstrap/network/qw-client.ts: QwClientNetworkOptions
+  src/app/bootstrap/network/qw-downloads.ts: QwDownloadOptions
+  src/app/bootstrap/network/recorded-source.ts: DemoTiming
+  src/app/bootstrap/network/remote-qw.ts: QwRemotePresentationOptions
+  src/app/bootstrap/network/transport.ts: ApplicationNetworkFamily
+  src/app/bootstrap/network/transport.ts: bunApplicationTransports
+  src/app/bootstrap/network/unified-client.ts: UnifiedClientOptions
+  src/app/bootstrap/network/unified-component-consumer.ts: UnifiedComponentConsumerOptions
+  src/app/bootstrap/network/unified-components.ts: UnifiedComponentIdentity
+  src/app/bootstrap/network/unified-content.ts: UnifiedMapSidecar
+  src/app/bootstrap/network/unified-content.ts: UnifiedCompositionIdentity
+  src/app/bootstrap/network/unified-control.ts: UnifiedActorReference
+  src/app/bootstrap/network/unified-control.ts: UnifiedInputBatch
+  src/app/bootstrap/network/unified-control.ts: UnifiedHandshake
+  src/app/bootstrap/network/unified-native-consumer.ts: UnifiedNativeConsumerOptions
+  src/app/bootstrap/network/unified-server.ts: UnifiedServerOptions
+  src/app/bootstrap/player-service-status.ts: PlayerServiceStatus
+  src/app/bootstrap/player-service-status.ts: playerServiceStatus (no local use either)
+  src/app/bootstrap/q1-client-settings.ts: Q1ChaseSettings
+  src/app/bootstrap/q2-console.ts: LMCTF_CONSOLE_NAMES
+  src/app/bootstrap/q2-console.ts: ApplicationQ2ConsoleOptions
+  src/app/bootstrap/q2-native-hud.ts: NativeQ2HudRendering
+  src/app/bootstrap/q3-client.ts: ApplicationQ3ClientOptions
+  src/app/bootstrap/q3-client.ts: QvmVideoReopenOptions
+  src/app/bootstrap/q3-client.ts: ApplicationQ3LocalRound
+  src/app/bootstrap/q3-client/client-state.ts: LocalQ3ClientBindings
+  src/app/bootstrap/q3-client/qvm.ts: ApplicationQvmClientOptions
+  src/app/bootstrap/q3-client/scene.ts: Q3SceneRenderOptions
+  src/app/bootstrap/q3-client/status.ts: effectiveStatusCvar
+  src/app/bootstrap/q3-client/status.ts: cgameStatusCvars
+  src/app/bootstrap/q3-common-cvars.ts: q3ServerCvarDefinitions
+  src/app/bootstrap/q3-common-cvars.ts: q3ServerCvarNames (no local use either)
+  src/app/bootstrap/q3-rankings.ts: Q3RankingHost
+  src/app/bootstrap/qvm-grapple-selection.ts: QvmGrappleSelection
+  src/app/bootstrap/remote-seat-source.ts: RemoteSeatSourceHooks
+  src/app/bootstrap/remote-seat-source.ts: RemoteSeatSourceOptions
+  src/app/bootstrap/remote-seat-view.ts: RemoteSeatViewOptions
+  src/app/bootstrap/remote-seats.ts: RemoteSeatServices
+  src/app/bootstrap/remote-seats.ts: prepareRemoteSeatChannels (no local use either)
+  src/app/bootstrap/rerelease-presentation.ts: RereleasePresentationSeat
+  src/app/bootstrap/rerelease-presentation.ts: RereleaseSkyView
+  src/app/bootstrap/rerelease-presentation.ts: q2PlayerNameTokens
+  src/app/bootstrap/rerelease-presentation/fog.ts: q2FogFromSource
+  src/app/bootstrap/selected-q3-presentation.ts: SelectedQ3Presentation
+  src/app/bootstrap/selected-q3-presentation.ts: SelectedQ3PresentationOptions
+  src/app/bootstrap/selected-q3-presentation.ts: ApplicationSelectedQ3Presentation
+  src/app/bootstrap/server-administration.ts: SourceAdministrationOptions
+  src/app/bootstrap/server-browser-cache.ts: Q3BrowserCache
+  src/app/bootstrap/simulation/actor-execution.ts: ActorExecutionFrame
+  src/app/bootstrap/simulation/arsenal/q1.ts: Q1SelectedArsenalOptions
+  src/app/bootstrap/simulation/arsenal/q2.ts: Q2SelectedWeaponTurnState
+  src/app/bootstrap/simulation/arsenal/q2.ts: Q2SelectedArsenalOptions
+  src/app/bootstrap/simulation/arsenal/q3-source-legacy.ts: Q3WeaponStatistics
+  src/app/bootstrap/simulation/arsenal/q3-source-legacy.ts: Q3ProjectileState
+  src/app/bootstrap/simulation/arsenal/q3-source-legacy.ts: readQ3ProjectileStates
+  src/app/bootstrap/simulation/arsenal/q3-source-legacy.ts: readQ3WeaponStatistics
+  src/app/bootstrap/simulation/arsenal/q3-source.ts: Q3SelectedClientPose
+  src/app/bootstrap/simulation/arsenal/q3-source.ts: Q3SelectedEquipmentState
+  src/app/bootstrap/simulation/arsenal/q3.ts: Q3SelectedArsenalOptions
+  src/app/bootstrap/simulation/bot-knowledge-checkpoint.ts: BotKnowledgeCheckpoint
+  src/app/bootstrap/simulation/bot-rerelease-world.ts: RereleaseWorldOptions
+  src/app/bootstrap/simulation/bot-rerelease.ts: RereleasePopulationCheckpoint (no local use either)
+  src/app/bootstrap/simulation/bot-rerelease.ts: ApplicationRereleaseBots
+  src/app/bootstrap/simulation/classic-guest-source.ts: ClassicGuestSourceOptions
+  src/app/bootstrap/simulation/classic-guest-world.ts: ClassicGuestWorldOptions
+  src/app/bootstrap/simulation/dropped-pickups.ts: DroppedPickupCargo
+  src/app/bootstrap/simulation/dropped-pickups.ts: DroppedPickupSlot
+  src/app/bootstrap/simulation/grapple-runtime.ts: GrappleSource
+  src/app/bootstrap/simulation/grapple-runtime.ts: GrappleWeaponAnimation
+  src/app/bootstrap/simulation/guest-monsters.ts: GuestMonsterReplacement
+  src/app/bootstrap/simulation/guest-monsters.ts: GuestMonsterKept
+  src/app/bootstrap/simulation/guest-monsters.ts: filterEntityText (no local use either)
+  src/app/bootstrap/simulation/monster-checkpoint.ts: MonsterSourceCheckpoint
+  src/app/bootstrap/simulation/monster-runtime.ts: SelectedMonsterBehavior
+  src/app/bootstrap/simulation/native-mod-host.ts: NativeModHostOptions
+  src/app/bootstrap/simulation/native-mod-presentation.ts: NativeModAppearance
+  src/app/bootstrap/simulation/native-mod-presentation.ts: NativeModPresentationSource
+  src/app/bootstrap/simulation/native-mod.ts: PrepareNativeModOptions
+  src/app/bootstrap/simulation/native-mod.ts: prepareNativeMod
+  src/app/bootstrap/simulation/native-q2-rerelease-save.ts: Q2RereleaseNativeIdentity
+  src/app/bootstrap/simulation/native-q2-rerelease-save.ts: Q2RereleaseLevelState
+  src/app/bootstrap/simulation/native-q2-travel.ts: ClassicNativeQ2Travel
+  src/app/bootstrap/simulation/native-q2-travel.ts: RereleaseNativeQ2Travel
+  src/app/bootstrap/simulation/network-q3.ts: Q3ApplicationServerBindingOptions
+  src/app/bootstrap/simulation/network-q3.ts: Q3ApplicationServerAuthority
+  src/app/bootstrap/simulation/network-qw.ts: QwApplicationServerBindingOptions
+  src/app/bootstrap/simulation/new-toss.ts: Q2NewTossServices
+  src/app/bootstrap/simulation/player-checkpoint.ts: saveHit
+  src/app/bootstrap/simulation/player-checkpoint.ts: readHit
+  src/app/bootstrap/simulation/player-checkpoint.ts: readAnimation
+  src/app/bootstrap/simulation/players.ts: PlayerMovementHost
+
+## Exports imported only by tests: 235
+  src/app/bootstrap/audio/music.ts: q1MusicFallback
+  src/app/bootstrap/base-arena-catalog.ts: parseBaseArenaCatalog
+  src/app/bootstrap/character-turntable.ts: CharacterTurntableRequest
+  src/app/bootstrap/character-turntable.ts: loadCharacterTurntableScene
+  src/app/bootstrap/character-turntable.ts: renderCharacterTurntable
+  src/app/bootstrap/demo-commands.ts: DemoClientState
+  src/app/bootstrap/demo-recording.ts: recordingPath
+  src/app/bootstrap/frame-time.ts: FrameTimeCvarMirror
+  src/app/bootstrap/model-loader.ts: ApplicationModelProvider
+  src/app/bootstrap/model-loader.ts: LoadedApplicationModel
+  src/app/bootstrap/network/transport.ts: ApplicationUdpSocket
+  src/app/bootstrap/network/transport.ts: ApplicationTransportCapabilities
+  src/app/bootstrap/network/transport.ts: parseIpxRemote
+  src/app/bootstrap/network/unified-content.ts: createUnifiedComposition
+  src/app/bootstrap/network/unified-content.ts: encodeUnifiedComposition
+  src/app/bootstrap/network/unified-content.ts: decodeUnifiedComposition
+  src/app/bootstrap/network/unified-content.ts: resolveUnifiedComposition
+  src/app/bootstrap/network/unified-frame-codec.ts: UnifiedFrameDecoder
+  src/app/bootstrap/network/unified-frame-codec.ts: decodeUnifiedFrame
+  src/app/bootstrap/precache.ts: characterResourceRequests
+  src/app/bootstrap/precache.ts: nativeQ2MonsterResources
+  src/app/bootstrap/precache.ts: applicationResourceRequests
+  src/app/bootstrap/presentation-scene.ts: seatModelVisible
+  src/app/bootstrap/q1-wheel.ts: q1WheelSlotItem
+  src/app/bootstrap/q2-console.ts: bindLmctfConsoleRules
+  src/app/bootstrap/q2-match-reports.ts: classicMatchScore
+  src/app/bootstrap/q2-match-reports.ts: rereleaseMatchScore
+  src/app/bootstrap/q3-client/qvm-scalars.ts: qvmClientInputSyscall
+  src/app/bootstrap/q3-client/qvm.ts: qvmClientCommands
+  src/app/bootstrap/simulation/arsenal/q3-source.ts: Q3SelectedSourceHost
+  src/app/bootstrap/simulation/classic-guest-world.ts: ClassicGuestRevisit
+  src/app/bootstrap/simulation/classic-guest-world.ts: classicGuestUserCommand
+  src/app/bootstrap/simulation/native-q2-rerelease-save.ts: Q2RereleaseNativeSave
+  src/app/bootstrap/simulation/network-q2-rerelease-native.ts: createRereleaseNativeMessageTranscoder
+  src/app/bootstrap/simulation/network-unified.ts: unifiedPresentationFor
+  src/app/bootstrap/simulation/network-unified.ts: unifiedModelPresentations
+  src/app/bootstrap/simulation/prediction.ts: MovementPredictionOptions
+  src/app/bootstrap/simulation/prediction.ts: copyPredictionSnapshot
+  src/app/bootstrap/simulation/prediction.ts: predictMovementSequence
+  src/app/bootstrap/simulation/prediction/qw-source-state.ts: qwPredictionSnapshot
+  src/app/bootstrap/simulation/q2-rerelease-slide.ts: Q2RereleaseFlyMoveServices
+  src/app/bootstrap/simulation/q3/index.ts: Q3SourceEvent
+  src/app/bootstrap/simulation/quakec-mod.ts: prepareQuakeCMod
+  src/app/bootstrap/simulation/qvm-mod.ts: prepareQvmMod
+  src/app/bootstrap/simulation/rerelease-weapon-behavior.ts: retireRereleaseWeaponActor
+  src/app/bootstrap/simulation/runtime.ts: orderedActorTurns
+  src/app/bootstrap/simulation/weapon-slot-projection.ts: EquipmentWeaponProjection
+  src/app/bootstrap/simulation/weapon-slot-projection.ts: PrimaryWeaponProjection
+  src/app/bootstrap/team-arena-overrides.ts: decodeTeamArenaOverrides
+  src/app/bootstrap/team-arena-scores.ts: TeamArenaScoreInput
+  src/app/bootstrap/team-arena-scores.ts: calculateTeamArenaScore
+  src/app/bootstrap/team-arena-scores.ts: teamArenaScorePath
+  src/app/bootstrap/team-arena-scores.ts: encodeTeamArenaScore
+  src/app/bootstrap/team-arena-scores.ts: decodeTeamArenaScore
+  src/app/bootstrap/team-arena-skirmish.ts: parseTeamArenaCampaign
+  src/app/bootstrap/team-arena-skirmish.ts: nextTeamArenaCursor
+  src/app/bootstrap/team-arena-skirmish.ts: currentTeamArenaCursor
+  src/app/bootstrap/team-arena-skirmish.ts: readTeamArenaCampaign
+  src/app/bootstrap/weapon-view.ts: ViewWeaponEntity
+  src/audio/geometry.ts: AudioGeometryTrace
+  src/audio/index.ts: AudioMixer
+  src/audio/index.ts: decodeWav
+  src/audio/index.ts: decodeQuakeWav
+  src/audio/index.ts: PcmSound
+  src/audio/index.ts: MemoryPcmStream
+  src/audio/index.ts: VorbisPcmStream
+  src/audio/index.ts: RawAudioStream
+  src/audio/index.ts: parseEnvironments
+  src/audio/index.ts: reverbPreset
+  src/audio/index.ts: StereoReverb
+  src/bots/behavior/index.ts: loadMountedBotAssetFiles
+  src/bots/behavior/library/goals.ts: GoalError
+  src/bots/behavior/library/goals.ts: loadItemConfig
+  src/bots/behavior/library/goals.ts: GoalEntityInfo
+  src/bots/behavior/library/goals.ts: GoalWorldHost
+  src/bots/behavior/library/log.ts: BotLogStream
+  src/bots/behavior/q3/ai-input.ts: botInputToUserCommand
+  src/bots/behavior/rerelease/data/knowledge.ts: BotWeaponContextT
+  src/bots/behavior/rerelease/data/knowledge.ts: weaponForItem
+  src/bots/behavior/rerelease/q2-exports.ts: Q2BotItemView
+  src/bots/navigation/index.ts: aasTraceAreas
+  src/bots/navigation/index.ts: aasBBoxAreas
+  src/bots/navigation/index.ts: navigationFromAsset
+  src/bots/navigation/index.ts: constructNavigation
+  src/bots/navigation/rerelease-path.ts: RereleasePathRequest
+  src/compat/q2/rerelease/debug-shapes.ts: rereleaseDebugLifetime
+  src/compat/q2/rerelease/native-entries.ts: rereleaseDamageSignature
+  src/compat/q2/rerelease/native-weapon-declaration.ts: serializeNativeWeaponDeclaration
+  src/compat/qvm/client-state-syscalls.ts: QvmClientStateServices
+  src/console/discovery.ts: findConsoleEntries
+  src/console/discovery.ts: consoleEntryHelp
+  src/console/llm-batch.ts: llmConsoleCatalog
+  src/console/llm-batch.ts: llmExecInstructions
+  src/console/metrics.ts: consoleCellWidth
+  src/content/composition/q1/index.ts: Q1SourceProgram
+  src/content/composition/q1/index.ts: Q1CompositionEvent
+  src/content/mods/callbacks.ts: readModCallbacks
+  src/content/mods/qvm-callbacks.ts: readQvmModCallbacks
+  src/content/mods/qvm-presentation.ts: readQvmModPresentation
+  src/content/q1/addons/ctf/flags.ts: touchFlag
+  src/content/q1/addons/ctf/grapple.ts: hookTouch
+  src/content/q1/addons/ctf/grapple.ts: fireHook
+  src/content/q1/addons/ctf/index.ts: CtfInput
+  src/content/q1/addons/ctf/index.ts: CtfStatus
+  src/content/q1/addons/ctf/index.ts: CtfTeam
+  src/content/q1/addons/ctf/index.ts: Q1CtfServices
+  src/content/q1/addons/ctf/teams.ts: setTeam
+  src/content/q1/addons/index.ts: Q1AddonEvent
+  src/content/q1/addons/index.ts: BLOODY_NIGHTMARE_ACTIVE
+  src/content/q1/addons/index.ts: BLOODY_NIGHTMARE_NEWGAME
+  src/content/q1/addons/index.ts: mg1LastSigil
+  src/content/q1/addons/index.ts: mg3RuneCount
+  src/content/q1/addons/index.ts: captureQ1AddonTravel
+  src/content/q1/addons/index.ts: admitQ1AddonTravel
+  src/content/q1/addons/items/index.ts: mg3UpgradeFlag
+  src/content/q1/addons/items/index.ts: mg3UpgradedMaximum
+  src/content/q1/addons/items/index.ts: giveNextMg3Upgrade
+  src/content/q1/addons/items/index.ts: Mg3Upgrade
+  src/content/q1/base/projectiles.ts: backpackMessage
+  src/content/q1/equipment/threewave-grapple.ts: ThreewaveGrappleInput
+
+## Layer dependency edges (value imports)
+  (root) -> app: 6   e.g. src/main.ts -> src/app/bootstrap/options.ts
+  (root) -> content: 3   e.g. src/main.ts -> src/content/user-data.ts
+  (root) -> foundation: 1   e.g. src/main.ts -> src/foundation/bounded-queue.ts
+  (root) -> llm: 1   e.g. src/main.ts -> src/llm/settings.ts
+  (root) -> platform: 1   e.g. src/main.ts -> src/platform/sdl.ts
+  app -> assets: 5   e.g. src/app/bootstrap/menu-art.ts -> assets/ui/main-menu-background.png
+  app -> audio: 23   e.g. src/app/bootstrap/application.ts -> src/audio/output.ts
+  app -> bots: 38   e.g. src/app/bootstrap/simulation/bot-assets.ts -> src/bots/behavior/assets.ts
+  app -> camera: 1   e.g. src/app/bootstrap/application-tools.ts -> src/camera/application.ts
+  app -> capture: 1   e.g. src/app/bootstrap/capture.ts -> src/capture/index.ts
+  app -> compat: 155   e.g. src/app/bootstrap/mod-presentation.ts -> src/compat/qvm/mod-presentation-checkpoint.ts
+  app -> console: 12   e.g. src/app/bootstrap/application.ts -> src/console/dedicated.ts
+  app -> content: 453   e.g. src/app/bootstrap/addon-library.ts -> src/content/archive/index.ts
+  app -> contracts: 59   e.g. src/app/bootstrap/addon-library.ts -> src/contracts/content.ts
+  app -> core: 162   e.g. src/app/bootstrap/application-tools.ts -> src/core/omnitimer.ts
+  app -> debug: 2   e.g. src/app/bootstrap/component-drawings.ts -> src/debug/world.ts
+  app -> formats: 43   e.g. src/app/bootstrap/assets.ts -> src/formats/images/index.ts
+  app -> foundation: 43   e.g. src/app/bootstrap/application.ts -> src/foundation/event-ring.ts
+  app -> guest: 16   e.g. src/app/bootstrap/simulation/classic-guest-source.ts -> src/guest/abi/index.ts
+  app -> input: 44   e.g. src/app/bootstrap/application.ts -> src/input/seat.ts
+  app -> materials: 14   e.g. src/app/bootstrap/assets.ts -> src/materials/compile.ts
+  app -> media: 11   e.g. src/app/bootstrap/assets.ts -> src/media/playback.ts
+  app -> movement: 55   e.g. src/app/bootstrap/audio.ts -> src/movement/q3/constants.ts
+  app -> network: 226   e.g. src/app/bootstrap/addon-library.ts -> src/network/services/http-downloads.ts
+  app -> persistence: 161   e.g. src/app/bootstrap/application.ts -> src/persistence/value.ts
+  app -> platform: 16   e.g. src/app/bootstrap/addon-library.ts -> src/platform/files/contained.ts
+  app -> render: 77   e.g. src/app/bootstrap/application.ts -> src/render/q3-hardware.ts
+  app -> settings: 20   e.g. src/app/bootstrap/application-tools.ts -> src/settings/config.ts
+  app -> text: 28   e.g. src/app/bootstrap/application.ts -> src/text/localization-resources.ts
+  app -> ui: 56   e.g. src/app/bootstrap/application.ts -> src/ui/common/index.ts
+  app -> world: 54   e.g. src/app/bootstrap/application.ts -> src/world/session/mod-commands.ts
+  audio -> core: 3   e.g. src/audio/mixer.ts -> src/core/math.ts
+  audio -> foundation: 2   e.g. src/audio/engine.ts -> src/foundation/bounded-queue.ts
+  audio -> persistence: 1   e.g. src/audio/streams.ts -> src/persistence/value.ts
+  audio -> platform: 2   e.g. src/audio/engine.ts -> src/platform/audio.ts
+  bots -> content: 50   e.g. src/bots/behavior/q3/ai-chat.ts -> src/content/q3/base/shared/definitions.ts
+  bots -> core: 58   e.g. src/bots/behavior/director.ts -> src/core/common-parse.ts
+  bots -> formats: 1   e.g. src/bots/navigation/aas-reachability-spatial.ts -> src/formats/q3-map/entities.ts
+  bots -> foundation: 1   e.g. src/bots/behavior/director.ts -> src/foundation/event-ring.ts
+  bots -> persistence: 22   e.g. src/bots/behavior/director.ts -> src/persistence/value.ts
+  bots -> ui: 18   e.g. src/bots/behavior/library/bsp-entities.ts -> src/ui/common/legacy/script/lexer.ts
+  bots -> world: 1   e.g. src/bots/navigation/aas-reachability-spatial.ts -> src/world/collision/contents.ts
+  camera -> core: 2   e.g. src/camera/application.ts -> src/core/math.ts
+  camera -> render: 1   e.g. src/camera/application.ts -> src/render/scene/view.ts
+  capture -> formats: 3   e.g. src/capture/index.ts -> src/formats/images/tga.ts
+  capture -> settings: 1   e.g. src/capture/index.ts -> src/settings/config.ts
+  compat -> app: 7   e.g. src/compat/q2/native-mod-provider.ts -> src/app/bootstrap/simulation/native-mod-presentation.ts
+  compat -> bots: 5   e.g. src/compat/q2/rerelease/navigation.ts -> src/bots/navigation/rerelease-path.ts
+  compat -> content: 40   e.g. src/compat/q2/classic/combat-binding.ts -> src/content/q2/missionpacks/damage.ts
+  compat -> contracts: 18   e.g. src/compat/q2/native-mod-items.ts -> src/contracts/source-items.ts
+  compat -> core: 51   e.g. src/compat/q2/classic/combat-binding.ts -> src/core/info-string.ts
+  compat -> debug: 1   e.g. src/compat/q2/rerelease/debug-shapes.ts -> src/debug/shapes.ts
+  compat -> formats: 1   e.g. src/compat/q2/rerelease/weapon-behavior-profile.ts -> src/formats/q1-map/entities.ts
+  compat -> foundation: 29   e.g. src/compat/q2/classic/combat-binding.ts -> src/foundation/cleanup.ts
+  compat -> guest: 38   e.g. src/compat/q2/classic/combat-binding.ts -> src/guest/abi/runner.ts
+  compat -> movement: 10   e.g. src/compat/q2/classic/pmove.ts -> src/movement/q2/index.ts
+  compat -> network: 9   e.g. src/compat/q2/rerelease/messages.ts -> src/network/q2/message.ts
+  compat -> persistence: 46   e.g. src/compat/q2/classic/world-profile.ts -> src/persistence/value.ts
+  compat -> platform: 1   e.g. src/compat/qvm/file-syscalls.ts -> src/platform/files/contained.ts
+  compat -> ui: 3   e.g. src/compat/qvm/client-script-syscalls.ts -> src/ui/common/legacy/script/lexer.ts
+  compat -> world: 29   e.g. src/compat/q2/classic/combat-binding.ts -> src/world/gameplay/authority.ts
+  console -> core: 5   e.g. src/console/commands.ts -> src/core/commands/text.ts
+  console -> foundation: 2   e.g. src/console/dedicated.ts -> src/foundation/event-ring.ts
+  console -> input: 3   e.g. src/console/field.ts -> src/input/key-codes.ts
+  console -> render: 1   e.g. src/console/draw.ts -> src/render/commands/frame.ts
+  console -> text: 2   e.g. src/console/draw.ts -> src/text/draw2d.ts
+  content -> compat: 30   e.g. src/content/catalog/launch.ts -> src/compat/qvm/compatibility.ts
+  content -> contracts: 58   e.g. src/content/catalog/addons.ts -> src/contracts/content.ts
+  content -> core: 235   e.g. src/content/archive/pak.ts -> src/core/binary/index.ts
+  content -> debug: 1   e.g. src/content/q2/rerelease/debug-shapes.ts -> src/debug/shapes.ts
+  content -> formats: 8   e.g. src/content/q1/foundation/entity.ts -> src/formats/q1-map/index.ts
+  content -> guest: 1   e.g. src/content/catalog/native-weapon-behaviors.ts -> src/guest/pe/index.ts
+  content -> input: 1   e.g. src/content/q3/presentation/mission-hud.ts -> src/input/key-codes.ts
+  content -> materials: 1   e.g. src/content/q3/presentation/scene-host.ts -> src/materials/q3-lighting.ts
+  content -> movement: 21   e.g. src/content/composition/q1-q3-supply.ts -> src/movement/q3/constants.ts
+  content -> network: 5   e.g. src/content/catalog/addons.ts -> src/network/common/value.ts
+  content -> persistence: 77   e.g. src/content/catalog/native-weapon-behaviors.ts -> src/persistence/value.ts
+  content -> platform: 1   e.g. src/content/catalog/addons.ts -> src/platform/files/contained.ts
+  content -> render: 4   e.g. src/content/q3/foundation/presentation.ts -> src/render/scene/models/transform.ts
+  content -> text: 7   e.g. src/content/q3/presentation/client.ts -> src/text/q3-font.ts
+  content -> ui: 3   e.g. src/content/q3/presentation/mission-hud.ts -> src/ui/common/legacy/runtime.ts
+  content -> world: 11   e.g. src/content/q1/foundation/entity-services.ts -> src/world/gameplay/damage-modifier.ts
+  core -> contracts: 2   e.g. src/core/math.ts -> src/contracts/math.ts
+  core -> foundation: 4   e.g. src/core/commands/index.ts -> src/foundation/event-ring.ts
+  core -> persistence: 2   e.g. src/core/common-parse.ts -> src/persistence/value.ts
+  debug -> core: 1   e.g. src/debug/shapes.ts -> src/core/math.ts
+  formats -> contracts: 1   e.g. src/formats/q3-model/md4.ts -> src/contracts/scene.ts
+  formats -> core: 33   e.g. src/formats/bsp-kind.ts -> src/core/binary/index.ts
+  guest -> foundation: 1   e.g. src/guest/runtime/windows/crt.ts -> src/foundation/binary.ts
+  input -> content: 10   e.g. src/input/weapon-bindings.ts -> src/content/q1/foundation/types.ts
+  input -> core: 6   e.g. src/input/client-commands.ts -> src/core/commands/index.ts
+  input -> platform: 1   e.g. src/input/source-input.ts -> src/platform/sdl.ts
+  materials -> core: 20   e.g. src/materials/color.ts -> src/core/math.ts
+  materials -> formats: 1   e.g. src/materials/legacy-fog.ts -> src/formats/q1-map/entities.ts
+  media -> audio: 1   e.g. src/media/ogv-playback.ts -> src/audio/streams.ts
+  media -> core: 6   e.g. src/media/cin.ts -> src/core/binary/index.ts
+  media -> formats: 1   e.g. src/media/still.ts -> src/formats/images/indexed.ts
+  media -> persistence: 9   e.g. src/media/cin-playback.ts -> src/persistence/value.ts
+  media -> platform: 2   e.g. src/media/ogv-playback.ts -> src/platform/theora.ts
+  movement -> content: 1   e.g. src/movement/q3/move.ts -> src/content/q3/base/game/grapple.ts
+  movement -> contracts: 5   e.g. src/movement/q1/pusher.ts -> src/contracts/identity.ts
+  movement -> core: 8   e.g. src/movement/q1/common.ts -> src/core/math.ts
+  network -> contracts: 2   e.g. src/network/common/session.ts -> src/contracts/content.ts
+  network -> core: 44   e.g. src/network/common/commands.ts -> src/core/binary/index.ts
+  network -> foundation: 5   e.g. src/network/common/session.ts -> src/foundation/event-ring.ts
+  network -> movement: 1   e.g. src/network/q1/prediction.ts -> src/movement/q1/quakeworld.ts
+  network -> persistence: 3   e.g. src/network/q1/decoder-checkpoint.ts -> src/persistence/value.ts
+  network -> platform: 2   e.g. src/network/services/downloads.ts -> src/platform/files/contained.ts
+  persistence -> compat: 3   e.g. src/persistence/native-weapon.ts -> src/compat/q2/rerelease/native-weapon-declaration.ts
+  persistence -> content: 6   e.g. src/persistence/mods.ts -> src/content/mods/declaration.ts
+  persistence -> contracts: 4   e.g. src/persistence/mods.ts -> src/contracts/mods.ts
+  persistence -> core: 4   e.g. src/persistence/kex-q2-save.ts -> src/core/binary/index.ts
+  persistence -> platform: 1   e.g. src/persistence/save-policy.ts -> src/platform/files/contained.ts
+  platform -> foundation: 1   e.g. src/platform/controller.ts -> src/foundation/bounded-queue.ts
+  platform -> network: 4   e.g. src/platform/ipx-native.ts -> src/network/common/endpoint.ts
+  render -> content: 1   e.g. src/render/scene/models/image-path.ts -> src/content/mounts/paths.ts
+  render -> contracts: 1   e.g. src/render/worker-runtime.ts -> src/contracts/identity.ts
+  render -> core: 29   e.g. src/render/scene/flare.ts -> src/core/math.ts
+  render -> formats: 18   e.g. src/render/cpu/textures.ts -> src/formats/images/palette.ts
+  render -> foundation: 1   e.g. src/render/scene/visibility.ts -> src/foundation/stamp.ts
+  render -> materials: 28   e.g. src/render/commands/material2d.ts -> src/materials/evaluate.ts
+  render -> platform: 9   e.g. src/render/gl/depth-atlas.ts -> src/platform/gl-framebuffers.ts
+  render -> text: 1   e.g. src/render/scene/world-text.ts -> src/text/atlas.ts
+  settings -> content: 10   e.g. src/settings/server/lmctf.ts -> src/content/q2/multiplayer/lmctf/types.ts
+  settings -> core: 3   e.g. src/settings/server/lmctf-cvars.ts -> src/core/cvars/index.ts
+  settings -> foundation: 1   e.g. src/settings/restart.ts -> src/foundation/bounded-queue.ts
+  settings -> input: 1   e.g. src/settings/config.ts -> src/input/gamepad.ts
+  text -> core: 3   e.g. src/text/kfont.ts -> src/core/common-parse.ts
+  text -> formats: 2   e.g. src/text/atlas.ts -> src/formats/images/png.ts
+  text -> persistence: 1   e.g. src/text/q3-font-registry.ts -> src/persistence/value.ts
+  text -> platform: 1   e.g. src/text/q3-font-registry.ts -> src/platform/freetype.ts
+  text -> render: 1   e.g. src/text/draw2d.ts -> src/render/commands/frame.ts
+  ui -> app: 2   e.g. src/ui/hud/q2-native.ts -> src/app/bootstrap/network/q2-layout.ts
+  ui -> audio: 1   e.g. src/ui/settings/index.ts -> src/audio/output.ts
+  ui -> content: 3   e.g. src/ui/common/legacy/runtime.ts -> src/content/q3/presentation/ref-entity.ts
+  ui -> core: 15   e.g. src/ui/common/legacy/menu.ts -> src/core/common-parse.ts
+  ui -> foundation: 3   e.g. src/ui/common/legacy/script/preprocessor.ts -> src/foundation/binary.ts
+  ui -> input: 8   e.g. src/ui/common/controller.ts -> src/input/key-codes.ts
+  ui -> llm: 1   e.g. src/ui/settings/llm.ts -> src/llm/settings.ts
+  ui -> persistence: 6   e.g. src/ui/common/legacy/script/lexer.ts -> src/persistence/value.ts
+  ui -> render: 3   e.g. src/ui/common/assets.ts -> src/render/scene/resources.ts
+  ui -> settings: 3   e.g. src/ui/settings/rotation.ts -> src/settings/server/profile.ts
+  ui -> text: 3   e.g. src/ui/common/draw.ts -> src/text/draw2d.ts
+  world -> content: 2   e.g. src/world/session/mod-files.ts -> src/content/mounts/index.ts
+  world -> contracts: 14   e.g. src/world/actors/registry.ts -> src/contracts/identity.ts
+  world -> core: 28   e.g. src/world/collision/body.ts -> src/core/numeric.ts
+  world -> formats: 2   e.g. src/world/collision/q1/index.ts -> src/formats/q1-map/queries.ts
+  world -> foundation: 5   e.g. src/world/collision/q1/index.ts -> src/foundation/stamp.ts
+  world -> materials: 1   e.g. src/world/collision/q1/index.ts -> src/materials/legacy.ts
+  world -> persistence: 7   e.g. src/world/collision/q3/clip-models.ts -> src/persistence/value.ts
+  world -> platform: 1   e.g. src/world/session/mod-files.ts -> src/platform/files/writable.ts
+
+## Mutual layer dependencies
+  app <-> ui: 56 / 2
+  app <-> compat: 155 / 7
+  compat <-> content: 40 / 30
+  compat <-> persistence: 46 / 3
+  content <-> persistence: 77 / 6
+  content <-> movement: 21 / 1
+  content <-> world: 11 / 2
+  content <-> render: 4 / 1
+  content <-> ui: 3 / 3
+  content <-> input: 1 / 10
+  core <-> persistence: 2 / 4
+  network <-> platform: 2 / 4
+  render <-> text: 1 / 1
+
+## File import cycles (value imports, SCC size>1): 12
+  size=10: src/bots/behavior/q3/ai-context.ts, src/bots/behavior/q3/ai-main.ts, src/bots/behavior/q3/ai-voice.ts, src/bots/behavior/q3/ai-team.ts, src/bots/behavior/q3/ai-decision.ts, src/bots/behavior/q3/ai-navigation.ts, src/bots/behavior/q3/ai-chat.ts, src/bots/behavior/q3/ai-command.ts, src/bots/behavior/q3/ai-orders.ts, src/bots/behavior/q3/ai-combat.ts
+  size=9: src/content/q1/base/monster-actions.ts, src/content/q1/base/monsters.ts, src/content/q1/base/creatures.ts, src/content/q1/base/projectiles.ts, src/content/q1/foundation/weapons.ts, src/content/q1/foundation/monsters.ts, src/content/q1/foundation/spawns.ts, src/content/q1/foundation/entity-services.ts, src/content/q1/foundation/pickups.ts
+  size=3: src/world/collision/q3/world.ts, src/world/collision/q3/model.ts, src/world/collision/q3/clip-models.ts
+  size=3: src/app/bootstrap/simulation/classic-guest-source.ts, src/app/bootstrap/simulation/q2-native-world.ts, src/app/bootstrap/simulation/rerelease-guest-source.ts
+  size=3: src/content/q3/base/game/projectile.ts, src/content/q3/base/game/missile.ts, src/content/q3/base/game/hitscan.ts
+  size=3: src/content/q1/base/player.ts, src/content/q1/base/map-entities.ts, src/content/q1/base/provider.ts
+  size=2: src/persistence/recipe.ts, src/persistence/mods.ts
+  size=2: src/app/bootstrap/mod-selection.ts, src/app/bootstrap/weapon-behavior-selection.ts
+  size=2: src/content/q1/missionpacks/monsters/gremlin-weapons.ts, src/content/q1/missionpacks/monsters/gremlin-ai.ts
+  size=2: src/app/bootstrap/simulation/players.ts, src/app/bootstrap/simulation/player-movement.ts
+  size=2: src/ui/hud/q2-rerelease-layout.ts, src/ui/hud/q2-native.ts
+  size=2: src/app/bootstrap/network/unified-native-components.ts, src/app/bootstrap/network/unified-components.ts
+
+## Longest functions
+  1104 src/network/q2/codecs/q2repro.ts:18 createRereleaseContext
+  936 src/movement/q2/rerelease.ts:22 createRereleaseMovement
+  753 src/movement/q2/rerelease.ts:203 Pmove
+  711 src/network/q2/codecs/r1q2.ts:16 createR1Context
+  659 src/movement/q2/classic.ts:10 pmoveClassic
+  617 src/app/bootstrap/application.ts:2629 prepareAndReplaceWorld
+  591 src/network/q2/codecs/q2pro.ts:16 createQ2ProContext
+  571 src/app/bootstrap/simulation/runtime.ts:3248 createSource
+  539 src/network/q2/codecs/kexdemo.ts:53 createKexContext
+  463 src/app/bootstrap/simulation/runtime.ts:5123 step
+  429 src/network/q1/codecs/wide.ts:12 makeWideCodec
+  408 src/app/bootstrap/simulation/network.ts:37 createQ2ApplicationServerHost
+  406 src/network/q2/codecs/vanilla.ts:11 createVanillaContext
+  382 src/app/bootstrap/simulation/runtime.ts:8146 restore
+  377 src/bots/behavior/rerelease/brain.ts:638 think
+  372 src/app/bootstrap/simulation/runtime.ts:573 <anon>
+  358 src/app/bootstrap/application.ts:3977 commands
+  336 src/render/scene/models/prepare.ts:188 prepareEntityAtTransform
+  323 src/compat/qc/mod-provider.ts:237 <anon>
+  318 src/app/bootstrap/application.ts:653 openSource
+  297 src/compat/qvm/interpreter.ts:864 execute
+  289 src/content/q2/rerelease/monsters/base-variants/medic.ts:77 createRereleaseMedicDefinitions
+  286 src/bots/behavior/q3/ai-decision.ts:361 botGetLongTermGoal
+  284 src/network/q1/codecs/qw29.ts:36 createQw29Codec
+  274 src/app/bootstrap/simulation/network-q1.ts:24 createQ1ApplicationServerHost
+  271 src/app/bootstrap/startup.ts:268 openGraphics
+  269 src/world/collision/q3/map-resource.ts:199 load
+  259 src/network/q2/codecs/kex-write.ts:21 createKexWriter
+  258 src/content/q3/presentation/client.ts:126 createQ3Presentation
+  256 src/network/q1/codecs/qw28.ts:91 createQw28Codec
+
+## Function size distribution: total=42965 >100=210 >200=59 >500=9
+
+## Highest cyclomatic
+  326 src/app/bootstrap/simulation/runtime.ts:5123 step
+  300 src/app/bootstrap/application.ts:3977 commands
+  226 src/app/bootstrap/audio/q2-events.ts:51 q2MonsterMuzzleSounds
+  210 src/compat/q2/native-mod-provider.ts:75 validateNativeModDeclaration
+  205 src/compat/qvm/interpreter.ts:864 execute
+  188 src/formats/images/png.ts:32 decodePng
+  184 src/compat/qvm/abi.ts:190 decodeQvmGameImport
+  168 src/guest/x86/cpu.ts:118 #execute
+  164 src/bots/behavior/q3/ai-decision.ts:361 botGetLongTermGoal
+  158 src/guest/floating-point/x87.ts:175 execute
+  157 src/app/bootstrap/options.ts:146 parseApplicationCommand
+  153 src/content/q3/presentation/events.ts:269 sourceEntityEvent
+  146 src/app/bootstrap/input.ts:444 <anon>
+  146 src/compat/qc/mod-provider.ts:66 validateQcMod
+  137 src/compat/qvm/mod-provider.ts:83 validateQvmMod
+  134 src/compat/qc/machine.ts:340 runStatements
+  133 src/ui/hud/q2-rerelease-layout.ts:27 q2RereleaseLayout
+  132 src/guest/x64/cpu.ts:338 #execute
+  128 src/guest/floating-point/sse.ts:253 execute
+  126 src/content/q1/quakec/damage-scale.ts:23 qcDamageScale
+  123 src/compat/qvm/bot-library-syscalls.ts:32 qvmBotLibrarySyscall
+  122 src/app/bootstrap/remote-application.ts:490 openSource
+  121 src/app/bootstrap/effects.ts:367 event
+  121 src/content/q1/base/monster-actions.ts:97 monsterAction
+  119 src/render/scene/models/prepare.ts:188 prepareEntityAtTransform
+
+## Largest classes
+  8260 lines, 498 members src/app/bootstrap/simulation/runtime.ts:294 SharedSimulation
+  4554 lines, 250 members src/app/bootstrap/application.ts:262 Application
+  2276 lines, 187 members src/ui/common/legacy/runtime.ts:535 UiRuntime
+  2181 lines, 177 members src/app/bootstrap/remote-application.ts:214 RemoteApplication
+  1540 lines, 61 members src/bots/behavior/rerelease/brain.ts:452 BotBrain
+  1350 lines, 98 members src/app/bootstrap/startup.ts:124 StartupApplication
+  1304 lines, 157 members src/app/bootstrap/simulation/quakec-source.ts:205 QuakeCSource
+  1150 lines, 95 members src/ui/common/legacy/script/preprocessor.ts:600 PreprocessorEngine
+  1114 lines, 94 members src/render/cpu/rasterizer.ts:296 SoftwareRenderer
+  1089 lines, 119 members src/compat/qvm/mod-provider.ts:288 QvmModProvider
+  957 lines, 78 members src/compat/qvm/interpreter.ts:205 QvmInterpreter
+  927 lines, 109 members src/app/bootstrap/input.ts:129 ApplicationInput
+  904 lines, 103 members src/audio/mixer.ts:234 AudioMixer
+  887 lines, 63 members src/app/bootstrap/startup-menu.ts:87 StartupMenu
+  887 lines, 69 members src/bots/behavior/library/chat.ts:408 BotChatLibrary
+  878 lines, 115 members src/core/commands/index.ts:147 CommandBuffer
+  866 lines, 94 members src/bots/behavior/library/goals.ts:628 BotGoalLibrary
+  865 lines, 83 members src/ui/common/legacy/script/lexer.ts:359 ScriptLexer
+  832 lines, 54 members src/ui/common/legacy/menu.ts:1173 UiMenuSourceParser
+  822 lines, 40 members src/materials/material.ts:608 ShaderParser
+
+## Deepest nesting
+  17 src/app/bootstrap/application.ts
+  14 src/app/bootstrap/effects.ts
+  13 src/app/bootstrap/network/q2-service-presentation.ts
+  13 src/compat/qvm/regions.ts
+  12 src/app/bootstrap/presentation-state.ts
+  11 src/app/bootstrap/audio.ts
+  11 src/camera/spline.ts
+  11 src/content/q1/quakec/damage-scale.ts
+  10 src/app/bootstrap/network/qw-client.ts
+  10 src/app/bootstrap/network/remote.ts
+  10 src/app/bootstrap/network/unified-client.ts
+  10 src/app/bootstrap/simulation/runtime.ts
+  10 src/content/q1/addons/monsters/bosses/oldnew.ts
+  10 src/ui/common/controller.ts
+  9 src/app/bootstrap/simulation/network.ts
+
+## Long lines (>160 chars) total=13686 of 378491 lines; max single line:
+  max=1635 long=21/95 src/compat/q2/rerelease/layouts.ts
+  max=1609 long=12/107 src/console/llm-batch.ts
+  max=1502 long=9/34 src/persistence/q2-missionpacks.ts
+  max=1211 long=19/47 src/persistence/q2-rerelease-state.ts
+  max=1087 long=20/391 src/app/bootstrap/network/remote-q1.ts
+  max=1059 long=400/1057 src/app/bootstrap/network/unified-event-codec.ts
+  max=1036 long=15/40 src/persistence/q2-monsters.ts
+  max=943 long=686/8592 src/app/bootstrap/simulation/runtime.ts
+  max=928 long=31/118 src/app/bootstrap/simulation/player-checkpoint.ts
+  max=886 long=26/298 src/app/bootstrap/simulation/network-q1.ts
+  max=861 long=15/45 src/persistence/q1-foundation.ts
+  max=833 long=2/441 src/network/q1/codecs/wide.ts
+  max=821 long=36/429 src/app/bootstrap/ui.ts
+  max=802 long=36/129 src/content/q1/missionpacks/world/hipnotic-hazards.ts
+  max=780 long=275/4818 src/app/bootstrap/application.ts
+
+## Comment density & long lines by src dir
+  content: lines=124973 comment%=1.3 long%=3.8
+  app: lines=71508 comment%=1.5 long%=6.2
+  compat: lines=30096 comment%=2.1 long%=5.7
+  bots: lines=29924 comment%=5.4 long%=1.0
+  network: lines=23318 comment%=1.6 long%=2.0
+  render: lines=14328 comment%=3.8 long%=2.1
+  ui: lines=13132 comment%=1.2 long%=2.3
+  guest: lines=10870 comment%=1.9 long%=3.9
+  world: lines=10124 comment%=2.7 long%=2.2
+  formats: lines=6926 comment%=3.7 long%=0.4
+  core: lines=5524 comment%=5.0 long%=1.0
+  movement: lines=5435 comment%=2.1 long%=1.5
+  contracts: lines=4471 comment%=4.5 long%=1.3
+  materials: lines=4451 comment%=3.8 long%=1.2
+  audio: lines=3893 comment%=4.3 long%=1.2
+  text: lines=3561 comment%=1.1 long%=0.8
+  platform: lines=3360 comment%=3.6 long%=1.0
+  persistence: lines=2672 comment%=2.2 long%=10.3
+  input: lines=2341 comment%=3.0 long%=1.4
+  media: lines=2227 comment%=3.2 long%=0.3
+  foundation: lines=1553 comment%=14.7 long%=0.1
+  llm: lines=1311 comment%=2.3 long%=3.1
+  console: lines=1104 comment%=1.3 long%=2.6
+  settings: lines=837 comment%=2.4 long%=6.2
+  camera: lines=245 comment%=1.2 long%=8.2
+  debug: lines=113 comment%=1.8 long%=3.5
+  (root): lines=101 comment%=5.0 long%=5.9
+  capture: lines=88 comment%=3.4 long%=0.0
+  types: lines=5 comment%=0.0 long%=0.0
+
+## Module-level mutable state candidates: 164
+  src/app/bootstrap/campaign-cinematic.ts: nextCinematic@17:let
+  src/app/bootstrap/character-turntable.ts: q3ShaderCatalogs@169:new WeakMap<MountedContent, Pr
+  src/app/bootstrap/client-bootstrap.ts: localAccounts@96:new WeakMap<IdentityOwner, Acc
+  src/app/bootstrap/component-media.ts: shaderDeliveries@38:new WeakMap<PresentationState,
+  src/app/bootstrap/effects/q2-muzzle.ts: q2MonsterMuzzles@6:new Map([
+  [26, { color: { x:
+  src/app/bootstrap/effects/q2-muzzle.ts: rereleaseMuzzles@213:new Map([
+  [232, 26], [233, 2
+  src/app/bootstrap/menu-art.ts: decodedImages@8:new Map<string, Promise<ImageL
+  src/app/bootstrap/q3-client/cinematics.ts: nextConsumer@33:let
+  src/app/bootstrap/simulation/arsenal/inventory-labels.ts: q1Ammo@8:new Map([
+  ["q1:ammo/shells",
+  src/app/bootstrap/simulation/monster-placement.ts: placementOffsets@86:new Map<number, readonly { rea
+  src/app/bootstrap/simulation/monster-runtime.ts: q1OrdinaryMonsters@39:new Set(["monster_army_infecte
+  src/app/bootstrap/simulation/monster-runtime.ts: q2OrdinaryMonsters@40:new Set(["monster_soldier", "m
+  src/app/bootstrap/simulation/q2-native-world.ts: primaryProfiles@33:new WeakMap<PreparedQ2NativeGu
+  src/app/bootstrap/startup-menu.ts: characterAppearanceFields@41:new Set(["character", "model",
+  src/app/bootstrap/startup-timing.ts: last@3:let
+  src/bots/behavior/q3/ai-voice.ts: voiceCommands@187:new Map([
+  ["getflag", botVoi
+  src/bots/navigation/aas-reachability-special.ts: WEAPON_JUMP_ITEMS@27:new Set([
+  "item_armor_body",
+  src/bots/navigation/estimate-aas.ts: topologies@28:new WeakMap<AasAsset, Topology
+  src/compat/q2/native-combat-call.ts: fieldReaders@85:new WeakMap<GuestCallSignature
+  src/compat/q2/rerelease/body-shape.ts: active@10:new WeakMap<RereleaseGuestModu
+  src/compat/q2/rerelease/equipment-movement.ts: active@10:new WeakMap<RereleaseGuestModu
+  src/compat/q2/rerelease/layouts.ts: fieldOffsets@5:new WeakMap<GuestLayout, Reado
+  src/compat/q2/rerelease/public-state.ts: snapshotBuffers@25:new WeakMap<MappedGuestMemory,
+  src/compat/q2/rerelease/world-profile.ts: ammoSlots@117:new Map([
+  ["ammo_bullets", 0
+  src/compat/qvm/legacy-bot-abi.ts: botImports@4:new Map<number, QvmGameImport>
+  src/console/llm-batch.ts: indirect@5:new Set(["llm_ask", "llm_exec"
+  src/content/catalog/launch.ts: KNOWN_PROVIDER_FAMILIES@91:new Set(["q1", "q2", "q3"])
+  src/content/composition/q1-hipnotic-supply.ts: hipnoticWeapons@5:new Map<ItemId, readonly ItemI
+  src/content/composition/q2-q1-supply.ts: hipnoticWeapons@41:new Map<ItemId, readonly ItemI
+  src/content/composition/q3-q1-supply.ts: hipnoticWeapons@37:new Map<ItemId, readonly ItemI
+  src/content/mounts/index.ts: verifiedDigests@35:new Map<string, DigestFingerpr
+  src/content/mounts/index.ts: diskDigests@36:let
+  src/content/mounts/index.ts: diskSaveTimer@37:let
+  src/content/q1/addons/monsters/ai/path.ts: registrations@20:new WeakMap<Q1EntityServices, 
+  src/content/q1/addons/monsters/bosses/final.ts: actions@23:new Map<string, (monster: Base
+  src/content/q1/addons/monsters/bosses/frames/final.ts: frames@3:new Map<string, MonsterFrame>(
+  src/content/q1/addons/monsters/bosses/frames/ghost.ts: frames@3:new Map<string, MonsterFrame>(
+  src/content/q1/addons/monsters/bosses/frames/oldnew.ts: frames@3:new Map<string, MonsterFrame>(
+  src/content/q1/addons/monsters/bosses/frames/orb.ts: frames@3:new Map<string, MonsterFrame>(
+  src/content/q1/addons/monsters/bosses/frames/szombie.ts: frames@3:new Map<string, MonsterFrame>(
+  src/content/q1/addons/monsters/bosses/ghost.ts: actions@17:new Map<string, (monster: Base
+  src/content/q1/addons/monsters/bosses/oldnew.ts: actions@20:new Map<string, (monster: Base
+  src/content/q1/addons/monsters/bosses/orb.ts: actions@20:new Map<string, (monster: Base
+  src/content/q1/addons/monsters/bosses/szombie.ts: actions@17:new Map<string, (monster: Base
+  src/content/q1/addons/monsters/demodog-frames.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/addons/monsters/demodog.ts: actions@18:new Map([
+  ["demodog_bite", m
+  src/content/q1/addons/monsters/heavy/tables/mg3_lavaman.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/addons/monsters/heavy/tables/mg3_rknight.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/addons/monsters/heavy/tables/mg3_super_shambler.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/addons/monsters/infected/controller.ts: actions@17:new Map([
+  ...armyActions,
+  
+  src/content/q1/addons/monsters/infected/frames.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/addons/monsters/infected/species.ts: infectedClassnames@8:new Map([
+  ["monster_army_inf
+  src/content/q1/addons/monsters/ordinary/army.ts: armyActions@11:new Map([
+  ["army_fire", mons
+  src/content/q1/addons/monsters/ordinary/index.ts: stores@16:new WeakMap<Q1AddonContext, Ma
+  src/content/q1/addons/monsters/ordinary/index.ts: extraFrames@20:new Map([["zombie_hang1", { fr
+  src/content/q1/addons/monsters/ordinary/rocket-ogre.ts: rocketOgreFrames@10:new Map<string, MonsterFrame>(
+  src/content/q1/addons/monsters/startup.ts: startNames@12:new WeakMap<Q1EntityServices, 
+  src/content/q1/base/creatures.ts: components@16:new WeakMap<Q1EntityServices, 
+  src/content/q1/base/finales.ts: classicFinales@2:new Map([
+  ["$qc_finale_e1_sh
+  src/content/q1/base/frames.ts: monsterFrames@4:new Map([
+  ["knight_stand1", 
+  src/content/q1/base/messages.ts: classicObituaries@2:new Map([
+  ["$qc_telefragged"
+  src/content/q1/base/messages.ts: classicMonsterObituaries@14:new Map([
+  ["monster_army", "
+  src/content/q1/base/monster-actions.ts: knightOffsets@91:new Map([
+  ["hknight_magica7"
+  src/content/q1/base/player.ts: characterTables@11:new WeakMap<Q1EntityServices, 
+  src/content/q1/base/provider.ts: providers@18:new WeakMap<Q1EntityServices, 
+  src/content/q1/base/travel.ts: temporaryItems@16:new Set(["q1:key/silver", "q1:
+  src/content/q1/foundation/pickups.ts: q3ItemsByClassname@119:let
+  src/content/q1/foundation/text.ts: classicQ1Messages@6:new Map([
+  ['$qc_found_secret
+  src/content/q1/missionpacks/messages.ts: classic@5:new Map([
+  ["$qc_wetsuit", "W
+  src/content/q1/missionpacks/monsters/tables/dragon.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/monsters/tables/eel.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/monsters/tables/grunt.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/monsters/tables/hiparma.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/monsters/tables/hipdecoy.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/monsters/tables/hipgrem.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/monsters/tables/hipscrge.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/monsters/tables/invis_sw.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/monsters/tables/lavaman.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/monsters/tables/morph.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/monsters/tables/mummy.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/monsters/tables/rottweiler.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/monsters/tables/s_wrath.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/monsters/tables/wrath.ts: frames@4:new Map<string, MonsterFrame>(
+  src/content/q1/missionpacks/obituaries.ts: classic@18:new Map([
+  ["$qc_death_empath
+  src/content/q1/missionpacks/obituaries.ts: monsters@32:new Map([
+  ["monster_army", "
+  src/content/q1/missionpacks/world/finale-text.ts: classic@2:new Map([
+  ["$qc_finale_r1", 
+  src/content/q1/quakec/armor-stage.ts: writtenWords@23:new WeakMap<QcProgram, Readonl
+  src/content/q1/quakec/armor-stage.ts: originals@139:new Map([
+  ["sha256:f2619787f
+  src/content/q1/quakec/armor-stage.ts: originalScales@152:new Map([
+  ["sha256:f3610ade8
+  src/content/q1/quakec/damage-call.ts: inputs@17:new Set<ModCallbackInput>([...
+  src/content/q1/quakec/damage-scale.ts: binary@19:new Set([QcOpcode.AddF, QcOpco
+  src/content/q1/quakec/id1-program.ts: derivedBindings@112:new WeakMap<QcProgram, Id1Prog
+  src/content/q2/base/monsters/boss-common.ts: explosionCallbacks@29:new WeakMap<Q2Monsters, Q2Thin
+  src/content/q2/base/monsters/flyer.ts: nextMoves@8:new WeakMap<Q2GameServices, "m
+  src/content/q2/base/monsters/makron.ts: spawnCallbacks@15:new WeakMap<Q2Monsters, Q2Thin
+  src/content/q2/base/player/obituary.ts: environment@3:new Map([
+  [23, "suicides"], 
+  src/content/q2/base/player/obituary.ts: kills@8:new Map([
+  [1, ["was blasted 
+  src/content/q2/foundation/held-weapons.ts: nativeModels@24:new Map([
+  ["q2:weapon_blaste
+  src/content/q2/foundation/weapon-attachments.ts: attachments@15:new Map<ContentDigest, ModelAt
+  src/content/q2/missionpacks/items.ts: names@34:new Map([
+  ["ionripper", { na
+  src/content/q2/missionpacks/monsters/index.ts: q2OriginalMissionPackFallbacks@40:new Set(["monster_gekk", "mons
+  src/content/q2/multiplayer/horde.ts: POINT_CLASSNAMES@15:new Set([
+  "info_monster_star
+  src/content/q2/rerelease/obituary.ts: generic@3:new Map([[23, "suicide"], [22,
+  src/content/q2/rerelease/obituary.ts: self@5:new Map([[24, "held_grenade"],
+  src/content/q2/rerelease/obituary.ts: kill@6:new Map([[1, "blaster"], [2, "
+  src/content/q3/guest-items.ts: layouts@25:new Map([
+  ["sha256:9751bad99
+  src/content/q3/presentation/client.ts: VM_SYMBOLS@124:new Map<string, ClientVmCvarSy
+  src/core/common-parse.ts: SINGLE_CHAR_TOKENS@508:new Set([123, 125, 41, 40, 39,
+  src/core/cvars/index.ts: canonicalSnapshotCache@139:new WeakMap<CvarState, CvarSna
+  src/core/cvars/mirror.ts: subscriptions@5:new WeakMap<CvarRegistry, Map<
+  src/core/numeric.ts: numericOperationsCache@98:new WeakMap<NumericProfile, Nu
+  src/formats/images/palette.ts: composedGammaTables@89:new WeakMap<GammaProfile, { re
+  src/formats/q12-model/animation.ts: aliasInterpolationCache@22:new WeakMap<ModelFrame, WeakMa
+  src/formats/q12-model/animation.ts: md2Topologies@57:new WeakMap<Q2AliasModel, Alia
+  src/formats/q12-model/animation.ts: mdlTopologies@58:new WeakMap<Q1AliasModel, Alia
+  src/guest/abi/adapter.ts: simdViews@15:new WeakMap<Uint8Array, DataVi
+  src/guest/abi/classify.ts: callPlans@58:new WeakMap<GuestCallSignature
+  src/guest/core/registers.ts: managedProcessors@148:new WeakMap<GuestProcessorStat
+  src/guest/floating-point/raw-sse.ts: memoryOperands@10:new WeakMap<GuestSimdState, Ui
+  src/guest/floating-point/raw-sse.ts: scalarRegisters@11:new WeakMap<Uint8Array, { read
+
+## src modules with no test importing them directly, largest first
+  1992 src/bots/behavior/rerelease/brain.ts
+  1624 src/content/q2/foundation/monsters/moves.ts
+  1224 src/ui/common/legacy/script/lexer.ts
+  1183 src/bots/behavior/q3/ai-decision.ts
+  1122 src/network/q2/codecs/q2repro.ts
+  1099 src/compat/q2/native-mod-provider.ts
+  1072 src/content/q2/rerelease/monsters/tables/gunner.ts
+  994 src/content/q2/missionpacks/monsters/tables/rogue-soldier.ts
+  974 src/bots/behavior/library/chat-data.ts
+  962 src/content/q2/missionpacks/monsters/tables/xatrix-soldierh.ts
+  847 src/content/q3/presentation/media.ts
+  835 src/content/q2/missionpacks/monsters/tables/xatrix-gekk.ts
+  827 src/render/cpu/triangle-kernel.ts
+  817 src/content/q2/base/monsters/tables/boss32.ts
+  817 src/content/q2/rerelease/monsters/tables/boss32.ts
+  800 src/bots/behavior/q3/ai-command.ts
+  792 src/guest/x64/cpu.ts
+  769 src/content/q2/foundation/weapons/player.ts
+  727 src/network/q2/codecs/r1q2.ts
+  681 src/content/q3/base/game/save-values.ts
+  663 src/bots/navigation/aas-reachability-geometry.ts
+  658 src/content/q2/base/monsters/tables/insane.ts
+  648 src/content/q2/missionpacks/monsters/tables/rogue-float.ts
+  648 src/content/q2/rerelease/monsters/tables/float.ts
+  639 src/content/q2/base/monsters/tables/actor.ts
+  632 src/content/q2/base/monsters/tables/float.ts
+  630 src/content/q2/rerelease/monsters/tables/actor.ts
+  626 src/content/q2/base/monsters/tables/tank.ts
+  626 src/content/q2/rerelease/monsters/tables/tank.ts
+  622 src/content/monsters/q2-rerelease.ts
+  count without direct test import: 992/2104
+
+## Files with license/copyright header in first 2KB: 1046/2104

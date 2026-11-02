@@ -1,0 +1,18 @@
+{"label":"warm","heapMB":58,"objects":645563,"rssMB":384,"extMB":20.5}
+{"label":"steady-0","heapMB":59,"objects":651052,"rssMB":417,"extMB":21.3,"msPerStep":2.108}
+{"label":"steady-1","heapMB":59.2,"objects":650812,"rssMB":407,"extMB":21.5,"msPerStep":1.691}
+{"label":"steady-2","heapMB":59.1,"objects":647207,"rssMB":402,"extMB":21.5,"msPerStep":1.993}
+{"label":"cycle-0-e1m2","heapMB":80.5,"objects":1031072,"rssMB":430,"extMB":26.3,"ms":787,"players":0}
+{"label":"cycle-1-e1m1","heapMB":78.6,"objects":984561,"rssMB":420,"extMB":26.7,"ms":574,"players":0}
+{"label":"cycle-2-e1m2","heapMB":81.2,"objects":1030454,"rssMB":494,"extMB":27,"ms":652,"players":0}
+{"label":"cycle-3-e1m1","heapMB":75.1,"objects":972780,"rssMB":438,"extMB":24.7,"ms":482,"players":0}
+{"label":"cycle-4-e1m2","heapMB":75,"objects":1013354,"rssMB":482,"extMB":22.9,"ms":668,"players":0}
+{"label":"cycle-5-e1m1","heapMB":75.4,"objects":972035,"rssMB":458,"extMB":25.1,"ms":586,"players":0}
+{"label":"cycle-6-e1m2","heapMB":77.4,"objects":1018549,"rssMB":481,"extMB":24.8,"ms":638,"players":0}
+{"label":"cycle-7-e1m1","heapMB":74.6,"objects":971437,"rssMB":433,"extMB":24.3,"ms":522,"players":0}
+{"label":"cycle-8-e1m2","heapMB":77.1,"objects":1018641,"rssMB":480,"extMB":24.5,"ms":659,"players":0}
+{"label":"cycle-9-e1m1","heapMB":75.6,"objects":971998,"rssMB":434,"extMB":25.3,"ms":512,"players":0}
+{"label":"cycle-10-e1m2","heapMB":77.2,"objects":1018969,"rssMB":500,"extMB":24.6,"ms":1108,"players":0}
+{"label":"cycle-11-e1m1","heapMB":73.9,"objects":967953,"rssMB":450,"extMB":23.9,"ms":1285,"players":0}
+TYPE-DELTAS [["Object",197510],["string",48265],["Array",42474],["SparseArrayValueMap",907],["Function",502],["Uint8Array",341],["JSLexicalEnvironment",212],["UnlinkedFunctionExecutable",-276],["SymbolTable",-336],["FunctionCodeBlock",-590],["UnlinkedFunctionCodeBlock",-932],["ModuleProgramCodeBlock",-1726],["FunctionExecutable",-7874]]
+STEP {"median":3.1025300000001153,"p99":401.0934449999995,"max":1065.2652319999997}

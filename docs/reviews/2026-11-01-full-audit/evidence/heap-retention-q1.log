@@ -1,0 +1,224 @@
+snap keys [ "version", "type", "nodes", "nodeClassNames", "edges", "edgeTypes", "edgeNames" ] Inspector 3
+TOP CLASSES
+  Object: n=1511017 size=59.5MB
+  ModuleRecord: n=1914 size=21.4MB
+  string: n=398143 size=20.7MB
+  FunctionCodeBlock: n=3057 size=13.0MB
+  Uint8Array: n=2136 size=8.2MB
+  Array: n=335140 size=5.1MB
+  FunctionExecutable: n=33131 size=4.0MB
+  Cell Butterfly: n=4466 size=3.6MB
+  Structure: n=28337 size=3.0MB
+  UnlinkedModuleProgramCodeBlock: n=1893 size=2.7MB
+  UnlinkedFunctionExecutable: n=26057 size=2.4MB
+  ModuleProgramCodeBlock: n=1729 size=1.8MB
+  UnlinkedFunctionCodeBlock: n=2343 size=1.7MB
+  ArrayBuffer: n=34 size=1.0MB
+  Function: n=30126 size=0.9MB
+  SymbolTable: n=8500 size=0.5MB
+  SparseArrayValueMap: n=14742 size=0.4MB
+  WeakMap: n=78 size=0.3MB
+  JSLexicalEnvironment: n=3852 size=0.2MB
+  JSModuleEnvironment: n=1914 size=0.2MB
+  ModuleProgramExecutable: n=1730 size=0.2MB
+  Promise: n=5793 size=0.2MB
+  ModuleRegistryEntry: n=1914 size=0.2MB
+  StructureRareData: n=1548 size=0.1MB
+  Int32Array: n=58 size=0.1MB
+  NativeExecutable: n=973 size=0.1MB
+  ActorIdentity: n=1302 size=0.1MB
+  JSSourceCode: n=1914 size=0.1MB
+  Map: n=1797 size=0.1MB
+  Float32Array: n=172 size=0.1MB
+  Uint32Array: n=34 size=0.0MB
+  GetterSetter: n=1427 size=0.0MB
+  AsyncFunction: n=1015 size=0.0MB
+  Q1Actor: n=165 size=0.0MB
+  FunctionRareData: n=352 size=0.0MB
+  PropertyTable: n=430 size=0.0MB
+  RegExp: n=87 size=0.0MB
+  WeakSet: n=24 size=0.0MB
+  GlobalObject: n=1 size=0.0MB
+  Set: n=280 size=0.0MB
+  Arguments: n=238 size=0.0MB
+  symbol: n=452 size=0.0MB
+  OwnedActorReference: n=165 size=0.0MB
+  EventRing: n=76 size=0.0MB
+  NodeJSFS: n=2 size=0.0MB
+  StructureChain: n=214 size=0.0MB
+  SharedSimulation: n=7 size=0.0MB
+  DOMAttributeGetterSetter: n=62 size=0.0MB
+  CustomGetterSetter: n=92 size=0.0MB
+  ModOperation: n=70 size=0.0MB
+  BigInt: n=68 size=0.0MB
+  GeneratorFunction: n=62 size=0.0MB
+  InternalModuleRegistry: n=1 size=0.0MB
+  FileSource: n=16 size=0.0MB
+  OpenArchive: n=16 size=0.0MB
+  CommandBuffer: n=9 size=0.0MB
+  LoadedApplicationContent: n=7 size=0.0MB
+  Q1SourceComposition: n=7 size=0.0MB
+  CvarRegistry: n=9 size=0.0MB
+  Generator: n=11 size=0.0MB
+
+INSTANCES SharedSimulation: 7
+  path:
+    Internal -> Q1Creatures
+    game -> Q1Foundation
+    host -> Object
+    originalPickups -> SharedOriginalPickupAdmission
+    eligible -> Function
+    Internal -> JSLexicalEnvironment
+    this -> SharedSimulation
+  path:
+    Internal -> Q1Creatures
+    game -> Q1Foundation
+    host -> Object
+    punchAngles -> Q1PlayerPunch
+    source -> Function
+    Internal -> JSLexicalEnvironment
+    this -> SharedSimulation
+  path:
+    Internal -> FunctionCodeBlock
+    Internal -> PreparedStartup
+    forward -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    nextSimulation -> SharedSimulation
+
+GLOBAL-ONLY retention of SharedSimulation: 7/7 reachable
+  id=532993 path:
+    Internal -> ModuleLoader
+    Internal -> ModuleRegistryEntry
+    Internal -> ModuleRecord
+    Internal -> JSModuleEnvironment
+    Internal -> Application
+    host -> Object
+    print -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    21 -> SharedSimulation
+  id=1529185 path:
+    Internal -> ModuleLoader
+    Internal -> ModuleRegistryEntry
+    Internal -> ModuleRecord
+    Internal -> JSModuleEnvironment
+    Internal -> Application
+    worldSimulation -> SharedSimulation
+    options -> Object
+    playerIdentity -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+    options -> Object
+    prepareRereleaseNavigation -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+    options -> Object
+    prepareRereleaseNavigation -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+    options -> Object
+    promptSupported -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+    options -> Object
+    playerIdentity -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+  id=1441671 path:
+    Internal -> ModuleLoader
+    Internal -> ModuleRegistryEntry
+    Internal -> ModuleRecord
+    Internal -> JSModuleEnvironment
+    Internal -> Application
+    worldSimulation -> SharedSimulation
+    options -> Object
+    playerIdentity -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+    options -> Object
+    prepareRereleaseNavigation -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+    options -> Object
+    prepareRereleaseNavigation -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+    options -> Object
+    promptSupported -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+  id=889981 path:
+    Internal -> ModuleLoader
+    Internal -> ModuleRegistryEntry
+    Internal -> ModuleRecord
+    Internal -> JSModuleEnvironment
+    Internal -> Application
+    worldSimulation -> SharedSimulation
+    options -> Object
+    playerIdentity -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+    options -> Object
+    prepareRereleaseNavigation -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+    options -> Object
+    prepareRereleaseNavigation -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+  id=618150 path:
+    Internal -> ModuleLoader
+    Internal -> ModuleRegistryEntry
+    Internal -> ModuleRecord
+    Internal -> JSModuleEnvironment
+    Internal -> Application
+    worldSimulation -> SharedSimulation
+    options -> Object
+    playerIdentity -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+    options -> Object
+    prepareRereleaseNavigation -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+  id=120482 path:
+    Internal -> ModuleLoader
+    Internal -> ModuleRegistryEntry
+    Internal -> ModuleRecord
+    Internal -> JSModuleEnvironment
+    Internal -> Application
+    worldSimulation -> SharedSimulation
+    options -> Object
+    playerIdentity -> Function
+    Internal -> JSLexicalEnvironment
+    Internal -> JSLexicalEnvironment
+    previousSimulation -> SharedSimulation
+  id=886944 path:
+    Internal -> ModuleLoader
+    Internal -> ModuleRegistryEntry
+    Internal -> ModuleRecord
+    Internal -> JSModuleEnvironment
+    Internal -> Application
+    worldSimulation -> SharedSimulation
+  retainers id=532993: JSLexicalEnvironment.thisx8, JSLexicalEnvironment.simulationx2, JSLexicalEnvironment.21x1, Object.valuex1, JSLexicalEnvironment.11x1, JSLexicalEnvironment.previousSimulationx1
+  retainers id=1529185: JSLexicalEnvironment.thisx8, JSLexicalEnvironment.simulationx3, JSLexicalEnvironment.previousSimulationx1, JSLexicalEnvironment.nextSimulationx1, JSLexicalEnvironment.11x1
+  retainers id=1441671: JSLexicalEnvironment.thisx8, JSLexicalEnvironment.simulationx3, JSLexicalEnvironment.previousSimulationx1, JSLexicalEnvironment.nextSimulationx1, JSLexicalEnvironment.11x1
+  retainers id=889981: JSLexicalEnvironment.thisx8, JSLexicalEnvironment.simulationx3, JSLexicalEnvironment.previousSimulationx1, JSLexicalEnvironment.nextSimulationx1, JSLexicalEnvironment.11x1
+  retainers id=618150: JSLexicalEnvironment.thisx8, JSLexicalEnvironment.simulationx3, JSLexicalEnvironment.previousSimulationx1, JSLexicalEnvironment.11x1, JSLexicalEnvironment.nextSimulationx1
+  retainers id=120482: JSLexicalEnvironment.thisx8, JSLexicalEnvironment.simulationx3, JSLexicalEnvironment.previousSimulationx1, JSLexicalEnvironment.nextSimulationx1, JSLexicalEnvironment.11x1
+  retainers id=886944: JSLexicalEnvironment.thisx8, JSLexicalEnvironment.simulationx3, Object.simulationx2, Application.worldSimulationx1, JSLexicalEnvironment.nextSimulationx1, JSLexicalEnvironment.11x1, WorldLifetime.simulationx1

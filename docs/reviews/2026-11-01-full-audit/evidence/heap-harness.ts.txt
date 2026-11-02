@@ -1,0 +1,56 @@
+// Audit-only: heap retention path analysis after N map travels.
+import { Application } from "./src/app/bootstrap/application.ts";
+import { parseApplicationCommand } from "./src/app/bootstrap/options.ts";
+const corpus = "<game-data>";
+const [scenario = "q1", cyclesArg = "8", steps = "40"] = Bun.argv.slice(2);
+const configs: Record<string, { args: string[]; maps: string[] }> = {
+  q1: { args: ["--game", "q1-classic-id1", "--map", "e1m1", "--movement", "q1", "--character", "q1", "--mode", "singleplayer"], maps: ["e1m2", "e1m1"] },
+  q2: { args: ["--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q2", "--character", "q2", "--mode", "singleplayer"], maps: ["base2", "base1"] },
+  q3: { args: ["--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3", "--mode", "deathmatch"], maps: ["q3dm2", "q3dm1"] },
+};
+const c = configs[scenario]!;
+const launch = parseApplicationCommand(["--content-root", corpus, ...c.args, "--dedicated"]);
+if (launch.kind !== "run") throw new Error("x");
+const app = await Application.open(launch.options, { print: () => undefined });
+for (let i = 0; i < Number(steps); i++) await app.step(50);
+for (let k = 0; k < Number(cyclesArg); k++) { app.queueCommand("map", [c.maps[k % 2]!], null); for (let i = 0; i < Number(steps); i++) await app.step(50); }
+Bun.gc(true); Bun.gc(true);
+const snap = Bun.generateHeapSnapshot() as unknown as { nodes: number[]; nodeClassNames: string[]; edges: number[]; edgeTypes: string[]; edgeNames: string[]; labels: string[] };
+console.log("snap keys", Object.keys(snap), (snap as any).type, (snap as any).version); const NF = (snap as any).type === "GCDebugging" ? 7 : 4;
+const { nodes, edges, nodeClassNames, edgeNames, edgeTypes, labels } = snap;
+const nodeCount = nodes.length / NF;
+const idToIndex = new Map<number, number>();
+for (let i = 0; i < nodeCount; i++) idToIndex.set(nodes[i * NF]!, i);
+const counts = new Map<string, { n: number; size: number }>();
+for (let i = 0; i < nodeCount; i++) { const name = nodeClassNames[nodes[i * NF + 2]!]!; const e = counts.get(name) ?? { n: 0, size: 0 }; e.n++; e.size += nodes[i * NF + 1]!; counts.set(name, e); }
+console.log("TOP CLASSES"); [...counts.entries()].sort((a, b) => b[1].size - a[1].size).slice(0, 60).forEach(([k, v]) => console.log(`  ${k}: n=${v.n} size=${(v.size / 1048576).toFixed(1)}MB`));
+// adjacency
+const head = new Int32Array(nodeCount).fill(-1); const next = new Int32Array(edges.length / 4); const to = new Int32Array(edges.length / 4);
+for (let e = 0; e < edges.length / 4; e++) { const f = idToIndex.get(edges[e * 4]!), t = idToIndex.get(edges[e * 4 + 1]!); if (f === undefined || t === undefined) continue; to[e] = t; next[e] = head[f]!; head[f] = e; }
+const parent = new Int32Array(nodeCount).fill(-1), parentEdge = new Int32Array(nodeCount).fill(-1);
+const seen = new Uint8Array(nodeCount); const q: number[] = [0]; seen[0] = 1;
+for (let qi = 0; qi < q.length; qi++) { const u = q[qi]!; for (let e = head[u]!; e !== -1; e = next[e]!) { const v = to[e]!; if (!seen[v]) { seen[v] = 1; parent[v] = u; parentEdge[v] = e; q.push(v); } } }
+const pathOf = (i: number) => { const out: string[] = []; let u = i, guard = 0; while (u !== -1 && u !== 0 && guard++ < 60) { const e = parentEdge[u]!; const type = edgeTypes[edges[e * 4 + 2]!]!; const data = edges[e * 4 + 3]!; const label = type === "Property" || type === "Variable" ? edgeNames[data] : type === "Index" ? `[${data}]` : type; const lab = labels && NF === 7 ? (labels[nodes[u * NF + 4]!] ?? "") : ""; out.push(`${label} -> ${nodeClassNames[nodes[u * NF + 2]!]}${lab ? `(${lab.slice(0, 40)})` : ""}`); u = parent[u]!; } return out.reverse().join("\n    "); };
+const wanted = (process.env["WANT"] ?? "SharedSimulation,Application,Q1Provider,SessionWorld,CollisionWorld,ActorRegistry").split(",");
+for (const name of wanted) {
+  const list: number[] = []; for (let i = 0; i < nodeCount; i++) if (nodeClassNames[nodes[i * NF + 2]!] === name) list.push(i);
+  console.log(`\nINSTANCES ${name}: ${list.length}`);
+  for (const i of list.slice(0, 2).concat(list.slice(-1))) console.log(`  path:\n    ${pathOf(i)}`);
+}
+
+// Real-retention: BFS from root but not through code blocks / executables / conservative root hits to non-Global objects.
+const banned = new Set(["FunctionCodeBlock","ModuleProgramCodeBlock","EvalCodeBlock","ProgramCodeBlock","UnlinkedFunctionCodeBlock","FunctionExecutable","Structure","StructureChain","StructureRareData","InferredValue","Watchpoint"]);
+const seen2 = new Uint8Array(nodeCount); const par2 = new Int32Array(nodeCount).fill(-1), parE2 = new Int32Array(nodeCount).fill(-1); const q2: number[] = [];
+const appIdx = (() => { for (let i = 0; i < nodeCount; i++) if (nodeClassNames[nodes[i * NF + 2]!] === "GlobalObject") return i; return 0; })();
+q2.push(appIdx); seen2[appIdx] = 1;
+for (let qi = 0; qi < q2.length; qi++) { const u = q2[qi]!; for (let e = head[u]!; e !== -1; e = next[e]!) { const v = to[e]!; if (seen2[v]) continue; if (banned.has(nodeClassNames[nodes[v * NF + 2]!]!)) continue; seen2[v] = 1; par2[v] = u; parE2[v] = e; q2.push(v); } }
+const path2 = (i: number) => { const out: string[] = []; let u = i, g = 0; while (u !== -1 && u !== appIdx && g++ < 80) { const e = parE2[u]!; const type = edgeTypes[edges[e * 4 + 2]!]!; const data = edges[e * 4 + 3]!; const label = type === "Property" || type === "Variable" ? edgeNames[data] : type === "Index" ? `[${data}]` : type; out.push(`${label} -> ${nodeClassNames[nodes[u * NF + 2]!]}`); u = par2[u]!; } return out.reverse().join("\n    "); };
+const sims: number[] = []; for (let i = 0; i < nodeCount; i++) if (nodeClassNames[nodes[i * NF + 2]!] === "SharedSimulation") sims.push(i);
+console.log(`\nGLOBAL-ONLY retention of SharedSimulation: ${sims.filter(i => seen2[i]).length}/${sims.length} reachable`);
+for (const i of sims) if (seen2[i]) console.log(`  id=${nodes[i*NF]} path:\n    ${path2(i)}`);
+// Direct retainers of each simulation
+const rev = new Map<number, string[]>();
+for (let e = 0; e < edges.length / 4; e++) { const t = idToIndex.get(edges[e*4+1]!); if (t === undefined || !sims.includes(t)) continue; const f = idToIndex.get(edges[e*4]!)!; const type = edgeTypes[edges[e*4+2]!]!; const data = edges[e*4+3]!; const label = type === "Property" || type === "Variable" ? edgeNames[data] : type === "Index" ? `[${data}]` : type; const list = rev.get(t) ?? []; list.push(`${nodeClassNames[nodes[f*NF+2]!]}.${label}`); rev.set(t, list); }
+for (const i of sims) { const c = new Map<string,number>(); for (const r of rev.get(i) ?? []) c.set(r,(c.get(r)??0)+1); console.log(`  retainers id=${nodes[i*NF]}: ${[...c.entries()].sort((a,b)=>b[1]-a[1]).slice(0,14).map(([k,v])=>k+"x"+v).join(", ")}`); }
+// Retention summary: group edges by first property name at depth of paths from Application
+process.exit(0);

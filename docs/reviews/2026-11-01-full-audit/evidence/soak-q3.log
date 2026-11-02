@@ -1,0 +1,16 @@
+{"label":"warm","heapMB":104.6,"objects":1096869,"rssMB":703,"extMB":35.5}
+{"label":"steady-0","heapMB":107.3,"objects":1099675,"rssMB":681,"extMB":37.9,"msPerStep":15.133}
+{"label":"steady-1","heapMB":108.4,"objects":1098526,"rssMB":662,"extMB":39,"msPerStep":14.042}
+{"label":"steady-2","heapMB":108.9,"objects":1098084,"rssMB":678,"extMB":39.6,"msPerStep":15.494}
+{"label":"cycle-0-q3dm2","heapMB":149.3,"objects":1718665,"rssMB":901,"extMB":44.7,"ms":9515,"players":4}
+{"label":"cycle-1-q3dm1","heapMB":191.9,"objects":2297027,"rssMB":1089,"extMB":54,"ms":9030,"players":4}
+{"label":"cycle-2-q3dm2","heapMB":233.5,"objects":2918367,"rssMB":1183,"extMB":60.3,"ms":9976,"players":4}
+{"label":"cycle-3-q3dm1","heapMB":275.2,"objects":3494350,"rssMB":1334,"extMB":68.8,"ms":7788,"players":4}
+{"label":"cycle-4-q3dm2","heapMB":315.7,"objects":4113106,"rssMB":1380,"extMB":74.3,"ms":7152,"players":4}
+{"label":"cycle-5-q3dm1","heapMB":356,"objects":4689602,"rssMB":1466,"extMB":81.2,"ms":7023,"players":4}
+{"label":"cycle-6-q3dm2","heapMB":398.8,"objects":5310539,"rssMB":1621,"extMB":88.9,"ms":7747,"players":4}
+{"label":"cycle-7-q3dm1","heapMB":439.8,"objects":5887577,"rssMB":1744,"extMB":96.5,"ms":6766,"players":4}
+{"label":"cycle-8-q3dm2","heapMB":479.1,"objects":6506016,"rssMB":1408,"extMB":100.9,"ms":6926,"players":4}
+{"label":"cycle-9-q3dm1","heapMB":522.6,"objects":7084851,"rssMB":1988,"extMB":110.9,"ms":6651,"players":4}
+TYPE-DELTAS [["Object",3587863],["string",581726],["Function",388304],["Array",358333],["JSLexicalEnvironment",158397],["GetterSetter",140565],["SparseArrayValueMap",49627],["Uint8Array",21450],["Uint16Array",20545],["ArrayBuffer",18995],["FunctionExecutable",6144],["UnlinkedFunctionExecutable",6120],["Int32Array",6060],["Structure",5382],["StructureRareData",5265],["SymbolTable",3347],["Map",2513],["DataView",2310],["FunctionCodeBlock",2132],["Cell Butterfly",1837],["UnlinkedFunctionCodeBlock",822],["Arguments",741],["Set",412]]
+STEP {"median":12.092700999986846,"p99":7232.6481020000065,"max":9308.710461000002}
