@@ -1,0 +1,7 @@
+  0:00 ------------------------------------------------------------
+  0:00 InitGame: \g_gametype\2\sv_maxclients\8\g_maxGameClients\0\dmflags\0\fraglimit\20\timelimit\0\capturelimit\8\g_needpass\0\protocol\68\sv_allowDownload\0\sv_maxRate\0\mapname\q3dm1\sv_mapname\q3dm1\sv_privateClients\0\sv_minPing\0\sv_maxPing\0\sv_floodProtect\1\gamename\baseq3
+  0:00 ClientConnect: 0
+  0:00 ClientUserinfoChanged: 0 n\Ranger\t\0\model\ranger\hmodel\ranger\c1\4\c2\5\hc\70\w\0\l\0\skill\    2.00\tt\0\tl\0
+  0:02 ClientBegin: 0
+  0:03 ShutdownGame:
+  0:03 ------------------------------------------------------------
