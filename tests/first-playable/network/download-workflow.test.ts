@@ -1,7 +1,6 @@
 import { expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { RemoteApplication } from '../../../src/app/bootstrap/remote-application.ts';
 import { loadApplicationContent } from '../../../src/app/bootstrap/content.ts';
 import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
@@ -11,11 +10,13 @@ import { createIdentityOwner } from '../../../src/contracts/identity.ts';
 import { blockChecksum } from '../../../src/core/md4.ts';
 import { UdpTransport } from '../../../src/network/common/transport.ts';
 import type { EntityStateT } from '../../../src/network/q2/index.ts';
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 const nativeTest = Bun.env['QUAKE_DOWNLOAD_WORKFLOW_TEST'] === '1' ? test : test.skip;
 
 nativeTest('public download controls survive native cancellation and HTTP package remount with fallback on travel', async () => {
-    const temporary = await mkdtemp(join(tmpdir(), 'q2-public-download-'));
+    const temporary = await tempDirectory('q2-public-download-');
     for (const directory of ["ctf", "+arena"]) {
         const profile = join(temporary, "q2", directory);
         await mkdir(profile, { recursive: true });

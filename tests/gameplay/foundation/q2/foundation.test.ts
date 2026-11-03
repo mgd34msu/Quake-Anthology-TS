@@ -1,17 +1,18 @@
 import { SharedOriginalPickupAdmission } from "../../../../src/world/gameplay/original-pickups.ts";
-import { testCorpusRoot } from "../../../support/corpus.ts";
+import { corpusTest, corpusDescribe, corpusFile } from "../../../support/corpus.ts";
 
 import type { RegularArmorState } from "../../../../src/contracts/gameplay.ts";
 import type { OriginalPickupOffer } from "../../../../src/contracts/original-pickups.ts";
-import { describe, expect, test } from "bun:test";
+import { expect } from "bun:test";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { Q2Foundation } from "../../../../src/content/q2/foundation/runtime.ts";
 import type { Q2FoundationHost, Q2GameOptions, Q2PresentationEvent } from "../../../../src/content/q2/foundation/host.ts";
 import { createQ2TargetModule } from "../../../../src/content/q2/foundation/targets.ts";
 import { createQ2ItemModule } from "../../../../src/content/q2/foundation/items.ts";
+import { noInfiniteAmmo } from "../../../../src/content/q2/foundation/infinite-ammo.ts";
 import { createQ2MoverModule } from "../../../../src/content/q2/foundation/movers.ts";
 import { encodeQ2FoundationCheckpoint, decodeQ2FoundationCheckpoint } from "../../../../src/persistence/q2-foundation.ts";
 import { encodeQ2ItemsCheckpoint, decodeQ2ItemsCheckpoint } from "../../../../src/persistence/q2-items.ts";
@@ -26,10 +27,22 @@ import { readQ2Bsp } from "../../../../src/formats/q2-map/index.ts";
 import { SharedPickupAdmission } from "../../../../src/world/gameplay/pickups.ts";
 import { Q2_Q3_SUPPLY_PROFILE } from "../../../../src/content/composition/q2-q3-supply.ts";
 import { Q3_WEAPON_ITEMS, q3SpawnLoadout } from "../../../../src/content/q3/foundation/arsenal.ts";
+import { inertAuthority } from "../../../support/authority.ts";
+const test = corpusTest("q2/baseq2/pak0.pak", "q2/rerelease/baseq2/pak0.pak");
+const describe = corpusDescribe("q2/baseq2/pak0.pak", "q2/rerelease/baseq2/pak0.pak");
 
 const options: Q2GameOptions = { edition: "classic", mapName: "base1", skill: 1, mode: "singleplayer", deathmatchFlags: 0,
   maxClients: 4, provider: "q2:official", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" };
 const zero = { x: 0, y: 0, z: 0 };
+
+test("a touch-fired func_button keeps its touch callback and has no blocked handler", () => {
+  const { game, player } = targetGame();
+  const button = game.spawn({ classname: "func_button", ordinal: 5, values: new Map([["target", "t4"], ["wait", "1"], ["speed", "100"], ["lip", "0"]]) });
+  expect(button.touch).not.toBeNull();
+  button.touch?.(button, game, { self: button.actor, other: player.id, plane: null, surface: null });
+  expect(button.touch).not.toBeNull();
+  expect(button.blocked).toBeNull();
+});
 
 test("source train route observes real corner offsets, stops and ambiguous targets without mutation", () => {
   const fixture = targetGame({ ...options, edition: "rerelease" }), { game, movers } = fixture;
@@ -64,6 +77,26 @@ test("source train route observes real corner offsets, stops and ambiguous targe
   expect(movers.trainRoute(train, game)).toBeNull();
 });
 
+test("rerelease g_instagib removes pickups, starts players with a railgun and 99 slugs, and refuses weapon drops", () => {
+  const { game, player, items } = targetGame({ ...options, edition: "rerelease", mode: "deathmatch", instagib: true });
+  const pickup = game.spawn({ classname: "item_health", ordinal: 40, values: new Map([["origin", "0 0 0"]]) });
+  expect(game.entity(pickup.actor.id)).toBeNull();
+  expect(game.host.inventory.count(player.id, "q2:weapon_blaster")).toBe(0);
+  expect(game.host.inventory.count(player.id, "q2:weapon_railgun")).toBe(1);
+  expect(game.host.inventory.count(player.id, "q2:ammo_slugs")).toBe(99);
+  const owner = game.entity(player.id);
+  if (owner === null) throw new Error("Missing player entity");
+  expect(items.drop(owner, game, "q2:weapon_railgun", { playerDeath: false })).toBeNull();
+});
+
+test("rerelease g_infinite_ammo keeps trap and tesla ammo finite and refuses ammo drops", () => {
+  const { game } = targetGame({ ...options, edition: "rerelease", mode: "deathmatch", deathmatchFlags: 8192 });
+  expect(noInfiniteAmmo(game, "q2:ammo_trap")).toBe(true);
+  expect(noInfiniteAmmo(game, "q2:ammo_tesla")).toBe(true);
+  expect(noInfiniteAmmo(game, "q2:ammo_slugs")).toBe(false);
+  expect(noInfiniteAmmo(targetGame().game, "q2:ammo_trap")).toBe(false);
+});
+
 function targetGame(selected: Q2GameOptions = options) {
   const actors = new SessionActorRegistry(createIdentityOwner("q2-foundation"));
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
@@ -73,7 +106,7 @@ function targetGame(selected: Q2GameOptions = options) {
   const scheduled = new Map<OwnedActor, number>();
   const players: ActorId[] = [];
   let now = 0;
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   combat.register(createQ2CombatPolicy({ id: options.combatProvider, armor: nativeVictimArmor(() => ({ arithmetic: "binary64", screenFacingDot: 1, q2: { product: selected.edition, ctf: false, alive: true } })),
     context: request => ({ arithmetic: "binary64", player: players.includes(request.target), monster: false, attackerPlayer: false,
       hasEnemy: false, easySkill: false, deathmatch: false, defenderSphere: false, teamDamageEnabled: false,
@@ -221,7 +254,7 @@ describe("Q2 permanent gameplay foundation", () => {
     expect(dropped.owner).toBe(actor.id); expect(saved()?.callbacks.touch).toBe("Touch_Item");
   });
   test("selected Q3 supply consumes retail base1 weapons and preserves Q2 refusal, drops and respawn", async () => {
-    const archive = await openArchive(`${testCorpusRoot()}/q2/baseq2/pak0.pak`);
+    const archive = await openArchive(corpusFile("q2/baseq2/pak0.pak"));
     try {
       const entry = archive.findEntries("maps/base1.bsp")[0];
       if (entry === undefined) throw new Error("Missing base1");
@@ -359,7 +392,9 @@ describe("Q2 permanent gameplay foundation", () => {
       scene.advance(0.1);
       expect(scene.game.body(entity).origin.z).toBe(96); expect(scene.game.body(entity).ground).toBe(world.id);
       expect(checkBottom(context, scene.game.body(entity).origin)).toBe(true);
-      expect(walkMove(context, 0, 8)).toBe(true); expect(scene.game.body(entity).origin).toEqual({ x: 8, y: 0, z: 96 }); expect(touches).toBe(1);
+      expect(walkMove(context, 0, 8)).toBe(true); expect(scene.game.body(entity).origin).toEqual({ x: 8, y: 0, z: 96 });
+      // monster start runs the zero-length M_walkmove too (one touch), and the real step adds a second.
+      expect(touches).toBe(2);
       // Force the source slow support check, including rerelease quadrant hulls.
       scene.host.pointContents = point => wet && point.z >= 126 && point.z <= 128 ? 32 : 0;
       expect(checkBottom(context, scene.game.body(entity).origin)).toBe(true);
@@ -398,7 +433,7 @@ describe("Q2 permanent gameplay foundation", () => {
     const moverState = decodeQ2MoversCheckpoint(encodeQ2MoversCheckpoint(scene.movers.capture(scene.game)));
     const actors = SessionActorRegistry.restore(createIdentityOwner("q2-foundation-restored"), scene.host.actors.checkpoint(), scene.host.actors.sourceCheckpoint());
     const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-    const inventory = new SharedInventoryTable(actors), combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+    const inventory = new SharedInventoryTable(actors), combat = inertAuthority(actors, callbacks);
     for (const entry of scene.host.actors.observations()) {
       const actor = actors.resolveSaved(entry.id), body = scene.host.bodies.read(entry.id), state = scene.host.combat.read(entry.id);
       if (actor === null) throw new Error("Missing restored shared actor");
@@ -503,8 +538,8 @@ describe("Q2 permanent gameplay foundation", () => {
   });
 
   test("real classic and rerelease base1 preserve authored spawn fields and edition inhibition", async () => {
-    const classicArchive = await openArchive(`${testCorpusRoot()}/q2/baseq2/pak0.pak`);
-    const rereleaseArchive = await openArchive(`${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`);
+    const classicArchive = await openArchive(corpusFile("q2/baseq2/pak0.pak"));
+    const rereleaseArchive = await openArchive(corpusFile("q2/rerelease/baseq2/pak0.pak"));
     try {
       const classicEntry = classicArchive.findEntries("maps/base1.bsp")[0], rereleaseEntry = rereleaseArchive.findEntries("maps/base1.bsp")[0];
       if (classicEntry === undefined || rereleaseEntry === undefined) throw new Error("Missing supplied base1 fixture");

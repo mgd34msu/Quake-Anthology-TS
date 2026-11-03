@@ -1,0 +1,46 @@
+# Corpus-free checks: nothing here needs Quake game data, a display or a GPU.
+# The corpus and GL tiers (`bun run test:corpus`, `bun run test:gl`) stay local.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run format:check
+      - run: bun run spdx
+      - run: bun run codec:check
+      - name: Policy on changed files
+        if: github.event_name == 'pull_request'
+        run: |
+          git diff --name-only --diff-filter=ACMR "${{ github.event.pull_request.base.sha }}...HEAD" -- '*.ts' > "$RUNNER_TEMP/changed.txt"
+          if [ -s "$RUNNER_TEMP/changed.txt" ]; then
+            xargs -a "$RUNNER_TEMP/changed.txt" bun tools/check-policy.ts . --files
+          fi
+      - name: Policy on the whole project
+        if: github.event_name == 'push'
+        run: bun run policy
+      - name: Added lines stay within the size budget
+        if: github.event_name == 'pull_request'
+        run: bun tools/check-style.ts "${{ github.event.pull_request.base.sha }}"
+      - run: bun run test:unit

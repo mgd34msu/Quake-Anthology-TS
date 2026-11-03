@@ -118,7 +118,7 @@ export class VmRegistry {
       if (registration === null) break;
       print(`${registration.name} : `);
       if (cell.record.kind === "typescript") { print("TypeScript replacement\n"); continue; }
-      print("interpreted\n");
+      print(`${cell.record.kind === "interpreted" ? cell.record.interpreter.semantics : "interpreted"}\n`);
       print(`    code length : ${this.codeLength(cell).toString().padStart(7)}\n`);
       print(`    table length: ${this.tableLength(cell).toString().padStart(7)}\n`);
       print(`    data length : ${this.dataLength(cell).toString().padStart(7)}\n`);

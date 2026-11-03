@@ -2,7 +2,7 @@ import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isRecord, isUnknownArray } from "../../network/common/value.ts";
 import { createContentDigest, type ContentDigest } from "../../contracts/content.ts";
-import { containedFileParts } from "../../platform/files/contained.ts";
+import { containedFileParts } from "../../core/files/contained.ts";
 
 export const quaddictedCatalogUrl = "https://www.quaddicted.com/api/v1/?q=%2Btags%3A%22game%3Dquake%22%20%2Btags%3A%22game_mode%3Dsingleplayer%22&fl=sha256,tags,urls,bytes,install";
 export interface AddonPackage {
@@ -30,10 +30,12 @@ function pathPrefix(value: string): string {
   return path === "" ? "" : path + (value.endsWith("/") ? "/" : "");
 }
 /** Quaddicted API v1: installation paths are relative to a virtual Quake base. */
-export function parseAddonCatalog(value: unknown): readonly AddonPackage[] {
+export function parseAddonCatalog(value: unknown, skipped: (reason: string) => void = () => {}): readonly AddonPackage[] {
   if (!isUnknownArray(value)) throw new Error("Invalid Quaddicted catalog");
   const result: AddonPackage[] = [];
   for (const row of value) {
+    // One malformed row is skipped; it must not hide the rest of the catalog.
+    try {
     if (!isRecord(row)) throw new Error("Invalid Quaddicted package");
     const tags = strings(row["tags"]), filename = addonTags(tags, "filename")[0];
     if (!tags.includes("game=quake") || !tags.includes("game_mode=singleplayer") || filename === undefined || !filename.endsWith(".zip")) continue;
@@ -44,6 +46,7 @@ export function parseAddonCatalog(value: unknown): readonly AddonPackage[] {
     let unavailable: string | null = null;
     const commandline = addonTags(tags, "commandline").join(" ");
     const gameDirectory = /(?:^|\s)-game\s+([a-zA-Z0-9._+-]+)(?:\s|$)/.exec(commandline)?.[1] ?? "id1";
+    if (gameDirectory === "." || gameDirectory === "..") throw new Error(`Invalid game directory: ${gameDirectory}`);
     if (/(?:^|\s)-(?:hipnotic|rogue|quoth)(?:\s|$)/.test(commandline)) unavailable = "Requires a source gameplay option not yet supported by this installer";
     const mappings: { from: string; to: string | null }[] = [], install = row["install"];
     try {
@@ -59,6 +62,7 @@ export function parseAddonCatalog(value: unknown): readonly AddonPackage[] {
     result.push({ digest: createContentDigest(sha256), sha256, title: addonTags(tags, "title")[0] ?? filename,
       filename, group: addonTags(tags, "release_group")[0] ?? filename.replace(/\.zip$/, ""), bytes, url, tags,
       starts: addonTags(tags, "startmap").filter(path => /^[a-zA-Z0-9_+./-]+$/.test(path) && !path.includes("..")), gameDirectory, mappings, unavailable });
+    } catch (error) { skipped(error instanceof Error ? error.message : String(error)); }
   }
   return result;
 }
@@ -146,6 +150,7 @@ export async function readNightdiveAddons(root: string): Promise<readonly Nightd
 
 export async function managedAddonTitle(root: string, contentDirectory: string): Promise<string | null> {
   if (!/^qd_[a-f0-9]{20}_[a-f0-9]{20}$/.test(contentDirectory.split("/").at(-1) ?? "")) return null;
-  const value: unknown = JSON.parse(await readFile(join(root, contentDirectory, ".quaddicted.json"), "utf8"));
+  let value: unknown;
+  try { value = JSON.parse(await readFile(join(root, contentDirectory, ".quaddicted.json"), "utf8")); } catch { return null; }
   return isRecord(value) && typeof value["title"] === "string" ? value["title"] : null;
 }

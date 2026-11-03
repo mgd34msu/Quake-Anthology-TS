@@ -1,7 +1,7 @@
 /* Q3 sv_game.c/cl_cgame.c/cl_ui.c filesystem traps over the selected mounted content. GPL-2.0-or-later. */
-import type { UserFileStore, WritableBinaryFile, WritableFileCheckpoint, WritableFileMode } from "../../platform/files/writable.ts";
+import type { UserFileStore, WritableBinaryFile, WritableFileCheckpoint, WritableFileMode } from "../../core/files/writable.ts";
 import { createHash } from "node:crypto";
-import { containedFileParts } from "../../platform/files/contained.ts";
+import { containedFileParts } from "../../core/files/contained.ts";
 import { readResource } from "../../persistence/recipe.ts";
 import { SaveReader } from "../../persistence/value.ts";
 import { CommonError } from "../../core/common-error.ts";
@@ -43,6 +43,8 @@ export interface QvmFileServices {
   readonly print?: (text: string) => void;
   assertCurrent(): void;
 }
+
+const IMMUTABLE_NAME = /(?:\.(?:pk3|qvm|dll|so|dylib)|(?:^|\/)(?:q3key|q3config\.cfg|autoexec\.cfg))$/i;
 
 /** Guest slots belong to this module lifetime; resource bytes retain their actual mount provenance. */
 export class QvmFiles {
@@ -110,6 +112,11 @@ export class QvmFiles {
     const writable = this.services.writable;
     if (writable === null) throw new Error("QVM filesystem has no writable owner");
     const slot = this.freeSlot();
+    // ioquake3 FS_CheckFilenameIsMutable: guests cannot plant code or packages, and here they cannot touch credentials or startup configs either.
+    if (IMMUTABLE_NAME.test(path.replaceAll("\\", "/"))) {
+      this.services.print?.(`WARNING: ${path} is not a mutable name\n`); this.assertCurrent();
+      publish(0); return -1;
+    }
     const file = writable.open(path.replaceAll("\\", "/"), mode, text => { this.services.print?.(text); this.assertCurrent(); });
     try { this.assertCurrent(); }
     catch (error) { file?.close(); throw error; }
@@ -208,7 +215,8 @@ export class QvmFiles {
   }
   async list(path: string, extension: string): Promise<readonly string[]> {
     this.assertCurrent();
-    if (path.toLowerCase() === "$modlist") throw new Error("QVM $modlist requires an installed-mod catalog owner");
+    // The stock UI asks for installed mods on its main menu; no mod catalog owner exists, so none are listed.
+    if (path.toLowerCase() === "$modlist") return [];
     const names = await this.services.mounts.listFiles(path, extension);
     this.assertCurrent();
     return names;

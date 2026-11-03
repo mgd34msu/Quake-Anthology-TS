@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
 import { digestBytes } from "../../../src/content/mounts/index.ts";
-import { QvmModule, QvmOpcode, rejectQvmSyscall, resolveQvmArtifact } from "../../../src/compat/qvm/index.ts";
+import { QvmModule } from "../../../src/compat/qvm/module.ts";
+import { QvmOpcode } from "../../../src/compat/qvm/image.ts";
+import { rejectQvmSyscall } from "../../../src/compat/qvm/syscalls.ts";
+import { resolveQvmArtifact } from "../../../src/compat/qvm/artifacts.ts";
 import { QvmGameData } from "../../../src/compat/qvm/game-data.ts";
 import { qvmInventoryBinding, qvmInventoryProjection } from "../../../src/compat/qvm/game-inventory.ts";
 
@@ -69,7 +72,7 @@ test("QVM inventory follows relocated records and rejects expired source clients
     expect(f.binding.read().find(entry => entry.item === "q3:ammo/shotgun")?.count).toBe(41);
     f.retire(); expect(() => f.binding.read()).toThrow("Retired player");
   } finally { f.module.retire(); }
-  expect(() => f.binding.read()).toThrow();
+  expect(() => f.binding.read()).toThrow("QVM memory has been retired");
 });
 
 test("QVM inventory rejects unadmitted fields, altered source identity and invalid ABI writes", () => {

@@ -1,4 +1,6 @@
+import { writeCapture } from "../support/capture.ts";
 import { sceneModelBatches } from "../../src/render/scene/submissions.ts";
+import { rendererBackends } from "../support/gl.ts";
 import { expect, spyOn, test } from "bun:test";
 import { loadApplicationContent } from "../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
@@ -16,7 +18,7 @@ import { WorldScene } from "../../src/render/scene/world.ts";
 import { prepareSceneEntity, SceneModelRenderer } from "../../src/render/scene/models/index.ts";
 import type { SceneTexture } from "../../src/render/scene/textures.ts";
 
-for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test(`QW indexed player skin preserves native geometry and palette on ${backend}`, async () => {
+for (const backend of rendererBackends) test(`QW indexed player skin preserves native geometry and palette on ${backend}`, async () => {
   const parsed = parseApplicationCommand(["--game", "q1-rerelease-id1", "--map", "e1m1", "--dedicated"]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const content = await loadApplicationContent(parsed.options), identity = createIdentityOwner("qw-indexed-skin");
@@ -68,7 +70,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test(`Q
         frames.begin(); frames.view({ target: input.target, time: input.time, viewport: camera.viewport, clear: input.clear, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
         const pending = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute(frames.finish()); const image = await pending;
         expect(image.filter((value, index) => index % 4 !== 3 && value > 5).length).toBeGreaterThan(100);
-        snapshots.push(image); await Bun.write(`/tmp/qw-indexed-skin-${backend}-${colors.top}.png`, encodePng(320, 240, image));
+        snapshots.push(image); await writeCapture(`qw-indexed-skin-${backend}-${colors.top}.png`, encodePng(320, 240, image));
       }
       expect(snapshots[0]).not.toEqual(snapshots[1]);
       const other = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--dedicated"]);
@@ -85,7 +87,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test(`Q
           expect(prepareSceneEntity(entity, { camera, timeSeconds: 0, options: source }).surfaces[0]?.geometry).toEqual(native.surfaces[0]?.geometry);
           frames.begin(); frames.view({ target: input.target, time: input.time, viewport: camera.viewport, clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false }, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
           const pending = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute(frames.finish());
-          await Bun.write(`/tmp/qw-indexed-skin-${backend}-q2-map.png`, encodePng(320, 240, await pending));
+          await writeCapture(`qw-indexed-skin-${backend}-q2-map.png`, encodePng(320, 240, await pending));
         } finally { world.close(); }
       } finally { await q2.close(); }
     } finally { captureTextures.mockRestore(); }

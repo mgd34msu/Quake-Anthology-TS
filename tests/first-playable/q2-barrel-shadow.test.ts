@@ -1,6 +1,7 @@
+import { writeCapture } from "../support/capture.ts";
 import { sceneModelBatches } from "../../src/render/scene/submissions.ts";
 import { expect, spyOn, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { Application } from "../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { SceneModelRenderer } from "../../src/render/scene/models/renderer.ts";
@@ -8,10 +9,12 @@ import { ModelLightSampler } from "../../src/render/scene/models/light-sampler.t
 import type { WorldViewInput } from "../../src/render/scene/world.ts";
 import type { Vec3 } from "../../src/contracts/math.ts";
 import { encodePng } from "../../src/formats/images/png.ts";
+import { trackedTempDirectories } from "../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 interface Probe { readonly renderer: SceneModelRenderer; readonly args: Parameters<SceneModelRenderer["prepare"]>; }
 for (const backend of ["cpu", "gl"]) test.skipIf(process.env["QUAKE_BARREL_SHADOW"] !== "1")(`base1 barrel ${backend} shadows preserve lighting and count effect lights once`, async () => {
-  const root = await mkdtemp("/tmp/q2-barrel-shadow-");
+  const root = await tempDirectory("q2-barrel-shadow-");
   const parsed = parseApplicationCommand(["--game", "q2-rerelease-baseq2", "--map", "base1", "--renderer", backend, "--hidden",
     "--width", "640", "--height", "480", "--seats", "2", "--gamma", "1", "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Expected application launch");
@@ -38,7 +41,7 @@ for (const backend of ["cpu", "gl"]) test.skipIf(process.env["QUAKE_BARREL_SHADO
     await app.step(25); await app.step(25); await app.step(25);
     const capture = async (name: string): Promise<Uint8Array> => {
       const pending = app.captureNextFrame(); await app.step(0.001); const pixels = await pending;
-      await Bun.write(`/tmp/q2-barrel-shadow-${backend}-${name}.png`, encodePng(640, 480, pixels)); return pixels;
+      await writeCapture(`q2-barrel-shadow-${backend}-${name}.png`, encodePng(640, 480, pixels)); return pixels;
     };
     const after = await capture("after");
     const probe = probes.at(-1);
@@ -70,6 +73,6 @@ for (const backend of ["cpu", "gl"]) test.skipIf(process.env["QUAKE_BARREL_SHADO
     if (merged === undefined) throw new Error("Missing combined alias lighting");
     expect(merged.filter(origin => origin === effect.origin)).toHaveLength(1);
     expect(merged).toHaveLength((input.lights?.length ?? 0) + authored.length + 1);
-    await Bun.write(`/tmp/q2-barrel-shadow-${backend}-evidence.json`, JSON.stringify({ restoredSkin, authoredLights: authored.length, combinedLights: merged.length }));
+    await writeCapture(`q2-barrel-shadow-${backend}-evidence.json`, JSON.stringify({ restoredSkin, authoredLights: authored.length, combinedLights: merged.length }));
   } finally { prepareHook.mockRestore(); sampleHook.mockRestore(); await app.close(); await rm(root, { recursive: true, force: true }); }
 }, 60000);

@@ -5,7 +5,7 @@ import type { Bounds, Vec3 } from '../../contracts/math.ts';
 import type { NumericOperations } from '../../contracts/numeric.ts';
 import type { BspChild, BspPlane, LeafQueryResult, PointContentsQuery, PointContentsResult, Q2SurfaceInfo, Q2WorldGeometry, TraceQuery, TraceResult, TraceShape } from '../../contracts/scene.ts';
 import { createNumericOperations } from '../../core/numeric.ts';
-import { convertContents, geometryMask } from './contents.ts';
+import { convertContents, geometryMask, Q2_NULL_SURFACE } from './contents.ts';
 import { traceBrushMedia } from './media.ts';
 import type { MediumBrush, TraceMedia } from './media.ts';
 type Q2Trace = Extract<TraceResult, {
@@ -192,7 +192,8 @@ export class Q2Collision {
                 if (d1 <= 0 && d2 <= 0)
                     continue;
                 if (d1 > d2) {
-                    const f = Math.max(0, n.divide(n.subtract(d1, epsilon), n.subtract(d1, d2)));
+                    // cmodel.c compares the raw fraction and clamps once a side is chosen; q2repro clamps first.
+                    const raw = n.divide(n.subtract(d1, epsilon), n.subtract(d1, d2)), f = merged ? Math.max(0, raw) : raw;
                     if (f > enter) {
                         enter = f;
                         lead = { plane, surface: side.textureInfo < 0 ? null : at(this.geometry.textureInfo, side.textureInfo) };
@@ -217,7 +218,7 @@ export class Q2Collision {
                 return;
             }
             if (enter < leave && enter > -1 && enter < work.fraction && lead !== null) {
-                work.fraction = enter;
+                work.fraction = Math.max(0, enter);
                 work.plane = lead.plane;
                 work.surface = lead.surface;
                 work.contents = brush.contents;
@@ -290,11 +291,12 @@ export class Q2Collision {
         }
         return { kind: 'q2', fraction: work.fraction, end: lerp(query.start, query.end, work.fraction, n), startSolid: work.startSolid, allSolid: work.allSolid,
             contact: work.fraction < 1 && !work.allSolid ? { kind: 'plane', plane } : { kind: 'none' }, hit: work.fraction < 1 || work.startSolid ? { kind: 'world', model } : { kind: 'none' },
-            contents: work.contents, surface: work.surface, sourcePlane: plane, secondary: work.secondary };
+            contents: work.contents, surface: work.surface ?? Q2_NULL_SURFACE, sourcePlane: plane, secondary: work.secondary };
     }
     setAreaPortalState(portal: number, open: boolean): void {
-        if (!this.geometry.areaPortals.some(value => value.portal === portal))
-            throw new RangeError(`Unknown Q2 area portal ${portal}`);
+        // Retail maps toggle portal numbers that have no lump entry; cmodel.c rejects only a number above the lump count.
+        if (!Number.isSafeInteger(portal) || portal < 0 || portal > this.geometry.areaPortals.length)
+            throw new RangeError(`Q2 area portal ${portal} is outside the map's ${this.geometry.areaPortals.length} portals`);
         if (open)
             this.#openPortals.add(portal);
         else

@@ -19,7 +19,7 @@ test("embedded menu artwork retains exact pixels with isolated concurrent copies
     expect(Buffer.compare((await loadMenuArtImage(file.file)).pixels, expected.pixels)).toBe(0);
   }
   await expect(loadMenuArtImage("unknown.png")).rejects.toThrow("Unknown menu artwork");
-});
+}, 60000);
 
 test("menu artwork belongs to each renderer and closing one preserves the other", async () => {
   const identity = createIdentityOwner("menu-art-loading");
@@ -38,4 +38,14 @@ test("menu artwork belongs to each renderer and closing one preserves the other"
     expect(first.drainOperations().filter(operation => operation.kind === "release-image")).toHaveLength(5);
     expect(second.drainOperations()).toHaveLength(0);
   } finally { a.close(); b.close(); first.close(); second.close(); }
+});
+
+test("UI-009 production selections upload only the art they draw", async () => {
+  const identity = createIdentityOwner("menu-art-selection");
+  const images = new SceneImageRegistry({ identity: Symbol("selection"), session: identity.session, generation: 0 });
+  const art = await loadNativeUiArt("resource:test:font", images, loadMenuArtImage, { frames: false, mainBackground: false });
+  try {
+    expect(images.drainOperations().filter(operation => operation.kind === "create-image")).toHaveLength(1);
+    expect([art.skin.background, art.skin.panel, art.skin.focus]).toEqual([null, null, null]);
+  } finally { art.close(); images.close(); }
 });

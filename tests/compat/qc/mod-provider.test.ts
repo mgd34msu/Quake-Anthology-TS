@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { homedir } from "node:os";
+import { copperAvailable, copperProgramPath } from "../../support/corpus.ts";
 
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -8,10 +8,11 @@ import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
 import { prepareQuakeCMod } from "../../../src/app/bootstrap/simulation/quakec-mod.ts";
 import { SessionMods } from "../../../src/world/session/mods.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
+import { inertAuthority } from "../../support/authority.ts";
 
-const path = `${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`;
-test.skipIf(!await Bun.file(path).exists())("QC source items share capacity fields while count and capacity aliases remain invalid", async () => {
+const path = copperProgramPath();
+test.skipIf(!copperAvailable())("QC source items share capacity fields while count and capacity aliases remain invalid", async () => {
   const { loadQcProgram } = await import("../../../src/compat/qc/program.ts");
   const { validateQcItems } = await import("../../../src/compat/qc/mod-items.ts");
   const program = loadQcProgram(await Bun.file(path).bytes());
@@ -28,10 +29,10 @@ test.skipIf(!await Bun.file(path).exists())("QC source items share capacity fiel
     items: { ...items, storage: items.storage.map((storage, index) => index === 1 ? { ...storage, field: overlap } : storage) } })).toThrow("overlap");
 });
 
-test.skipIf(!await Bun.file(path).exists())("original Copper healing executes through declared actor callbacks in isolated mod instances", async () => {
+test.skipIf(!copperAvailable())("original Copper healing executes through declared actor callbacks in isolated mod instances", async () => {
   const bytes = new Uint8Array(await Bun.file(path).arrayBuffer()), digest = createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"));
   const actors = new SessionActorRegistry(createIdentityOwner("copper-mods")), callbacks = new ActorCallbackTable(actors);
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const target = actors.allocate("q2:game", "q2:monster_soldier");
   combat.create(target, { health: 20, mass: 200, canTakeDamage: true, invulnerable: false, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, team: null });
@@ -63,13 +64,13 @@ test.skipIf(!await Bun.file(path).exists())("original Copper healing executes th
     combat.setHealth(target, 44);
     mods = await SessionMods.open(options, saved);
     callbacks.use(target, null, null); expect(combat.read(target.id)?.health).toBe(68);
-    await mods.setEnabled(options.enabled[0] ?? { product: "invalid", id: "invalid" }, false);
+    mods.close(); mods = await SessionMods.open({ ...options, enabled: options.enabled.slice(1) });
     callbacks.use(target, null, null); expect(combat.read(target.id)?.health).toBe(76);
     actors.release(target); expect(callbacks.use(target, null, null)).toBe(false);
   } finally { mods.close(); actors.close(); }
 });
 
-test.skipIf(!await Bun.file(path).exists())("original Copper helper spawn and scheduled removal retain shared actor ownership across save", async () => {
+test.skipIf(!copperAvailable())("original Copper helper spawn and scheduled removal retain shared actor ownership across save", async () => {
   const { QcModProvider } = await import("../../../src/compat/qc/mod-provider.ts");
   const { loadQcProgram } = await import("../../../src/compat/qc/program.ts");
   const { SourceRandom } = await import("../../../src/app/bootstrap/simulation/random.ts");
@@ -83,7 +84,7 @@ test.skipIf(!await Bun.file(path).exists())("original Copper helper spawn and sc
       { field: "think", binding: "think" }, { field: "nextthink", binding: "nextthink" }] };
   const create = (actors: SessionActorRegistry, restored: boolean) => {
     const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-    const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+    const combat = inertAuthority(actors, callbacks);
     const random = new SourceRandom(17);
     return new QcModProvider(program, { id: "mod:copper-helper", artifactPath: "progs.dat", digest: program.digest, revision: "test" }, declaration,
       { actors, callbacks, bodies, combat, inventory: new SharedInventoryTable(actors), seed: 17, time: () => ({ kind: "seconds", value: 5 }),

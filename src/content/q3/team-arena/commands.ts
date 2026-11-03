@@ -128,7 +128,8 @@ function sanitize(text: string): string {
   for (let index = 0; index < input.length; index++) {
     const code = input.charCodeAt(index);
     if (code === 27) {
-      if (index + 1 === input.length) throw new GameCommandError("SanitizeString ESC pair crosses the terminating NUL");
+      // C steps over the terminating NUL here. A peer controls this text, so a trailing ESC just ends the string.
+      if (index + 1 === input.length) break;
       index++;
     } else if (code >= 32 && code < 128) result += lower(input.charAt(index));
   }
@@ -385,7 +386,7 @@ export class GameCommandRuntime {
       }
       if (slot === original) return;
     }
-    throw new GameCommandError("Cmd_FollowCycle_f cannot terminate from an automatic-follow sentinel without an active player");
+    // C spins forever from the -1 automatic-follow sentinel when nobody is playing; the command has no target.
   }
 
   private sayTo(entity: GameEntity, target: GameEntity, mode: SayMode, color: number, name: string, text: string): void {
@@ -409,7 +410,7 @@ export class GameCommandRuntime {
         : gameFormat("\x19(%s^7\x19) (%s)\x19: ", [client.pers.netname, location], 64);
       color = 53;
     } else {
-      const location = target !== null && gameType >= GameType.GT_TEAM && clientOf(target).sess.sessionTeam === client.sess.sessionTeam
+      const location = target?.client != null && gameType >= GameType.GT_TEAM && target.client.sess.sessionTeam === client.sess.sessionTeam
         ? this.host.team.getLocationMessage(entity, 64) : null;
       name = location === null ? gameFormat("\x19[%s^7\x19]\x19: ", [client.pers.netname], 64)
         : gameFormat("\x19[%s^7\x19] (%s)\x19: ", [client.pers.netname, location], 64);
@@ -500,9 +501,9 @@ export class GameCommandRuntime {
 
   private gameCommand(entity: GameEntity, args: Arguments): void {
     const slot = gameAtoi(args.at(1)), order = gameAtoi(args.at(2));
-    if (slot < 0 || slot >= MAX_CLIENTS || order < 0 || order > orders.length) return;
+    if (slot < 0 || slot >= MAX_CLIENTS || order < 0 || order >= orders.length) return;
     const text = orders[order];
-    if (text === undefined) throw new GameCommandError("Cmd_GameCommand_f order 7 reads beyond the source order table");
+    if (text === undefined) return;
     this.say(entity, this.host.pool.at(slot), "tell", text);
     this.say(entity, entity, "tell", text);
   }
@@ -514,7 +515,7 @@ export class GameCommandRuntime {
     if (client.pers.voteCount >= MAX_VOTE_COUNT) { this.print(entity, "You have called the maximum number of votes.\n"); return; }
     if (client.sess.sessionTeam === Team.TEAM_SPECTATOR) { this.print(entity, "Not allowed to call a vote as spectator.\n"); return; }
     const command = args.at(1), parameter = args.at(2), key = lower(command);
-    if (command.includes(";") || parameter.includes(";")) { this.print(entity, "Invalid vote string.\n"); return; }
+    if (/[;\r\n"]/.test(command) || /[;\r\n"]/.test(parameter)) { this.print(entity, "Invalid vote string.\n"); return; }
     if (!["map_restart", "nextmap", "map", "g_gametype", "kick", "clientkick", "g_dowarmup", "timelimit", "fraglimit"].includes(key)) {
       this.print(entity, "Invalid vote string.\n");
       this.print(entity, "Vote commands are: map_restart, nextmap, map <mapname>, g_gametype <n>, kick <player>, clientkick <clientnum>, g_doWarmup, timelimit <time>, fraglimit <frags>.\n");
@@ -656,6 +657,13 @@ export class GameCommandRuntime {
   dispatch(clientNum: number, argv: readonly string[]): void {
     const entity = this.host.pool.at(clientNum);
     if (entity.client === null) return;
+    try { this.dispatchCommand(entity, argv); } catch (error) {
+      if (!(error instanceof GameCommandError)) throw error;
+      this.print(entity, gameFormat("%s\n", [error.message]));
+    }
+  }
+
+  private dispatchCommand(entity: GameEntity, argv: readonly string[]): void {
     const args = new Arguments(argv), command = args.at(0), key = lower(command);
     switch (key) {
       case "say": this.sayCommand(entity, args, "all", false); return;

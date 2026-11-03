@@ -4,6 +4,7 @@ import { testCorpusRoot } from "../../support/corpus.ts";
 import { existsSync } from "node:fs";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { decompressQ1Pvs, findQ1Leaf, parseQ1Entities, q1EntityValue, q1FaceVertices, q1LeafPvs, q1TextureRgba, readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
+import type { Q1WorldGeometry } from "../../../src/contracts/scene.ts";
 import type { Q1BspFormat } from "../../../src/formats/q1-map/index.ts";
 
 test("rejects truncated headers, invalid lump bounds and partial records", () => {
@@ -80,3 +81,42 @@ for (const fixture of cases) {
     }
   });
 }
+
+test.skipIf(!existsSync(`${qfiles}/q1/id1/PAK0.PAK`))("rejects a drawing node whose child points back at itself", async () => {
+  const archive = await openArchive(`${qfiles}/q1/id1/PAK0.PAK`);
+  try {
+    const entry = archive.findEntries("maps/start.bsp")[0];
+    if (entry === undefined) throw new Error("Missing maps/start.bsp");
+    const bytes = (await archive.readEntry(entry)).slice();
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const nodes = view.getInt32(4 + 5 * 8, true);
+    view.setInt16(nodes + 4, 0, true);
+    expect(() => readQ1Bsp(bytes, { source: "cycle" })).toThrow("cycle in BSP nodes");
+  } finally { archive.close(); }
+});
+
+const startPak = `${qfiles}/q1/id1/PAK0.PAK`;
+test.skipIf(!existsSync(startPak))("rejects a clipnode tree that cycles back to its own root at load", async () => {
+  const archive = await openArchive(startPak);
+  try {
+    const entry = archive.findEntries("maps/start.bsp")[0];
+    if (entry === undefined) throw new Error("Missing start.bsp");
+    const bytes = new Uint8Array(await archive.readEntry(entry));
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const lump = (number: number): number => view.getInt32(4 + number * 8, true);
+    const headnode = view.getInt32(lump(14) + 36 + 4, true);
+    expect(headnode).toBeGreaterThanOrEqual(0);
+    expect(() => readQ1Bsp(bytes)).not.toThrow();
+    view.setInt16(lump(9) + headnode * 8 + 4, headnode, true);
+    expect(() => readQ1Bsp(bytes)).toThrow("cycle");
+  } finally { archive.close(); }
+});
+
+test("a corrupt PVS row degrades to all-visible instead of throwing", () => {
+  const zero = { x: 0, y: 0, z: 0 }, bounds = { min: zero, max: zero };
+  const leaf: Q1WorldGeometry["leaves"][number] = { contents: -1, bounds, faces: { first: 0, count: 0 }, visibilityOffset: 0, ambientSound: [0, 0, 0, 0] };
+  const map: Q1WorldGeometry = { kind: "q1-bsp", format: "bsp29", entities: "", planes: [], vertices: [], edges: [], surfaceEdges: [], nodes: [], leaves: [leaf, leaf],
+    leafFaces: [], textures: [], textureInfo: [], faces: [], models: [{ bounds, origin: zero, headnodes: [0, 0, 0, 0], visibleLeaves: 16, faces: { first: 0, count: 0 } }],
+    clipnodes: [], visibility: new Uint8Array([0, 0]), lighting: { kind: "luminance8", samples: new Uint8Array() }, decoupledLightmaps: null, brushList: null, extensions: [] };
+  expect(q1LeafPvs(map, 1)).toEqual(new Uint8Array([255, 255]));
+});

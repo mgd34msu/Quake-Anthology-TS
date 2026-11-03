@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -160,41 +160,58 @@ test("Q2 step preserves stationary support but still moves when ground friction 
   }
 });
 
+test("a Q1 toss body keeps its ground when the supporting edict is freed, while a Q2 body does not", () => {
+  for (const family of ["q1", "q2"] satisfies PhysicsFamily[]) {
+    const s = setup(family), support = s.actor("test:support", zero, "stationary"), item = s.actor("test:item", { x: 0, y: 0, z: 100 }, "toss");
+    const body = s.physics.bodies.read(item.id); if (body === null) throw new Error("Missing item body");
+    s.physics.bodies.write(item, { ...body, ground: support.id });
+    s.actors.release(support);
+    s.physics.step(item, 0.1);
+    expect(s.physics.bodies.read(item.id)?.ground === null).toBe(family === "q2");
+    if (family === "q1") expect(s.physics.bodies.read(item.id)?.origin).toEqual({ x: 0, y: 0, z: 100 });
+    s.actors.close();
+  }
+});
+
 test("attached bodies follow committed positions and do not integrate flight velocity", () => {
   const s = setup(), anchor = s.actor("test:anchor", zero, "stationary"), hook = s.actor("test:hook", { x: 20, y: 0, z: 0 }, "fly-missile");
-  s.physics.bodies.attach(hook, { anchor: anchor.id, follow: { kind: "translation", offset: { x: 20, y: 0, z: 0 } } });
-  const body = s.physics.bodies.read(hook.id), anchorBody = s.physics.bodies.read(anchor.id);
-  if (body === null || anchorBody === null) throw new Error("Missing attachment bodies");
-  s.physics.bodies.write(hook, { ...body, velocity: { x: 400, y: 0, z: 0 } });
-  s.physics.setMotion({ actor: hook, kind: "fly-missile", velocity: { x: 400, y: 0, z: 0 }, angularVelocity: { x: 0, y: 0, z: -500 },
-    gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null });
-  s.physics.step(hook, 0.1);
-  expect(s.physics.bodies.read(hook.id)?.origin).toEqual({ x: 20, y: 0, z: 0 });
-  expect(s.physics.bodies.read(hook.id)?.angles.z).toBe(-50);
-  s.physics.bodies.write(anchor, { ...anchorBody, origin: { x: 94, y: 0, z: 0 }, velocity: zero });
-  expect(s.physics.bodies.read(hook.id)?.origin.x).toBe(20);
-  s.physics.commitAttachments();
-  expect(s.physics.bodies.read(hook.id)?.origin.x).toBe(114);
-  s.physics.step(hook, 0.1);
-  s.physics.commitAttachments();
-  expect(s.physics.bodies.read(hook.id)?.origin.x).toBe(114);
-  expect(() => s.physics.bodies.attach(anchor, { anchor: hook.id, follow: { kind: "center" } })).toThrow("cycle");
+  try {
+    s.physics.bodies.attach(hook, { anchor: anchor.id, follow: { kind: "translation", offset: { x: 20, y: 0, z: 0 } } });
+    const body = s.physics.bodies.read(hook.id), anchorBody = s.physics.bodies.read(anchor.id);
+    if (body === null || anchorBody === null) throw new Error("Missing attachment bodies");
+    s.physics.bodies.write(hook, { ...body, velocity: { x: 400, y: 0, z: 0 } });
+    s.physics.setMotion({ actor: hook, kind: "fly-missile", velocity: { x: 400, y: 0, z: 0 }, angularVelocity: { x: 0, y: 0, z: -500 },
+      gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null });
+    s.physics.step(hook, 0.1);
+    expect(s.physics.bodies.read(hook.id)?.origin).toEqual({ x: 20, y: 0, z: 0 });
+    expect(s.physics.bodies.read(hook.id)?.angles.z).toBe(-50);
+    s.physics.bodies.write(anchor, { ...anchorBody, origin: { x: 94, y: 0, z: 0 }, velocity: zero });
+    expect(s.physics.bodies.read(hook.id)?.origin.x).toBe(20);
+    s.physics.commitAttachments();
+    expect(s.physics.bodies.read(hook.id)?.origin.x).toBe(114);
+    s.physics.step(hook, 0.1);
+    s.physics.commitAttachments();
+    expect(s.physics.bodies.read(hook.id)?.origin.x).toBe(114);
+    expect(() => s.physics.bodies.attach(anchor, { anchor: hook.id, follow: { kind: "center" } })).toThrow("cycle");
+  } finally { s.actors.close(); }
 });
 
 test("anchor release cleans every attached child even when a child cleanup throws", () => {
   const s = setup(), anchor = s.actor("test:anchor", zero, "stationary"), first = s.actor("test:first", zero, "fly-missile"), second = s.actor("test:second", zero, "fly-missile");
-  for (const child of [first, second]) s.physics.bodies.attach(child, { anchor: anchor.id, follow: { kind: "center" } });
-  s.actors.onRelease(actor => {
-    expect(s.physics.bodies.read(anchor.id)).toBeNull();
-    if (actor === first) throw new Error("source cleanup failure");
-    return undefined;
-  });
-  expect(() => s.actors.release(anchor)).toThrow();
-  for (const actor of [anchor, first, second]) {
-    expect(s.actors.isLive(actor.id)).toBe(false);
-    expect(s.physics.bodies.attachment(actor.id)).toBeNull();
-    expect(s.physics.bodies.linked(actor.id)).toBeNull();
-  }
+  try {
+    for (const child of [first, second]) s.physics.bodies.attach(child, { anchor: anchor.id, follow: { kind: "center" } });
+    s.actors.onRelease(actor => {
+      expect(s.physics.bodies.read(anchor.id)).toBeNull();
+      if (actor === first) throw new Error("source cleanup failure");
+      return undefined;
+    });
+    expect(() => s.actors.release(anchor)).toThrow();
+    for (const actor of [anchor, first, second]) {
+      expect(s.actors.isLive(actor.id)).toBe(false);
+      expect(s.physics.bodies.attachment(actor.id)).toBeNull();
+      expect(s.physics.bodies.linked(actor.id)).toBeNull();
+    }
+  } finally { s.actors.close(); }
 });
 
 test("rerelease G_Impact preserves its trace and calls the inverted contact after mover removal", () => {
@@ -271,6 +288,18 @@ test("Q1 push touches triggers before impact, rechecking mover liveness after ea
   }
 });
 
+test("Q1 missile that starts inside another solid still impacts it", () => {
+  const s = setup("q1"), mover = s.actor("test:flyer", zero, "fly-missile"), blocker = s.actor("test:blocker", { x: 0.5, y: 0, z: 0 }, "stationary");
+  const touched: ActorId[] = [];
+  s.callbacks.bind(mover, { think: null, use: null, pain: null, die: null, touch: contact => { touched.push(contact.other); return undefined; } });
+  s.physics.setMotion({ actor: mover, kind: "fly-missile", velocity: { x: 1000, y: 0, z: 0 }, angularVelocity: zero, gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null });
+  const body = s.physics.bodies.read(mover.id); if (body === null) throw new Error("Missing missile body");
+  s.physics.bodies.write(mover, { ...body, velocity: { x: 1000, y: 0, z: 0 } });
+  s.physics.step(mover, 0.05);
+  expect(touched.some(other => other.equals(blocker.id))).toBe(true);
+  s.actors.close();
+});
+
 test("Q1 blocked callback sees earlier riders moved and rollback retains callback velocity", () => {
   const observed: number[] = [];
   let pushed: OwnedActor | null = null;
@@ -321,7 +350,7 @@ test("Q2 pusher teams roll back earlier members before the blocked callback", ()
   expect(s.physics.bodies.read(first.id)?.origin.x).toBe(-30);
 });
 
-const pakPath = `${testCorpusRoot()}/q1/id1/PAK0.PAK`;
+const pakPath = corpusFile("q1/id1/PAK0.PAK");
 test.skipIf(!existsSync(pakPath))("shared toss physics settles a Q2 body on the real Quake start map", async () => {
   const archive = await openArchive(pakPath);
   try {

@@ -1,5 +1,5 @@
 // Ported from unix/linux_glimp.c XLateKey. GPL-2.0-or-later.
-import { KeyCode } from "./key-codes.ts";
+import { KeyCode } from "../core/key-codes.ts";
 const specialKeys = new Map<number, number>([
   [57, 0], [70, 0], [71, 0], [72, KeyCode.Pause],
   [73, KeyCode.Insert], [74, KeyCode.Home], [75, KeyCode.PageUp],

@@ -3,6 +3,7 @@
 import { inflateSync } from "node:zlib";
 import { BinaryError } from "../../core/binary/index.ts";
 import type { ImageLevel } from "../../contracts/render.ts";
+import { imageSizeAllowed } from "./limits.ts";
 
 export interface PngImage extends ImageLevel {
   readonly bitDepth: number;
@@ -66,7 +67,7 @@ export function decodePng(bytes: Uint8Array, source = "<png>"): PngImage {
     else if ((view.getUint8(offset + 4) & 32) === 0) fail(offset, `unsupported critical chunk ${type}`);
     offset = end + 4;
   }
-  if (!ended || width <= 0 || height <= 0 || width * height * 4 > 0x7fffffff || idat.length === 0) fail(8, "missing chunks or invalid dimensions");
+  if (!ended || width <= 0 || height <= 0 || !imageSizeAllowed(width, height) || idat.length === 0) fail(8, "missing chunks or invalid dimensions");
   if (colorType === 3 && palette === null) fail(8, "indexed image has no palette");
   const channels = colorType === 0 || colorType === 3 ? 1 : colorType === 2 ? 3 : colorType === 4 ? 2 : 4;
   const bitsPerPixel = channels * bitDepth, byteStride = Math.max(1, Math.ceil(bitsPerPixel / 8));

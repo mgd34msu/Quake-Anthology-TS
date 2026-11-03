@@ -5,13 +5,14 @@ import type { EquipmentMovement } from "../../../contracts/movement.ts";
 import type { Q2RereleaseEntityState, Q2RereleasePlayerState, Q2RereleaseUserCommand } from "../../../contracts/protocol.ts";
 import type { WindowsCapabilities } from "../../../guest/runtime/windows/index.ts";
 import type { RereleaseSourceSave } from "../../../compat/q2/rerelease/host.ts";
-import { guestPointer } from "../../../compat/q2/rerelease/module.ts";
+import { fitRereleaseText, guestPointer } from "../../../compat/q2/rerelease/module.ts";
 import { RereleaseGuestSource, type PreparedRereleaseGuest } from "./rerelease-guest-source.ts";
 import { NativeInputBinding, type NativeInputServices } from "../../../compat/q2/native-input.ts";
 import { RereleasePublicEdict } from "../../../compat/q2/rerelease/public-state.ts";
 import { RereleaseGuestServices } from "./rerelease-guest-services.ts";
 import type { RereleaseGuestServicesOptions, RereleaseGuestMapServices } from "./rerelease-guest-services-contract.ts";
 import type { ClassicGuestMap, ClassicGuestClient } from "./classic-guest-world.ts";
+import { driveTravel, driveTravelLoading } from "./native-guest-travel.ts";
 
 export interface RereleaseGuestWorldOptions {
   readonly prepared: PreparedRereleaseGuest;
@@ -21,6 +22,9 @@ export interface RereleaseGuestWorldOptions {
 }
 export interface RereleaseGuestSave { readonly game: RereleaseSourceSave; readonly level: RereleaseSourceSave }
 export interface RereleaseGuestRevisit { readonly level: RereleaseSourceSave; readonly restoreServerState: (world: RereleaseGuestWorld) => void }
+type RereleaseTravelStep =
+  | { readonly kind: "spawn"; readonly world: RereleaseGuestWorld; readonly map: ClassicGuestMap }
+  | { readonly kind: "read-level"; readonly level: RereleaseSourceSave };
 interface CommandContext { value: { readonly arguments: readonly string[]; readonly args: string } | null }
 
 export class RereleaseGuestWorld {
@@ -118,7 +122,20 @@ export class RereleaseGuestWorld {
     }
     this.services.completeSpawn(); this.#phase = "running";
   }
-  private transfer(map: ClassicGuestMap, binding: RereleaseGuestMapServices, revisit?: RereleaseGuestRevisit): RereleaseGuestWorld {
+  travel(map: ClassicGuestMap, binding: RereleaseGuestMapServices, revisit?: RereleaseGuestRevisit): RereleaseGuestWorld {
+    return this.operation(() => { const host = this.source.host; return driveTravel(this.travelStages(map, binding, revisit), step => {
+      if (step.kind === "spawn") step.world.spawnMap(step.map);
+      else host.readSave("level", step.level);
+    }); });
+  }
+  travelLoading(map: ClassicGuestMap, binding: RereleaseGuestMapServices, nextFrame: () => Promise<void>, revisit?: RereleaseGuestRevisit): Promise<RereleaseGuestWorld> {
+    return this.loading(() => { const host = this.source.host; return driveTravelLoading(this.travelStages(map, binding, revisit), async step => {
+      if (step.kind === "spawn") await step.world.spawnMapLoading(step.map, nextFrame);
+      else await host.readSaveLoading("level", step.level, nextFrame);
+    }); });
+  }
+  /** Travel as stages; the caller executes each yielded host step synchronously or through the loading path. */
+  private *travelStages(map: ClassicGuestMap, binding: RereleaseGuestMapServices, revisit?: RereleaseGuestRevisit): Generator<RereleaseTravelStep, RereleaseGuestWorld> {
     this.requireRunning(); this.services.validateMap(binding);
     if (revisit !== undefined && this.services.options.cvars.variableValue("deathmatch") !== 0) throw new Error("Native deathmatch does not restore hub levels");
     this.finishInputRetirements();
@@ -128,30 +145,15 @@ export class RereleaseGuestWorld {
     next.#phase = "initialized"; this.#phase = "transferred"; this.#clients.clear();
     try {
       source.host.rebindWorld(() => services.rebindWorld({ ...binding, command: () => this.commandContext.value ?? binding.command() }));
-      next.spawnMap(map);
-      if (revisit !== undefined) { next.#phase = "initialized"; services.drainMessages(); revisit.restoreServerState(next); source.host.readSave("level", revisit.level); services.completeSpawn(); next.#phase = "running"; }
+      yield { kind: "spawn", world: next, map };
+      if (revisit !== undefined) {
+        next.#phase = "initialized"; services.drainMessages(); revisit.restoreServerState(next);
+        yield { kind: "read-level", level: revisit.level };
+        services.completeSpawn(); next.#phase = "running";
+      }
       for (const client of clients) { source.host.reserveClient(client.slot); next.#clients.set(client.slot, { ...client, phase: "connected" }); }
       return next;
     } catch (error) { try { next.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Native map travel and cleanup failed"); } throw error; }
-  }
-  travel(map: ClassicGuestMap, binding: RereleaseGuestMapServices, revisit?: RereleaseGuestRevisit): RereleaseGuestWorld { return this.operation(() => this.transfer(map, binding, revisit)); }
-  travelLoading(map: ClassicGuestMap, binding: RereleaseGuestMapServices, nextFrame: () => Promise<void>, revisit?: RereleaseGuestRevisit): Promise<RereleaseGuestWorld> {
-    return this.loading(async () => {
-      this.requireRunning(); this.services.validateMap(binding);
-      if (revisit !== undefined && this.services.options.cvars.variableValue("deathmatch") !== 0) throw new Error("Native deathmatch does not restore hub levels");
-      this.finishInputRetirements();
-      const source = this.source, services = this.services, clients = this.clients;
-      const next = new RereleaseGuestWorld(source, services, this.commandContext);
-      this.inputBinding?.close(); this.inputBinding = null;
-      next.#phase = "initialized"; this.#phase = "transferred"; this.#clients.clear();
-      try {
-        source.host.rebindWorld(() => services.rebindWorld({ ...binding, command: () => this.commandContext.value ?? binding.command() }));
-        await next.spawnMapLoading(map, nextFrame);
-        if (revisit !== undefined) { next.#phase = "initialized"; services.drainMessages(); revisit.restoreServerState(next); await source.host.readSaveLoading("level", revisit.level, nextFrame); services.completeSpawn(); next.#phase = "running"; }
-        for (const client of clients) { source.host.reserveClient(client.slot); next.#clients.set(client.slot, { ...client, phase: "connected" }); }
-        return next;
-      } catch (error) { try { next.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Native map travel and cleanup failed"); } throw error; }
-    });
   }
   connect(slot: number, userinfo: string, socialId = "", isBot = false): { readonly allowed: boolean; readonly userinfo: string } {
     return this.operation(() => {
@@ -173,8 +175,7 @@ export class RereleaseGuestWorld {
   disconnect(slot: number): void { this.operation(() => { this.requireRunning(); this.client(slot); this.source.host.clientDisconnect(slot); this.source.host.releaseClientReservation(slot); this.#clients.delete(slot); }); }
   userinfo(slot: number, value: string): void {
     this.operation(() => {
-      this.requireRunning(); const client = this.client(slot), module = this.source.host.module, bytes = new TextEncoder().encode(value);
-      if (bytes.length >= 2048 || value.includes("\0")) throw new RangeError("Rerelease userinfo exceeds its source string limits");
+      this.requireRunning(); const client = this.client(slot), module = this.source.host.module, bytes = new TextEncoder().encode(fitRereleaseText(value, 2048));
       const info = module.memory.allocate({ byteLength: 2048, label: "Q2 mutable userinfo" }), entity = module.entities().atSlot(slot);
       try {
         module.memory.write(info, bytes); this.source.host.core.refreshCvars();
@@ -187,8 +188,7 @@ export class RereleaseGuestWorld {
   }
   setUserinfoStorage(slot: number, value: string): void {
     this.requireRunning(); const client = this.client(slot);
-    if (new TextEncoder().encode(value).length >= 2048 || value.includes("\0")) throw new RangeError("Rerelease userinfo exceeds its source string limits");
-    this.#clients.set(slot, { ...client, userinfo: value });
+    this.#clients.set(slot, { ...client, userinfo: fitRereleaseText(value, 2048) });
   }
   command(slot: number, arguments_: readonly string[], args: string): void {
     this.operation(() => { this.requireRunning(); this.client(slot, "active"); const module = this.source.host.module, entity = module.entities().atSlot(slot);

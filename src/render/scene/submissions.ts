@@ -42,6 +42,11 @@ export interface SceneModelGroup extends SceneGroup {
   readonly operations: readonly DrawOperation[];
 }
 
+/** Stencil shadow volumes sort with the stencil shadow material and draw nothing in colour. */
+export interface SceneShadowGroup extends SceneGroup {
+  readonly operations: readonly Extract<RenderOperation, { readonly kind: "shadow-volume" }>[];
+}
+
 export type SceneOperation = RenderOperation | SceneGroup;
 
 export function compiledDrawGroup(material: CompiledMaterial, batches: readonly DrawBatch[]): SceneModelGroup {
@@ -62,8 +67,12 @@ export function sequenceDrawGroup(phase: SequencePhase, batches: readonly DrawBa
   return { kind: "scene-group", order: { kind: "sequence", phase }, operations: [{ kind: "draw", batches }] };
 }
 
-export function sceneModelBatches(groups: readonly SceneModelGroup[]): readonly DrawBatch[] {
-  return groups.flatMap(group => group.operations.flatMap(operation => operation.batches));
+export function shadowVolumeGroup(material: RegisteredSceneMaterial, source: SourceSurfaceOrder | undefined, operation: SceneShadowGroup["operations"][number]): SceneShadowGroup {
+  return { kind: "scene-group", order: source === undefined ? { kind: "compiled", material } : sourceDrawGroup(material, source, []).order, operations: [operation] };
+}
+
+export function sceneModelBatches(groups: readonly (SceneModelGroup | SceneShadowGroup)[]): readonly DrawBatch[] {
+  return groups.flatMap(group => group.operations.flatMap(operation => operation.kind === "draw" ? operation.batches : []));
 }
 
 function priority(order: SceneGroupOrder): number {

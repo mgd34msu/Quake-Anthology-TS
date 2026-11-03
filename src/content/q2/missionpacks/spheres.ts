@@ -119,7 +119,7 @@ export class Q2MissionPackSpheres {
   private readonly vengeancePain: Q2Pain = (entity, game, reaction) => {
     if (entity.enemy !== null || reaction.attacker === null) return undefined;
     if ((entity.spawnflags & doppleFlag(game)) === 0 && ((entity.owner !== null && (game.host.combat.read(entity.owner)?.health ?? 0) >= 25) || reaction.attacker === entity.owner)) return undefined;
-    entity.wait = Math.max(entity.wait, game.host.now() + 15); entity.effects |= 16; entity.touch = this.vengeanceTouch; entity.enemy = reaction.attacker;
+    entity.wait = (entity.spawnflags & doppleFlag(game)) !== 0 ? game.host.now() + 15 : Math.max(entity.wait, game.host.now() + 15); entity.effects |= 16; entity.touch = this.vengeanceTouch; entity.enemy = reaction.attacker;
     return game.show(entity);
   };
 
@@ -127,7 +127,7 @@ export class Q2MissionPackSpheres {
     if (entity.enemy !== null || reaction.attacker === null) return undefined;
     const owner = game.entity(entity.owner), dopple = (entity.spawnflags & doppleFlag(game)) !== 0;
     if (!dopple && (owner !== null && (game.host.combat.read(owner.actor.id)?.health ?? 0) > 0 || reaction.attacker === entity.owner)) return undefined;
-    entity.wait = Math.max(entity.wait, game.host.now() + 15); entity.effects |= 8 | 0x4000000; entity.touch = this.hunterTouch; entity.enemy = reaction.attacker;
+    entity.wait = dopple ? game.host.now() + 15 : Math.max(entity.wait, game.host.now() + 15); entity.effects |= 8 | 0x4000000; entity.touch = this.hunterTouch; entity.enemy = reaction.attacker;
     game.show(entity);
     if (dopple || owner === null || !game.host.isPlayer(owner.actor.id) || !this.hooks.hunterCamera || (game.options.deathmatchFlags & 1024) !== 0) return undefined;
     const target = game.host.bodies.read(reaction.attacker);

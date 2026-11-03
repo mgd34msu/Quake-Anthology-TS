@@ -2,4 +2,4 @@ export { EngineSession, SessionClient, SessionConnection, SessionSeat, WorldLife
 export type { SessionMode } from "./session.ts";
 export { ResourceScope } from "./resources.ts";
 export type { SessionResource } from "./resources.ts";
-export { SourceClock, ProviderRuntimeState } from "./clocks.ts";
+export { SourceClock } from "./clocks.ts";

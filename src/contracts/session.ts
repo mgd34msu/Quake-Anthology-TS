@@ -123,9 +123,24 @@ export interface ProviderCheckpoint {
   readonly bytes: Uint8Array;
 }
 
+/**
+ * What a running native-guest session actually did with one selection axis.
+ * "honored" took full effect, "partial" took effect for some of the axis and
+ * "guest-native" left the guest's own implementation in charge. It is
+ * metadata for status and saves; restore never reads it back as state.
+ */
+export interface SelectionConsumptionEntry {
+  readonly axis: "enemies" | "movement" | "character";
+  readonly requested: string;
+  readonly outcome: "honored" | "partial" | "guest-native";
+  readonly detail: string;
+}
+
 export interface SaveImage {
+  /** Empty when nothing was narrowed; saves from before schema 4 migrate to empty. */
+  readonly consumption: readonly SelectionConsumptionEntry[];
   readonly mods?: import("./mods.ts").ModSessionCheckpoint;
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 4;
   /** Version 2 armor placeholders still need source-owner normalization during restore. */
   readonly legacyArmorLayout?: true;
   readonly recipe: ExecutableRecipe;

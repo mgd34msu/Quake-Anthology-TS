@@ -29,10 +29,10 @@ import type { ItemId } from "../../contracts/gameplay.ts";
 import type { ContentId, ResourceId, ProviderReference } from "../../contracts/content.ts";
 import type { Rect, RenderCommand, SceneCamera } from "../../contracts/render.ts";
 import type { SeatInputEvent, SeatInputFocus, UiControl, UiDrawContext } from "../../contracts/ui.ts";
-import { KeyCode } from "../../input/key-codes.ts";
+import { KeyCode } from "../../core/key-codes.ts";
 import { tokenizeCommand } from "../../core/commands/index.ts";
 import type { SeatInputSample } from "../../input/seat.ts";
-import { NativeUiController, menuRow, renderUiCommands } from "../../ui/common/index.ts";
+import { NativeUiController, createMenuLocalizer, menuRow, renderUiCommands, type MenuCatalogs } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
 import { SeatHudMessages, SeatWeaponWheel, hudVitalOccupiedRects, drawCommonHud, emptyHudData } from "../../ui/hud/index.ts";
 import { SeatUiPreferences, bindInputSettings, bindInputRoutingSettings, bindAudioSettings, bindAudioGeometrySettings, bindMusicPlaylistSettings, registerSettingsMenus } from "../../ui/settings/index.ts";
@@ -56,6 +56,9 @@ import { bindImageSettings, bindModelSettings } from "../../ui/settings/images.t
 
 import { TeamArenaResults, type TeamArenaResultService } from "./team-arena-results.ts";
 import { SeatPlayerDeath, playerDeathMenu } from "./player-death.ts";
+
+/** Translations register here per lowercase language name; an empty catalog leaves every literal as written. */
+const menuCatalogs: MenuCatalogs = new Map();
 
 export class ApplicationSeatUi implements ApplicationInputUi {
   readonly controller: NativeUiController;
@@ -163,11 +166,12 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     this.controller = new NativeUiController({ seat, skin: () => this.controller.activeMenu === gamePromptMenu ? { ...menuSkin(art.skin.font), titleFont: art.skin.font, titleScale: 2.6 } : menuSkin(art.skin.font),
       measureText: (text, scale) => layoutText({ text, font: this.menuFont, scale, color: { x: 1, y: 1, z: 1, w: 1 } }).width, now: input.now,
       bindings: () => local.input.bindings, appearance: () => this.preferences.values,
+      localize: createMenuLocalizer(() => menuCatalogs, readLanguage),
       focus: (focus, time) => { local.input.setFocus(focus, time); local.haptics.setActive(local.input.focused && focus.kind === "game"); input.router.updateCapture(); },
       clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); },
       sound: (sound, owner) => audio.uiSound(sound, owner),
       executeScript: script => { throw new Error(`Legacy UI module ${script.module} is not attached to this native menu`); } });
-    this.soundCaptions = new SeatSoundCaptions(seat, audio.engine, readLanguage);
+    this.soundCaptions = new SeatSoundCaptions(seat, audio.engine, readLanguage, text => local.console.print(text));
     this.sourceHud = new SeatSourceHud(local.player.actor, options?.localize);
     this.inventoryMenu = registerInventoryMenu(this.controller, () => this.sourceHud.inventoryItems(), command);
     this.matchMenu = local.builder.dialect === "q3" ? registerMatchMenu(this.controller, command) : null;
@@ -346,7 +350,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
         ];
       renderUiCommands(context, commands, { text: this.text, white: this.art.white, picture: resource => this.weaponAssets?.picture(resource) ?? this.art.picture(resource), emit, material });
     }
-    const panel = menuPanel(context);
+    const panel = menuPanel(context, false, this.preferences.values.menuScale);
     const backdrop = this.controller.activeMenu === playerDeathMenu && panel.kind === "fill" ? { ...panel, color: { ...panel.color, w: 0.45 } } : panel;
     renderUiCommands(context, this.controller.activeMenu === null ? [] : [backdrop, ...this.controller.draw({ ...context, timeMilliseconds: this.now() })],
       { text: this.menuText, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });

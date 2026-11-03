@@ -18,7 +18,7 @@ import type { Q2WeaponEvent, Q2Weapons } from "../../foundation/weapons/index.ts
 import { q2FallingDamage, q2WorldEffects } from "./environment.ts";
 import { q2Obituary } from "./obituary.ts";
 import { q2ClientAnimation, q2ClientEffects, q2BuildView, q2DamageFeedback } from "./view.ts";
-import { q2EntitiesNamed, q2KillBox, q2PlayerSpawns, q2SpawnOrigin, selectQ2Spawn } from "./spawns.ts";
+import { q2EntitiesNamed, q2KillBox, q2PlayerSpawnCallbacks, q2PlayerSpawns, q2SpawnOrigin, selectQ2Spawn } from "./spawns.ts";
 import { createQ2PlayerRules, Q2PlayerState } from "./types.ts";
 import type { Q2PlayerCarry, Q2PlayerContext, Q2PlayerHooks, Q2PlayerRules, Q2PlayerView, Q2ScoreRow } from "./types.ts";
 import { q2ChatAllowed, runQ2ClientCommand } from "./commands.ts";
@@ -103,7 +103,7 @@ export class Q2Players implements Q2SpawnModule {
     }
     return undefined;
   };
-  get callbacks(): Q2CallbackDefinitions { return { pain: { player_pain: this.playerPain }, die: { player_die: this.playerDie, body_die: this.bodyDie } }; }
+  get callbacks(): Q2CallbackDefinitions { return { ...q2PlayerSpawnCallbacks, pain: { player_pain: this.playerPain }, die: { player_die: this.playerDie, body_die: this.bodyDie } }; }
 
   context(entity: Q2Entity, game: Q2GameServices): Q2PlayerContext {
     const state = this.states.get(entity.actor.id);
@@ -151,7 +151,7 @@ export class Q2Players implements Q2SpawnModule {
     this.userinfoChanged(entity, game, admission.userinfo);
     if (!game.host.inventory.has(entity.actor.id)) game.host.inventory.create(entity.actor, []);
     if (game.host.combat.read(entity.actor.id) === null) game.host.combat.create(entity.actor, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
-    if (admission.initializeInventory) this.items.configurePlayer(entity.actor, game, true);
+    if (admission.initializeInventory) { this.items.configurePlayer(entity.actor, game, true); if (game.options.instagib === true) state.selectedItem = "q2:weapon_railgun"; }
     if (state.useQ2Weapons && !this.weapons.states.has(entity.actor.id)) this.weapons.bind(entity, game);
     entity.pain = this.playerPain;
     entity.die = this.playerDie;
@@ -198,7 +198,8 @@ export class Q2Players implements Q2SpawnModule {
     return undefined;
   }
   private setInventory(entity: Q2Entity, game: Q2GameServices, entries: readonly InventoryEntry[]): undefined {
-    for (const entry of game.host.inventory.entries(entity.actor.id)) game.host.inventory.configure(entity.actor, { ...entry, count: 0 });
+    const catalog = new Map(this.items.list().map(item => [item.id, item.capacity]));
+    for (const entry of game.host.inventory.entries(entity.actor.id)) game.host.inventory.configure(entity.actor, { ...entry, count: 0, capacity: catalog.get(entry.item) ?? entry.capacity });
     for (const entry of entries) game.host.inventory.configure(entity.actor, entry);
     return undefined;
   }
@@ -240,7 +241,7 @@ export class Q2Players implements Q2SpawnModule {
         this.setInventory(entity, game, state.useQ2Inventory ? [] : state.spawnInventory);
         if (state.useQ2Inventory) this.items.configurePlayer(entity.actor, game, true);
         game.host.combat.setHealth(entity.actor, 100); game.host.combat.setArmor(entity.actor, { regular: { kind: "none" }, powered: { kind: "none" } }); entity.maxHealth = 100;
-        state.selectedItem = "q2:weapon_blaster";
+        state.selectedItem = game.options.instagib === true ? "q2:weapon_railgun" : "q2:weapon_blaster";
         if (state.useQ2Inventory) this.hooks.persistentInventoryInitialized?.(entity, game);
       }
     }
@@ -337,6 +338,7 @@ export class Q2Players implements Q2SpawnModule {
   /** Campaign death bookkeeping also applies to a foreign character on this actor. */
   protected obituary(entity: Q2Entity, game: Q2GameServices, reaction: DeathReaction): undefined {
     const state = this.context(entity, game).state, cause = entity.lastAttack?.cause;
+    entity.enemy = reaction.attacker !== null && reaction.attacker !== entity.actor.id && this.states.has(reaction.attacker) ? reaction.attacker : null;
     return this.hooks.emit({ kind: "print", target: null, level: "medium", text: q2Obituary(state, reaction.attacker === null ? null : this.states.get(reaction.attacker) ?? null,
       cause?.kind === "q2" ? cause.meansOfDeath : 0, game.options.mode === "deathmatch", game.options.mode === "coop",
       (recipient, change) => this.applyScore(entity, game, reaction, recipient, change)) });
@@ -354,6 +356,8 @@ export class Q2Players implements Q2SpawnModule {
     const state = this.context(entity, game).state, first = !state.dead;
     if (first) {
       state.respawnTime = game.host.now() + 1;
+      entity.flags &= ~4096;
+      if (game.host.combat.read(entity.actor.id)?.armor.powered.kind !== "none") game.host.combat.setPoweredProtection(entity.actor, { kind: "none" });
       const killer = reaction.attacker !== null && reaction.attacker !== entity.actor.id ? game.host.bodies.read(reaction.attacker)
         : reaction.inflictor !== null && reaction.inflictor !== entity.actor.id ? game.host.bodies.read(reaction.inflictor) : null;
       if (killer !== null) { const origin = game.body(entity).origin; state.killerYaw = (Math.atan2(killer.origin.y - origin.y, killer.origin.x - origin.x) * 180 / Math.PI + 360) % 360; }
@@ -369,6 +373,7 @@ export class Q2Players implements Q2SpawnModule {
       }
       this.clearDeathInventory(entity, game);
       state.showScores = game.options.mode === "deathmatch";
+      if (state.showScores) this.scoreboard(entity, game);
     }
     state.dead = true;
     this.clearPowerups(entity, game);
@@ -394,9 +399,7 @@ export class Q2Players implements Q2SpawnModule {
     return undefined;
   }
   private clearPowerups(entity: Q2Entity, game: Q2GameServices): undefined {
-    this.items.clearPowerups(entity.actor.id); entity.flags &= ~4096;
-    const armor = game.host.combat.read(entity.actor.id)?.armor;
-    if (armor !== undefined && armor.powered.kind !== "none") game.host.combat.setPoweredProtection(entity.actor, { kind: "none" });
+    this.items.clearPowerups(entity.actor.id);
     return game.host.combat.setTraits(entity.actor, { invulnerable: this.states.get(entity.actor.id)?.god ?? false });
   }
 
@@ -410,6 +413,9 @@ export class Q2Players implements Q2SpawnModule {
     }
     if (state.spectator) {
       if ((state.latchedButtons & 1) !== 0) { state.latchedButtons &= ~1; this.chase(entity, game, 1, true); }
+      if (context.movement.upMove >= 10) {
+        if (!state.jumpHeld) { state.jumpHeld = true; this.chase(entity, game, 1); }
+      } else state.jumpHeld = false;
     } else if (state.useQ2Weapons) earlyQ2WeaponTurn(state, latchedAttack => this.weapons.tick(entity, game, { ...this.hooks.weaponInput(entity.actor.id), latchedAttack }));
     for (const [actor, watcher] of this.states) {
       const observer = game.entity(actor);
@@ -439,7 +445,15 @@ export class Q2Players implements Q2SpawnModule {
 
   protected worldEffects(context: Q2PlayerContext): undefined { return q2WorldEffects(context); }
   protected fallingDamage(context: Q2PlayerContext): undefined { return q2FallingDamage(context); }
-  protected buildView(context: Q2PlayerContext, flashes: number, intermission: boolean): Q2PlayerView { return q2BuildView(context, flashes, intermission); }
+  protected buildView(context: Q2PlayerContext, flashes: number, intermission: boolean): Q2PlayerView {
+    const view = q2BuildView(context, flashes, intermission), { state, game, entity } = context;
+    if (game.options.edition !== "classic") return view;
+    // G_SetStats syncs the counter, ClientEndServerFrame beeps up to three times, 64 frames apart, and the icon blinks.
+    if (state.gameHelpChanged !== game.helpChanged) { state.gameHelpChanged = game.helpChanged; state.helpChanged = 1; }
+    const frame = Math.round(game.host.now() * 10);
+    if (state.helpChanged > 0 && state.helpChanged <= 3 && (frame & 63) === 0) { state.helpChanged++; game.sound(entity, "misc/pc_up.wav", 2, 1, 3); }
+    return state.helpChanged > 0 && (frame & 8) !== 0 ? { ...view, helpIcon: true } : view;
+  }
   protected damageFeedback(context: Q2PlayerContext, painIndex: number): { readonly flashes: number; readonly painIndex: number } { return q2DamageFeedback(context, painIndex); }
   protected clientAnimation(context: Q2PlayerContext): undefined { return q2ClientAnimation(context); }
   protected updateBob(context: Q2PlayerContext): undefined {
@@ -543,13 +557,17 @@ export class Q2Players implements Q2SpawnModule {
     return this.hooks.emit({ kind: "scoreboard", actor: entity.actor.id, rows, killer: entity.enemy, reliable });
   }
 
-  chase(entity: Q2Entity, game: Q2GameServices, direction: 1 | -1, toggle = false): undefined {
+  chase(entity: Q2Entity, game: Q2GameServices, direction: 1 | -1, toggle = false, from: ActorId | null = this.context(entity, game).state.chaseTarget): undefined {
     const state = this.context(entity, game).state;
     if (toggle && state.chaseTarget !== null) state.chaseTarget = null;
     else {
       const candidates = [...this.states].filter(([, value]) => value.connected && !value.spectator).sort((left, right) => left[1].slot - right[1].slot);
-      const index = candidates.findIndex(([actor]) => actor === state.chaseTarget);
-      state.chaseTarget = candidates[(index + direction + candidates.length) % candidates.length]?.[0] ?? null;
+      // g_chase.c steps from the old target's slot, which may already be gone.
+      const slot = from === null ? undefined : this.states.get(from)?.slot;
+      const next = slot === undefined ? undefined
+        : direction === 1 ? candidates.find(([, value]) => value.slot > slot) : [...candidates].reverse().find(([, value]) => value.slot < slot);
+      state.chaseTarget = (slot === undefined ? candidates[direction === 1 ? 0 : candidates.length - 1] : next ?? candidates[direction === 1 ? 0 : candidates.length - 1])?.[0] ?? null;
+      if (state.chaseTarget === null && from === null) game.host.emit({ kind: "centerprint", actor: entity.actor.id, text: "No other players to chase." });
     }
     this.hooks.emit({ kind: "chase", actor: entity.actor.id, target: state.chaseTarget });
     if (state.chaseTarget !== null) this.updateChase(entity, game);
@@ -562,7 +580,7 @@ export class Q2Players implements Q2SpawnModule {
     const target = state.chaseTarget === null ? null : game.entity(state.chaseTarget);
     const targetState = target === null ? undefined : this.states.get(target.actor.id);
     if (target === null || targetState === undefined || !targetState.connected || targetState.spectator) {
-      if (state.chaseTarget !== null) { state.chaseTarget = null; this.chase(entity, game, 1); }
+      if (state.chaseTarget !== null) { const previous = state.chaseTarget; state.chaseTarget = null; this.chase(entity, game, 1, false, previous); }
       return undefined;
     }
     const targetBody = game.body(target), movement = this.hooks.movement(target.actor.id);

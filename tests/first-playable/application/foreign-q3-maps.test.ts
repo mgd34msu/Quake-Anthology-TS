@@ -1,13 +1,16 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { afterEach, expect } from "bun:test";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import type { ItemId } from "../../../src/contracts/gameplay.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { testCorpusRoot, corpusTest, corpusDescribe } from "../../support/corpus.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q2/baseq2/pak0.pak", "q3a/baseq3/pak0.pk3");
+const describe = corpusDescribe("q1/id1/pak0.pak", "q2/baseq2/pak0.pak", "q3a/baseq3/pak0.pk3");
+const tempDirectory = trackedTempDirectories();
 
 // Q3-authored maps on TS Q1/Q2 primaries: Q3 items and world classes are
 // hosted by the primary's own spawn/pickup systems through the shared
@@ -23,7 +26,7 @@ afterEach(async () => {
 
 async function foreignQ3Lane(args: string[], modelNeedle: string, expectedWeapon: ItemId): Promise<void> {
   const corpus = testCorpusRoot();
-  directory = await mkdtemp(join(tmpdir(), "foreign-q3-map-"));
+  directory = await tempDirectory("foreign-q3-map-");
   const parsed = parseApplicationCommand(["--content-root", corpus, ...args, "--user-content-root", directory]);
   if (parsed.kind !== "run") throw new Error("Missing foreign Q3 launch options");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
@@ -45,11 +48,15 @@ async function foreignQ3Lane(args: string[], modelNeedle: string, expectedWeapon
   simulation.physics.touchTriggers(player);
   for (let step = 0; step < 40 && simulation.inventory.count(player.id, expectedWeapon) === 0; step++) await application.step(50);
   expect(simulation.inventory.count(player.id, expectedWeapon)).toBe(1);
-  const before = simulation.presentations().length;
+  const signature = (entries: ReturnType<typeof simulation.presentations>): string[] => entries.map(entry => `${entry.family}:${entry.path}`).sort();
+  const before = signature(simulation.presentations());
   const save = join(directory, "saves", "foreign-q3.sav");
   await application.saveGame(save);
   await application.loadGame(save);
-  expect(application.simulation.presentations().length).toBe(before);
+  expect(signature(application.simulation.presentations())).toEqual(before);
+  const restored = application.simulation.players()[0];
+  if (restored === undefined) throw new Error("Restored player missing");
+  expect(application.simulation.inventory.count(restored, expectedWeapon)).toBe(1);
   for (let step = 0; step < 10; step++) await application.step(50);
 }
 

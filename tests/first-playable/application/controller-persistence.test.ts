@@ -3,15 +3,16 @@ import { InputRouter } from "../../../src/input/router.ts";
 import { ControllerSettings } from "../../../src/app/bootstrap/controller-settings.ts";
 import { ConfigStore } from "../../../src/settings/config.ts";
 import { expect, spyOn, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Application } from '../../../src/app/bootstrap/application.ts';
 import { ApplicationInput } from '../../../src/app/bootstrap/input.ts';
 import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 test('application restores seat controls and remaps transient controller instance bindings', async () => {
-  const root=await mkdtemp(join(tmpdir(),'input-persistence-'));
+  const root=await tempDirectory('input-persistence-');
   const selected=parseApplicationCommand(['--game','q1-classic-id1','--map','e1m1','--movement','q1','--character','q1','--seats','2','--renderer','cpu','--width','160','--height','120','--hidden']);
   if(selected.kind!=='run')throw Error('Missing options');
   const opened=spyOn(ApplicationInput,'open');let app:Application|null=null;

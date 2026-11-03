@@ -31,7 +31,7 @@ export const supertankDefinition: Q2MonsterDefinition = {
     return context.setMove("supertank_move_death");
   },
   callbacks: {
-    supertank_run: run, TreadSound: sound("bosstank/btkengn1.wav", 4), BossExplode: bossExplode,
+    supertank_run: run, TreadSound: sound("bosstank/btkengn1.wav"), BossExplode: bossExplode,
     supertank_dead(context) { return finishCorpse(context, { min: { x: -60, y: -60, z: 0 }, max: { x: 60, y: 60, z: 72 } }); },
     supertank_reattack1(context) { return context.setMove(visible(context) && context.game.host.random() < 0.9 ? "supertank_move_attack1" : "supertank_move_end_attack1"); },
     supertankRocket(context) {

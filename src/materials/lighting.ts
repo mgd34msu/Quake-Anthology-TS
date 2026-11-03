@@ -74,6 +74,12 @@ function sample(face: LightmapFace, style: number, pixel: number, channel: numbe
   return element(face.lighting.samples, face.offset + (style * face.width * face.height + pixel) * channels + (channels === 1 ? 0 : channel));
 }
 
+/** Mirrors the plane and radius rejection at the top of addDynamicLights, so callers can skip faces a light cannot touch. */
+export function dynamicLightReachesFace(face: LightmapFace, light: SurfaceDynamicLight): boolean {
+  const distance = Math.fround(dot3(light.origin, face.plane.normal) - face.plane.distance);
+  return Math.fround(light.radius - Math.abs(distance)) >= light.minimum;
+}
+
 /** Classic uses the source octagonal distance metric, in 16-unit texel steps.
  * Decoupled maps use their own texel axes rather than a mismatched classic grid. */
 function addDynamicLights(block: Float32Array | Uint32Array, face: LightmapFace, lights: readonly SurfaceDynamicLight[], scale: number): void {
@@ -117,11 +123,14 @@ export function buildQ1Lightmap(face: LightmapFace, styles: readonly number[], o
   if (options.fullbright !== true && face.lighting !== null) addDynamicLights(block, face, options.dynamicLights ?? [], 256);
   const pixels = new Uint8Array(size * 4);
   for (let pixel = 0; pixel < size; pixel++) {
-    const brightness = (channel: number): number => Math.min(255, element(block, pixel * 3 + channel) >> 7);
-    if (encoding === "rgb") pixels.set([brightness(0), brightness(1), brightness(2), 255], pixel * 4);
-    else if (encoding === "inverted-luminance") {
-      const value = 255 - brightness(0); pixels.set([value, value, value, 255], pixel * 4);
-    } else pixels.set([0, 0, 0, 255 - brightness(0)], pixel * 4);
+    const base = pixel * 3, offset = pixel * 4;
+    const red = Math.min(255, element(block, base) >> 7);
+    if (encoding === "rgb") {
+      pixels[offset] = red; pixels[offset + 1] = Math.min(255, element(block, base + 1) >> 7);
+      pixels[offset + 2] = Math.min(255, element(block, base + 2) >> 7); pixels[offset + 3] = 255;
+    } else if (encoding === "inverted-luminance") {
+      const value = 255 - red; pixels[offset] = value; pixels[offset + 1] = value; pixels[offset + 2] = value; pixels[offset + 3] = 255;
+    } else pixels[offset + 3] = 255 - red;
   }
   return { image: { width: face.width, height: face.height, pixels }, encoding };
 }

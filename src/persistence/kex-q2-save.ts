@@ -59,10 +59,13 @@ export interface KexQ2SaveArchive {
   readonly game: unknown;
 }
 
+/** Retail saves are a few MB; the bound stops a gzip bomb dropped into a scanned save directory. */
+const MAX_KEX_SAVE_BYTES = 256 * 1024 * 1024;
+
 /** Read the whole retail KEX Quake II save archive (server metadata + JSON game state). */
 export async function readKexQ2SaveArchive(path: string): Promise<KexQ2SaveArchive> {
   let pak: Uint8Array;
-  try { pak = gunzipSync(await Bun.file(path).bytes()); }
+  try { pak = new Uint8Array(gunzipSync(await Bun.file(path).bytes(), { maxOutputLength: MAX_KEX_SAVE_BYTES })); }
   catch (error) { throw new SaveFormatError("q2-kex", `cannot decompress save archive: ${error instanceof Error ? error.message : String(error)}`); }
   const reader = new BinaryReader(pak, "q2-kex/save.pak");
   if (readFixed(reader, 4) !== "PACK") throw new SaveFormatError("q2-kex", "save archive is not a PAK");

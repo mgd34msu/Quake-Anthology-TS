@@ -1,5 +1,7 @@
 # What runs in a gameplay cycle
 
+> **Dated record, not current status.** The gameplay cycle as of 1.0.0. It omits the native-character and guest-monster steps and the foreign-provider branch added since; see [architecture.md](architecture.md#frame-cycle). Its measurements cite commits and `.artifacts` drivers that are not retained. The maintained status is [status.md](status.md). Where this page disagrees with it or with the code, trust those. 
+
 This map follows the current original Quake II rerelease DLL path, the path behind the measured native performance problem. Q1/QW, Q2 classic and Q3 preserve their own source order and cadence; they share the surrounding application services. A simulation tick and a rendered frame are different operations. One application/input batch can contain several overdue simulation ticks.
 
 The original rerelease tick interval here is 25 ms, or 40 ticks per simulated second. Classic native Q2 uses 100 ms. Installed `563f0a99` completed 400 native ticks in the complete 495-entity base1 workload. Ticks 331–350, before CPU profiling, measured medians of 41.23 ms inside native RunFrame and 45.55 ms per application step. Earlier portions encountered another CPU workload. RunFrame includes engine callbacks invoked by the DLL. These are separate medians, not an additive phase profile or rendered FPS. Native execution remains over budget.
@@ -227,3 +229,22 @@ These are optimization targets, not demonstrated speedups. The measured native c
 - [Source publication and engine imports](../src/app/bootstrap/simulation/rerelease-guest-services.ts)
 
 Original game order was checked against the local retained `qsrc/quake2-rerelease-dll/rerelease/g_main.cpp`, `g_phys.cpp` and the public API2023 wrapper.
+
+## Steps added after 1.0.0 (native Quake II worlds)
+
+For a world run by an original Quake II game DLL (`kind: "q2-native"` in
+`src/app/bootstrap/simulation/runtime.ts`), the per-frame loop runs, in order, after
+`source.game.frame(...)`:
+
+1. `tickNativeCharacters()`: when a foreign character is selected, syncs each client's
+   mirrored combat state and tracks health so the shared character presentation (pain, death)
+   follows the guest's player.
+2. `runGuestMonsters()`: steps shared TypeScript monsters that replaced the guest's enemies
+   (foreign enemies, 1.1.10).
+3. Hand-grenade stepping, selected QVM actors and the mod owner's advance, as before.
+
+Before the frame, each client command takes a foreign-provider branch when a foreign movement is
+selected: the host quotes `serverTime` and runs one `player.move` per command, then writes the
+result back through the guest's `pmove_t` (`native-input.ts`). See
+[status.md](status.md#native-quake-ii-guests-with-foreign-providers) for what that path still
+fabricates. The measurements in the sections above predate these steps and were not re-run.

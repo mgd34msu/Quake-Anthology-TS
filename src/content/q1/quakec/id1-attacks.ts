@@ -29,9 +29,13 @@ interface Attack {
 export class Id1SynchronousAttacks {
   private readonly active: Attack[] = [];
   private readonly binding: Id1ProgramBinding;
-  constructor(private readonly source: Pick<QcWorldHostOptions, "program" | "entities" | "actors" | "slots">,
+  constructor(private readonly source: Pick<QcWorldHostOptions, "program" | "entities" | "actors" | "slots"> & Partial<Pick<QcWorldHostOptions, "foreignActor" | "foreignReference">>,
     private readonly machine: () => QcMachine) {
     this.binding = id1ProgramBinding(source.program);
+  }
+  private foreignReference(actor: ActorId): number {
+    if (this.source.foreignReference === undefined) throw new QcProgramError("id1 damage references an actor without a source projection");
+    return this.source.foreignReference(actor);
   }
   assertIdle(): void { if (this.active.length !== 0) throw new QcProgramError("Cannot save during a synchronous attack"); }
   private vm(): QcMachine {
@@ -56,7 +60,7 @@ export class Id1SynchronousAttacks {
       if (call.functionIndex === layout.addMulti) {
         const attack = this.active.at(-1);
         if (attack !== undefined && call.caller === layout.traceAttack) {
-          const target = this.source.slots.at(this.source.entities.slot(vm.argInt(0)));
+          const slot = this.source.entities.slot(vm.argInt(0)), target = this.source.slots.at(slot) ?? this.source.foreignActor?.(slot) ?? null;
           if (target !== null) attack.traces.set(target.id, this.trace(vm));
         }
         return execute();
@@ -81,11 +85,12 @@ export class Id1SynchronousAttacks {
     if (attack === undefined || !this.source.actors.isLive(attack.actor) || !attack.actor.equals(call.attacker) || !attack.actor.equals(call.inflictor)
       || vm.globals.int(vm.globalOffset("self")) !== attack.reference || vm.globals.int(this.binding.damage.global) !== this.binding.damage.index
       || axe !== (attack.weapon === "q1:weapon/axe")) throw new QcProgramError("Unmatched id1 synchronous damage scope");
-    const target = this.source.actors.sourceOf(call.target);
-    if (target === null || target.provider !== this.source.slots.options.provider) throw new QcProgramError("id1 attack target has no source projection");
+    const owned = this.source.actors.sourceOf(call.target);
+    // Foreign targets are visible to QC only through their borrowed rows
+    const targetReference = owned !== null && owned.provider === this.source.slots.options.provider ? this.source.entities.reference(owned.slot) : this.foreignReference(call.target);
     const trace = axe ? this.trace(vm) : attack.traces.get(call.target);
     if (trace === undefined) throw new QcProgramError("id1 shotgun damage has no captured target trace");
-    const n = vm.numeric, owner = this.source.entities.fromReference(attack.reference), victim = this.source.entities.at(target.slot);
+    const n = vm.numeric, owner = this.source.entities.fromReference(attack.reference), victim = this.source.entities.fromReference(targetReference);
     const min = owner.vector(this.field("absmin")), max = owner.vector(this.field("absmax")), origin = victim.vector(this.field("origin"));
     const delta = { x: n.subtract(origin.x, n.multiply(n.add(min.x, max.x), 0.5)), y: n.subtract(origin.y, n.multiply(n.add(min.y, max.y), 0.5)), z: n.subtract(origin.z, n.multiply(n.add(min.z, max.z), 0.5)) };
     const magnitude = n.squareRoot(n.add(n.add(n.multiply(delta.x, delta.x), n.multiply(delta.y, delta.y)), n.multiply(delta.z, delta.z)));

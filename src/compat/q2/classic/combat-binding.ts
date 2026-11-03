@@ -29,6 +29,9 @@ export class ClassicCombatBindings {
   private readonly armorHooks = new CleanupStack();
   private readonly damageHooks = new CleanupStack();
   private closed = false;
+  /** One inuse stand-in edict per foreign damage source, kept for the actor's life so hits do not consume G_Spawn slots. */
+  private readonly damageProxies = new Map<ActorId, RawEntityView>();
+  private readonly reloadObserver: () => void;
   private armorBypass: { readonly channel: ProtectionChannel; stack: bigint | "pending" } | null = null;
   private readonly damageSignature: GuestCallSignature;
   private readonly regularSignature: GuestCallSignature;
@@ -37,6 +40,7 @@ export class ClassicCombatBindings {
     this.damageSignature = nativeCombatSignature(profile.calls.damage, "damage", CLASSIC_Q2_ABI);
     this.regularSignature = nativeCombatSignature(profile.calls.regularArmor, "regular-armor", CLASSIC_Q2_ABI);
     this.powerSignature = nativeCombatSignature(profile.calls.powerArmor, "power-armor", CLASSIC_Q2_ABI);
+    this.reloadObserver = host.observeReload(() => { this.damageProxies.clear(); });
   }
   static create(host: ClassicQ2GuestHost, image: GuestAddress, declared?: ClassicCombatProfile | null): ClassicCombatBindings | null {
     const profile = declared === undefined ? classicCombatProfile(host.memory.module.digest) : declared;
@@ -91,7 +95,7 @@ export class ClassicCombatBindings {
       normalizeLegacyArmor: armor => normalizeLegacyPowerOnlyArmor(armor, this.armor(view), "q2:none"), sourceDamage: request => this.damage(request, view), read: () => {
       const client = this.client(view), flags = memory.readInt32(this.at(view, profile.fields.flags)), cvars = host.options.services.cvars;
       const skin = client === null ? "" : infoValueForKey(readClassicString(memory, memory.offset(client, BigInt(profile.client.userinfo)), profile.client.userinfoBytes), "skin"), rules = cvars.variableValue("dmflags") | 0;
-      const team = client === null ? null : cvars.variableValue("coop") !== 0 ? "q2:coop" : (rules & profile.teams.model) !== 0 ? `q2:model:${skin.split("/")[0] ?? ""}` : (rules & profile.teams.skin) !== 0 ? `q2:skin:${skin.split("/")[1] ?? ""}` : null;
+      const team = client === null ? null : cvars.variableValue("coop") !== 0 ? "q2:coop" : (rules & profile.teams.model) !== 0 ? `q2:model:${skin.split("/")[0] ?? ""}` : (rules & profile.teams.skin) !== 0 ? `q2:skin:${skin.split("/")[1] ?? skin}` : null;
       return { health: memory.readInt32(this.at(view, profile.fields.health)), canTakeDamage: memory.readInt32(this.at(view, profile.fields.damageable)) !== 0,
         mass: memory.readInt32(this.at(view, profile.fields.mass)), armor: this.armor(view), team, noKnockback: (flags & profile.flags.noKnockback) !== 0,
         invulnerable: (flags & profile.flags.invulnerable) !== 0 || client !== null && memory.readFloat32(memory.offset(client, BigInt(profile.client.invincibleFrame))) > memory.readInt32(this.entry(profile.globals.levelFrame)) };
@@ -156,6 +160,8 @@ export class ClassicCombatBindings {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.reloadObserver();
+    this.damageProxies.clear();
     this.damageHooks.runAll();
     this.armorHooks.runAll();
     this.armorBindings.clear();
@@ -163,6 +169,12 @@ export class ClassicCombatBindings {
   private targetAtEntry(call: NativeCombatCall, signature: GuestCallSignature): OwnedActor | null {
     const address = classicPointer([readNativeCombatField(this.host.options.runner.options.cpu, call, signature, "target")], 0);
     return address === null ? null : this.host.edicts.observe(address);
+  }
+  private standIn(call: NativeCombatCall, signature: GuestCallSignature): ActorId | null {
+    const resolve = this.host.options.services.standInActor;
+    if (resolve === undefined) return null;
+    const address = classicPointer([readNativeCombatField(this.host.options.runner.options.cpu, call, signature, "target")], 0);
+    return address === null ? null : resolve(this.host.edicts.fromPointer(address));
   }
   private installDamageHooks(): void {
     const { host, profile, damageSignature } = this, { callbacks, cpu } = host.options.runner.options;
@@ -175,6 +187,7 @@ export class ClassicCombatBindings {
       invoke: (_context, args) => { this.incomingDamage(args); return { kind: "void" }; },
     }, () => {
       if (this.closed || this.frames.at(-1)?.stack === stack()) return false;
+      if (this.standIn(profile.calls.damage, damageSignature) !== null) return true;
       const composed = host.options.services.engine.combat.damageOperation.active;
       if (!composed && this.armorBindings.size === 0) return false;
       const actor = this.targetAtEntry(profile.calls.damage, damageSignature);
@@ -225,16 +238,29 @@ export class ClassicCombatBindings {
     const { host } = this, provenance = host.options.services.damageProvenance;
     if (provenance === undefined) throw new Error("Classic source damage requires captured provenance");
     const actor = (index: number): ActorId => {
+      const standIn = host.options.services.standInActor?.(host.edicts.fromPointer(classicRequiredPointer(args, index)));
+      if (standIn !== undefined && standIn !== null) return standIn;
       const owned = host.edicts.observe(classicRequiredPointer(args, index));
       if (owned === null) throw new Error("Classic damage references a retired source actor"); return owned.id;
     };
+    const standIn = host.options.services.standInActor?.(host.edicts.fromPointer(classicRequiredPointer(args, 0))) != null;
     const target = actor(0), inflictor = actor(1), attacker = actor(2), flags = classicNumber(args, 8);
     const native = { edition: "classic", game: this.profile.game, value: classicNumber(args, 9) } satisfies import("../../../contracts/gameplay.ts").Q2NativeCause;
     const meansOfDeath = canonicalCauseFromNative(native); if (meansOfDeath === null) throw new Error("Unclassified classic damage cause");
     host.options.services.engine.combat.apply({ target, amount: classicNumber(args, 6), knockback: classicNumber(args, 7),
       direction: readClassicVector(host.memory, classicRequiredPointer(args, 3)), point: readClassicVector(host.memory, classicRequiredPointer(args, 4)),
       normal: readClassicVector(host.memory, classicRequiredPointer(args, 5)), delivery: (flags & 1) !== 0 ? "radius" : "direct",
-      attack: { ...provenance(attacker, inflictor, target), attacker, inflictor, cause: { kind: "q2", meansOfDeath, damageFlags: flags, native } } }, request => this.damage(request, host.edicts.fromPointer(classicRequiredPointer(args, 0)), sourceArgs));
+      attack: { ...provenance(attacker, inflictor, target), attacker, inflictor, cause: { kind: "q2", meansOfDeath, damageFlags: flags, native } } },
+      // A stand-in's health belongs to the shared monster: shared combat applies the hit and the guest's own T_Damage does not run on it.
+      standIn ? undefined : request => this.damage(request, host.edicts.fromPointer(classicRequiredPointer(args, 0)), sourceArgs));
+  }
+  private releaseRetiredProxies(): void {
+    const { host } = this, { actors } = host.options.services.engine;
+    for (const [actor, view] of this.damageProxies) {
+      if (actors.isLive(actor)) continue;
+      this.damageProxies.delete(actor);
+      if (view.bytes.getInt32(88, true) !== 0) host.invoke(this.entry(this.profile.entries.free), classicSignature([q2Pointer]), [pointer(view.address)]);
+    }
   }
   private damage(input: DamageRequest, view: RawEntityView, sourceArgs?: readonly GuestCallValue[]) {
     const { host, profile } = this, { memory } = host, engine = host.options.services.engine;
@@ -242,7 +268,8 @@ export class ClassicCombatBindings {
       const frame: DamageFrame = { request, view, stack: null }; this.frames.push(frame);
       let health = memory.readInt32(this.at(view, profile.fields.health)), armor = this.armor(view), velocity = readClassicVector(memory, this.at(view, profile.fields.velocity));
       let result: SourceDamageResult = { appliedDamage: 0, reaction: "none" }, reacting = false;
-      const writes = new CleanupStack(), reactions = new CleanupStack(), temporary: GuestAddress[] = [];
+      const writes = new CleanupStack(), reactions = new CleanupStack();
+      this.releaseRetiredProxies();
       const stopWrites = () => { writes.runAll(); };
       const current = () => this.frames.at(-1) === frame && !reacting;
       const address = (actor: ActorId | null): GuestAddress => {
@@ -250,9 +277,14 @@ export class ClassicCombatBindings {
         const native = engine.actors.sourceOf(actor);
         if (native?.provider === memory.module.id) return host.edicts.at(native.slot).address;
         const body = engine.bodies.read(actor); if (body === null) throw new Error("Foreign damage actor has no body to project");
-        const allocated = host.invoke(this.entry(profile.entries.spawn), classicSignature([], q2Pointer), []);
-        if (allocated.kind !== "pointer" || allocated.value === null) throw new Error("Source G_Spawn returned no damage projection");
-        const value = allocated.value; temporary.push(value);
+        let proxy = this.damageProxies.get(actor);
+        if (proxy === undefined || proxy.bytes.getInt32(88, true) === 0) {
+          const allocated = host.invoke(this.entry(profile.entries.spawn), classicSignature([], q2Pointer), []);
+          if (allocated.kind !== "pointer" || allocated.value === null) throw new Error("Source G_Spawn returned no damage projection");
+          proxy = host.edicts.fromPointer(allocated.value);
+          this.damageProxies.set(actor, proxy);
+        }
+        const value = proxy.address;
         writeClassicVector(memory, memory.offset(value, 4n), body.origin); writeClassicVector(memory, memory.offset(value, 16n), body.angles);
         writeClassicVector(memory, memory.offset(value, 188n), body.bounds.min); writeClassicVector(memory, memory.offset(value, 200n), body.bounds.max);
         writeClassicVector(memory, memory.offset(value, BigInt(profile.fields.velocity)), body.velocity);
@@ -297,8 +329,7 @@ export class ClassicCombatBindings {
         return result;
       } finally {
         stopWrites(); reactions.runAll();
-        try { for (const value of temporary) host.invoke(this.entry(profile.entries.free), classicSignature([q2Pointer]), [pointer(value)]); }
-        finally { memory.unmap(vectors, 36); this.frames.pop(); host.edicts.reconcile(); }
+        memory.unmap(vectors, 36); this.frames.pop(); host.edicts.reconcile();
       }
     });
   }

@@ -77,10 +77,11 @@ describe("image codecs", () => {
     expect(decodeLit(lit, 1).samples).toEqual(new Uint8Array([10, 20, 30]));
     expect(() => decodeLit(lit, 2)).toThrow("sample count");
     const input = { width: 2, height: 2, pixels: new Uint8Array([0, 0, 0, 255, 64, 64, 64, 255, 128, 128, 128, 255, 192, 192, 192, 255]) };
+    const inputBefore = Uint8Array.from(input.pixels);
     expect(generateMipChain(input)[1]?.pixels).toEqual(new Uint8Array([96, 96, 96, 255]));
     expect(resampleImage(input, 1, 1, "q1").pixels).toEqual(new Uint8Array([64, 64, 64, 255]));
     expect(resampleImage(input, 1, 1, "q2").pixels).toEqual(new Uint8Array([96, 96, 96, 255]));
-    expect(input.pixels.length).toBe(16);
+    expect(input.pixels).toEqual(inputBefore);
   });
 
   test("GIF retains palette indices and transparency", () => {

@@ -81,8 +81,9 @@ export function spawnBubble(game: Q1EntityServices, origin: Vec3, velocity = { x
 }
 function bubbleBob(game: Q1EntityServices, bubble: Q1Actor): undefined {
   const body = game.body(bubble); bubble.count++;
-  if (bubble.count === 4) { spawnBubble(game, body.origin, body.velocity, true); bubble.frame = 1; bubble.count = 10; }
-  const contents = game.host.contents(body.origin); if (bubble.count >= 20 || contents !== "water" && contents !== "slime" && contents !== "lava") return game.remove(bubble);
+  // bubble_split removes the parent because a noclip bubble's waterlevel is never 3; nothing else ends a bubble before its 20th step.
+  if (bubble.count === 4) { spawnBubble(game, body.origin, body.velocity, true); return game.remove(bubble); }
+  if (bubble.count >= 20) return game.remove(bubble);
   const x = body.velocity.x - 10 + game.host.random() * 20, y = body.velocity.y - 10 + game.host.random() * 20, z = body.velocity.z + 10 + game.host.random() * 10;
   game.setBody(bubble, { velocity: { x: x > 10 ? 5 : x < -10 ? -5 : x, y: y > 10 ? 5 : y < -10 ? -5 : y, z: z > 30 ? 25 : z < 10 ? 15 : z } }); return later(game, bubble, 0.5, "base:bubble_bob");
 }
@@ -161,7 +162,10 @@ export function spawnRemainingMapActor(base: Q1Base, entity: Q1Actor): undefined
     case "trigger_onlyregistered": if (game.usesId1Precaches) game.precacheSound("misc/talk.wav"); initTrigger(game, entity); entity.touch = game.named.touch(entity, "base:registered_touch"); return undefined;
     case "trigger_monsterjump": if (game.body(entity).angles.y === 0) game.setBody(entity, { angles: { x: 0, y: 360, z: 0 } }); initTrigger(game, entity); entity.speed ||= 200; entity.touch = game.named.touch(entity, "base:monsterjump_touch"); return undefined;
     case "trap_spikeshooter": case "trap_shooter": return shooter(game, entity);
-    case "misc_fireball": if (game.usesId1Precaches) game.precacheModel("progs/lavaball.mdl"); entity.classname = "fireball"; entity.fields.set("killstring", "$qc_ks_lavaball"); entity.speed ||= 1000; return later(game, entity, game.host.random() * 5, "base:fireball_fly");
+    case "misc_fireball": if (game.usesId1Precaches) game.precacheModel("progs/lavaball.mdl"); entity.classname = "fireball"; entity.fields.set("killstring", "$qc_ks_lavaball");
+      // id1 and QW misc.qc test `self.speed == 1000` (a no-op); only the rerelease assigns the default.
+      if (game.options.edition === "rerelease") entity.speed ||= 1000;
+      return later(game, entity, game.host.random() * 5, "base:fireball_fly");
     case "air_bubbles": if (game.options.deathmatch !== 0) return game.remove(entity); if (game.usesId1Precaches) game.precacheModel("progs/s_bubble.spr"); return later(game, entity, 1, "base:make_bubbles");
     case "light_globe": if (game.usesId1Precaches) game.precacheModel("progs/s_light.spr"); entity.model = "progs/s_light.spr"; return makeStatic(game, entity);
     case "light_torch_small_walltorch": case "light_flame_large_yellow": case "light_flame_small_yellow": case "light_flame_small_white":

@@ -45,7 +45,6 @@ test("mixed Q3 rocket effects preserve shooter identity and fixed impact through
         for (const shooter of [actor, remote]) {
           const sounds: SourceEffectSound[] = [{ content: q3, path: "sound/weapons/rocket/rocklf1a.wav",
             origin: { ...origin, x: origin.x + 14 }, channel: 2, volume: 1, seconds: 1, playback: { kind: "actor", actor: shooter } }];
-          expect(sounds[0]?.playback).toEqual({ kind: "actor", actor: shooter });
           audio.receiveEffectSounds(sounds);
           await audio.frame(snapshot, [listener], []);
           const request = observed.at(-1);
@@ -62,8 +61,6 @@ test("mixed Q3 rocket effects preserve shooter identity and fixed impact through
         const impact = { ...origin, y: origin.y - 350 };
         const sounds: SourceEffectSound[] = [{ content: q3, path: "sound/weapons/rocket/rocklx1a.wav",
           origin: impact, channel: 0, volume: 1, seconds: 1, playback: { kind: "once" } }];
-        expect(sounds[0]?.origin).toEqual(impact);
-        expect(sounds[0]?.playback).toEqual({ kind: "once" });
         audio.receiveEffectSounds(sounds);
         await audio.frame(snapshot, [listener], []);
         expect(observed.at(-1)?.origin).toEqual({ kind: "fixed", position: impact });

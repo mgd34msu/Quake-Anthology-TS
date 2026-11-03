@@ -1,5 +1,5 @@
 import { sweepQ2Body } from "../../../src/movement/q2/swept.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import { createMovementMath } from "../../../src/movement/q2/math.ts";
 import { plane } from "../../../src/movement/q2/types.ts";
@@ -42,7 +42,7 @@ function rerelease(origin: Vec3, n64Physics = false): Q2RereleaseMovementInput {
 }
 
 async function level() {
-  const archive = await openArchive(`${testCorpusRoot()}/q2/baseq2/pak0.pak`);
+  const archive = await openArchive(corpusFile("q2/baseq2/pak0.pak"));
   try {
     const entry = archive.findEntries("maps/base1.bsp")[0];
     if (entry === undefined) throw new Error("Retail base1 missing");
@@ -56,11 +56,11 @@ async function level() {
     return { world, origin: { x, y, z } };
   } finally { archive.close(); }
 }
-const installed = await Bun.file(`${testCorpusRoot()}/q2/baseq2/pak0.pak`).exists();
+const installed = await Bun.file(corpusFile("q2/baseq2/pak0.pak")).exists();
 
-const q1ClassicArchive = await Bun.file(`${testCorpusRoot()}/q1/id1/pak0.pak`).exists()
-  ? `${testCorpusRoot()}/q1/id1/pak0.pak` : `${testCorpusRoot()}/q1/id1/PAK0.PAK`;
-for (const path of [q1ClassicArchive, `${testCorpusRoot()}/q1/rerelease/id1/pak0.pak`]) {
+const q1ClassicArchive = await Bun.file(corpusFile("q1/id1/pak0.pak")).exists()
+  ? corpusFile("q1/id1/pak0.pak") : corpusFile("q1/id1/PAK0.PAK");
+for (const path of [q1ClassicArchive, corpusFile("q1/rerelease/id1/pak0.pak")]) {
 test.skipIf(!await Bun.file(path).exists())(`both Q2 movement profiles stop on Q1 floors after directional input ends: ${path}`, async () => {
   const archive = await openArchive(path);
   try {
@@ -125,6 +125,12 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
     if (jump.status !== "active") throw new Error("Unexpected removal");
     expect(jump.state.velocityEighths[2]).toBeGreaterThan(0);
     expect(jump.state.flags & PmflagsT.PMF_JUMP_HELD).not.toBe(0);
+    const held = provider.move({ ...input, state: jump.state, command: { ...input.command, upMove: 200 } }, services);
+    if (held.status !== "active") throw new Error("Unexpected removal");
+    expect(held.state.flags & PmflagsT.PMF_JUMP_HELD).not.toBe(0);
+    const released = provider.move({ ...input, state: jump.state, command: { ...input.command, upMove: 0 } }, services);
+    if (released.status !== "active") throw new Error("Unexpected removal");
+    expect(released.state.flags & PmflagsT.PMF_JUMP_HELD).toBe(0);
   });
 
   test("rerelease and Quake 64 use identical authority and prediction configs", async () => {
@@ -214,7 +220,7 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
   });
 });
 
-const q3ArchivePath = `${testCorpusRoot()}/q3a/baseq3/pak0.pk3`;
+const q3ArchivePath = corpusFile("q3a/baseq3/pak0.pk3");
 test.skipIf(!await Bun.file(q3ArchivePath).exists())("Q2 rerelease movement uses Q3 retail geometry and a separately selected character body", async () => {
   const archive = await openArchive(q3ArchivePath);
   try {
@@ -319,11 +325,12 @@ for (const edition of ["classic", "rerelease"]) test.skipIf(!installed)(`Q2 ${ed
   expect(wall.fraction).toBeLessThan(1);
   for (let index = 0; index < 250; index++) position = step(300, 0).origin;
   expect(position.x).toBeLessThanOrEqual(wallOrigin.x - 8 - base.shape.bounds.max.x + 0.2);
+  expect(position.x).toBeGreaterThan(wallOrigin.x - 8 - base.shape.bounds.max.x - 1); // flight reaches the wall, not just stays short of it
   expect(current.state.type).toBe(0);
 });
 
 
-test.skipIf(!installed)("authored stance and freeze use both original Q2 Pmove policies and release cleanly", async () => {
+test.skipIf(!installed)("authored stance and freeze use both original Q2 Pmove policies and movement input resumes after the freeze ends", async () => {
   const map = await level(), scene = createSceneQueries(map.world);
   const services: MovementServices = { scene, numeric, touch: (_contact, state) => ({ kind: "continue", state }),
     weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
@@ -336,8 +343,14 @@ test.skipIf(!installed)("authored stance and freeze use both original Q2 Pmove p
       const frozen = provider.move({ ...input, command: { ...input.command, forwardMove: 200 }, environment: { ...input.environment, clientOutputs: { mode: "freeze" } } }, services);
       if (frozen.status !== "active") throw new Error("Unexpected removal");
       expect(frozen.state.originEighths).toEqual(input.state.originEighths); expect(frozen.state.type).toBe(0);
-      const resumed = provider.move({ ...input, state: frozen.state, command: { ...input.command, forwardMove: 200 } }, services);
-      if (resumed.status !== "active") throw new Error("Unexpected removal"); expect(resumed.state.originEighths).not.toEqual(frozen.state.originEighths);
+      // In the air the fixture's air acceleration is zero, so input only shows once the player has settled onto the floor.
+      let grounded = input.state;
+      for (let i = 0; i < 30; i++) { const step = provider.move({ ...input, state: grounded, commandSequence: i }, services); if (step.status !== "active") throw new Error("Unexpected removal"); grounded = step.state; }
+      const resumed = provider.move({ ...input, state: grounded, command: { ...input.command, forwardMove: 200 } }, services);
+      const idle = provider.move({ ...input, state: grounded, command: { ...input.command, forwardMove: 0 } }, services);
+      if (resumed.status !== "active" || idle.status !== "active") throw new Error("Unexpected removal");
+      // Falling alone also moves the origin, so movement input resuming must show in the horizontal plane against an idle step.
+      expect(resumed.state.originEighths.slice(0, 2)).not.toEqual(idle.state.originEighths.slice(0, 2));
     } else {
       const original = rerelease(map.origin), input = { ...original, state: { ...original.state, flags: 4 } }, crouched = provider.move({ ...input, environment: { ...input.environment, clientOutputs: { stance: true } } }, services);
       if (crouched.status !== "active") throw new Error("Unexpected removal");
@@ -345,8 +358,12 @@ test.skipIf(!installed)("authored stance and freeze use both original Q2 Pmove p
       const frozen = provider.move({ ...input, command: { ...input.command, forwardMove: 200 }, environment: { ...input.environment, clientOutputs: { mode: "freeze" } } }, services);
       if (frozen.status !== "active") throw new Error("Unexpected removal");
       expect(frozen.state.origin).toEqual(input.state.origin); expect(frozen.state.type).toBe(0);
-      const resumed = provider.move({ ...input, state: frozen.state, command: { ...input.command, forwardMove: 200 } }, services);
-      if (resumed.status !== "active") throw new Error("Unexpected removal"); expect(resumed.state.origin).not.toEqual(frozen.state.origin);
+      let grounded = input.state;
+      for (let i = 0; i < 30; i++) { const step = provider.move({ ...input, state: grounded, command: { ...input.command, serverFrame: i } }, services); if (step.status !== "active") throw new Error("Unexpected removal"); grounded = step.state; }
+      const resumed = provider.move({ ...input, state: grounded, command: { ...input.command, forwardMove: 200 } }, services);
+      const idle = provider.move({ ...input, state: grounded, command: { ...input.command, forwardMove: 0 } }, services);
+      if (resumed.status !== "active" || idle.status !== "active") throw new Error("Unexpected removal");
+      expect([resumed.state.origin.x, resumed.state.origin.y]).not.toEqual([idle.state.origin.x, idle.state.origin.y]);
     }
   }
 });
@@ -361,15 +378,51 @@ test.skipIf(!installed)("authored body bounds survive selected Q2 steps and bloc
   const input = classic(origin), provider = createQ2ClassicMovementProvider("q2:movement");
   const moved = provider.move({ ...input, command: { ...input.command, forwardMove: 200 }, environment: { ...input.environment, clientOutputs: { bodyBounds: small } } }, services);
   if (moved.status !== "active") throw new Error("Player removed");
-  expect(moved.bounds).toEqual(small); expect(moved.state).not.toEqual(input.state);
+  const smallEnvironment = { ...input.environment, clientOutputs: { bodyBounds: small } };
+  let settled = input.state;
+  for (let i = 0; i < 30; i++) { const step = provider.move({ ...input, state: settled, environment: smallEnvironment, commandSequence: i }, services); if (step.status !== "active") throw new Error("Player removed"); settled = step.state; }
+  const movedOnFloor = provider.move({ ...input, state: settled, command: { ...input.command, forwardMove: 200 }, environment: smallEnvironment }, services);
+  const idleSmall = provider.move({ ...input, state: settled, environment: smallEnvironment }, services);
+  if (idleSmall.status !== "active" || movedOnFloor.status !== "active") throw new Error("Player removed");
+  expect(moved.bounds).toEqual(small); expect(movedOnFloor.state.originEighths.slice(0, 2)).not.toEqual(idleSmall.state.originEighths.slice(0, 2));
   const held = provider.move({ ...input, state: moved.state, currentBounds: moved.bounds, environment: { ...input.environment, clientOutputs: { bodyBounds: blocked } } }, services);
   if (held.status !== "active") throw new Error("Player removed");
   expect(held.bounds).toEqual(small);
   const rr = rerelease(origin), rrProvider = createQ2RereleaseMovementProvider("q2:movement", new Q2RereleaseMovementContext());
   const rrMoved = rrProvider.move({ ...rr, command: { ...rr.command, forwardMove: 200 }, environment: { ...rr.environment, clientOutputs: { bodyBounds: small } } }, services);
   if (rrMoved.status !== "active") throw new Error("Player removed");
-  expect(rrMoved.bounds).toEqual(small); expect(rrMoved.state).not.toEqual(rr.state);
+  const rrSmallEnvironment = { ...rr.environment, clientOutputs: { bodyBounds: small } };
+  let rrSettled = rr.state;
+  for (let i = 0; i < 30; i++) { const step = rrProvider.move({ ...rr, state: rrSettled, environment: rrSmallEnvironment, command: { ...rr.command, serverFrame: i } }, services); if (step.status !== "active") throw new Error("Player removed"); rrSettled = step.state; }
+  const rrOnFloor = rrProvider.move({ ...rr, state: rrSettled, command: { ...rr.command, forwardMove: 200 }, environment: rrSmallEnvironment }, services);
+  const rrIdle = rrProvider.move({ ...rr, state: rrSettled, environment: rrSmallEnvironment }, services);
+  if (rrIdle.status !== "active" || rrOnFloor.status !== "active") throw new Error("Player removed");
+  expect(rrMoved.bounds).toEqual(small); expect([rrOnFloor.state.origin.x, rrOnFloor.state.origin.y]).not.toEqual([rrIdle.state.origin.x, rrIdle.state.origin.y]);
   const rrHeld = rrProvider.move({ ...rr, state: rrMoved.state, currentBounds: rrMoved.bounds, environment: { ...rr.environment, clientOutputs: { bodyBounds: blocked } } }, services);
   if (rrHeld.status !== "active") throw new Error("Player removed");
   expect(rrHeld.bounds).toEqual(small);
+});
+
+test.skipIf(!installed)("classic authoritative movement of a dead player traces with the dead mask but prediction keeps the live mask", async () => {
+  const map = await level(), scene = createSceneQueries(map.world);
+  const masks: number[] = [];
+  const spy = new Proxy(scene, { get: (target, property) => {
+    if (property === "trace") return (query: Parameters<typeof scene.trace>[0]) => { if (query.policy.kind === "q2") masks.push(query.policy.contentsMask); return target.trace(query); };
+    const value: unknown = Reflect.get(target, property, target);
+    if (typeof value !== "function") return value;
+    return (...args: unknown[]): unknown => { const result: unknown = Reflect.apply(value, target, args); return result; };
+  } });
+  const services: MovementServices = { scene: spy, numeric, touch: (_contact, state) => ({ kind: "continue", state }),
+    weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
+  const provider = createQ2ClassicMovementProvider("q2:classic");
+  const input = classic(map.origin), MONSTER = 0x02000000;
+  provider.move({ ...input, environment: { ...input.environment, health: 0 } }, services);
+  expect(masks.length).toBeGreaterThan(0);
+  expect(masks.every(mask => (mask & MONSTER) === 0)).toBe(true);
+  masks.length = 0;
+  provider.move({ ...input, environment: { ...input.environment, health: 0 }, execution: "prediction" }, services);
+  expect(masks.some(mask => (mask & MONSTER) !== 0)).toBe(true);
+  masks.length = 0;
+  provider.move(input, services);
+  expect(masks.some(mask => (mask & MONSTER) !== 0)).toBe(true);
 });

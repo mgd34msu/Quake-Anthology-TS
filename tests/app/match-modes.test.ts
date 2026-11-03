@@ -24,7 +24,11 @@ test("source mode admission and authored map eligibility reject incompatible mod
   expect(matchModeUnavailable({ family: "q1", edition: "classic", campaign: "id1", mode: "coop", rules: "horde" })).toBeNull();
   expect(matchModeUnavailable({ family: "q2", edition: "rerelease", campaign: "baseq2", mode: "deathmatch", rules: "lmctf" })).toBeNull();
   expect(matchModeUnavailable({ family: "q2", edition: "classic", campaign: "baseq2", mode: "deathmatch", rules: "deathball" })).toBeNull();
-  for (const rules of ["tag", "deathball", "horde"]) expect(parseApplicationCommand(["--rules", rules]).kind).not.toBe("error");
+  for (const rules of ["tag", "deathball", "horde"]) {
+    const parsed = parseApplicationCommand(["--rules", rules]);
+    if (parsed.kind === "run" || parsed.kind === "menu") expect(String(parsed.options.rules)).toBe(rules); else throw new Error(`Unexpected ${parsed.kind} command for --rules ${rules}`);
+  }
+  expect(() => parseApplicationCommand(["--rules", "bogus"])).toThrow("Unknown match rules: bogus");
 });
 test("DeathBall selection uses source cvar defaults and remains live", () => {
   const id = createIdentityOwner("mode-selection"), cvars = new CvarRegistry({ dialect: "q2-rerelease", context: { session: id.session, origin: { kind: "server-console" } } });

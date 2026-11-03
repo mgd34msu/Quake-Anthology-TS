@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { homedir } from "node:os";
+import { copperAvailable, copperProgramPath } from "../../support/corpus.ts";
 
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import type { CommandContext } from "../../../src/contracts/common.ts";
@@ -10,15 +10,16 @@ import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
 import { CommandBuffer } from "../../../src/core/commands/index.ts";
 import { CvarRegistry } from "../../../src/core/cvars/index.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
 import { ModCommands } from "../../../src/world/session/mod-commands.ts";
 import { SessionMods } from "../../../src/world/session/mods.ts";
+import { inertAuthority } from "../../support/authority.ts";
 
-const artifact = `${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`;
-test.skipIf(!await Bun.file(artifact).exists())("original Copper console functions and localcmd retain component cvars and source ownership", async () => {
+const artifact = copperProgramPath();
+test.skipIf(!copperAvailable())("original Copper console functions and localcmd retain component cvars and source ownership", async () => {
   const program = await Bun.file(artifact).bytes(), digest = createContentDigest(new Bun.CryptoHasher("sha256").update(program).digest("hex"));
   const actors = new SessionActorRegistry(createIdentityOwner("copper-console")), callbacks = new ActorCallbackTable(actors);
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const context: CommandContext = { session: actors.session, origin: { kind: "server-console" } };
   const primary = new CvarRegistry({ dialect: "q3", context }); primary.register("skill", "9");
@@ -51,8 +52,8 @@ test.skipIf(!await Bun.file(artifact).exists())("original Copper console functio
     expect(maps).toEqual([{ map: "e1m2", dialect: "q1-netquake", owner: prepared[0]?.identity.modules[0]?.id }]);
     sourceCommands.execute(first, "source_restart discarded", context);
     sourceCommands.execute(second, "source_restart retained", context);
-    await mods.setEnabled(first, false); commands.execute();
-    expect(maps.map(entry => entry.map)).toEqual(["e1m2", "retained"]);
+    mods.close(); commands.execute();
+    expect(maps.map(entry => entry.map)).toEqual(["e1m2"]);
     expect(() => sourceCommands.execute(first, "recordskill", context)).toThrow("unavailable");
   } finally { mods.close(); actors.close(); }
 });

@@ -27,8 +27,7 @@ class NumberInput {
   }
 
   byte(): number {
-    if (this.offset > this.text.length) throw new RangeError("Game number scan reads beyond its backing string");
-    if (this.offset === this.text.length) return 0;
+    if (this.offset >= this.text.length) return 0;
     const byte = this.text.charCodeAt(this.offset);
     return byte < 128 ? byte : byte - 256;
   }
@@ -99,15 +98,15 @@ export function gameAtoi(text: string): number {
 /**
  * bg_lib _atof consumes the first delimiter, even NUL, and leaves a leading dot.
  * The pinned/baseq3 c='0' initialization stabilizes missionpack's stale-stack case.
- * Reads outside the supplied string are rejected instead of borrowing VM memory.
+ * Reads past the supplied string see NUL instead of borrowing VM memory; peers and maps supply this text.
  */
 export function scanGameFloat(text: string, offset = 0): GameFloatScan {
-  const input = new NumberInput(text, offset);
+  const input = new NumberInput(text, Math.min(offset, text.length));
   const value = readFloat(input, "scan");
   return { value, nextOffset: input.offset };
 }
 
-/** QVM sscanf("%f %f %f") always writes all three destinations. */
+/** QVM sscanf("%f %f %f") always writes all three destinations; components missing from a short string are zero. */
 export function scanGameVector(text: string): Vec3 {
   const input = new NumberInput(text);
   const x = readFloat(input, "scan"), y = readFloat(input, "scan"), z = readFloat(input, "scan");

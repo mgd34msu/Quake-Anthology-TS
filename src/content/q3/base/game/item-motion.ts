@@ -140,6 +140,8 @@ export function runItem(entity: GameEntity, context: RunItemContext): void {
   entity.r.currentOrigin = vec3(trace.end.x, trace.end.y, trace.end.z);
   context.entities.options.link(entity);
   runThink(entity, time);
+  // The think may free the item (30-second expiry); writes to a freed record would allocate a fresh actor.
+  if (!entity.inuse) return;
 
   const fraction = trace.solidity === "clear" ? trace.fraction : 0;
   if (fraction === 1) return;

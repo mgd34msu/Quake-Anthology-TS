@@ -51,7 +51,7 @@ test("source IPX addresses preserve network/node/socket and never resolve as UDP
   expect(parseIpxRemote("12345678:0011223344ff", 26000)).toEqual(expected);
   expect(await resolveApplicationAddress("ipx:12345678:0011223344FF:26000", 27960, { kind: "ipx-native" }, "q3")).toEqual(expected);
   for (const invalid of ["localhost:27960", "0000:001122334455", "00000000:001122334455:0", "00000000:001122334455:65536", "00000000:0011223344zz:1"])
-    expect(() => parseIpxRemote(invalid, 26000)).toThrow();
+    expect(() => parseIpxRemote(invalid, 26000)).toThrow(/IPX address must be NETWORK\.NODE\[:SOCKET\] with 8 and 12 hexadecimal digits|Invalid network port/);
   await expect(resolveApplicationAddress("12345678:0011223344ff", 27500, { kind: "ipx-native" }, "qw")).rejects.toThrow("QuakeWorld");
 });
 
@@ -91,7 +91,7 @@ test("application UDP keeps SOCKS and native IPX never falls back to UDP", async
 test("application cancellation closes a socket allocated while cancellation arrived", async () => {
   const controller = new AbortController(), udp = new MemoryUdp(ipv4Address([127, 0, 0, 1], 27000));
   const capabilities: ApplicationTransportCapabilities = { nativeIpx: { kind: "unavailable", reason: "no AF_IPX" }, bindUdp: async () => { controller.abort(); return udp; } };
-  await expect(openApplicationTransport({ selection: { kind: "udp" }, family: "q1", host: "0.0.0.0", port: 26000, limits, signal: controller.signal }, capabilities)).rejects.toThrow();
+  await expect(openApplicationTransport({ selection: { kind: "udp" }, family: "q1", host: "0.0.0.0", port: 26000, limits, signal: controller.signal }, capabilities)).rejects.toThrow("The operation was aborted.");
   expect(udp.closed).toBe(true);
 });
 

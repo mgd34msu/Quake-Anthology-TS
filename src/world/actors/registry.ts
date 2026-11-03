@@ -45,6 +45,8 @@ export class SessionActorRegistry implements ActorRegistry {
   private readonly savedReferences = new Map<string, ActorId>();
   private closed = false;
   private orderingRevision = 0;
+  /** Every slot below this index is occupied, so allocation still takes the lowest free slot. */
+  private lowestFree = 0;
 
   get revision(): number { return this.orderingRevision; }
 
@@ -58,7 +60,8 @@ export class SessionActorRegistry implements ActorRegistry {
 
   allocate(owner: ProviderId, definition: `${string}:${string}`): OwnedActor {
     if (this.closed) throw new Error("Actor registry is closed");
-    let index = this.slots.findIndex(slot => slot.actor === null);
+    let index = -1;
+    for (let candidate = this.lowestFree; candidate < this.slots.length; candidate++) if (this.slots[candidate]?.actor === null) { index = candidate; break; }
     if (index < 0) {
       index = this.slots.length;
       if (index >= this.capacity) throw new RangeError("Actor registry is full");
@@ -69,6 +72,7 @@ export class SessionActorRegistry implements ActorRegistry {
     slot.generation = this.reserveGeneration(index, slot.generation);
     const actor = this.identities.ownedActor(this.identities.actor(index, slot.generation), owner);
     slot.actor = actor;
+    this.lowestFree = index + 1;
     slot.definition = definition;
     slot.observation = Object.freeze({ id: actor.id, owner: actor.owner, definition });
     this.orderingRevision++;
@@ -110,6 +114,7 @@ export class SessionActorRegistry implements ActorRegistry {
     const source = slot.source;
     // Reentrant callbacks may allocate this slot. Invalidate the old generation before notifying tables.
     slot.actor = null;
+    this.lowestFree = Math.min(this.lowestFree, actor.id.slot);
     slot.observation = null;
     slot.source = null;
     slot.generation++;

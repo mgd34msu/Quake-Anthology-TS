@@ -12,7 +12,7 @@ import { savedActorId } from "../../../persistence/save-image.ts";
 import type { ApplicationBotNavigation } from "./navigation.ts";
 import { ApplicationBots, RestoredBotReliableCommands, type ApplicationBotService, type ApplicationBotsOptions, type ApplicationBotClient, type ApplicationBotsCheckpoint } from "./bots.ts";
 import type { ApplicationBotAssets } from "./bot-assets.ts";
-import { createRereleaseBotWorld, nativeWeaponItem } from "./bot-rerelease-world.ts";
+import { createRereleaseBotWorld, nativeWeaponItem, RereleaseFrameSnapshot } from "./bot-rerelease-world.ts";
 import { rereleaseBotObjectives } from "./bot-objectives.ts";
 import type { SimulationPresentationEvent } from "./types.ts";
 import { rereleaseBotCommand } from "./bot-commands.ts";
@@ -31,8 +31,10 @@ export class ApplicationRereleaseBots implements ApplicationBotService {
   private readonly navigation: ApplicationBotNavigation;
   private readonly connections = new Map<number, Connection>();
   private readonly observations = new Map<number, ActorId>();
+  private readonly observationNumbers = new Map<string, number>();
   private nextObservation = 1;
   private elapsedMilliseconds = 0;
+  private readonly snapshot = new RereleaseFrameSnapshot();
   private heard: BotSoundT[] = [];
   private closed = false;
   private readonly objectives;
@@ -48,6 +50,12 @@ export class ApplicationRereleaseBots implements ApplicationBotService {
     if (options.restore !== undefined) this.restore(options.restore);
     else for (const saved of options.clients ?? []) this.connect(saved, this.name(saved), this.defaultSkill());
     options.simulation.botServices.attachTransport(this);
+    // The table otherwise grows with every actor ever observed on the map.
+    options.simulation.actors.onRelease(released => {
+      const key = `${released.id.slot}:${released.id.generation}`, number = this.observationNumbers.get(key);
+      if (number !== undefined) { this.observationNumbers.delete(key); this.observations.delete(number); }
+      return undefined;
+    });
   }
   private defaultSkill(): string {
     const skills = this.assets.knowledge.skills;
@@ -61,8 +69,9 @@ export class ApplicationRereleaseBots implements ApplicationBotService {
     return index < 0 ? this.assets.knowledge.characters[0]?.name ?? "Bot" : fields[index + 1] ?? "Bot";
   }
   private identify = (actor: ActorId): number => {
-    for (const [number, existing] of this.observations) if (existing.equals(actor)) return number;
-    const number = this.nextObservation++; this.observations.set(number, actor); return number;
+    const key = `${actor.slot}:${actor.generation}`, known = this.observationNumbers.get(key);
+    if (known !== undefined) return known;
+    const number = this.nextObservation++; this.observations.set(number, actor); this.observationNumbers.set(key, number); return number;
   };
   private connect(saved: ApplicationBotClient, name: string, skill: string, restoredActor?: OwnedActor): Connection {
     const { simulation } = this.options;
@@ -97,7 +106,7 @@ export class ApplicationRereleaseBots implements ApplicationBotService {
         humanTeammateNear: () => simulation.players().some(other => !this.isBot(other) && this.objectives.team(other) === this.objectives.team(actor.id)
           && (() => { const body = simulation.bodies.read(other), own = simulation.bodies.read(actor.id); return body !== null && own !== null && Math.hypot(body.origin.x-own.origin.x, body.origin.y-own.origin.y, body.origin.z-own.origin.z) < 256; })()) } });
     const world = createRereleaseBotWorld({ simulation, navigation: this.navigation, knowledge: this.assets.knowledge, objectives: this.objectives,
-      identify: this.identify, isBot: actor => this.isBot(actor), elapsed: () => this.elapsedMilliseconds, sounds: () => this.heard }, actor.id);
+      identify: this.identify, isBot: actor => this.isBot(actor), elapsed: () => this.elapsedMilliseconds, sounds: () => this.heard, snapshot: this.snapshot }, actor.id);
     const connection: Connection = { ...saved, userinfo: saved.userinfo ?? `\\name\\${name}`, actor, behavior, world, name, skill, selection, sequence: 0 };
     this.connections.set(saved.client.id.slot, connection);
     if (restoredActor === undefined) {
@@ -149,17 +158,20 @@ export class ApplicationRereleaseBots implements ApplicationBotService {
     const minimum = Math.min(simulation.options.maxClients, Math.max(0, Math.trunc(this.configuration.variableValue("bot_minplayers"))));
     if (this.configuration.variableValue("bot_enable") !== 0 && simulation.clientIdentities().length < minimum) this.add(this.assets.knowledge.characters[this.connections.size % Math.max(1, this.assets.knowledge.characters.length)]?.name ?? "Bot");
     const commands: ActorCommand[] = [];
-    for (const connection of this.connections.values()) {
-      const player = simulation.movementPlayer(connection.actor.id);
-      if (player === null || !simulation.actors.isLive(connection.actor.id)) throw new Error("Native bot command targets a retired actor");
-      connection.behavior.brain.setGameMode(this.objectives.mode());
-      const objective = this.objectives.goal(connection.actor.id);
-      connection.behavior.setObjectiveGoal(objective);
-      const source = connection.behavior.think(connection.world);
-      const command = this.command(source, connection);
-      commands.push({ actor: connection.actor.id, source: { kind: "bot", provider: this.assets.source === "q1-rerelease" ? "q1:bot" : "q2:bot" }, sequence: connection.sequence++, command,
-        arsenal: { provider: player.arsenal.provider, weapon: nativeWeaponItem(simulation, connection.actor.id, this.assets.knowledge, connection.selection.number), useHoldable: false } });
-    }
+    this.snapshot.begin();
+    try {
+      for (const connection of this.connections.values()) {
+        const player = simulation.movementPlayer(connection.actor.id);
+        if (player === null || !simulation.actors.isLive(connection.actor.id)) throw new Error("Native bot command targets a retired actor");
+        connection.behavior.brain.setGameMode(this.objectives.mode());
+        const objective = this.objectives.goal(connection.actor.id);
+        connection.behavior.setObjectiveGoal(objective);
+        const source = connection.behavior.think(connection.world);
+        const command = this.command(source, connection);
+        commands.push({ actor: connection.actor.id, source: { kind: "bot", provider: this.assets.source === "q1-rerelease" ? "q1:bot" : "q2:bot" }, sequence: connection.sequence++, command,
+          arsenal: { provider: player.arsenal.provider, weapon: nativeWeaponItem(simulation, connection.actor.id, this.assets.knowledge, connection.selection.number), useHoldable: false } });
+      }
+    } finally { this.snapshot.end(); }
     this.heard = [];
     return commands;
   }
@@ -225,7 +237,8 @@ export class ApplicationRereleaseBots implements ApplicationBotService {
     this.heard = r.field("heard").list(sound => ({ origin: { x: sound.field("origin").field("x").finite(), y: sound.field("origin").field("y").finite(), z: sound.field("origin").field("z").finite() }, sourceId: sound.field("sourceId").integer(), time: sound.field("time").finite(), loudness: sound.field("loudness").finite() })).slice();
     for (const entry of image.observations) {
       if (entry.number < 1 || entry.number >= this.nextObservation || this.observations.has(entry.number)) throw new Error("Invalid native bot observation sequence");
-      this.observations.set(entry.number, this.options.simulation.actors.referenceSaved(entry.actor));
+      const restored = this.options.simulation.actors.referenceSaved(entry.actor);
+      this.observations.set(entry.number, restored); this.observationNumbers.set(`${restored.slot}:${restored.generation}`, entry.number);
     }
     const clients = r.field("clients").list(entry => ({ slot: entry.field("slot").integer(0), name: entry.field("name").string(), skill: entry.field("skill").string(), sequence: entry.field("sequence").integer(0), selection: entry.field("selection").integer(0), behavior: readRereleaseBehavior(entry.field("behavior").value) }));
     if (clients.length !== image.transport.connections.length || new Set(clients.map(client => client.slot)).size !== clients.length)

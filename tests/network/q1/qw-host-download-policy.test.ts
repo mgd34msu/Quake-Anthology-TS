@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
-import { corpusFile } from "../../support/corpus.ts";
+import { expect } from 'bun:test';
+import { corpusFile, corpusTest } from "../../support/corpus.ts";
 
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import {tmpdir } from 'node:os';
@@ -10,7 +10,7 @@ import { QwClientNetwork } from '../../../src/app/bootstrap/network/qw-client.ts
 import { UdpTransport } from '../../../src/network/common/transport.ts';
 import { quakeWorldMapChecksum2 } from '../../../src/network/q1/checksum.ts';
 
-const nativeTest = Bun.env['QUAKE_DOWNLOAD_WORKFLOW_TEST'] === '1' ? test : test.skip;
+const nativeTest = corpusTest('q1/qw/qwprogs.dat');
 
 nativeTest('dedicated QW user mod advertises its directory and enforces every download category over native UDP', async () => {
   const root = await mkdtemp(join(tmpdir(), 'qw-host-download-policy-'));

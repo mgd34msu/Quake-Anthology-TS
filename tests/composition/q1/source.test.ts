@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect } from "bun:test";
+import { corpusTest, testCorpusRoot } from "../../support/corpus.ts";
 
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -20,6 +20,7 @@ import { touchFlag } from "../../../src/content/q1/addons/ctf/flags.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../src/persistence/q1-foundation.ts";
 import { captureSharedBodies, restoreSharedBodyLinks } from "../../../src/persistence/world-state.ts";
 
+const test = corpusTest("q1/rerelease/id1/pak0.pak", "q1/rerelease/ctf/pak0.pak", "q1/rerelease/mg1/pak0.pak");
 async function map(program: Q1SourceProgram, name: string): Promise<Q1Map> {
   const archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/${program}/pak0.pak`);
   try { const path = `maps/${name}.bsp`, entry = archive.findEntries(path)[0]; if (entry === undefined) throw new Error(`Missing ${path}`); return readQ1Bsp(await archive.readEntry(entry), { source: path }); }
@@ -33,10 +34,10 @@ interface Saved {
   readonly combat: readonly { readonly actor: { readonly slot: number; readonly generation: number }; readonly state: NonNullable<ReturnType<GameplayAuthority["read"]>> }[];
   readonly inventory: readonly { readonly actor: { readonly slot: number; readonly generation: number }; readonly entries: ReturnType<SharedInventoryTable["entries"]> }[];
 }
-function sourceWorld(map: Q1Map, program: Q1SourceProgram, saved?: Saved, horde = false) {
+function sourceWorld(map: Q1Map, program: Q1SourceProgram, saved?: Saved, horde = false, deathmatch = program === "ctf" ? 1 : 0, extraCvars: readonly (readonly [string, number])[] = []) {
   const owner = createIdentityOwner("q1-composition-check"), actors = saved === undefined ? new SessionActorRegistry(owner) : SessionActorRegistry.restore(owner, saved.slots, saved.sources);
   const callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map), players: ActorId[] = [], events: Q1CompositionEvent[] = [], sourceEvents: Q1Event[] = [];
-  const pending = new Map<OwnedActor, number>(), cvars = new Map<string, number>([["teamplay", program === "ctf" ? 130 : 0], ["horde", horde ? 1 : 0]]);
+  const pending = new Map<OwnedActor, number>(), cvars = new Map<string, number>([["teamplay", program === "ctf" ? 130 : 0], ["horde", horde ? 1 : 0], ...extraCvars]);
   let runtime: Q1Foundation | null = null, composed: Q1SourceComposition | null = null;
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onUnlink: actor => { scene.unlink(actor); return undefined; }, onLink: body => {
     const entity = runtime?.entity(body.actor); if (entity == null || entity.solid === "none" || entity.classname === "worldspawn") { scene.unlink(body.actor); return undefined; }
@@ -58,7 +59,7 @@ function sourceWorld(map: Q1Map, program: Q1SourceProgram, saved?: Saved, horde 
     powerup: (actor, kind, until) => { if (kind === "invulnerability") combat.setTraits(actor, { invulnerable: until > 0 }); return undefined; },
     setGravity: () => undefined,
   };
-  const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, coop: false, deathmatch: program === "ctf" ? 1 : 0, maxClients: 4, gravity: 800, campaign: `q1:${program}`, combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
+  const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, coop: false, deathmatch, maxClients: 4, gravity: 800, campaign: `q1:${program}`, combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
   const services: Q1CompositionServices = {
     cvar: name => cvars.get(name) ?? 0, setCvar: (name, value) => { cvars.set(name, Number(value)); return undefined; }, emit: event => { events.push(event); return undefined; },
     selectedPlayer: actor => ({ deadFlag: game.health(actor) > 0 ? 0 : 2, isBot: false, viewAngles: bodies.read(actor)?.angles ?? ZERO, viewOffset: { x: 0, y: 0, z: 26 }, frame: 0, waterType: "empty", waterLevel: 0, teleportUntil: game.player(actor)?.teleportUntil ?? 0 }),
@@ -232,4 +233,15 @@ test("pickup preference reaches actual Q1 source players on admission update res
     try { expect([...restored.source.clients.records.values()].map(client => restored.game.player(client.actor.id)?.autoSwitch)).toEqual(["new", "new"]); }
     finally { restored.actors.close(); }
   } finally { world.actors.close(); }
+});
+
+test("sv_gate_dev_impulses puts the MG3 developer impulses behind cheats on deathmatch servers and defaults to the source behavior", async () => {
+  const level = await map("mg3", "hub");
+  for (const [gate, cheats, allowed] of [[0, 0, true], [1, 0, false], [1, 1, true]] as const) {
+    const world = sourceWorld(level, "mg3", undefined, false, 1, [["sv_gate_dev_impulses", gate], ["sv_cheats", cheats]]), actor = world.admit("Ranger", 4), addon = world.source.addon;
+    if (addon === null) throw new Error("Missing MG3 source state");
+    world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: 227 }); expect(world.source.impulse(actor.id)).toBe(true);
+    expect(addon.playerNumber(actor.id, "parm15")).toBe(allowed ? 1 : 0);
+    world.actors.close();
+  }
 });

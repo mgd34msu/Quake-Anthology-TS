@@ -6,7 +6,7 @@ import { BotMoveStateStore } from "../../../../src/bots/behavior/q3/movement-sta
 import { BotAssetFiles } from "../../../../src/bots/behavior/assets.ts";
 import { BotScriptSources } from "../../../../src/bots/behavior/library/script-sources.ts";
 import { WeightConfigStore } from "../../../../src/bots/behavior/library/weights.ts";
-import { ScriptGlobalDefines } from "../../../../src/ui/common/legacy/script/preprocessor.ts";
+import { ScriptGlobalDefines } from "../../../../src/content/legacy-script/preprocessor.ts";
 import { BotChatLibrary } from "../../../../src/bots/behavior/library/chat.ts";
 
 test("chat checkpoint preserves shared cooldowns, console lists and matching graph without replay", () => {
@@ -67,7 +67,7 @@ test("bot allocation references restore variable aliases, action bytes and movem
   const input = actions.getInput(2, 0.25), capture = memory.checkpoint();
   const savedVariables = variables.checkpoint(capture), savedActions = actions.checkpoint(capture), savedMovement = movement.checkpoint(capture, variables);
   memory.dispose();
-  expect(() => state.origin.x).toThrow();
+  expect(() => state.origin.x).toThrow("Bot memory allocation has been freed");
   const restoredMemory = new BotMemory(), allocations = restoredMemory.restore(capture.image);
   const restoredVariables = new BotLibVars(restoredMemory);
   restoredVariables.restore(savedVariables, allocations);

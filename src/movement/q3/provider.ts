@@ -106,6 +106,7 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
     standingBounds: standing, ...(input.currentBounds === undefined ? {} : { currentBounds: input.currentBounds }),
     get bodyBounds() { return input.environment.clientOutputs?.bodyBounds; }, postures: options.postures(input),
     traceMask: selectedPolicy.contentsMask, fixedMsec: input.profile.fixedMilliseconds, noFootsteps: input.profile.noFootsteps,
+    ...(input.profile.ladders === true ? { ladders: true } : {}),
     ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
     beginStep(_state, activeCommand, msec, index) {
       if (removed) return false;

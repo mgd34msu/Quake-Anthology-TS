@@ -7,7 +7,7 @@ import { arenaSelection } from "../../src/app/bootstrap/base-arena-selection.ts"
 import { registerArenaSelectionMenu } from "../../src/app/bootstrap/base-arena-select-menu.ts";
 import { NativeUiController } from "../../src/ui/common/controller.ts";
 import { defaultUiSkin } from "../../src/ui/common/skin.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 import { BaseArenaMenus } from "../../src/app/bootstrap/base-arena-menu.ts";
 
 function setup() {

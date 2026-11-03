@@ -1,5 +1,5 @@
 /* Botlib behavior composition; the shared session owns actors, navigation and movement. GPL-2.0-or-later. */
-import { ScriptGlobalDefines } from "../../../ui/common/legacy/script/preprocessor.ts";
+import { ScriptGlobalDefines } from "../../../content/legacy-script/preprocessor.ts";
 import type { BotSourceFiles } from "../assets.ts";
 import { BotMemory } from "../library/memory.ts";
 import { BotLibVars } from "../library/libvars.ts";

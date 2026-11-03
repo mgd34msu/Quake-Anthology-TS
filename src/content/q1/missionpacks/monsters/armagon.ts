@@ -172,7 +172,7 @@ export function armagonDefinition(runtime: Q1MissionPackMonsters): PackMonsterDe
     "hiparma:armagon_watk13": monster => { walkingAttack(monster); return monster.attackFinished(1); },
     "hiparma:armagon_wlaseratk6": monster => { walkingAttack(monster); return launch(monster, 40, 0, true); },
     "hiparma:armagon_wlaseratk11": monster => { walkingAttack(monster); return launch(monster, -40, 0, true); },
-    "SUB_AttackFinished(1.0)": monster => monster.attackFinished(1), "SUB_AttackFinished(0.3)": monster => monster.attackFinished(0.3),
+    "SUB_AttackFinished(1)": monster => monster.attackFinished(1), "SUB_AttackFinished(0.3)": monster => monster.attackFinished(0.3),
     "hiparma:armagon_stop2": monster => { foot(monster); return think(monster); }, "hiparma:armagon_satk6": monster => { foot(monster); return think(monster); },
     "hiparma:armagon_satk9": monster => { think(monster); launch(monster, 40, 0, false); return launch(monster, -40, 0, false); },
     "armagon_launch_laser(40)": monster => launch(monster, 40, 0, true), "armagon_launch_laser(-40)": monster => launch(monster, -40, 0, true),

@@ -57,3 +57,25 @@ test("active movie captions replace their locale after a live preference change"
   expect(captions.active(state, preferences)[0]?.localizedText).toBe("Bonjour"); expect(failures).toEqual([]);
   captions.clear();
 });
+
+test("a malformed sound sidecar skips its bad cues with a warning and never throws from prepare", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sound-caption-bad-"));
+  await mkdir(join(root, "sound"));
+  await Bun.write(join(root, "sound/voice.wav"), new Uint8Array([1]));
+  await Bun.write(join(root, "sound/voice.srt"), "1\n00:00:01,00 --> 00:00:02,000\nBad stamp\n\n2\n00:00:03,000 --> 00:00:02,000\nBackwards\n\nNOTE a --> b\n\n3\n00:00:00,000 --> 00:00:02,000\nGood cue\n");
+  const content = "q1:rerelease:baseq1:caption-bad", mount = "mount:test:captions-bad";
+  const mounts = await openMountPlan({ id: "mount-plan:test:captions-bad", mounts: [{ kind: "loose", rootPath: root, identity: { id: mount, content, generation: 0 } }], defaultOrder: [mount], prefixOrders: [] });
+  const owner = createIdentityOwner("voice-caption-bad"), seat = owner.seat(0), warnings: string[] = [];
+  let receive = (_event: AudioVoiceEvent): void => {};
+  const audio = { observeVoices: (listener: (event: AudioVoiceEvent) => void): (() => void) => { receive = listener; return () => {}; },
+    get voiceClock() { return { outputSample: 100, sampleRate: 1000, paused: false }; } };
+  const captions = new SeatSoundCaptions(seat, audio, () => "english", text => { warnings.push(text); });
+  try {
+    const opened = await mounts.open("sound/voice.wav"); if (opened === null) throw new Error("Missing authored sound");
+    const sound = { resource: opened.reference.id, reference: opened.reference, name: "sound/voice.wav", pcm: { sampleRate: 1000, channels: 1, frameCount: 2000, samples: new Int16Array(2000), loopStart: null } } satisfies Extract<AudioVoiceEvent, { kind: "start" }>["sound"];
+    receive({ kind: "start", seat, voiceId: 1, sound, outputSample: 100, sampleRate: 1000, sourceOffsetSeconds: 0 });
+    await captions.prepare({ forContent: async () => mounts });
+    expect(captions.active({ subtitles: true, soundCaptions: true, speakers: true })[0]?.localizedText).toBe("Good cue");
+    expect(warnings).toHaveLength(3);
+  } finally { captions.close(); mounts.close(); await rm(root, { recursive: true, force: true }); }
+});

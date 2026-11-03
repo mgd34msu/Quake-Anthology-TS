@@ -12,7 +12,7 @@ import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { discoverInstalledContent } from "../../src/content/catalog/index.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { ConfigStore } from "../../src/settings/config.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 import { SceneImageRegistry } from "../../src/render/scene/resources.ts";
 import { classicCharset } from "../../src/text/atlas.ts";
 import type { TextFontSelection } from "../../src/text/atlas.ts";
@@ -24,6 +24,8 @@ import { decodeConnectionless } from "../../src/network/q3/connectionless.ts";
 import { decodeQ3MasterPacket, decodeQ3ServerStatus, encodeQ3Status } from "../../src/network/q3/discovery.ts";
 import { writeQ3BrowserCache, readQ3BrowserCache } from "../../src/app/bootstrap/server-browser-cache.ts";
 import type { Q3BrowserCacheView } from "../../src/network/q3/browser-view.ts";
+import { trackedTempDirectories } from "../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 function masterPacket(addresses: readonly Ipv4Address[], complete: boolean): Uint8Array {
   return Uint8Array.from([255, 255, 255, 255, ...new TextEncoder().encode("getserversResponse"),
@@ -31,7 +33,7 @@ function masterPacket(addresses: readonly Ipv4Address[], complete: boolean): Uin
 }
 
 test("Q3 browser source reads reuse one scan until membership changes", async () => {
-  const root = await mkdtemp(resolve(tmpdir(), "quake-browser-read-reuse-")), browser = await StartupServerBrowser.open(new ConfigStore(root));
+  const root = await tempDirectory("quake-browser-read-reuse-"), browser = await StartupServerBrowser.open(new ConfigStore(root));
   const core = browser.q3Core, endpoint = ipv4Address([127, 0, 0, 1], 27960), extra = ipv4Address([127, 0, 0, 1], 27961);
   browser.addQ3(2, endpoint);
   const scans = spyOn(core, "list"), packets: Uint8Array[] = [];
@@ -59,7 +61,7 @@ test("Q3 browser source reads reuse one scan until membership changes", async ()
 });
 
 test("Q3 browser snapshot invalidates an optimistic favorite when a deferred write rolls back", async () => {
-  const root = await mkdtemp(resolve(tmpdir(), "quake-browser-read-rollback-")), config = new ConfigStore(root), browser = await StartupServerBrowser.open(config);
+  const root = await tempDirectory("quake-browser-read-rollback-"), config = new ConfigStore(root), browser = await StartupServerBrowser.open(config);
   let release = (): void => { throw new Error("Missing write gate"); }, writing = false;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const dump = spyOn(config, "dump").mockImplementation(async () => { writing = true; await gate; throw new Error("Deferred favorite failure"); });
@@ -90,7 +92,7 @@ test("Q3 browser facade cache retains global overflow addresses beyond the 4096-
 });
 
 test("Q3 browser facade correlates master packets, exposes partial lists and persists canonical status with UI metadata", async () => {
-  const root = await mkdtemp(resolve(tmpdir(), "quake-browser-facade-")), config = new ConfigStore(root);
+  const root = await tempDirectory("quake-browser-facade-"), config = new ConfigStore(root);
   const peer = await UdpTransport.bind({ host: "127.0.0.1", port: 0 }), stranger = await UdpTransport.bind({ host: "127.0.0.1", port: 0 });
   let browser = await StartupServerBrowser.open(config);
   try {
@@ -274,7 +276,7 @@ test("normal browser menu persists favorites, removal, selected addresses and di
 }, 30000);
 
 test("direct address recall is protocol-specific and failed favorite writes leave the list unchanged", async () => {
-  const directory = await mkdtemp(resolve(tmpdir(), "quake-browser-addresses-")), config = new ConfigStore(directory);
+  const directory = await tempDirectory("quake-browser-addresses-"), config = new ConfigStore(directory);
   let browser = await StartupServerBrowser.open(config);
   try {
     browser.choose("q2"); browser.address = "127.0.0.1:27911"; await browser.connection();

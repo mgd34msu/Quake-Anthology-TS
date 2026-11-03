@@ -7,7 +7,7 @@ import { CommandBuffer } from '../../src/core/commands/index.ts';
 import { CvarRegistry } from '../../src/core/cvars/index.ts';
 import { SeatInput } from '../../src/input/seat.ts';
 import { InputRouter } from '../../src/input/router.ts';
-import { KeyCode } from '../../src/input/key-codes.ts';
+import { KeyCode } from '../../src/core/key-codes.ts';
 import type { MidiInputBoundary } from '../../src/input/midi.ts';
 import { InputDevices, loadInputDeviceSettings } from '../../src/app/bootstrap/input-devices.ts';
 import { ConfigStore } from '../../src/settings/config.ts';

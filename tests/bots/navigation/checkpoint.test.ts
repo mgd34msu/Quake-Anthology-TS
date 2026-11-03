@@ -56,7 +56,7 @@ test("navigation rejects malformed references and durations before mutating live
     { ...before, map: { ...before.map, digest: "wrong" } },
   ];
   for (const value of malformed) {
-    expect(() => runtime.restoreCheckpoint(value)).toThrow();
+    expect(() => runtime.restoreCheckpoint(value)).toThrow("navigation.");
     expect(runtime.checkpoint()).toEqual(before);
   }
 });

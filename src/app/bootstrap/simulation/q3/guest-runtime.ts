@@ -8,7 +8,7 @@ import { savedActorId, readSavedActor } from '../../../../persistence/save-image
 import type { QvmHostCheckpoint } from '../../../../compat/qvm/module.ts';
 import type { ActorId, ClientId } from '../../../../contracts/identity.ts';
 import type { MountedContent } from '../../../../content/mounts/index.ts';
-import type { UserFileStore } from '../../../../platform/files/writable.ts';
+import type { UserFileStore } from '../../../../core/files/writable.ts';
 import type { WireUserCommand } from '../../../../network/q3/message.ts';
 import { CommonParseCursor, CommonParseState } from '../../../../core/common-parse.ts';
 import { QvmGame } from '../../../../compat/qvm/game.ts';
@@ -16,7 +16,7 @@ import { QvmInputBinding, type QvmInputDefinition, type QvmInputServices } from 
 import type { QvmFunctionCall, QvmSystemCallResult } from '../../../../compat/qvm/interpreter.ts';
 import type { ModClientIdentity } from '../../../../world/session/mod-clients.ts';
 import { QvmGameExport, QvmGameImport } from '../../../../compat/qvm/abi.ts';
-import { qvmArguments } from '../../../../compat/qvm/module.ts';
+import { qvmArguments, qvmSemanticsFromCvar } from '../../../../compat/qvm/module.ts';
 import type { QvmModuleOptions } from '../../../../compat/qvm/module.ts';
 import { QvmFiles, qvmFileSyscall } from '../../../../compat/qvm/file-syscalls.ts';
 import { qvmCommonSyscall } from '../../../../compat/qvm/common-syscalls.ts';
@@ -185,7 +185,7 @@ export class Q3QvmServerGame {
     this.state.cvars.set('sv_maxclients', String(options.maxClients), true);
     this.state.cvars.set('dedicated', options.dedicated === false ? '0' : '1', true);
     this.files = new QvmFiles({ mounts: options.mounts, writable: options.writable, print: text => this.state.print(text), assertCurrent: () => this.current() });
-    this.game = new QvmGame({ artifact: options.artifact, host: call => this.host(call), hostState: {
+    this.game = new QvmGame({ artifact: options.artifact, semantics: qvmSemanticsFromCvar(this.state.cvars, 'qagame'), host: call => this.host(call), hostState: {
       checkpoint: () => this.captureHost(), restore: state => { this.restoreHost(state); return undefined; },
     } });
     try {

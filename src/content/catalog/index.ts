@@ -140,11 +140,14 @@ function compareQ2Archives(left: CatalogArchive, right: CatalogArchive): number 
   return a.number < b.number ? -1 : a.number > b.number ? 1 : sourceCompare(a.suffix, b.suffix);
 }
 
+/** FS_PathCmp folds ASCII letters to upper case and treats `\` and `:` as `/`. */
+function q3PathKey(name: string): string { return name.replace(/[a-z]/g, letter => letter.toUpperCase()).replace(/[\\:]/g, "/"); }
+
 /** Highest priority first, matching each source engine's prepend order. */
 export function orderGameArchives(product: ProductExpectation, archives: readonly CatalogArchive[]): readonly CatalogArchive[] {
   const sorted = [...archives].sort((left, right) => sourceCompare(basename(left.path), basename(right.path)));
-  if (product.family === "q3") return sorted.filter(archive => archive.format === "pk3")
-    .sort((left, right) => sourceCompare(basename(left.path).toLowerCase(), basename(right.path).toLowerCase())).reverse();
+  if (product.family === "q3") return sorted.filter(archive => archive.format === "pk3").slice(0, 1024)
+    .sort((left, right) => sourceCompare(q3PathKey(basename(left.path)), q3PathKey(basename(right.path)))).reverse();
   if (product.family === "q2") return archives.filter(archive => archive.format === "pak" || archive.format === "zip" && /\.pkz$/i.test(archive.path))
     .sort(compareQ2Archives).reverse();
   const numbered: CatalogArchive[] = [];
@@ -210,7 +213,7 @@ async function discoverMods(root: string, products: readonly ProductExpectation[
       if (await managedAddonHidden(root, contentDirectory)) continue;
       const inspected = await inspectModDirectory(resolve(installed, entry.name), base, inspect);
       if (inspected === null) continue;
-      if (!/^[a-zA-Z0-9][a-zA-Z0-9._+-]*$/.test(entry.name)) throw new Error(`Mod directory needs a valid content identity: ${contentDirectory}`);
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9._+-]*$/.test(entry.name)) continue; // A folder name can't stop the game from starting; it just isn't a mod.
       found.push(...modExpectations(directory, entry.name, contentDirectory, await managedAddonTitle(root, contentDirectory), base, products, known, inspected));
     }
   }
@@ -633,11 +636,40 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
   }
   // An unreadable base remains a requirement even when its filenames are present.
   const byProduct = new Map(products.map(product => [product.expectation.id, product]));
-  const checked = products.map((product): CatalogProduct => {
-    if (product.availability.kind !== "installed" || product.expectation.baseProduct === null) return product;
-    const base = byProduct.get(product.expectation.baseProduct);
-    if (base === undefined || base.availability.kind !== "installed") return { ...product, availability: { kind: "missing", requirements: [`base product ${product.expectation.baseProduct}`] } };
-    return product;
-  });
+  const programNames = new Map<CatalogProduct, Set<string>>();
+  const programsOf = async (product: CatalogProduct): Promise<Set<string>> => {
+    const existing = programNames.get(product);
+    if (existing !== undefined) return existing;
+    const names = new Set<string>(product.archives.flatMap(archive => archive.entries.map(entry => entry.path.toLowerCase())));
+    if (product.looseRoot !== null) for (const entry of await readdir(product.looseRoot, { withFileTypes: true })) if (entry.isFile()) names.add(entry.name.toLowerCase());
+    programNames.set(product, names);
+    return names;
+  };
+  // A program is found in the product's own directory or archives, or anywhere along its base chain.
+  const missingPrograms = async (product: CatalogProduct): Promise<string[]> => {
+    const chain: CatalogProduct[] = [];
+    for (let link: CatalogProduct | undefined = product; link !== undefined && !chain.includes(link);
+      link = link.expectation.baseProduct === null ? undefined : byProduct.get(link.expectation.baseProduct)) chain.push(link);
+    const missing: string[] = [];
+    for (const program of product.expectation.requiredPrograms) {
+      let found = false;
+      for (const link of chain) if ((await programsOf(link)).has(program.toLowerCase())) { found = true; break; }
+      if (!found) missing.push(program);
+    }
+    return missing;
+  };
+  const checked: CatalogProduct[] = [];
+  for (const product of products) {
+    if (product.availability.kind !== "installed") { checked.push(product); continue; }
+    if (product.expectation.baseProduct !== null) {
+      const base = byProduct.get(product.expectation.baseProduct);
+      if (base === undefined || base.availability.kind !== "installed") {
+        checked.push({ ...product, availability: { kind: "missing", requirements: [`base product ${product.expectation.baseProduct}`] } });
+        continue;
+      }
+    }
+    const missing = remoteOverlays.has(product.expectation.id) ? [] : await missingPrograms(product);
+    checked.push(missing.length === 0 ? product : { ...product, availability: { kind: "missing", requirements: missing } });
+  }
   return new InstalledCatalog(corpusRoot, checked, [...rootArchives.values()], generation, userContentRoot, options.addonContentRoots ?? []);
 }

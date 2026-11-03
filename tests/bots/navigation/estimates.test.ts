@@ -24,7 +24,9 @@ test("AAS estimate retains donor portal, null-origin and successful-zero results
   expect(whole.kind).toBe("estimate");
   if (whole.kind === "estimate") { expect(whole.travelTime).toBe(48); expect(whole.firstEdge?.id).toBe(1); }
   expect(estimates.estimate(query(1, 1))).toEqual({ kind: "estimate", travelTime: 1, firstEdge: null });
-  expect(estimates.estimate(query(0, 0))).toEqual({ kind: "unreachable" });
+  // AAS_AreaRouteToGoalArea answers equal areas with 1 before range-testing either, so (0, 0) is not unreachable.
+  expect(estimates.estimate(query(0, 0))).toEqual({ kind: "estimate", travelTime: 1, firstEdge: null });
+  expect(estimates.estimate(query(0, 1))).toEqual({ kind: "unreachable" });
 });
 
 test("AAS source uint16 cache time differs from final same-cluster int time", () => {
@@ -98,7 +100,10 @@ test("source equal-cost FIFO order and first-128 outgoing limit remain stable", 
 
 test("source query validation keeps invalid areas before numeric validation", () => {
   const estimates = new NavigationEstimates(chain(), () => true);
-  expect(estimates.estimate({ ...query(0, 0), travelFlags: NaN })).toEqual({ kind: "unreachable" });
+  expect(estimates.estimate({ ...query(0, 1), travelFlags: NaN })).toEqual({ kind: "unreachable" });
+  expect(estimates.estimate({ ...query(0, 0), travelFlags: NaN })).toEqual({ kind: "estimate", travelTime: 1, firstEdge: null });
   expect(() => estimates.estimate({ ...query(1, 1), travelFlags: NaN })).toThrow("32-bit mask");
-  expect(() => estimates.estimate(query(1, 1, { x: Infinity, y: 0, z: 0 }))).toThrow("finite float32");
+  // SRC8B-009: be_aas_route.c clamps a non-finite or huge origin instead of failing, so a mod syscall cannot throw out of it.
+  expect(() => estimates.estimate(query(1, 2, { x: Infinity, y: 0, z: 0 }))).not.toThrow();
+  expect(() => estimates.estimate(query(1, 2, { x: NaN, y: 0, z: 0 }))).not.toThrow();
 });

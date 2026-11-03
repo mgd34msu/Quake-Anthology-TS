@@ -2,7 +2,7 @@ import { mkdir, readdir, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
 import { kexQ2SaveRestorable, readKexQ2SaveArchive } from "../../persistence/kex-q2-save.ts";
-import { readSavedGame } from "../../persistence/saved-game.ts";
+import { readSavedGame, readSaveHeader } from "../../persistence/saved-game.ts";
 import { selectQ1SaveProduct } from "../../persistence/q1-selection.ts";
 import { savedSimulationSettings } from "./simulation/index.ts";
 
@@ -117,6 +117,15 @@ export class StartupSaves {
       let savedAtMilliseconds = 0, map = "Unknown map", game = "Unknown game", unavailable: string | null = null;
       try {
         savedAtMilliseconds = (await stat(path)).mtimeMs;
+        const header = await readSaveHeader(path);
+        if (header !== null) {
+          const product = this.catalog.product(header.content);
+          map = header.map.replace(/^maps\//, "").replace(/\.bsp$/, "");
+          game = `${product.expectation.title} (${product.expectation.edition})`;
+          if (product.availability.kind !== "installed") unavailable = "Required game content is not installed.";
+          paths.set(id, path); rows.push(remember({ id, label, map, game, savedAtMilliseconds, unavailable }));
+          continue;
+        }
         const save = await readSavedGame(path);
         const product = save.kind === "shared" ? this.catalog.product(save.image.recipe.map.entities.content)
           : selectQ1SaveProduct(this.catalog, save.data, path);

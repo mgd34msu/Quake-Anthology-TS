@@ -20,14 +20,19 @@ export function newQ1Travel(options: Pick<Q1FoundationOptions, "edition" | "skil
   const health = options.edition === "rerelease" && options.skill === 3 && options.deathmatch === 0 ? 50 : 100;
   return { health, maxHealth: health, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, inventory, weapon: "shotgun", extensions: [] };
 }
-/** Captures source travel policy without changing the departing actor. */
-export function captureQ1Travel(game: Q1EntityServices, actor: OwnedActor, weapon: Q1Weapon = game.player(actor.id)?.weapon ?? "shotgun", maxHealth = game.player(actor.id)?.maxHealth ?? 100, policy: { readonly resetInDeathmatch?: boolean } = {}): Q1TravelState {
-  const combat = game.host.combat.read(actor.id); if (combat === null) throw new Error("Q1 travel actor has no combat state");
+/** Player extension parameters (SetChangeParms) that survive every travel reset. */
+export function captureQ1TravelExtensions(game: Q1EntityServices, actor: OwnedActor): readonly { readonly id: string; readonly bytes: Uint8Array }[] {
   const player = game.player(actor.id), extensions: { readonly id: string; readonly bytes: Uint8Array }[] = [];
   if (player !== null) for (const extension of game.playerExtensions.values()) {
     const bytes = extension.captureTravel?.(game, player);
     if (bytes !== undefined) extensions.push({ id: extension.id, bytes: bytes.slice() });
   }
+  return extensions;
+}
+/** Captures source travel policy without changing the departing actor. */
+export function captureQ1Travel(game: Q1EntityServices, actor: OwnedActor, weapon: Q1Weapon = game.player(actor.id)?.weapon ?? "shotgun", maxHealth = game.player(actor.id)?.maxHealth ?? 100, policy: { readonly resetInDeathmatch?: boolean } = {}): Q1TravelState {
+  const combat = game.host.combat.read(actor.id); if (combat === null) throw new Error("Q1 travel actor has no combat state");
+  const extensions = captureQ1TravelExtensions(game, actor);
   if (combat.health <= 0 || game.options.deathmatch !== 0 && (policy.resetInDeathmatch ?? true)) return { ...newQ1Travel(game.options), extensions };
   const inventory = game.host.inventory.entries(actor.id).map(entry => temporaryItems.has(entry.item) ? { ...entry, count: 0 } : entry.item === "q1:ammo/shells" ? { ...entry, count: Math.max(25, entry.count) } : entry);
   return { health: Math.max(maxHealth / 2, Math.min(maxHealth, combat.health)), maxHealth, armor: combat.armor, inventory, weapon, extensions };

@@ -30,6 +30,8 @@ export interface GuestAllocationOptions {
   readonly alignment?: bigint;
   readonly permissions?: GuestPermissions;
   readonly label?: string;
+  /** One page, read-write: served from a shared slab; release it with an exact one-page `unmap`. */
+  readonly pooled?: boolean;
 }
 export interface GuestMemorySnapshot {
   readonly module: ModuleIdentity;
@@ -129,8 +131,15 @@ export interface GuestX87State {
   dataSelector: number;
 }
 /** Raw lanes retain NaN payloads, signed zeros, integer aliases, and MXCSR flags. */
+/** Views and buffers over one register file, created with it so the SIMD executors allocate nothing per instruction. Not part of a snapshot. */
+export interface GuestSimdScratch {
+  readonly registers: readonly Uint8Array[];
+  readonly operand: Uint8Array;
+  readonly scalar: { readonly view: DataView; low: number; high: number };
+}
 export interface GuestSimdState {
   readonly xmm: Uint8Array;
+  readonly scratch: GuestSimdScratch;
   mxcsr: number;
   mxcsrMask: number;
 }

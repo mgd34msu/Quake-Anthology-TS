@@ -1,16 +1,19 @@
-import { expect, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeCapture } from "../../support/capture.ts";
+import { expect } from "bun:test";
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Application } from '../../../src/app/bootstrap/application.ts';
 import { applicationPreset } from '../../../src/app/bootstrap/content.ts';
 import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
 import { discoverInstalledContent, presetChoice, resolveLaunch } from '../../../src/content/catalog/index.ts';
 import { encodePng } from '../../../src/formats/images/png.ts';
-import { testCorpusRoot } from '../../support/corpus.ts';
+import { testCorpusRoot, corpusTest } from '../../support/corpus.ts';
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q3a/baseq3/pak0.pk3");
+const tempDirectory = trackedTempDirectories();
 
 test('Q1 source colors feed each player model and survive source save restore', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'q1-player-colors-'));
+  const root = await tempDirectory('q1-player-colors-');
   const selected = parseApplicationCommand(['--game','q1-rerelease-id1','--map','e1m1','--movement','q1','--character','q1','--seats','2','--renderer','cpu','--width','640','--height','480','--hidden']);
   if(selected.kind!=='run')throw Error('Missing options');
   const app=await Application.open({...selected.options,userContentRoot:root},{print:()=>undefined,saveDirectory:root});
@@ -25,7 +28,7 @@ test('Q1 source colors feed each player model and survive source save restore', 
     const save=join(root,'colors.sav');await app.saveGame(save);
     source.composition.clients.colors(first.actor, 6, 7); await app.step(50);expect(colors()[0]).toEqual({top:6,bottom:7});
     await app.loadGame(save);await app.step(50);expect(colors()).toEqual([{top:4,bottom:13},{top:2,bottom:8}]);
-    const pixels=app.captureNextFrame();await app.step(1);await Bun.write('/tmp/q1-player-colors.png',encodePng(640,480,await pixels));
+    const pixels=app.captureNextFrame();await app.step(1);await writeCapture('q1-player-colors.png',encodePng(640,480,await pixels));
   }finally{await app.close();await rm(root,{recursive:true,force:true});}
 },30000);
 

@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { q1ExpansionMonsterSources, q1AddonMonsterSources } from "../../../src/content/monsters/expansions.ts";
@@ -12,6 +12,7 @@ import { encodeSaveImage, decodeSaveImage } from "../../../src/persistence/index
 import { decodeCheckpointValue, SaveReader } from "../../../src/persistence/value.ts";
 import { simulationProviderCheckpoint } from "../../../src/app/bootstrap/simulation/save.ts";
 import { readSelectedMonstersCheckpoint } from "../../../src/app/bootstrap/simulation/monster-checkpoint.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q2/baseq2/pak0.pak");
 
 function selected(simulation: ReturnType<typeof createSimulation>) {
   const checkpoint = simulationProviderCheckpoint(simulation.checkpoint(), "world:simulation");

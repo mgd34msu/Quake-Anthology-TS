@@ -1,3 +1,4 @@
+import { expectWorldRegion } from "../../support/pixels.ts";
 import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -90,7 +91,7 @@ for (const gameDirectory of ['qw', 'id1', 'mod-alpha']) test(`hidden QW ${gameDi
         expect(remote.content.recipe.map.geometry.requestedPath).toBe('maps/e1m1.bsp');
         const player = remote.localPlayers[0]; if (player === undefined) throw new Error(`QW seat missing: ${prints.join('')}`);
         expect(remote.remote.player?.sourceEntity).toBe(4); expect(remote.remote.playerUi(player.actor).health).toBe(100);
-        expect(new Set(remote.readPixels()).size).toBeGreaterThan(16);
+        expectWorldRegion(remote.readPixels(),160,120);
         expect(new Uint8Array(await readFile(join(userProductDirectory(root, gameDirectory === 'mod-alpha' ? 'q1/Mod-Alpha' : 'q1/qw'), 'sound/misc/qw-join-test.wav')))).toEqual(new Uint8Array(sound));
         const beforeMovement = remote.remote.playerView(player.actor).origin;
         expect(remote.remote.scene.queryActors({ min: { x: -10000, y: -10000, z: -10000 }, max: { x: 10000, y: 10000, z: 10000 } }).some(actor => actor.collision.shape.kind === 'model')).toBe(true);
@@ -120,7 +121,7 @@ for (const gameDirectory of ['qw', 'id1', 'mod-alpha']) test(`hidden QW ${gameDi
                 const downloaded = await remote.content.mounts.open('sound/misc/qw-join-test.wav');
                 expect(downloaded?.reference.provenance.mount.identity.content).toBe(remote.content.catalog.require(remote.options.product).id);
                 expect(downloaded?.bytes).toEqual(new Uint8Array(sound));
-                expect(new Set(remote.readPixels()).size).toBeGreaterThan(16);
+                expectWorldRegion(remote.readPixels(),160,120);
             }
             const reconnectOptions = remote.options;
             const staleLookup = remote.remote.downloads?.request('maps/retired-owner.bsp', 'model');

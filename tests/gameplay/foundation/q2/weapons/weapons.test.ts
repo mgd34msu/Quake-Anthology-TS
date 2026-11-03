@@ -14,6 +14,7 @@ import { Q2Weapons, Q2WeaponState, Q2_BASE_WEAPONS } from "../../../../../src/co
 import type { Q2WeaponEvent, Q2WeaponInput, Q2WeaponName } from "../../../../../src/content/q2/foundation/weapons/index.ts";
 
 import { encodeQ2WeaponsCheckpoint, decodeQ2WeaponsCheckpoint, readQ2WeaponState } from "../../../../../src/persistence/q2-weapons.ts";
+import { encodeCheckpointValue } from "../../../../../src/persistence/value.ts";
 import { projectQ2Actor } from "../../../../../src/content/q2/foundation/weapons/projection.ts";
 import { SaveReader } from "../../../../../src/persistence/value.ts";
 
@@ -285,7 +286,7 @@ describe("Q2 base weapons on shared state", () => {
       expect(handReservation.kind).toBe("finite");
       expect(() => readQ2WeaponState(new SaveReader(legacy))).toThrow("legacy active hand grenade");
       expect(readQ2WeaponState(new SaveReader({ ...legacy, phase: "ready" })).handReservation.kind).toBe("none");
-      expect(() => readQ2WeaponState(new SaveReader({ ...legacy, handReservation: { kind: "invalid" } }))).toThrow();
+      expect(() => readQ2WeaponState(new SaveReader({ ...legacy, handReservation: { kind: "invalid" } }))).toThrow("save.handReservation.kind");
     }
   });
 
@@ -335,6 +336,19 @@ describe("Q2 base weapons on shared state", () => {
     }
   });
 
+  test("a shot whose ammo was dropped mid-fire spends what is left and never throws or goes negative", () => {
+    for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) for (const definition of Q2_BASE_WEAPONS) {
+      if (definition.ammo === null || definition.quantity !== 1 || definition.name === "grenades") continue;
+      const scene = fixture(edition, definition.name);
+      scene.inventory.configure(scene.player, { item: definition.ammo, count: 1, capacity: 200 });
+      for (let frame = 0; frame < 24; frame++) {
+        if (frame === 8) scene.inventory.configure(scene.player, { item: definition.ammo, count: 0, capacity: 200 });
+        scene.step(frame / 10, { ...input, attack: true });
+        expect(scene.inventory.count(scene.player.id, definition.ammo)).toBeGreaterThanOrEqual(0);
+      }
+      scene.actors.close();
+    }
+  });
   test("BFG windup rechecks cells spent by power armor before launching", () => {
     const scene = fixture("rerelease", "bfg");
     scene.step(0);
@@ -387,7 +401,7 @@ test("foreign Q2 noise owns silencer charges without a native weapon and restore
   weapons.playerNoiseForActor(scene.player.id, scene.game, zero, "weapon");
   expect(weapons.silencerShots(scene.player.id)).toBe(1); expect(noises).toEqual([true]);
   const saved = decodeQ2WeaponsCheckpoint(encodeQ2WeaponsCheckpoint(weapons.capture(scene.game)));
-  expect(saved.formatVersion).toBe(2); expect(saved.states).toEqual([]);
+  expect(saved.formatVersion).toBe(3); expect(saved.states).toEqual([]);
   const restored = new Q2Weapons(weapons.hooks); restored.restore(scene.game, saved);
   expect(restored.silencerShots(scene.player.id)).toBe(1); expect(restored.states.size).toBe(0);
   restored.playerNoiseForActor(scene.player.id, scene.game, zero, "weapon");
@@ -396,6 +410,19 @@ test("foreign Q2 noise owns silencer charges without a native weapon and restore
   restored.grantSilencer(scene.player.id, scene.game, 30); restored.resetSilencer(scene.player.id); expect(restored.silencerShots(scene.player.id)).toBe(0);
   restored.grantSilencer(scene.player.id, scene.game, 30); scene.actors.release(scene.player);
   expect(restored.silencerShots(scene.player.id)).toBe(0); expect(weapons.silencerShots(scene.player.id)).toBe(0);
+});
+
+test("a version 2 weapon checkpoint with the retired noise records still loads and restores", () => {
+  const scene = fixture("classic");
+  scene.weapons.grantSilencer(scene.player.id, scene.game, 2);
+  const current = scene.weapons.capture(scene.game), actor = { slot: scene.player.id.slot, generation: scene.player.id.generation };
+  const noise = { actor, origin: { x: 1, y: 2, z: 3 }, time: 4, secondary: false };
+  const legacy = { ...current, formatVersion: 2, noises: [{ actor, primary: noise, secondary: null }], soundEntity: noise, sound2Entity: null };
+  const loaded = decodeQ2WeaponsCheckpoint(encodeCheckpointValue(legacy));
+  expect(loaded.formatVersion).toBe(3);
+  expect(loaded).toEqual(current);
+  const restored = new Q2Weapons(scene.weapons.hooks); restored.restore(scene.game, loaded);
+  expect(restored.silencerShots(scene.player.id)).toBe(2);
 });
 
 test("native last silencer charge is captured before weapon noise debits it", () => {
@@ -456,8 +483,10 @@ test("Q2 weapon ownership fires and restores without a source player entity", ()
   weapons.tick(owner, scene.game, input); weapons.tick(owner, scene.game, input);
   expect([...scene.game.entities.values()].some(entity => entity.classname === "bolt" && entity.owner === actor.id)).toBe(true);
   const saved = decodeQ2WeaponsCheckpoint(encodeQ2WeaponsCheckpoint(weapons.capture(scene.game)));
+  const expected = { ...state };
+  state.phase = "activating"; state.frame = 0; state.weapon = "shotgun"; // restore must put the saved state back
   const restored = weapons; restored.restore(scene.game, saved);
-  expect(restored.states.get(actor.id)).toEqual(state);
+  expect({ ...restored.states.get(actor.id) }).toEqual(expected);
   expect(scene.game.entity(actor.id)).toBeNull();
   scene.actors.release(actor); expect(restored.states.has(actor.id)).toBe(false);
   scene.actors.close();

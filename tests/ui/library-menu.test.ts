@@ -3,7 +3,7 @@ import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { NativeUiController } from "../../src/ui/common/controller.ts";
 import { defaultUiSkin } from "../../src/ui/common/skin.ts";
 import { registerLibraryMenu } from "../../src/ui/library/menu.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 import { bindGameplaySettings } from "../../src/ui/settings/gameplay.ts";
 import { CvarRegistry } from "../../src/core/cvars/index.ts";
 const owner = createIdentityOwner("library-tests"), seat = owner.seat(0);

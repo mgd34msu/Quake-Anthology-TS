@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { allocateNativeMemory, nativeAllocationBytes } from "../../../guest/runtime/common/memory.ts";
 import type { GuestAddress, GuestCallResult } from "../../../contracts/execution.ts";
-import type { CvarRegistry, CvarSnapshot } from "../../../core/cvars/index.ts";
+import { Q2CvarFlag, type CvarRegistry, type CvarSnapshot } from "../../../core/cvars/index.ts";
 import type { MappedGuestMemory } from "../../../guest/core/contracts.ts";
 import { SparseGuestMemory } from "../../../guest/core/memory.ts";
 import { integer, pointer, requiredPointer } from "../../../guest/runtime/common/memory.ts";
+import { CommandGuestStrings, ReusableGuestString } from "../guest-strings.ts";
 import { cvarLayout, fieldOffset } from "./layouts.ts";
+import { filterGuestConsole } from "../guest-console.ts";
 import type { RereleaseImportCall } from "./module.ts";
 import { guestInt, guestPointer, MissingRereleaseImport } from "./module.ts";
 
@@ -35,6 +37,7 @@ export interface RereleaseCoreServices {
 interface Allocation { readonly address: GuestAddress; readonly size: number; readonly tag: number; }
 interface GuestCvar {
   readonly address: GuestAddress; readonly name: string;
+  readonly text: ReusableGuestString; readonly latchedText: ReusableGuestString;
   readonly fields: Readonly<Record<"string" | "latched_string" | "flags" | "modified_count" | "value" | "integer", GuestAddress>>;
 }
 /** Guest cvar records mirror one session registry; tagged bytes remain source-owned. */
@@ -43,7 +46,10 @@ export class RereleaseCoreImports {
   readonly #strings = new Map<string, GuestAddress>();
   readonly #cvars = new Map<string, GuestCvar>();
   #lastCvar: GuestAddress | null = null;
-  constructor(readonly memory: MappedGuestMemory, readonly services: RereleaseCoreServices) {}
+  readonly #commandStrings: CommandGuestStrings;
+  constructor(readonly memory: MappedGuestMemory, readonly services: RereleaseCoreServices) {
+    this.#commandStrings = new CommandGuestStrings(memory, "Q2 command text", text => new TextEncoder().encode(text));
+  }
   string(text: string): GuestAddress {
     const previous = this.#strings.get(text);
     if (previous !== undefined) return previous;
@@ -58,12 +64,14 @@ export class RereleaseCoreImports {
   }
   #writeCvar(record: GuestCvar, value: CvarSnapshot): void {
     const fields = record.fields;
-    this.memory.writePointer(fields.string, this.string(value.value));
-    this.memory.writePointer(fields.latched_string, value.latchedValue === undefined ? null : this.string(value.latchedValue));
+    // Private cvars (rcon passwords) exist for the guest but never reveal their contents.
+    const hidden = (value.flags & Q2CvarFlag.Private) !== 0, encode = (text: string) => new TextEncoder().encode(text);
+    this.memory.writePointer(fields.string, record.text.setText(hidden ? "" : value.value, encode));
+    this.memory.writePointer(fields.latched_string, value.latchedValue === undefined || hidden ? null : record.latchedText.setText(value.latchedValue, encode));
     this.memory.writeUint32(fields.flags, value.flags);
     this.memory.writeInt32(fields.modified_count, value.modificationCount || 1);
-    this.memory.writeFloat32(fields.value, value.numericValue);
-    this.memory.writeInt32(fields.integer, value.integerValue);
+    this.memory.writeFloat32(fields.value, hidden ? 0 : value.numericValue);
+    this.memory.writeInt32(fields.integer, hidden ? 0 : value.integerValue);
   }
   cvar(value: CvarSnapshot | undefined): GuestAddress | null {
     if (value === undefined) return null;
@@ -71,7 +79,8 @@ export class RereleaseCoreImports {
     if (record === undefined) {
       const address = this.memory.allocate({ byteLength: cvarLayout.byteLength, alignment: 8n, label: `Q2 cvar ${value.name}` });
       const at = (name: string) => this.memory.offset(address, BigInt(fieldOffset(cvarLayout, name)));
-      record = { name: value.name, address, fields: { string: at("string"), latched_string: at("latched_string"),
+      record = { name: value.name, address, text: new ReusableGuestString(this.memory, `Q2 cvar ${value.name} value`),
+        latchedText: new ReusableGuestString(this.memory, `Q2 cvar ${value.name} latched`), fields: { string: at("string"), latched_string: at("latched_string"),
         flags: at("flags"), modified_count: at("modified_count"), value: at("value"), integer: at("integer") } };
       this.memory.writePointer(address, this.string(value.name));
       this.memory.writePointer(this.memory.offset(address, BigInt(fieldOffset(cvarLayout, "next"))), this.#lastCvar);
@@ -105,9 +114,14 @@ export class RereleaseCoreImports {
       case "imageindex": return guestInt(this.services.resourceIndex("image", text(0)));
       case "ServerFrame": return { kind: "uint32", value: this.services.serverFrame() };
       case "argc": return guestInt(this.services.commandArguments().length);
-      case "argv": return guestPointer(this.string(this.services.commandArguments()[number(0)] ?? ""));
-      case "args": return guestPointer(this.string(this.services.commandTail()));
-      case "AddCommandString": this.services.addCommand(text(0)); return { kind: "void" };
+      case "argv": { const command = this.services.commandArguments(); return guestPointer(this.#commandStrings.get(`${command.join("\0")}\0\0${this.services.commandTail()}`, command[number(0)] ?? "")); }
+      case "args": { const tail = this.services.commandTail(); return guestPointer(this.#commandStrings.get(`${this.services.commandArguments().join("\0")}\0\0${tail}`, tail)); }
+      case "AddCommandString": {
+        const filtered = filterGuestConsole(text(0));
+        if (filtered.refused.length !== 0) this.services.print(`game module console command refused: ${filtered.refused.join(", ")}\n`);
+        if (filtered.text !== "") this.services.addCommand(filtered.text);
+        return { kind: "void" };
+      }
       case "GetExtension": return guestPointer(this.services.extension(text(0), call.api));
       case "Info_ValueForKey": {
         // q2repro src/server/game.c PF_Info_ValueForKey delegates to the
@@ -133,8 +147,12 @@ export class RereleaseCoreImports {
         return { kind: "uint64", value: BigInt(bytes.length) };
       }
       case "cvar": return guestPointer(this.cvar(this.services.cvars.register(text(0), text(1), number(2))));
-      case "cvar_set": return guestPointer(this.cvar(this.services.cvars.set(text(0), text(1))));
-      case "cvar_forceset": return guestPointer(this.cvar(this.services.cvars.set(text(0), text(1), true)));
+      case "cvar_set": case "cvar_forceset": {
+        const name = text(0), existing = this.services.cvars.get(name);
+        // A guest may not overwrite the credentials it is not allowed to read.
+        if (existing !== undefined && (existing.flags & Q2CvarFlag.Private) !== 0) return guestPointer(this.cvar(existing));
+        return guestPointer(this.cvar(this.services.cvars.set(name, text(1), call.name === "cvar_forceset")));
+      }
       case "TagMalloc": {
         const rawSize = integer(args, 0);
         if (rawSize < 0n || rawSize > 0x1000_0000n) throw new RangeError("Q2 TagMalloc size exceeds mapped-memory allocation limit");

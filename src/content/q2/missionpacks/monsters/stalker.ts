@@ -175,13 +175,17 @@ export function createStalkerDefinition(monsters: Q2Monsters, weapons: Q2Mission
     blocked(context, distance) {
       const enemy = enemyBody(context);
       if (!aliveEnemy(context) || enemy === null) return false;
-      if (rogueBlockedCheckShot(context, 0.25 + 0.05 * context.game.options.skill, source)) return true;
+      const rerelease = context.game.options.edition === "rerelease";
+      if (!rerelease && rogueBlockedCheckShot(context, 0.25 + 0.05 * context.game.options.skill, source)) return true;
       if (ceiling(context)) { if (!transition(context)) return false; detach(context); return true; }
-      if (visible(context)) { pounce(context, enemy.origin); return true; }
+      if (!rerelease && visible(context)) { pounce(context, enemy.origin); return true; }
       if (blockedCheckJump(context, distance, 256, 68) !== "none") {
         context.setMove(enemy.origin.z >= context.game.body(context.entity).origin.z ? "stalker_move_jump_up" : "stalker_move_jump_down"); return true;
       }
-      return blockedCheckPlatform(context, distance);
+      if (blockedCheckPlatform(context, distance)) return true;
+      // m_rogue_stalker.cpp rerelease pounces on a blocked step only one time in ten.
+      if (rerelease && visible(context) && context.game.host.random() < 0.1) { pounce(context, enemy.origin); return true; }
+      return false;
     },
     callbacks: {
       stalker_stand: stand, stalker_walk: move("stalker_move_walk"), stalker_run: run,

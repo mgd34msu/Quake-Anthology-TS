@@ -48,7 +48,7 @@ export function qcDeclaredPickupStages(program: QcProgram, declarations: readonl
     const fn = program.functionNamed(declaration.function);
     if (fn.firstStatement <= 0 || fn.namedBuiltin || fn.parameterSizes.length !== 0 || callers.has(fn.index)) fail("duplicate or non-touch source function");
     callers.add(fn.index);
-    const end = program.functions.reduce((limit, other) => other.firstStatement > fn.firstStatement ? Math.min(limit, other.firstStatement) : limit, program.statements.length);
+    const end = program.functionEnd(fn);
     const descriptor = declaration.descriptor;
     if (descriptor.kind !== "constant") {
       field(descriptor.field, descriptor.kind);

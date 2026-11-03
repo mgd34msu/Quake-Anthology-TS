@@ -1,6 +1,6 @@
 {
   "name": "quake-typescript",
-  "version": "1.2.6",
+  "version": "1.2.7-dev",
   "private": true,
   "type": "module",
   "license": "GPL-2.0-or-later",
@@ -10,17 +10,24 @@
     "typecheck": "tsc --noEmit",
     "policy": "bun run tools/check-policy.ts",
     "test": "bun test",
+    "test:unit": "bun tools/test-tier.ts unit",
+    "test:corpus": "bun tools/test-tier.ts corpus",
+    "test:gl": "bun tools/test-tier.ts gl",
     "test:policy": "bun test tests/policy",
-    "reference:environment": "bun tools/reference/environment.ts",
-    "test:reference": "bun test tools/reference",
     "test:platform": "bun test tests/platform",
     "bench:foundation": "bun run tools/bench-foundation.ts",
-    "test:verification": "bun test tests/verification",
-    "check": "bun run typecheck && bun run policy && bun test",
+    "check": "bun run typecheck && bun run format:check && bun run spdx && bun run codec:check && bun run policy && bun run test:unit",
     "build": "bun run tools/build.ts",
-    "build:tools": "bun run tools/build.ts --tools"
+    "build:tools": "bun run tools/build.ts --tools",
+    "release": "bun run tools/release.ts",
+    "format": "biome format --write",
+    "format:check": "biome format",
+    "spdx": "bun tools/check-spdx.ts",
+    "codec:generate": "bun tools/generate-event-codec.ts",
+    "codec:check": "bun tools/generate-event-codec.ts --check"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.4",
     "@types/bun": "1.3.14",
     "typescript": "5.9.3"
   },

@@ -1,11 +1,10 @@
 // Quake net_dgrm.c and QuakeWorld net_chan.c framing. GPL-2.0-or-later.
 import { PacketRate } from '../common/scheduling.ts';
 import { StopAndWaitChannel, ToggleReliableChannel } from '../common/reliability.ts';
-import { sameAddress } from '../common/endpoint.ts';
-import type { NetworkAddress } from '../common/endpoint.ts';
-import type { DatagramTransport } from '../common/transport.ts';
 import { PacketError } from './message.ts';
 export const NETFLAG_DATA = 0x10000, NETFLAG_ACK = 0x20000, NETFLAG_EOM = 0x80000, NETFLAG_UNRELIABLE = 0x100000, NETFLAG_CTL = 0x80000000;
+/** Largest forward jump in one accepted QW datagram; real loss never skips this many sequences. */
+const MAX_QUAKEWORLD_SEQUENCE_JUMP = 0x10000;
 export type ChannelDelivery = {
     readonly kind: 'reliable' | 'unreliable';
     readonly payload: Uint8Array;
@@ -110,7 +109,11 @@ export class QuakeWorldChannel {
         const word = v.getUint32(0, true), ack = v.getUint32(4, true);
         if (word === 0xffffffff)
             return null;
-        const sequence = word & 0x7fffffff, acknowledged = ack & 0x7fffffff, result = this.reliable.receive({ sequence, acknowledged, reliable: (word >>> 31) !== 0, reliableAcknowledged: (ack >>> 31) === 0 ? 0 : 1, payload: bytes.subarray(header) });
+        const sequence = word & 0x7fffffff, acknowledged = ack & 0x7fffffff;
+        // The server copies accepted sequences into its own outgoing counter, so a peer must not be able to jump it to the end of the 31-bit space.
+        if (this.side === 'server' && sequence - this.incomingSequence > MAX_QUAKEWORLD_SEQUENCE_JUMP)
+            return null;
+        const result = this.reliable.receive({ sequence, acknowledged, reliable: (word >>> 31) !== 0, reliableAcknowledged: (ack >>> 31) === 0 ? 0 : 1, payload: bytes.subarray(header) });
         if (result.kind === 'rejected')
             return null;
         this.frameLatency = this.frameLatency * 0.99 + (this.outgoingSequence - acknowledged) * 0.01;
@@ -119,26 +122,5 @@ export class QuakeWorldChannel {
         if (this.side === 'server' && sequence >= this.outgoingSequence)
             this.reliable.advanceOutgoingSequence(sequence);
         return { payload: result.payload, sequence, acknowledged, dropped: result.dropped };
-    }
-}
-/** Endpoint matching happens before a channel consumes bytes. QW permits only port rebinding. */
-export class QuakePeer<TAddress extends NetworkAddress> {
-    constructor(readonly transport: DatagramTransport<TAddress>, public remote: TAddress, readonly channel: NetQuakeChannel | QuakeWorldChannel) { }
-    send(bytes: Uint8Array): boolean { return this.transport.send(this.remote, bytes); }
-    receive(from: TAddress, bytes: Uint8Array, nowMilliseconds: number): ChannelDelivery | QuakeWorldDelivery | null {
-        if (this.channel instanceof NetQuakeChannel) {
-            if (!sameAddress(from, this.remote))
-                return null;
-            const result = this.channel.receive(bytes, nowMilliseconds);
-            for (const reply of result.replies)
-                this.send(reply);
-            return result.delivery;
-        }
-        if (!sameAddress(from, this.remote, this.channel.side === "client"))
-            return null;
-        const result = this.channel.receive(bytes, nowMilliseconds);
-        if (result !== null)
-            this.remote = from;
-        return result;
     }
 }

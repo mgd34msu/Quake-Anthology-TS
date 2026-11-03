@@ -5,7 +5,7 @@ import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts"
 import type { Vec3 } from "../../../../src/contracts/math.ts";
 import type { TraceResult } from "../../../../src/contracts/scene.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ2Bsp } from "../../../../src/formats/q2-map/index.ts";
 import { parseQ2Entities, inhibitQ2Spawn } from "../../../../src/content/q2/foundation/fields.ts";
@@ -16,13 +16,15 @@ import { Q2Monsters } from "../../../../src/content/q2/foundation/monsters/index
 import { q2ClassicBaseMonsterDefinitions, registerQ2ClassicBaseMonsters } from "../../../../src/content/q2/base/monsters/index.ts";
 import { medicFrame } from "../../../../src/content/q2/base/monsters/tables/medic.ts";
 import { gunnerFrame } from "../../../../src/content/q2/base/monsters/tables/gunner.ts";
+import { throwGib } from "../../../../src/content/q2/foundation/monsters/gibs.ts";
+import { inertAuthority } from "../../../support/authority.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
 function fixture() {
   const actors = new SessionActorRegistry(createIdentityOwner("q2-base-monsters")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors), scheduled = new Map<OwnedActor, number>(), events: Q2PresentationEvent[] = [];
   const world = actors.allocateAtSource("q2:game", 0, "q2:worldspawn"), player = actors.allocate("q3:character", "q3:sarge");
   bodies.create(world, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
@@ -188,6 +190,39 @@ describe("original Q2 base monster source behavior", () => {
     expect(crucified.entity.flags & 2048).toBe(2048);
     expect(scene.game.body(crucified.entity).bounds).toEqual({ min: { x: -16, y: 0, z: 0 }, max: { x: 16, y: 8, z: 32 } });
     expect(scene.game.counters.totalMonsters).toBe(0);
+    scene.actors.close();
+  });
+
+  test("A head gib drops the dying actor's attached models, as ThrowHead does", () => {
+    const scene = fixture(), jorg = scene.spawn("monster_jorg");
+    expect(jorg.entity.model2).not.toBe("");
+    throwGib(jorg.entity, scene.game, "models/objects/gibs/gear/tris.md2", 0, { head: true });
+    expect(jorg.entity.model2).toBe("");
+    scene.actors.close();
+  });
+
+  test("The Iron Maiden corpse box sits on the floor, not under it", () => {
+    const scene = fixture(), chick = scene.spawn("monster_chick");
+    chick.dispatch("chick_dead");
+    expect(scene.game.body(chick.entity).bounds).toEqual({ min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 16 } });
+    scene.actors.close();
+  });
+
+  test("A medic whose patient is alive again stops hunting corpses, and a monster's alarm does not mark the player hostile", () => {
+    const scene = fixture(), medic = scene.spawn("monster_medic");
+    scene.advance(0.1);
+    medic.state.medic = true; medic.entity.enemy = scene.player.id; medic.run();
+    scene.advance(0.2); scene.advance(0.3); scene.advance(0.4);
+    expect(medic.state.medic).toBe(false);
+
+    // spawnflags 2 keeps the alarm monster from thinking, so only its FoundTarget call matters.
+    const alarm = scene.spawn("monster_tank", new Map([["origin", "0 0 24"], ["spawnflags", "2"]]));
+    alarm.entity.enemy = scene.player.id;
+    scene.monsters.foundTarget(alarm);
+    scene.advance(1);
+    const behind = scene.spawn("monster_soldier", new Map([["origin", "200 0 24"], ["angle", "180"]]));
+    behind.findTarget();
+    expect(behind.entity.enemy).toBeNull();
     scene.actors.close();
   });
 });

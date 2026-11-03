@@ -14,8 +14,6 @@ import { QvmFiles, qvmFileSyscall } from "../../../compat/qvm/file-syscalls.ts";
 import { rejectQvmSyscall, type QvmHostCall, type QvmHostResult } from "../../../compat/qvm/syscalls.ts";
 import { CvarRegistry } from "../../../core/cvars/index.ts";
 import { CommandBuffer } from "../../../core/commands/index.ts";
-import { CommonParseCursor, CommonParseState } from "../../../core/common-parse.ts";
-import { Q3_BINARY32_PROFILE } from "../../../core/numeric.ts";
 import { qvmAngleVectors } from "../../../core/math.ts";
 import type { MountedContent } from "../../../content/mounts/index.ts";
 import type { SharedSceneQueries } from "../../../world/collision/index.ts";
@@ -24,7 +22,7 @@ import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../
 import { readSavedActor, savedActorId } from "../../../persistence/save-image.ts";
 import { readGuest } from "../../../persistence/execution.ts";
 import { readVector } from "../../../persistence/shared.ts";
-import { qvmWeaponInitializationEntities } from "./qvm-weapon-behavior.ts";
+import { QvmComponentState, qvmComponentSpatial } from "./qvm-component-state.ts";
 import type { Q3SourceEvent } from "./q3/host.ts";
 import type { ContentId } from "../../../contracts/content.ts";
 import type { SimulationPresentation } from "./types.ts";
@@ -73,12 +71,9 @@ export class QvmGrappleSource {
   private readonly cvars: CvarRegistry;
   private readonly files: QvmFiles;
   private readonly commands: CommandBuffer;
-  private readonly configstrings = new Map<number, string>();
-  private readonly userinfo = new Map<number, string>();
   private readonly bindings = new Map<ActorId, Binding>();
   private readonly tethers = new Map<ActorId, Tether>();
-  private readonly parser = new CommonParseState();
-  private readonly cursor: CommonParseCursor;
+  private readonly state: QvmComponentState;
   private readonly services: QvmServerGameServices;
   private readonly unsubscribe: () => undefined;
   private milliseconds = 0;
@@ -87,8 +82,8 @@ export class QvmGrappleSource {
   private restoringTethers: ReadonlyMap<ActorId, OwnedActor> | null = null;
   private constructor(readonly options: QvmGrappleSourceOptions) {
     this.host = options;
-    this.cursor = new CommonParseCursor(qvmWeaponInitializationEntities(options.entityText));
     this.cvars = new CvarRegistry({ dialect: "q3", context: options.context, print: text => options.event({ kind: "print", text }) });
+    this.state = new QvmComponentState(options.entityText, this.cvars);
     for (const [name, value] of Object.entries({ g_log: "", cm_noCurves: "0", cm_playerCurveClip: "1", bot_enable: "0", sv_maxclients: "64", dedicated: "1", g_gametype: "0" })) this.cvars.register(name, value, 0);
     for (const [name, value] of Object.entries(options.profile.initialCvars)) { this.cvars.register(name, value, 0); this.cvars.set(name, value, true); }
     this.commands = new CommandBuffer({ dialect: "q3", context: options.context, cvars: this.cvars,
@@ -98,25 +93,15 @@ export class QvmGrappleSource {
     this.files = new QvmFiles({ mounts: options.mounts, writable: null, print: text => options.event({ kind: "print", text }), assertCurrent: () => this.current() });
     this.vm = new QvmGame({ artifact: options.artifact, host: call => this.syscall(call), hostState: {
       checkpoint: () => ({ state: { module: options.artifact.module, format: "q3:grapple-host", bytes: encodeCheckpointValue({
-        version: 1, milliseconds: this.milliseconds, data: this.vm.data.checkpoint(), cvars: this.cvars.captureSaveState(),
-        configstrings: [...this.configstrings].map(([index, value]) => ({ index, value })), userinfo: [...this.userinfo].map(([slot, value]) => ({ slot, value })),
-        files: this.files.captureCheckpoint(), entityText: this.cursor.source, cursor: this.cursor.offset, parser: this.parser.captureSaveState(),
+        version: 1, milliseconds: this.milliseconds, ...this.state.capture(this.vm.data, this.files),
       }) }, random: [], callbacks: [] }),
       restore: checkpoint => {
         if (checkpoint.state.format !== "q3:grapple-host" || checkpoint.random.length !== 0 || checkpoint.callbacks.length !== 0) throw new Error("Invalid QVM grapple host checkpoint");
         const reader = new SaveReader(decodeCheckpointValue(checkpoint.state.bytes), "qvm.grapple.host");
-        reader.field("version").literal(1); reader.field("entityText").literal(this.cursor.source);
+        reader.field("version").literal(1);
         this.milliseconds = reader.field("milliseconds").integer(0);
-        const data = reader.field("data"); this.vm.data.restore({ entitiesWord: data.field("entitiesWord").integer(), numEntities: data.field("numEntities").integer(0), entityStride: data.field("entityStride").integer(0), clientsWord: data.field("clientsWord").integer(), clientStride: data.field("clientStride").integer(0) });
-        this.cvars.restoreSaveState(reader.field("cvars").value); this.configstrings.clear(); this.userinfo.clear();
-        for (const entry of reader.field("userinfo").list(cell => ({ slot: cell.field("slot").integer(0), value: cell.field("value").string() }))) {
-          if (entry.slot >= 64 || this.userinfo.has(entry.slot)) throw new Error("Invalid saved grapple client"); this.userinfo.set(entry.slot, entry.value);
-        }
-        for (const entry of reader.field("configstrings").list(cell => ({ index: cell.field("index").integer(0), value: cell.field("value").string() }))) {
-          if (entry.index >= 1024 || this.configstrings.has(entry.index)) throw new Error("Invalid saved grapple configstring"); this.configstrings.set(entry.index, entry.value);
-        }
-        this.cursor.offset = reader.field("cursor").nullable(cell => cell.integer(0)); this.parser.restoreSaveState(reader.field("parser").value);
-        this.files.restoreCheckpoint(reader.field("files").value); return undefined;
+        this.state.restore(reader, this.vm.data, this.files, "grapple");
+        return undefined;
       },
     } });
     this.vm.data.setClientCount(64);
@@ -139,40 +124,15 @@ export class QvmGrappleSource {
       return 0;
     });
     this.services = { data: this.vm.data, cvars: this.cvars, maxClients: 64,
-      configstrings: { get: index => this.configstrings.get(index) ?? "", set: (index, value) => { this.configstrings.set(index, value); options.event({ kind: "configstring", index, value }); } },
-      getUserinfo: slot => this.userinfo.get(slot) ?? "", setUserinfo: (slot, value) => { this.userinfo.set(slot, value); },
+      configstrings: { get: index => this.state.configstrings.get(index) ?? "", set: (index, value) => { this.state.configstrings.set(index, value); options.event({ kind: "configstring", index, value }); } },
+      getUserinfo: slot => this.state.userinfo.get(slot) ?? "", setUserinfo: (slot, value) => { this.state.userinfo.set(slot, value); },
       getUserCommand: () => ({ serverTime: this.milliseconds, angles: [0, 0, 0], buttons: 0, weapon: 0, forwardmove: 0, rightmove: 0, upmove: 0 }),
       dropClient: (client, reason) => { throw new Error(`Grapple source rejected borrowed client ${client}: ${reason}`); },
       sendServerCommand: (client, text) => options.event({ kind: "server-command", client, text }),
-      entityToken: () => ({ token: this.parser.parse(this.cursor), ended: this.cursor.offset === null }),
-      spatial: {
-        trace: input => {
-          const trace = options.scene.trace({ start: input.start, end: input.end, shape: input.shape, target: { kind: "world" }, numeric: Q3_BINARY32_PROFILE,
-            passActor: this.actorForSlot(input.passEntityNum), policy: { kind: "q3", contentsMask: input.mask, curves: this.cvars.variableValue("cm_noCurves") === 0, playerCurveClip: this.cvars.variableValue("cm_playerCurveClip") !== 0 } });
-          if (trace.kind !== "q3") throw new Error("Grapple collision lost its source policy");
-          return { fraction: trace.fraction, end: trace.end, allSolid: trace.allSolid, startSolid: trace.startSolid, contents: trace.contents,
-            surfaceFlags: trace.surfaceFlags, plane: trace.sourcePlane, entityNum: trace.hit.kind === "actor" ? this.slot(this.mirror(trace.hit.actor)) : trace.fraction === 1 ? 1023 : 1022 };
-        },
-        pointContents: (point, pass) => {
-          const sample = options.scene.pointContents({ point, target: { kind: "world" }, passActor: this.actorForSlot(pass), numeric: Q3_BINARY32_PROFILE,
-            policy: { kind: "q3", contentsMask: -1, curves: true, playerCurveClip: true } });
-          if (sample.kind !== "q3") throw new Error("Grapple contents lost its source policy"); return sample.contents;
-        },
-        areaEntities: (bounds, maximum) => {
-          const actors = options.scene.queryActors(bounds).filter(entry => ![...this.tethers.values()].some(tether => tether.actor.id.equals(entry.body.actor)));
-          return (maximum < 0 ? actors : actors.slice(0, maximum)).map(entry => this.slot(this.mirror(entry.body.actor)));
-        },
-        entityContact: () => { throw new Error("Grapple source requested undeclared brush contact"); },
-        setBrushModel: () => { throw new Error("Grapple source attempted to own a map brush"); },
-        adjustAreaPortalState: () => { throw new Error("Grapple source attempted to change map portals"); },
-        inPvs: (first, second, ignore) => { const a = options.scene.pointLeaf(first), b = options.scene.pointLeaf(second);
-          return options.scene.clusterVisible(options.scene.leafCluster(a), options.scene.leafCluster(b), "pvs") && (ignore || options.scene.areasConnected(options.scene.leafArea(a), options.scene.leafArea(b))); },
-        areasConnected: (first, second) => options.scene.areasConnected(first, second),
-        link: slot => { const r = this.vm.data.entity(slot).r; r.linked = true;
-          r.absmin = { x: r.currentOrigin.x + r.mins.x - 1, y: r.currentOrigin.y + r.mins.y - 1, z: r.currentOrigin.z + r.mins.z - 1 };
-          r.absmax = { x: r.currentOrigin.x + r.maxs.x + 1, y: r.currentOrigin.y + r.maxs.y + 1, z: r.currentOrigin.z + r.maxs.z + 1 }; },
-        unlink: slot => { this.vm.data.entity(slot).r.linked = false; },
-      },
+      entityToken: () => ({ token: this.state.parser.parse(this.state.cursor), ended: this.state.cursor.offset === null }),
+      spatial: qvmComponentSpatial({ scene: options.scene, cvars: this.cvars, data: this.vm.data, label: "Grapple", actorForSlot: slot => this.actorForSlot(slot), slotOf: actor => this.slot(this.mirror(actor)),
+        hidden: actor => [...this.tethers.values()].some(tether => tether.actor.id.equals(actor)),
+        reject: operation => { throw new Error(`Grapple source cannot ${operation}`); } }),
     };
     this.unsubscribe = options.actors.onRelease(actor => { this.removeActor(actor.id); return undefined; });
   }
@@ -215,16 +175,16 @@ export class QvmGrappleSource {
     for (const tether of this.tethers.values()) if (this.slot(tether.projection.hook) === slot) return tether.actor.id;
     return null;
   }
-  private mirror(actor: ActorId): number {
-    const target = this.options.targets().find(entry => entry.actor.equals(actor));
+  private mirror(actor: ActorId, known?: QvmGrappleTarget): number {
+    const target = known ?? this.options.targets().find(entry => entry.actor.equals(actor));
     if (target === undefined) throw new Error("Grapple collision refers to an unavailable shared actor");
     let binding = this.bindings.get(target.actor);
     if (binding === undefined) {
       if (target.kind === "player") {
-        let slot = 0; while (slot < 64 && this.userinfo.has(slot)) slot++;
+        let slot = 0; while (slot < 64 && this.state.userinfo.has(slot)) slot++;
         if (slot === 64) throw new Error("Grapple source exhausted its client capacity");
         const pointer = this.vm.data.entityBytes(slot).byteOffset - this.vm.module.memory.bytes.byteOffset;
-        binding = { actor: target.actor, pointer, client: true, origin: target.body.origin }; this.bindings.set(target.actor, binding); this.userinfo.set(slot, target.userinfo);
+        binding = { actor: target.actor, pointer, client: true, origin: target.body.origin }; this.bindings.set(target.actor, binding); this.state.userinfo.set(slot, target.userinfo);
         const denial = this.vm.clientConnect(slot, true, false); if (denial !== null) throw new Error(`Grapple source rejected client: ${denial}`);
         this.vm.clientBegin(slot);
       } else {
@@ -236,7 +196,7 @@ export class QvmGrappleSource {
     const entity = this.vm.data.entityFromPointer(binding.pointer), body = target.body;
     if (target.kind === "player") {
       const slot = this.slot(binding.pointer), ps = this.vm.data.publicPlayerBytes(slot);
-      if (this.userinfo.get(slot) !== target.userinfo) { this.userinfo.set(slot, target.userinfo); this.vm.clientUserinfoChanged(slot); }
+      if (this.state.userinfo.get(slot) !== target.userinfo) { this.state.userinfo.set(slot, target.userinfo); this.vm.clientUserinfoChanged(slot); }
       for (const [offset, vector] of [[20, body.origin], [32, body.velocity], [152, body.angles]] satisfies readonly (readonly [number, Vec3])[]) {
         ps.setFloat32(offset, vector.x, true); ps.setFloat32(offset + 4, vector.y, true); ps.setFloat32(offset + 8, vector.z, true);
       }
@@ -263,8 +223,9 @@ export class QvmGrappleSource {
     this.synchronizing = true;
     try {
       const targets = this.options.targets();
-      for (const actor of [...this.bindings.keys()]) if (!targets.some(target => target.actor.equals(actor))) this.removeActor(actor);
-      for (const target of targets) this.mirror(target.actor);
+      const present = new Set(targets.map(target => target.actor));
+      for (const actor of [...this.bindings.keys()]) if (!present.has(actor)) this.removeActor(actor);
+      for (const target of targets) this.mirror(target.actor, target);
     } finally { this.synchronizing = false; }
   }
   private publish(owner: ActorId, projection: QvmGrappleProjection | null): void {
@@ -286,7 +247,7 @@ export class QvmGrappleSource {
     if (this.closed || this.provider === null) return;
     this.provider.actorReleased(actor);
     const binding = this.bindings.get(actor); if (binding === undefined) return;
-    if (binding.client) { const slot = this.slot(binding.pointer); this.vm.clientDisconnect(slot); this.userinfo.delete(slot); }
+    if (binding.client) { const slot = this.slot(binding.pointer); this.vm.clientDisconnect(slot); this.state.userinfo.delete(slot); }
     else this.vm.module.call([binding.pointer], this.options.profile.callbacks.free);
     this.bindings.delete(actor);
   }

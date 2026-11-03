@@ -6,7 +6,7 @@ export interface PresentationMovementOptions {
   readonly originalServerTime?: number;
   trace(start: Vec3, end: Vec3, bounds: Bounds, skipNumber: number, mask: number): MovementTrace;
   pointContents(point: Vec3, passEntity: number): number;
-  readonly traceMask: number; readonly fixedMsec: number | null; readonly noFootsteps: boolean; readonly gauntletHit: boolean;
+  readonly traceMask: number; readonly fixedMsec: number | null; readonly noFootsteps: boolean; readonly ladders?: boolean; readonly gauntletHit: boolean;
 }
 /** Prediction invokes the recipe's selected movement, arsenal and character owners together. */
 export interface PresentationMovementHost {

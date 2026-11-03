@@ -1,7 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { StartupSelectionModel } from "../../../src/app/bootstrap/startup-selection.ts";
@@ -9,9 +8,11 @@ import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.t
 import { discoverInstalledContent } from "../../../src/content/catalog/index.ts";
 import { UnifiedAudio } from "../../../src/audio/index.ts";
 import { encodePng } from "../../../src/formats/images/png-encoder.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 test("actual mixed Q2 campaign plays, skips and completes unit CIN without losing its world on failure", async () => {
-  const root = await mkdtemp(join(tmpdir(), "quake-campaign-cin-"));
+  const root = await tempDirectory("quake-campaign-cin-");
   const parsed = parseApplicationCommand(["--menu", "--hidden", "--renderer", "cpu", "--width", "320", "--height", "240", "--user-content-root", root]);
   if (parsed.kind !== "menu") throw new Error("Missing startup options");
   const catalog = await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, discoverMods: false });

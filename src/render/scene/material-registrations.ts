@@ -36,12 +36,15 @@ export interface ShaderLogicalKey {
     | { readonly kind: "world"; readonly world: ShaderWorldIdentity; readonly lightmapIndex: number; readonly baseTextureName: string | null };
 }
 
+/** Bumped whenever any handle is created or replaced, since a replacement can change the sort key a cached snapshot ordered by. */
+let materialEpoch = 0;
+
 class MaterialHandle implements RegisteredSceneMaterial {
-  constructor(readonly registration: ShaderRegistration, private current: CompiledMaterial) {}
+  constructor(readonly registration: ShaderRegistration, private current: CompiledMaterial) { materialEpoch++; }
   get registered() { return this.current.registered; }
   get finished() { return this.current.finished; }
   get material() { return this.current.material; }
-  replace(current: CompiledMaterial): void { this.current = current; }
+  replace(current: CompiledMaterial): void { this.current = current; materialEpoch++; }
 }
 
 export class SceneMaterialRegistrations {
@@ -200,11 +203,15 @@ export class SceneMaterialRegistrations {
   }
   cancel(registration: ShaderRegistration): void {
     if (this.admitted.get(registration) !== null) throw new Error("Only an unpublished shader admission can be cancelled");
-    this.admitted.delete(registration);
+    this.admitted.delete(registration); materialEpoch++;
   }
+  private sortedCache: { readonly epoch: number; readonly size: number; readonly materials: readonly RegisteredSceneMaterial[] } | null = null;
   snapshot(sorted = true): readonly RegisteredSceneMaterial[] {
+    if (sorted && this.sortedCache !== null && this.sortedCache.epoch === materialEpoch && this.sortedCache.size === this.admitted.size) return this.sortedCache.materials;
     const materials = [...this.admitted.values()].flatMap(material => material === null ? [] : [material]);
-    return sorted ? materials.sort((a, b) => a.finished.sort - b.finished.sort) : materials;
+    if (!sorted) return materials;
+    materials.sort((a, b) => a.finished.sort - b.finished.sort);
+    this.sortedCache = { epoch: materialEpoch, size: this.admitted.size, materials }; return materials;
   }
 }
 
@@ -249,6 +256,7 @@ export class ProviderShaderRegistrations {
 export class ShaderReplacementStage {
   private state: "preparing" | "committed" | "discarded" = "preparing";
   private readonly entries = new Map<string, { readonly key: ShaderLogicalKey; readonly registration: ShaderRegistration; material: MaterialHandle | null }>();
+  private readonly byRegistration = new Map<ShaderRegistration, { readonly key: ShaderLogicalKey; readonly registration: ShaderRegistration; material: MaterialHandle | null }>();
   constructor(readonly provider: ProviderShaderRegistrations) {}
   private requirePreparing(): void { if (this.state !== "preparing") throw new Error(`Shader replacement is ${this.state}`); }
   reserve(key: ShaderLogicalKey): ShaderRegistration {
@@ -256,11 +264,12 @@ export class ShaderReplacementStage {
     const cacheKey = this.provider.key(key), previous = this.entries.get(cacheKey);
     if (previous !== undefined) return previous.registration;
     const registration = this.provider.find(key) ?? new Registration(this.provider, key.name);
-    this.entries.set(cacheKey, { key, registration, material: null }); return registration;
+    const entry = { key, registration, material: null };
+    this.entries.set(cacheKey, entry); this.byRegistration.set(registration, entry); return registration;
   }
   publish(registration: ShaderRegistration, compiled: CompiledMaterial): RegisteredSceneMaterial {
     this.requirePreparing();
-    const entry = [...this.entries.values()].find(value => value.registration === registration);
+    const entry = this.byRegistration.get(registration);
     if (entry === undefined) throw new Error("Shader was not admitted to this replacement");
     if (entry.material === null) entry.material = new MaterialHandle(registration, compiled);
     else entry.material.replace(compiled);
@@ -270,7 +279,7 @@ export class ShaderReplacementStage {
     this.requirePreparing();
     const cacheKey = this.provider.key(key), entry = this.entries.get(cacheKey);
     if (entry?.registration !== registration || entry.material !== null) throw new Error("Only an unpublished staged shader admission can be cancelled");
-    this.entries.delete(cacheKey);
+    this.entries.delete(cacheKey); this.byRegistration.delete(registration);
   }
   validate(): void {
     this.requirePreparing();
@@ -290,5 +299,5 @@ export class ShaderReplacementStage {
     }
     this.state = "committed";
   }
-  discard(): void { this.requirePreparing(); this.entries.clear(); this.state = "discarded"; }
+  discard(): void { this.requirePreparing(); this.entries.clear(); this.byRegistration.clear(); this.state = "discarded"; }
 }

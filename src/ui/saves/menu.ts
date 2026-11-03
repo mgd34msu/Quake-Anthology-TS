@@ -1,5 +1,5 @@
 import type { UiControl, UiMenuId } from "../../contracts/ui.ts";
-import { menuRow, NativeUiController } from "../common/index.ts";
+import { buttonControl, menuRow, NativeUiController, wrapWords } from "../common/index.ts";
 import type { StartupSaveList } from "../../app/bootstrap/startup-saves.ts";
 
 export interface SavedGameMenuService {
@@ -14,11 +14,9 @@ export function registerSavedGameMenus(controller: NativeUiController, service: 
   const save: UiMenuId = "menu:saves:save", load: UiMenuId = "menu:saves:load", name: UiMenuId = "menu:saves:name", confirm: UiMenuId = "menu:saves:overwrite";
   let page = 0, draft = "Save 001", selected: string | null = null, busy = false, message = "";
   const reason = (saving = true): string | null => service?.unavailable(saving ? "save" : "load") ?? (service === undefined ? "Remote games cannot be saved or loaded here." : null);
-  const button = (id: string, label: string, row: number, action: () => void, enabled = true): UiControl => ({ id: `ui:saves:${id}`, kind: "button", label, rect: menuRow(row), visible: true, enabled: enabled && !busy, activate: () => { action(); return undefined; } });
+  const button = (id: string, label: string, row: number, action: () => void, enabled = true): UiControl => buttonControl(`ui:saves:${id}`, label, menuRow(row), action, enabled && !busy);
   const info = (label: string): readonly UiControl[] => {
-    const lines: string[] = []; let line = "";
-    for (const word of label.split(/\s+/)) { if (line.length + word.length > 48) { lines.push(line); line = word; } else line += `${line === "" ? "" : " "}${word}`; }
-    lines.push(line);
+    const lines = wrapWords(label, 48);
     return lines.slice(0, 2).map((text, index) => button(`message:${index}`, text, 9 + index, () => undefined, false));
   };
   const back = (): UiControl => button("back", "Cancel", 11, () => controller.closeMenu());

@@ -41,7 +41,7 @@ function useKey(game: Q1EntityServices, entity: Q1Actor, activator: ActorId | nu
   const owner = game.host.actors.resolveOwned(activator);
   const sound = game.worldType === 2 ? "base" : game.worldType === 1 ? "rune" : "med";
   if (owner === null || !game.host.inventory.consume(owner, key, 1)) {
-    game.message(activator, entity.message || `$qc_need_${gold ? "gold" : "silver"}_${game.worldType === 2 ? "keycard" : game.worldType === 1 ? "runekey" : "key"}`);
+    game.message(activator, entity.message || `$qc_need_gold_${game.worldType === 2 ? "keycard" : game.worldType === 1 ? "runekey" : "key"}`);
     return game.sound(entity, `doors/${sound}try.wav`);
   }
   entity.touch = null; entity.use = null; entity.message = "";

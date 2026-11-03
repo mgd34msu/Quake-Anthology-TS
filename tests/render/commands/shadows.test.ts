@@ -263,3 +263,17 @@ test("inactive dynamic lights do not require or sample a shadow atlas", async ()
       .toEqual({ r: 0.2, g: 0.2, b: 0.1, a: 0.3 });
   }
 });
+
+test("a replaced backend invalidates cached shadow signatures", () => {
+  const identity = createIdentityOwner("shadow-epoch"), owner = { identity: Symbol("epoch"), session: identity.session, generation: 0 };
+  const images = new SceneImageRegistry(owner), shadows = new Q2ShadowScene(images);
+  const light: SceneLight = { origin: { x: 0, y: 0, z: 64 }, color: { x: 1, y: 1, z: 1 }, radius: 192, additive: false,
+    profile: { kind: "q2", scale: 1, cone: null, shadow: { kind: "cast", resolution: 128 } } };
+  expect(shadows.prepare([light], [], []).stats.rebuiltLights).toBe(1);
+  expect(shadows.prepare([light], [], []).stats.cachedLights).toBe(1);
+  images.invalidateBackend();
+  const after = shadows.prepare([light], [], []);
+  expect(after.stats.cachedLights).toBe(0);
+  expect(after.stats.rebuiltLights).toBe(1);
+  shadows.close();
+});

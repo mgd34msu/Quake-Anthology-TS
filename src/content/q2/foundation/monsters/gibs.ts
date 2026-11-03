@@ -68,6 +68,11 @@ export function throwGib(self: Q2Entity, game: Q2GameServices, model: string, da
   const velocity = add(body.velocity, scale(impulse, options.metallic === true ? 1 : 0.5));
   const clipped: Vec3 = { x: Math.max(-300, Math.min(300, velocity.x)), y: Math.max(-300, Math.min(300, velocity.y)), z: Math.max(200, Math.min(500, velocity.z)) };
   gib.model = model;
+  if (options.head === true) {
+    // ThrowHead drops the attached models and the looping sound of the dying actor.
+    gib.model2 = ""; gib.model3 = ""; gib.model4 = "";
+    game.host.emit({ kind: "sound", actor: gib.actor.id, origin: body.origin, path: "", channel: 0, volume: 0, attenuation: 1, reliable: false, loop: "stop" });
+  }
   if (rerelease) gib.classname = "gib";
   gib.frame = 0;
   gib.oldFrame = -1;

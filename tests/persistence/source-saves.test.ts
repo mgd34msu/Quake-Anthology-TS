@@ -4,19 +4,28 @@ import { corpusFile } from "../support/corpus.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { decodeQ1Save, encodeQ1Save } from "../../src/persistence/q1.ts";
-import { decodeQ2RereleaseLevelMetadata, decodeQ2RereleaseServer, encodeQ2RereleaseLevelMetadata, encodeQ2RereleaseServer } from "../../src/persistence/q2-containers.ts";
+import { decodeQ2ClassicLevelMetadata, decodeQ2ClassicServer, encodeQ2ClassicLevelMetadata, encodeQ2ClassicServer, decodeQ2RereleaseLevelMetadata, decodeQ2RereleaseServer, encodeQ2RereleaseLevelMetadata, encodeQ2RereleaseServer } from "../../src/persistence/q2-containers.ts";
 import { decodeQ2RereleaseGame, decodeQ2RereleaseLevel, encodeQ2RereleaseGame, encodeQ2RereleaseLevel, readQ2AmmoCapacity, readQ2BrushAnimation, readQ2Fog, readQ2HeightFog, readQ2Poi, writeQ2AmmoCapacity, writeQ2BrushAnimation, writeQ2Fog, writeQ2HeightFog, writeQ2Poi } from "../../src/persistence/q2-rerelease.ts";
 import { SaveNumber, sourceObject } from "../../src/persistence/source-json.ts";
-import { captureQ1QuakeCSave, restoreQ1QuakeCSave } from "../../src/persistence/q1-quakec.ts";
+import { captureQ1QuakeCSave, restoreQ1QuakeCSave } from "../../src/compat/qc/q1-save.ts";
 import { openArchive } from "../../src/content/archive/index.ts";
 import { QcMachine, QcEntityMemory, classicQcEntityLayout, createQcBuiltins, loadQcProgram } from "../../src/compat/qc/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../src/core/numeric.ts";
 
-const artifacts = join(import.meta.dir, "../../.artifacts");
-const q1Save = join(artifacts, "q1-retail/2026-09-11T05-43-37-305Z/game/id1/retail-before.sav");
-const q2Root = join(artifacts, "q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/save/native-reference");
+// No WinQuake save or q2repro rerelease-format save is in the corpus; QTS_TEST_Q1_REFERENCE_SAVE and QTS_TEST_Q2_REFERENCE_SAVE_DIR supply them.
+// A variable that is set but names a missing path fails instead of skipping.
+function referencePath(variable: string): string | null {
+  const value = process.env[variable];
+  if (value === undefined || value === "") { console.warn(`${variable} is not set; its reference save test is skipped.`); return null; }
+  if (!existsSync(value)) throw new Error(`${variable} names a missing path: ${value}`);
+  return value;
+}
+const q1Save = referencePath("QTS_TEST_Q1_REFERENCE_SAVE") ?? "";
+const q2Root = referencePath("QTS_TEST_Q2_REFERENCE_SAVE_DIR") ?? "";
+// The installed Steam Quake II keeps a classic-format engine save in baseq2/save/save0, which the assembled corpus carries.
+const installedQ2Root = corpusFile("q2/baseq2/save/save0");
 
-test.skipIf(!existsSync(q1Save))("reads and rewrites the actual WinQuake reference save without losing edict fields", async () => {
+test.skipIf(q1Save === "")("reads and rewrites the actual WinQuake reference save without losing edict fields", async () => {
   const save = decodeQ1Save(new Uint8Array(await Bun.file(q1Save).arrayBuffer()));
   expect(save.map).toBe("start");
   expect(save.entities.length).toBeGreaterThan(1);
@@ -40,7 +49,7 @@ test.skipIf(!existsSync(q1Save))("reads and rewrites the actual WinQuake referen
   } finally { archive.close(); }
 });
 
-test.skipIf(!existsSync(q2Root))("roundtrips actual q2repro rerelease engine and game saves", async () => {
+test.skipIf(q2Root === "")("roundtrips actual q2repro rerelease engine and game saves", async () => {
   const serverBytes = new Uint8Array(await Bun.file(join(q2Root, "server.ssv")).arrayBuffer());
   const server = decodeQ2RereleaseServer(serverBytes);
   expect(server.mapCommand).toContain("base1");
@@ -55,6 +64,18 @@ test.skipIf(!existsSync(q2Root))("roundtrips actual q2repro rerelease engine and
   const world = level.entities.get(0); if (world === undefined) throw new Error("reference has no worldspawn");
   expect(readQ2Fog(world).density).toBeGreaterThan(0);
   expect(readQ2HeightFog(world).density).toBeGreaterThan(0);
+});
+
+test.skipIf(!existsSync(join(installedQ2Root, "server.ssv")))("roundtrips the installed classic Quake II engine save byte for byte", async () => {
+  const serverBytes = new Uint8Array(await Bun.file(join(installedQ2Root, "server.ssv")).arrayBuffer());
+  const server = decodeQ2ClassicServer(serverBytes);
+  expect(server.mapCommand).toContain("base2");
+  expect(server.cvars.length).toBeGreaterThan(0);
+  expect(encodeQ2ClassicServer(server)).toEqual(serverBytes);
+  const levelBytes = new Uint8Array(await Bun.file(join(installedQ2Root, "base1.sv2")).arrayBuffer());
+  const level = decodeQ2ClassicLevelMetadata(levelBytes);
+  expect(level.configstrings.some(entry => entry.value === "Outer Base")).toBe(true);
+  expect(encodeQ2ClassicLevelMetadata(level)).toEqual(levelBytes);
 });
 
 test("rerelease field codecs retain fog, brush animation, POIs, ammo capacities and unknown 64-bit fields", () => {

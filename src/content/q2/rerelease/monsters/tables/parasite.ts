@@ -187,14 +187,6 @@ export const parasiteMoves: readonly MonsterMove[] = [
     { ai: "run", distance: Math.fround(0), actions: [], lerpFrame: -1 },
     { ai: "run", distance: Math.fround(30), actions: [], lerpFrame: -1 },
   ] },
-  { name: "parasite_move_stop_run", firstFrame: 77, lastFrame: 82, end: null, sidestepScale: 0, frames: [
-    { ai: "run", distance: Math.fround(20), actions: [], lerpFrame: -1 },
-    { ai: "run", distance: Math.fround(20), actions: [], lerpFrame: -1 },
-    { ai: "run", distance: Math.fround(12), actions: [], lerpFrame: -1 },
-    { ai: "run", distance: Math.fround(10), actions: [], lerpFrame: -1 },
-    { ai: "run", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-    { ai: "run", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-  ] },
   { name: "parasite_move_walk", firstFrame: 70, lastFrame: 76, end: "parasite_walk", sidestepScale: 0, frames: [
     { ai: "walk", distance: Math.fround(30), actions: [], lerpFrame: -1 },
     { ai: "walk", distance: Math.fround(30), actions: [], lerpFrame: -1 },
@@ -207,14 +199,6 @@ export const parasiteMoves: readonly MonsterMove[] = [
   { name: "parasite_move_start_walk", firstFrame: 68, lastFrame: 69, end: null, sidestepScale: 0, frames: [
     { ai: "walk", distance: Math.fround(0), actions: [], lerpFrame: -1 },
     { ai: "walk", distance: Math.fround(30), actions: ["parasite_walk"], lerpFrame: -1 },
-  ] },
-  { name: "parasite_move_stop_walk", firstFrame: 77, lastFrame: 82, end: null, sidestepScale: 0, frames: [
-    { ai: "walk", distance: Math.fround(20), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(20), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(12), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(10), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(0), actions: [], lerpFrame: -1 },
   ] },
   { name: "parasite_move_break", firstFrame: 0, lastFrame: 31, end: "parasite_start_run", sidestepScale: 0, frames: [
     { ai: {"kind":"source","name":"parasite_charge_proboscis"}, distance: Math.fround(0), actions: [], lerpFrame: -1 },

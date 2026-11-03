@@ -13,7 +13,7 @@ export const freeProjectile: Q2Think = (entity, game) => game.remove(entity);
 export function projectile(self: Pick<Q2Entity, "actor">, game: Q2GameServices, classname: string, start: Vec3, direction: Vec3,
   speed: number, model: string, motion: Q2Motion["kind"], effects: number): Q2Entity {
   const entity = game.create(classname);
-  entity.owner = self.actor.id; entity.projectile = true; entity.dodgeable = true;
+  entity.owner = self.actor.id; entity.projectile = true; entity.dodgeable = true; game.markDodgeable(entity);
   entity.speed = speed; entity.model = model; entity.effects = effects; entity.clipMask = projectileMask(game); entity.motion = motion;
   entity.movedir = direction;
   game.move(entity, { origin: start, velocity: scale(direction, speed), angles: vectorToAnglesRule(direction, "native"), bounds: { min: zero, max: zero } }, false);

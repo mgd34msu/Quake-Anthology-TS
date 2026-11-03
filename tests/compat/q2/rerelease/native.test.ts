@@ -1,5 +1,4 @@
 import { NativeInputBinding } from "../../../../src/compat/q2/native-input.ts";
-import { testCorpusRoot, corpusFile } from "../../../support/corpus.ts";
 
 import { ModClientApplications } from "../../../../src/world/session/mod-client-applications.ts";
 import { createNumericOperations } from "../../../../src/core/numeric.ts";
@@ -9,133 +8,32 @@ import { nativeCombatSignature, nativeRereleaseModLayout } from "../../../../src
 import { rereleaseAbi } from "../../../../src/compat/q2/rerelease/api.ts";
 import { SaveReader } from "../../../../src/persistence/value.ts";
 import { readRereleasePrimaryWorldProfile, rereleasePrimaryWorldProfile } from "../../../../src/compat/q2/rerelease/world-profile.ts";
-import { builtinNativePrimary } from "../../../../src/compat/q2/native-primary.ts";
-import type { RereleaseDebugShapesEvent } from "../../../../src/compat/q2/rerelease/debug-shapes.ts";
 import { WorldTextStore } from "../../../../src/text/world.ts";
 import type { RereleaseWorldTextEvent } from "../../../../src/compat/q2/rerelease/world-text.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { createMountPlanId } from "../../../../src/contracts/content.ts";
-import type { GuestAddress } from "../../../../src/contracts/execution.ts";
 import type { AttackProvenance, DamageOutcome } from "../../../../src/contracts/gameplay.ts";
 import type { OwnedActor } from "../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
-import { CvarRegistry } from "../../../../src/core/cvars/index.ts";
 import { GuestCallStopped } from "../../../../src/guest/abi/index.ts";
 import { integer, pointer, requiredPointer } from "../../../../src/guest/runtime/common/memory.ts";
-import { readGuestString } from "../../../../src/compat/q2/rerelease/imports.ts";
-import type { RereleaseCoreServices } from "../../../../src/compat/q2/rerelease/imports.ts";
-import { prepareRereleaseGuest, RereleaseGuestSource } from "../../../../src/app/bootstrap/simulation/rerelease-guest-source.ts";
-import { discoverInstalledContent } from "../../../../src/content/catalog/index.ts";
-import { openMountPlan } from "../../../../src/content/mounts/index.ts";
-import type { RereleaseSoundEvent } from "../../../../src/compat/q2/rerelease/sounds.ts";
-import { nativeWorld } from "./world.ts";
+import { RereleaseGuestSource } from "../../../../src/app/bootstrap/simulation/rerelease-guest-source.ts";
 import { rereleaseInventoryItems } from "../../../../src/compat/q2/rerelease/semantics.ts";
 import { RereleaseSourceEdict } from "../../../../src/compat/q2/rerelease/source-state.ts";
 import { resultPointer } from "../../../../src/compat/q2/rerelease/module.ts";
 import { rereleaseFreeSignature, rereleaseSpawnSignature } from "../../../../src/compat/q2/rerelease/native-entries.ts";
-import type { RereleaseQ2GuestHost } from "../../../../src/compat/q2/rerelease/host.ts";
-import type { RereleaseForeignDamageServices } from "../../../../src/compat/q2/rerelease/foreign-actors.ts";
 import { createQ2CombatPolicy } from "../../../../src/world/gameplay/policies.ts";
 import { absorbNativeArmor } from "../../../../src/world/gameplay/armor.ts";
-import { SizeBuf, SZ_Init } from "../../../../src/network/q2/message.ts";
-import type { RereleaseUnicast, RereleaseMulticast } from "../../../../src/compat/q2/rerelease/messages.ts";
-import { cgameExportLayout, cgameImportLayout, clientLayout, cvarLayout, edictLayout, entityStateLayout, fieldOffset, gameExportLayout, gameImportLayout, gameImports, guestBool, guestPointer, playerStateLayout, pmoveLayout, pmoveStateLayout, privateClientLayout, privateEdictPrefixLayout, readRereleasePlayerState, RereleaseCgame, RereleaseSourceClient, retailRereleaseClientProfile, signature, traceLayout, usercmdLayout } from "../../../../src/compat/q2/rerelease/index.ts";
+import { cgameExportLayout, cgameImportLayout, gameExportLayout, gameImportLayout, gameImports, signature } from "../../../../src/compat/q2/rerelease/api.ts";
+import { clientLayout, cvarLayout, edictLayout, entityStateLayout, fieldOffset, playerStateLayout, pmoveLayout, pmoveStateLayout, privateClientLayout, privateEdictPrefixLayout, traceLayout, usercmdLayout } from "../../../../src/compat/q2/rerelease/layouts.ts";
+import { guestBool, guestInt, guestPointer } from "../../../../src/compat/q2/rerelease/module.ts";
+import { readRereleasePlayerState } from "../../../../src/compat/q2/rerelease/player-state.ts";
+import { RereleaseSourceClient } from "../../../../src/compat/q2/rerelease/source-state.ts";
+import { retailRereleaseClientProfile } from "../../../../src/compat/q2/rerelease/client-profile.ts";
 
-const dll = new URL(corpusFile("q2/rerelease/baseq2/game_x64.dll"), "file:///");
-export const available = await Bun.file(dll).exists();
-const activeSources: RereleaseGuestSource[] = [];
-afterEach(() => { for (const source of activeSources.splice(0)) source.close(); });
-export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => void, nativeBindings = false, commandArguments: () => readonly string[] = () => [], foreignDamage?: RereleaseForeignDamageServices, debugShapes?: (event: RereleaseDebugShapesEvent) => void, debugDrawing?: "headless", declaredWorld = false) {
-  const catalog = await discoverInstalledContent({ corpusRoot: testCorpusRoot(), discoverMods: false });
-  const product = catalog.require("q2-rerelease-baseq2");
-  using mounts = await openMountPlan(await catalog.createMountPlan({ id: createMountPlanId("test", "native-rerelease"), assets: product.id, geometry: product.id }));
-  const artifact = await mounts.resolve("game_x64.dll"); if (artifact === null) throw new Error("Missing mounted native DLL");
-  expect(artifact.digest).toBe("sha256:045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd");
-  const prepared = await prepareRereleaseGuest({ kind: "native", owner: { provider: "q2:rerelease-native-host", content: product.id }, role: "server-game",
-    artifact, api: { kind: "q2-rerelease-game", version: 2023 }, profile: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" } }, mounts);
-  const cvars = new CvarRegistry({ dialect: "q2-rerelease", context: { session: createIdentityOwner("rerelease-native").session, origin: { kind: "server-console" } } });
-  const prints: string[] = [], configstrings = new Map<number, string>(), reached: string[] = [];
-  const localized: { readonly destination: GuestAddress | null; readonly level: number; readonly base: string; readonly arguments: readonly string[] }[] = [];
-  const resources = new Map<string, Map<string, number>>();
-  const services = (memory: import("../../../../src/guest/core/index.ts").MappedGuestMemory): RereleaseCoreServices => ({
-    cvars, print: text => { prints.push(text); return undefined; }, getConfigstring: index => configstrings.get(index) ?? "",
-    setConfigstring: (index, text) => { configstrings.set(index, text); return undefined; },
-    resourceIndex: (kind, name) => {
-      if (name.length === 0) return 0;
-      let table = resources.get(kind);
-      if (table === undefined) { table = new Map<string, number>(); resources.set(kind, table); }
-      const previous = table.get(name);
-      if (previous !== undefined) return previous;
-      const index = table.size + 1; table.set(name, index); return index;
-    },
-    serverFrame: () => 123, commandArguments, commandTail: () => commandArguments().slice(1).join(" "),
-    addCommand: () => { throw new Error("This fixture has no command executor"); }, extension: () => null,
-    invoke: call => {
-      reached.push(`${call.api}.${call.name}`);
-      if (call.api === "cgame" && call.name === "CL_ClientRealTime") return { kind: "uint64", value: 1_700_000_000_000n };
-      if (call.name === "Loc_Print") {
-        const count = Number(integer(call.arguments, 4)), array = pointer(call.arguments, 3), arguments_: string[] = [];
-        for (let index = 0; index < count; index++) {
-          if (array === null) throw new Error("Missing localization argument array");
-          const text = memory.readPointer(memory.offset(array, BigInt(index * 8)));
-          if (text === null) throw new Error("Missing localization string");
-          arguments_.push(readGuestString(memory, text));
-        }
-        localized.push({ destination: pointer(call.arguments, 0), level: Number(integer(call.arguments, 1)), base: readGuestString(memory, requiredPointer(call.arguments, 2)), arguments: arguments_ });
-        return { kind: "void" };
-      }
-      return undefined;
-    },
-  });
-  const world = await nativeWorld(index => { for (const [name, value] of resources.get("model") ?? []) if (value === index) return name; return undefined; });
-  const releaseListeners = { active: 0 }, subscribe = world.engine.actors.onRelease.bind(world.engine.actors);
-  spyOn(world.engine.actors, 'onRelease').mockImplementation(callback => {
-    releaseListeners.active++; const unsubscribe = subscribe(callback);
-    return () => { releaseListeners.active--; return unsubscribe(); };
-  });
-  // SV_SpawnServer reserves source resource indices for the loaded BSP and inline models.
-  const resourceIndex = (name: string): void => { let table = resources.get("model"); if (table === undefined) { table = new Map<string, number>(); resources.set("model", table); } if (!table.has(name)) table.set(name, table.size + 1); };
-  resourceIndex("maps/base1.bsp");
-  for (let index = 1; index < world.world.models.length; index++) resourceIndex(`*${index}`);
-  const buffer = new SizeBuf();
-  SZ_Init(buffer, new Uint8Array(65536), 65536);
-  const sounds: RereleaseSoundEvent[] = [];
-  const unicasts: RereleaseUnicast[] = [], multicasts: RereleaseMulticast[] = [];
-  let attached: RereleaseQ2GuestHost | null = null;
-  let inventoryItems: ReturnType<typeof rereleaseInventoryItems> | null = null;
-  const owner = (): RereleaseQ2GuestHost => { if (attached === null) throw new Error("Fixture host is not attached"); return attached; };
-  const semantics = !nativeBindings ? world.semantics : { ...world.semantics, bind: (view: import("../../../../src/contracts/execution.ts").RawEntityView, actor: import("../../../../src/contracts/identity.ts").OwnedActor, module: import("../../../../src/compat/q2/rerelease/module.ts").RereleaseGuestModule) => {
-    const base = world.semantics.bind(view, actor, module), edict = new RereleaseSourceEdict(view, module);
-    const client = edict.client === null ? null : new RereleaseSourceClient(edict.client, module, retailRereleaseClientProfile);
-    if (client !== null && inventoryItems === null) inventoryItems = rereleaseInventoryItems(module, value => owner().core.string(value));
-    const classname = module.memory.readPointer(edict.at("classname"));
-    const barrel = foreignDamage !== undefined && classname !== null && ["misc_explobox", "monster_soldier"].includes(readGuestString(module.memory, classname));
-    return { ...base, combat: !barrel ? base.combat : edict.combat({ armor: () => ({ regular: { kind: "none" }, powered: { kind: "none" } }), writeArmor: () => { throw new Error("Native barrel has no armor"); }, traits: () => ({ invulnerable: false, team: null, noKnockback: false }) }),
-      inventory: client === null || inventoryItems === null ? null : client.inventory(inventoryItems),
-      callbacks: edict.callbacks({ address: id => owner().addressForActor(id), actor: address => owner().actor(module.entities().fromPointer(address))?.id ?? null }, trace => owner().encodeTrace(trace)) };
-  } };
-  const profile = declaredWorld ? builtinNativePrimary(artifact.digest, "rerelease") : null;
-  if (declaredWorld && profile?.edition !== "rerelease") throw new Error("Missing original primary fixture profile");
-  const selected = profile?.edition !== "rerelease" ? prepared : { ...prepared,
-    primary: { declaration: artifact, profile: { ...profile, world: readRereleasePrimaryWorldProfile(new SaveReader(profile.world), artifact.digest) } } };
-  const source = RereleaseGuestSource.create(selected, { services,
-    ...(foreignDamage === undefined ? {} : { foreignDamage }),
-    clock: { nowMilliseconds: () => 1_700_000_000_000, performanceCounter: () => 12345678n, performanceFrequency: 10000000n },
-    ...(worldText === undefined ? {} : { worldText }),
-    ...(debugShapes === undefined ? {} : { debugShapes }),
-    ...(debugDrawing === undefined ? {} : { debugDrawing }),
-    sound: event => { sounds.push(event); },
-    messages: { buffer, acceptsClient: slot => slot === 1, unicast: message => { unicasts.push(message); }, multicast: message => { multicasts.push(message); } },
-    engine: world.engine, spatial: world.spatial, semantics, instructionBudget: Bun.env["Q2_RR_FULL_MAP"] === "1" ? 20_000_000 : 5_000_000 });
-  activeSources.push(source);
-  const { host, memory, runtime } = source;
-  attached = host;
-  expect(host.options.engine).toBe(world.engine); expect(host.options.spatial).toBe(world.spatial); expect(host.options.semantics).toBe(semantics);
-  world.attach(host);
-  const guest = host.module, core = host.core;
-  return { source, prepared, services, releaseListeners, guest, core, host, world, memory, runtime, cvars, prints, reached, resources, configstrings, localized, unicasts, multicasts, sounds };
-}
+import { available, closeNativeSources, nativeFixture } from "./native-fixture.ts";
+
+afterEach(closeNativeSources);
 
 test("source world declaration binds artifact identity and rejects invalid private storage", () => {
   const digest = "sha256:045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd", profile = rereleasePrimaryWorldProfile(digest);
@@ -153,7 +51,7 @@ test("source x64 public layouts retain padded bools, float movement and full tra
   expect([entityStateLayout.byteLength, playerStateLayout.byteLength, clientLayout.byteLength]).toEqual([120, 296, 300]);
   expect(fieldOffset(gameExportLayout, "edict_size")).toBe(168);
   expect(fieldOffset(playerStateLayout, "stats")).toBe(166);
-  expect(fieldOffset(edictLayout, "sv.health")).not.toBe(fieldOffset(edictLayout, "s.origin"));
+  expect([fieldOffset(edictLayout, "s.origin"), fieldOffset(edictLayout, "sv.health")]).toEqual([4, 164]);
 });
 
 test.skipIf(!available)("retail DLL attaches and returns both source API tables; cgame reads the supplied player bytes", async () => {
@@ -168,17 +66,19 @@ test.skipIf(!available)("retail DLL attaches and returns both source API tables;
   expect(guest.callCgame("GetOwnedWeaponWheelWeapons", [guestPointer(player)])).toEqual({ kind: "uint32", value: 0x80028001 });
   memory.writeInt16(memory.offset(player, 166n + 32n * 2n), 2);
   expect(guest.callCgame("GetOwnedWeaponWheelWeapons", [guestPointer(player)])).toEqual({ kind: "uint32", value: 0x80020002 });
-  const cgame = new RereleaseCgame({ module: guest, refreshCvars: () => core.refreshCvars(), splitIndex: () => { throw new Error("This query has no seat"); }, withSeat: () => { throw new Error("This query does not draw"); } });
-  cgame.init();
+  core.refreshCvars();
+  guest.callCgame("Init");
   expect(cvars.variableString("scr_centertime")).toBe("5.0");
   memory.writeInt16(memory.offset(player, 166n + 13n * 2n), -1);
-  expect(cgame.layoutFlags(readRereleasePlayerState(memory, player))).toBe(-1);
-  expect(cgame.monsterFlashOffset(1)).toEqual({ x: Math.fround(28.7), y: -18.5, z: Math.fround(28.7) });
+  expect(guest.callCgame("LayoutFlags", [guestPointer(player)])).toEqual({ kind: "int32", value: -1 });
+  const flash = memory.allocate({ byteLength: 12, alignment: 4n });
+  guest.callCgame("GetMonsterFlashOffset", [guestInt(1), guestPointer(flash)]);
+  expect([memory.readFloat32(flash), memory.readFloat32(memory.offset(flash, 4n)), memory.readFloat32(memory.offset(flash, 8n))]).toEqual([Math.fround(28.7), -18.5, Math.fround(28.7)]);
   const movement = memory.allocate({ byteLength: pmoveLayout.byteLength, alignment: 8n });
   memory.writeInt32(movement, 2); // PM_NOCLIP: no collision services are exercised.
   memory.writeUint8(memory.offset(movement, 52n), 25);
   memory.writeFloat32(memory.offset(movement, 68n), 200);
-  cgame.pmoveRaw(movement);
+  guest.callCgame("Pmove", [guestPointer(movement)]);
   const frameSeconds = Math.fround(25 * Math.fround(0.001));
   const speed = Math.fround(Math.fround(10 * frameSeconds) * 400);
   expect(memory.readFloat32(memory.offset(movement, 16n))).toBe(speed);
@@ -317,7 +217,7 @@ test.skipIf(!available)("retail external player velocity enters source Pmove and
 });
 
 test.skipIf(!available)("retail PreInit through ClientThink and active RunFrame use shared BSP, body and inventory authorities", async () => {
-  const { source, guest, core, host, world, memory, cvars, prints, reached, unicasts, multicasts, releaseListeners } = await nativeFixture();
+  const { source, guest, core, host, world, memory, cvars, prints, reached, releaseListeners } = await nativeFixture();
   host.preInit();
   expect(cvars.variableString("maxclients")).toBe("8");
   try { source.init(); } catch (error) {
@@ -348,12 +248,10 @@ test.skipIf(!available)("retail PreInit through ClientThink and active RunFrame 
   guest.prepFrame();
   expect(memory.readUint8(memory.offset(table.atSlot(8).address, 84n))).toBe(0);
   expect(memory.readUint8(memory.offset(table.atSlot(8).address, 3687n))).toBe(0xa7);
-  const fullMap = Bun.env["Q2_RR_FULL_MAP"] === "1";
-  try { host.spawnEntities("base1", fullMap ? world.world.entities : `{\n"classname" "worldspawn"\n}\n{\n"classname" "info_player_start"\n"origin" "${world.origin}"\n}\n`, ""); }
+  try { host.spawnEntities("base1", `{\n"classname" "worldspawn"\n}\n{\n"classname" "info_player_start"\n"origin" "${world.origin}"\n}\n`, ""); }
   catch (error) { console.log("SpawnEntities stopped", { ip: guest.options.runner.options.cpu.state.instructionPointer.toString(16), count: guest.entities().count, prints: prints.slice(-5), imports: reached.slice(-8) }); throw error; }
   host.runFrame(false);
-  if (fullMap) console.log("full source spawn", guest.entities().count, prints.slice(-10));
-  else expect(guest.entities().count).toBe(18); // Eight body-queue edicts and the real map's player start.
+  expect(guest.entities().count).toBe(18); // Eight body-queue edicts and the real map's player start.
   expect(world.traceCalls).toBeGreaterThan(0);
   expect(memory.readUint8(memory.offset(guest.entities().atSlot(0).address, BigInt(fieldOffset(edictLayout, "inuse"))))).toBe(1);
   expect(host.clientConnect(1, "\\name\\Native Guest\\skin\\male/grunt\\ip\\127.0.0.1", "native-social", false).accepted).toBe(true);
@@ -364,7 +262,6 @@ test.skipIf(!available)("retail PreInit through ClientThink and active RunFrame 
   expect(memory.readInt32(memory.offset(privateClient.at("pers.inventory"), 83n * 4n))).toBe(1);
   expect(() => privateClient.at("fog")).toThrow("Unknown");
   host.clientBegin(1);
-  if (fullMap) expect([...unicasts, ...multicasts].some(message => message.bytes.length > 0)).toBe(true);
   const actor = host.actor(guest.entities().atSlot(1));
   if (actor === null) throw new Error("ClientBegin did not create the shared player actor");
   const before = world.engine.bodies.read(actor.id);
@@ -400,18 +297,6 @@ test.skipIf(!available)("retail PreInit through ClientThink and active RunFrame 
     guest.callGame("Bot_TriggerEdict", [guestPointer(guest.entities().atSlot(1).address), guestPointer(target.address)], guest.entities().atSlot(1), target);
     expect(callbackOrder).toEqual(["use", "touch"]);
   } finally { memory.writePointer(targetUse, previousUse); memory.writePointer(targetTouch, previousTouch); memory.writeUint32(playerFlags, previousFlags); }
-  if (Bun.env["Q2_RR_SAVE_PROBE"] === "1") {
-    try { const saved = host.writeSave("level", false); console.log("native level JSON", saved.native.length, new TextDecoder().decode(saved.native).slice(0, 500)); }
-    catch (error) {
-      const registers = guest.options.runner.options.cpu.state.registers;
-      const format = memory.pointer(registers.read("r9", 64)), stack = memory.pointer(registers.read("rsp", 64));
-      if (format !== null && stack !== null) {
-        const locale = memory.readUint64(memory.offset(stack, 40n)), values = memory.readPointer(memory.offset(stack, 48n));
-        console.log("save formatter", { options: registers.read("rcx", 64).toString(16), buffer: registers.read("rdx", 64).toString(16), size: registers.read("r8", 64).toString(16), format: readGuestString(memory, format), formatAddress: format.byteOffset.toString(16), locale: locale.toString(16), vaList: values?.byteOffset.toString(16), arguments: values === null ? [] : [...memory.copy(values, 48)] });
-      }
-      throw error;
-    }
-  }
   expect(world.engine.actors.ownedBy(memory.module.id).length).toBeGreaterThan(0);
   const unrelated = world.engine.actors.allocate('q2:unrelated', 'q2:survives-guest');
   source.close();
@@ -420,6 +305,24 @@ test.skipIf(!available)("retail PreInit through ClientThink and active RunFrame 
   expect(() => world.engine.actors.release(unrelated)).not.toThrow();
 });
 
+
+test.skipIf(!available)("retail real base1 level round-trips through the production loading save path", async () => {
+  const { source, host, guest, world } = await nativeFixture(undefined, false, () => [], undefined, undefined, undefined, false, 400_000_000);
+  host.preInit(); source.init();
+  host.spawnEntities("base1", world.world.entities, "");
+  host.runFrame(false);
+  const spawned = guest.entities().count;
+  expect(spawned).toBeGreaterThan(100);
+  let pumps = 0;
+  const saved = await host.writeSaveLoading("level", false, async () => { pumps++; await Bun.sleep(0); });
+  // The minimal-map level JSON is under 2 KB; a real map's is two orders of magnitude larger.
+  expect(saved.native.length).toBeGreaterThan(100_000);
+  const parsedSave = (): unknown => JSON.parse(new TextDecoder().decode(saved.native));
+  expect(parsedSave).not.toThrow();
+  await host.readSaveLoading("level", saved, async () => { pumps++; await Bun.sleep(0); });
+  expect(guest.entities().count).toBe(spawned);
+  expect(pumps).toBeGreaterThan(0);
+}, 600_000);
 
 test.skipIf(!available)("retail info_world_text RunFrame submits both guest imports into the shared world store", async () => {
   const store = new WorldTextStore(), emitted: RereleaseWorldTextEvent[] = [];
@@ -527,7 +430,8 @@ test.skipIf(!available)("retail inventory roster and native death callbacks bind
   expect(memory.readPointer(barrelSource.at("think.value"))).not.toEqual(beforeThink);
   expect(memory.readPointer(barrelSource.at("activator"))).toEqual(playerView.address);
   const foreign = world.engine.actors.allocate("test:foreign", "test:foreign");
-  expect(() => world.engine.callbacks.die({ self: barrel, attacker: foreign.id, inflictor: foreign.id, damage: 95, kick: 0, point: { x: 0, y: 0, z: 0 }, attack: null })).toThrow("foreign actors");
+  expect(() => world.engine.callbacks.die({ self: barrel, attacker: foreign.id, inflictor: foreign.id, damage: 95, kick: 0, point: { x: 0, y: 0, z: 0 }, attack: null })).toThrow();
+  expect(world.foreignRequests).toEqual([foreign.id]);
   const defender = items.find(item => item.item === "q2:item_sphere_defender");
   if (defender === undefined) throw new Error("Missing native defender item");
   const launch = (): void => {

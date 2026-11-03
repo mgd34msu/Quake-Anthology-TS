@@ -15,6 +15,8 @@ export interface Q2PlayerMovement {
   readonly grounded: boolean;
   readonly ducked: boolean;
   readonly buttons: number;
+  /** Latest command upmove; a spectator pressing jump cycles its chase target. */
+  readonly upMove: number;
   readonly standingBounds: Bounds;
   readonly animateQ2: boolean;
 }
@@ -41,6 +43,8 @@ export interface Q2PlayerView {
   readonly timer: { readonly item: ItemId; readonly seconds: number } | null;
   readonly spectator: boolean;
   readonly layouts: number;
+  /** STAT_HELPICON shows i_help while an unread objective change is pending. */
+  readonly helpIcon?: boolean;
 }
 export interface Q2ScoreRow { readonly slot: number; readonly name: string; readonly score: number; readonly ping: number; readonly minutes: number; readonly spectator: boolean; }
 export type Q2PlayerEvent =
@@ -62,6 +66,8 @@ export interface Q2PlayerHooks {
   weaponState?(actor: ActorId): Q2CharacterWeapon | null;
   movement(actor: ActorId): Q2PlayerMovement;
   setMovement(actor: ActorId, change: Q2PlayerMovementChange): undefined;
+  /** g_select_empty: `use` may select a weapon that has no ammo. */
+  selectEmpty?(): boolean;
   emit(event: Q2PlayerEvent): undefined;
   noise(actor: ActorId, origin: Vec3): undefined;
   /** Source ClientBeginServerFrame invokes weapon think exactly once unless ClientThink already did. */
@@ -161,6 +167,9 @@ export class Q2PlayerState {
   powerArmorTime = 0;
   fallTime = 0;
   fallValue = 0;
+  /** pers.helpchanged and pers.game_helpchanged of the classic help computer. */
+  helpChanged = 0;
+  gameHelpChanged = 0;
   landmarkFreeFall = false;
   landmarkNoiseTime = 0;
   oldVelocity: Vec3 = { x: 0, y: 0, z: 0 };
@@ -178,6 +187,8 @@ export class Q2PlayerState {
   animationRun = false;
   loopSound = "";
   selectedItem: ItemId | null = "q2:weapon_blaster";
+  /** PMF_JUMP_HELD for spectators: one chase step per jump press. */
+  jumpHeld = false;
   showScores = false;
   showInventory = false;
   showHelp = false;

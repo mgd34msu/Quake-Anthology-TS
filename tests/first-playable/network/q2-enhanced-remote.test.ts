@@ -1,12 +1,13 @@
 import { expect, test } from 'bun:test';
-import { mkdtemp, mkdir, rm, symlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, rm, symlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
 import { RemoteApplication } from '../../../src/app/bootstrap/remote-application.ts';
 import { Q2RemotePresentation } from '../../../src/app/bootstrap/network/remote.ts';
 import type { EntityStateT } from '../../../src/network/q2/index.ts';
 import { UdpTransport } from '../../../src/network/common/transport.ts';
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 const launch = ['--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2'];
 test('Q2 remote profile is explicit and leaves protocol 34 as the default', () => {
@@ -24,7 +25,7 @@ test('Q2 remote profile is explicit and leaves protocol 34 as the default', () =
 });
 
 test.skipIf(process.env['QUAKE_Q2_DONOR_ROOT'] === undefined)('normal remote application joins the reference R1Q2 server over localhost UDP', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'quake-r1q2-remote-'));
+    const root = await tempDirectory('quake-r1q2-remote-');
     const reservation = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
     const port = reservation.address.port;
     reservation.close();

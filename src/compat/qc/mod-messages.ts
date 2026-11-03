@@ -17,11 +17,14 @@ export class QcModMessages {
   private readonly local = new QuakeCLocalMessages();
   private readonly signon: QcRoutedMessage[] = [];
   private readonly admitted = new Map<ActorId, number>();
+  /** False for a writable borrower of a monster-kill objective: the objective owner publishes the kill, so the borrower's copy would double it. */
+  private readonly publishesKills: boolean;
   private readonly retire: () => undefined;
   private readonly unsubscribe: (() => undefined) | undefined;
   constructor(private readonly world: QcMessageWorld, private readonly services: ModHostServices, private readonly content: ContentId,
     private readonly resourceName: (kind: "model" | "sound", index: number) => string,
-    source: { loading(): boolean; phs(): boolean }) {
+    source: { loading(): boolean; phs(): boolean; publishesKills: boolean }) {
+    this.publishesKills = source.publishesKills;
     const engine = services.engine;
     if (engine === undefined) throw new Error("Source mod messages require destination engine services");
     const client = (actor: ActorId) => services.clients === undefined ? engine.presentation?.players().some(value => value.equals(actor)) === true : services.clients.forActor(actor) !== null;
@@ -85,7 +88,10 @@ export class QcModMessages {
         const body = this.services.bodies.read(actor);
         return body === null ? null : { origin: body.origin, angles: presentation.camera(actor).angles };
       },
-      emit: (event, recipient = target ?? undefined) => engine.events.emit(content, { kind: "q1", event }, undefined, recipient),
+      emit: (event, recipient = target ?? undefined) => {
+        if (event.kind === "monster-killed" && !this.publishesKills) return undefined;
+        return engine.events.emit(content, { kind: "q1", event }, undefined, recipient);
+      },
       message: (event, actor) => {
         if (engine.message === undefined) throw new Error("Source mod message requires a destination message sink");
         return engine.message(event, actor);

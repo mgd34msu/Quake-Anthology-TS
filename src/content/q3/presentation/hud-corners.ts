@@ -286,7 +286,7 @@ export class ClientHudCorners {
         color: getColorForHealth(client.health, client.armor), forceColor: false, shadow: false,
         charWidth: 8, charHeight: 8, maxChars: 0 });
       xx += TINYCHAR_WIDTH * 3;
-      const weapon = this.icons.tools.media.weaponRegistry.weapon(client.curWeapon);
+      const weapon = this.icons.tools.media.weaponRegistry.weaponOrEmpty(client.curWeapon);
       this.icons.tools.drawPic({ x: xx, y, width: 8, height: 8 }, weapon.weaponIcon ?? this.icons.tools.media.graphics.deferShader);
       xx = right ? x : x + width - TINYCHAR_WIDTH;
       for (const powerup of POWERUPS) {

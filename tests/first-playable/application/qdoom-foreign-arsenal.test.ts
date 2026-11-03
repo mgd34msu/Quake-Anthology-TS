@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { createStartupSelection } from "../../../src/app/bootstrap/startup-selection.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
+import { holdFire } from "../../support/matrix-play.ts";
 
 // The custom-game matrix has no refusal path: an undeclared QC mod world
 // (qdoom) with QuakeWorld movement, a Quake III character, and the Quake II
@@ -31,15 +32,10 @@ test("qdoom world plays with QuakeWorld movement, Q3 character and Q2 arsenal", 
     expect(ui().items.some(item => item.kind === "weapon" && item.id.startsWith("q2:") && item.owned)).toBe(true);
     for (let frame = 0; frame < 200 && !ui().activeWeapon?.startsWith("q2:"); frame++) await application.step(25);
     expect(ui().activeWeapon?.startsWith("q2:")).toBe(true);
-    const ammoId = ui().activeWeapon === "q2:weapon/blaster" ? null : null;
-    void ammoId;
-    const healthBefore = ui().health;
-    application.input({ seat: local.seat.id, kind: "mouse-button", button: 1, down: true, timeMilliseconds: performance.now() });
-    for (let frame = 0; frame < 40; frame++) await application.step(25);
-    application.input({ seat: local.seat.id, kind: "mouse-button", button: 1, down: false, timeMilliseconds: performance.now() });
-    await application.step(25);
+    const ammo = (): number => ui().ammo?.count ?? -1;
+    expect(ammo()).toBeGreaterThan(0);
+    const fired = await holdFire(application, local.seat.id, ammo, () => ui().activeWeapon, 40);
+    expect(fired.ammoAfter).toBeLessThan(fired.ammoBefore);
     expect(ui().health).toBeGreaterThan(0);
-    expect(healthBefore).toBeGreaterThan(0);
-    expect(application.simulation).toBeDefined();
   } finally { try { await app?.close(); } finally { await rm(root, { recursive: true, force: true }); } }
 }, 180000);

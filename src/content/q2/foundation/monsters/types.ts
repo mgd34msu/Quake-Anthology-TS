@@ -80,6 +80,13 @@ export interface MonsterState extends Q2AlternateFlyState {
   strafeTime: number;
   hadVisibility: boolean;
   closeSightTripped: boolean;
+  badMoveTime: number;
+  reachedHoldCombat: boolean;
+  thirdEye: boolean;
+  bumpTime: number;
+  /** AI_NOSTEP: the rerelease ground step is one unit instead of the usual 18. */
+  noStep: boolean;
+  randomChangeTime: number;
   meleeTime: number;
   searchTime: number;
   trailTime: number;
@@ -121,7 +128,7 @@ export interface MonsterContext {
   consumeSourceBlocked(): boolean;
   runHintPath(distance: number): boolean;
   checkLostHintPath(): boolean;
-  schedule(delaySeconds: number, callback: "monster_dead_think" | "M_FliesOn" | "M_FliesOff"): undefined;
+  schedule(delaySeconds: number, callback: "monster_dead_think" | "M_FlyCheck" | "M_FliesOn" | "M_FliesOff"): undefined;
   setMove(name: string, immediate?: boolean): undefined;
   stand(): undefined;
   walk(): undefined;
@@ -170,6 +177,8 @@ export interface Q2MonsterDefinition {
   readonly viewHeight?: number;
   readonly yawSpeed?: number;
   readonly locomotion?: MonsterState["locomotion"];
+  /** Soldier family member: the weapon its shared callbacks fire, the model skin it spawns with and the entity count that selects them. */
+  readonly soldier?: { readonly weapon: MonsterState["weapon"]; readonly skin: number; readonly count: number };
   readonly initialMove: string;
   readonly moves: readonly MonsterMove[];
   readonly callbacks: Readonly<Record<string, MonsterHandler>>;

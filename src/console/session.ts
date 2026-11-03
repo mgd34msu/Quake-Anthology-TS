@@ -3,7 +3,7 @@ import type { SeatId } from "../contracts/identity.ts";
 import type { SeatInputEvent, SeatInputFocus } from "../contracts/ui.ts";
 import { type CommandBuffer, tokenizeCommand } from "../core/commands/index.ts";
 import type { CvarRegistry } from "../core/cvars/index.ts";
-import { KeyCode } from "../input/key-codes.ts";
+import { KeyCode } from "../core/key-codes.ts";
 import { ConsoleBuffer } from "./buffer.ts";
 import { queryConsoleEntries, type ConsoleDiscoveryEntry } from "./discovery.ts";
 import { ConsoleField, ConsoleHistory } from "./field.ts";
@@ -31,6 +31,7 @@ export class SeatConsole {
   private fraction = 0;
   private opened = false;
   private suppressToggleText = false;
+  private selectedEntry: { readonly name: string; readonly entry: ConsoleDiscoveryEntry | undefined } | null = null;
   private stagedOutput: { text: string; time: number; dialect: CommandDialect }[] | null;
   constructor(private options: SeatConsoleOptions) {
     if (options.context.session !== options.seat.session) throw new Error("Console belongs to another session");
@@ -39,7 +40,9 @@ export class SeatConsole {
   }
   get selectedCompletionEntry(): ConsoleDiscoveryEntry | undefined {
     const selected = this.field.selectedCompletion;
-    return selected === null ? undefined : queryConsoleEntries(this.options.commands, this.options.context).find(entry => entry.name === selected);
+    if (selected === null) { this.selectedEntry = null; return undefined; }
+    if (this.selectedEntry?.name !== selected) this.selectedEntry = { name: selected, entry: queryConsoleEntries(this.options.commands, this.options.context).find(entry => entry.name === selected) };
+    return this.selectedEntry.entry;
   }
   publish(focus: SeatInputFocus): void {
     this.stagedOutput = null;

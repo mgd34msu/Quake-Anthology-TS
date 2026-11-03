@@ -104,7 +104,7 @@ export class QvmModActors {
     this.flags = definition?.abi === "declared" ? definition.damageFlags : legacyFlags;
     this.callBytes = { damage: argumentBytes(this.calls.damage), touch: argumentBytes(this.calls.touch), use: argumentBytes(this.calls.use), pain: argumentBytes(this.calls.pain), die: argumentBytes(this.calls.die) };
     const callback = (call: QvmFunctionCall) => this.sourceCallback(call.instructionIndex, call);
-    this.removeResolver = options.module.bindFunctionResolver((entry, _first, words) => this.callback(entry, words) === null ? undefined : callback);
+    this.removeResolver = options.module.bindFunctionResolver((entry, first, words) => this.callback(entry, first, words) === null ? undefined : callback);
     this.removeRelease = options.services.actors.onRelease(actor => {
       const pointer = this.actorPointers.get(actor.id);
       if (pointer !== undefined && this.pointers.get(pointer) === actor) this.pointers.delete(pointer);
@@ -201,14 +201,20 @@ export class QvmModActors {
     });
     return undefined;
   }
-  private callback(entry: number, words: DataView): { readonly owner: OwnedActor; readonly kind: ReactionKind } | null {
+  private callback(entry: number, first: number, words: () => DataView): { readonly owner: OwnedActor; readonly kind: ReactionKind } | null {
+    if (this.pointers.size === 0) return null;
     let match: { readonly owner: OwnedActor; readonly kind: ReactionKind } | null = null;
+    let view: DataView | null = null;
     for (const kind of callbackKinds) {
       const definition = this.calls[kind], offset = definition.roles.target * 4;
-      if (offset + 4 > words.byteLength) continue;
-      const owner = this.pointers.get(words.getInt32(offset, true));
+      let target: number;
+      if (offset === 0) target = first;
+      else { view ??= words(); if (offset + 4 > view.byteLength) continue; target = view.getInt32(offset, true); }
+      const owner = this.pointers.get(target);
       if (owner === undefined || this.entry(owner.id, kind) !== entry) continue;
-      requireArguments(this.callBytes[kind], words);
+      view ??= words();
+      if (offset === 0 && offset + 4 > view.byteLength) continue;
+      requireArguments(this.callBytes[kind], view);
       if (match !== null) throw new Error("QVM callback entry has ambiguous source signatures");
       match = { owner, kind };
     }
@@ -220,7 +226,7 @@ export class QvmModActors {
     finally { for (const edit of saved) call.words.setInt32(edit.index * 4, edit.word, true); }
   }
   private sourceCallback(entry: number, call: QvmFunctionCall): number {
-    const match = this.callback(entry, call.words); if (match === null) return call.proceed();
+    const match = this.callback(entry, call.words.byteLength >= 4 ? call.words.getInt32(0, true) : 0, () => call.words); if (match === null) return call.proceed();
     const { owner, kind } = match;
     const callbacks = this.options.services.callbacks; if (callbacks === undefined) throw new Error("Missing shared QVM actor callbacks");
     const word = (index: number) => call.words.getInt32(index * 4, true), actor = (index: number) => this.options.actor(word(index));

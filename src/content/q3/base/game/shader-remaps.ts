@@ -27,10 +27,8 @@ function quakePath(value: string): string {
       throw new RangeError("shader remap paths must contain byte-valued code units");
     }
   }
-  if (path.length >= MAX_QPATH) {
-    throw new RangeError("shader remap paths must fit MAX_QPATH including the terminator");
-  }
-  return path;
+  // strcpy overruns the 64-byte slot in id's AddRemap; map and cvar text is cut to what fits instead.
+  return path.length >= MAX_QPATH ? path.slice(0, MAX_QPATH - 1) : path;
 }
 
 function foldedAsciiByte(value: number): number {

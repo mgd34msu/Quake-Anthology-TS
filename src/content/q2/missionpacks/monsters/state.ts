@@ -35,6 +35,15 @@ export interface Q2MissionPackMonstersCheckpoint {
 }
 export class Q2MissionPackMonsterState {
   private readonly actors = new Map<ActorId, RogueMonsterState>();
+  private readonly released = new WeakSet<Q2GameServices["host"]["actors"]>();
+
+  /** Drops an actor's rogue state when its source actor is released; registered once per actor registry. */
+  bind(game: Q2GameServices): undefined {
+    if (this.released.has(game.host.actors)) return undefined;
+    this.released.add(game.host.actors);
+    game.host.actors.onRelease(actor => { this.actors.delete(actor.id); return undefined; });
+    return undefined;
+  }
   flyerNextMove: "none" | "run" = "none";
   widowShotsFired = 0;
   widowDamageMultiplier: 1 | 2 | 4 = 1;

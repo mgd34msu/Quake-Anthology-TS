@@ -9,6 +9,8 @@ import { QvmGuestMemory } from "./guest-memory.ts";
 import { QvmInterpreter } from "./interpreter.ts";
 import type { QvmArguments, QvmEvaluationStack, QvmCancellationScope, QvmFunctionHook, QvmFunctionObserver, QvmFunctionResolver, QvmSyscall, QvmFunctionCall, QvmSystemCall, QvmSystemCallResult } from "./interpreter.ts";
 import { parseQvmRestart } from "./image.ts";
+import type { QvmCvarServices } from "./cvar-syscalls.ts";
+import type { QvmSemantics } from "./interpreter.ts";
 import type { QvmMemory } from "./memory.ts";
 import type { QvmRegionEvaluation } from "./regions.ts";
 import type { VmRegistration } from "./registry.ts";
@@ -16,7 +18,7 @@ import { createQvmSystemCall } from "./syscalls.ts";
 import type { QvmHost, QvmRole } from "./syscalls.ts";
 
 export const qvmNumericProfile: NumericProfile = {
-  id: "q3:qvm-interpreted", arithmetic: { kind: "binary32", round: "each-operation" },
+  id: "q3:qvm-binary32", arithmetic: { kind: "binary32", round: "each-operation" },
   scalarStorage: "binary32", floatToInt: "qvm-indefinite", integerOverflow: "wrap32",
 };
 export function qvmApi(role: QvmRole, profile: QvmAbiProfile = "q3-modern"): Q3ApiIdentity {
@@ -35,7 +37,15 @@ export interface QvmHostState {
   readonly checkpoint: () => QvmHostCheckpoint;
   readonly restore: (state: QvmHostCheckpoint) => undefined;
 }
+/** vm_game, vm_cgame and vm_ui (qcommon/vm.c): 1 selects vm_interpreted.c; 0 and 2 run the compiled-VM semantics, id's default. */
+export function qvmSemanticsFromCvar(cvars: Pick<QvmCvarServices, "register">, role: QvmRole): QvmSemantics {
+  const name = role === "qagame" ? "vm_game" : role === "cgame" ? "vm_cgame" : "vm_ui";
+  const value = cvars.register(name, "2", 1)?.integerValue;
+  return value === 1 ? "interpreted" : "compiled";
+}
 export interface QvmModuleOptions {
+  /** Instruction semantics; defaults to the compiled VM id ships (vm_game 2). */
+  readonly semantics?: QvmSemantics;
   readonly artifact: Extract<ResolvedQvmArtifact, { readonly kind: "bytecode" }>;
   readonly host: QvmHost;
   readonly allocation?: QvmAllocationProfile;
@@ -81,7 +91,7 @@ export class QvmModule implements GuestExecutor {
       this.currentEntry = call;
       try { return systemCall(call); }
       finally { this.currentEntry = previous; }
-    }, options.allocation, options.registration, "compiled", (scope, perform) => {
+    }, options.allocation, options.registration, options.semantics ?? "compiled", (scope, perform) => {
       const previous = this.currentEntry; this.currentEntry = scope;
       try { return perform(); } finally { this.currentEntry = previous; }
     });

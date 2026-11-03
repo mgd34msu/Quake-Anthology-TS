@@ -18,7 +18,9 @@ function velocity(game: Q2GameServices, actor: ActorId, value: Vec3, ground?: Ac
 }
 
 function init(entity: Q2Entity, game: Q2GameServices): undefined {
-  entity.visible = false; entity.movedir = movedir(game.body(entity).angles);
+  // InitTrigger leaves movedir zero for an unrotated brush.
+  const angles = game.body(entity).angles;
+  entity.visible = false; entity.movedir = angles.x === 0 && angles.y === 0 && angles.z === 0 ? zero : movedir(angles);
   game.move(entity, { angles: zero }, false);
   return game.solid(entity, "trigger");
 }
@@ -83,7 +85,7 @@ export class Q2EnvironmentalTriggers {
 
   private readonly jumpTouch: Q2Touch = (self, services, contact) => {
     const other = services.entity(contact.other), body = services.host.bodies.read(contact.other);
-    if (body === null || !services.host.isMonster(contact.other) || other !== null && ((other.flags & 3) !== 0 || (other.serverFlags & 8) !== 0)) return undefined;
+    if (body === null || !services.host.isMonster(contact.other) || other !== null && ((other.flags & 3) !== 0 || (other.serverFlags & 2) !== 0)) return undefined;
     return velocity(services, contact.other, { x: self.movedir.x * self.speed, y: self.movedir.y * self.speed,
       z: body.ground === null ? body.velocity.z : self.movedir.z }, null);
   };

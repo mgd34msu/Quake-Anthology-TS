@@ -3,7 +3,7 @@ import { Mg3Monster } from "../ai/index.ts";
 import type { ActorId } from "../../../../../contracts/identity.ts";
 import { sameActor } from "../../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../../foundation/entity.ts";
-import { POINT, ZERO, length, normalize, vadd, vscale, vsub, yawFor } from "../../../foundation/types.ts";
+import { POINT, ZERO, length, normalize, vadd, vscale, vsub } from "../../../foundation/types.ts";
 import type { BaseMonster } from "../../../base/monsters.ts";
 import { launchSpike } from "../../../base/projectiles.ts";
 import type { MonsterSpecies } from "../../../base/species.ts";
@@ -113,10 +113,3 @@ export function registerOrb(context: Q1AddonContext): undefined {
   } }); return undefined;
 }
 
-export function launchOrbMissile(monster: BaseMonster, missile: Q1Actor, speed: number, accuracy: number): undefined {
-  const { game, entity } = monster, target = monster.enemy === null ? null : game.host.bodies.read(monster.enemy), basis = game.makeVectors(game.body(entity).angles), origin = game.body(missile).origin;
-  const targetOrigin = target === null ? ZERO : vadd(vadd(target.origin, target.bounds.min), vscale(vsub(target.bounds.max, target.bounds.min), 0.7));
-  const delta = vsub(targetOrigin, origin), travel = length(delta) / speed, velocity = target === null ? ZERO : { ...target.velocity, z: 0 };
-  const direction = vadd(vadd(normalize(vadd(delta, vscale(velocity, travel))), vscale(basis.up, accuracy * (game.host.random() - 0.5))), vscale(game.basis.right, accuracy * (game.host.random() - 0.5)));
-  game.setBody(missile, { velocity: vscale(direction, speed), angles: { x: 0, y: yawFor(direction), z: 0 } }); return game.schedule(missile, 5, game.named.action(missile, "SUB_Remove"));
-}

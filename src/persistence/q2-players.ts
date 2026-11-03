@@ -33,7 +33,7 @@ export function readQ2PlayerStateCheckpoint(reader: SaveReader): Q2PlayerStateCh
     damagePitch: n("damagePitch"), damageRoll: n("damageRoll"), damageTime: n("damageTime"), powerArmorTime: n("powerArmorTime"), fallTime: n("fallTime"), fallValue: n("fallValue"), landmarkFreeFall: b("landmarkFreeFall"), landmarkNoiseTime: n("landmarkNoiseTime"),
     oldVelocity: vector("oldVelocity"), oldViewAngles: vector("oldViewAngles"), killerYaw: n("killerYaw"), buttons: n("buttons"), latchedButtons: n("latchedButtons"), weaponThunk: b("weaponThunk"), bobTime: n("bobTime"), bobMove: n("bobMove"), event: s("event"),
     animationPriority: n("animationPriority"), animationEnd: n("animationEnd"), animationDuck: b("animationDuck"), animationRun: b("animationRun"), loopSound: s("loopSound"), selectedItem: reader.field("selectedItem").nullable(namespaced),
-    showScores: b("showScores"), showInventory: b("showInventory"), showHelp: b("showHelp"), chaseTarget: reader.field("chaseTarget").nullable(readSavedActor), coopRespawn: reader.field("coopRespawn").nullable(carry),
+    jumpHeld: false, showScores: b("showScores"), showInventory: b("showInventory"), showHelp: b("showHelp"), helpChanged: reader.field("helpChanged").value === undefined ? 0 : n("helpChanged"), gameHelpChanged: reader.field("gameHelpChanged").value === undefined ? 0 : n("gameHelpChanged"), chaseTarget: reader.field("chaseTarget").nullable(readSavedActor), coopRespawn: reader.field("coopRespawn").nullable(carry),
     floodTimes: [...reader.field("floodTimes").list(value => value.number())], floodLockUntil: n("floodLockUntil") };
 }
 export function readQ2PlayersCheckpoint(reader: SaveReader): Q2PlayersCheckpoint {

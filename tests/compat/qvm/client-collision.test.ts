@@ -44,7 +44,7 @@ test.skipIf(!existsSync(path))("QVM collision traps use the mounted retail colli
     expect(loaded).toBe("maps/q3dm1.bsp");
     expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_NUMINLINEMODELS), services)).toBe(world.models.length);
     expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_INLINEMODEL, [0]), services)).toBe(0);
-    expect(() => qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_INLINEMODEL, [world.models.length]), services)).toThrow();
+    expect(() => qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_INLINEMODEL, [world.models.length]), services)).toThrow("CM_InlineModel: bad number");
     const origin = parseEntities(world.entities).find(entity => entity.get("classname") === "info_player_deathmatch")?.get("origin")?.trim().split(/\s+/).map(Number);
     if (origin?.[0] === undefined || origin[1] === undefined || origin[2] === undefined) throw new Error("No spawn");
     const start = { x: origin[0], y: origin[1], z: origin[2] + 32 }, end = { ...start, z: start.z - 512 };
@@ -87,8 +87,8 @@ test.skipIf(!existsSync(path))("QVM collision traps use the mounted retail colli
     guest.bytes.set(new TextEncoder().encode("maps/other.bsp\0"), 64);
     await expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_LOADMAP, [64]), services)).rejects.toThrow("Map lifetime mismatch");
     expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_TEMPCAPSULEMODEL, [160, 176]), services)).toBe(254);
-    expect(() => qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_POINTCONTENTS, [192, 254]), services)).toThrow();
-    expect(() => qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_BOXTRACE, [4090, 128, 144, 0, 0, 0, 1]), services)).toThrow();
+    expect(() => qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_POINTCONTENTS, [192, 254]), services)).toThrow("CM_ClipHandleToModel: bad handle 1 < 254 < 256");
+    expect(() => qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_BOXTRACE, [4090, 128, 144, 0, 0, 0, 1]), services)).toThrow("QVM memory span exceeds allocation or has an invalid length");
     expect(qvmClientCollisionSyscall(call(QvmCgameImport.CG_CM_LOADMODEL), services)).toBeNull();
   } finally { await archive.close(); }
 });

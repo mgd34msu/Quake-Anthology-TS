@@ -1,3 +1,4 @@
+import { writeCapture } from "../../support/capture.ts";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -6,7 +7,7 @@ import { Application } from "../../../src/app/bootstrap/application.ts";
 import { RemoteApplication } from "../../../src/app/bootstrap/remote-application.ts";
 import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
-import { KeyCode } from "../../../src/input/key-codes.ts";
+import { KeyCode } from "../../../src/core/key-codes.ts";
 import { encodePng } from "../../../src/formats/images/png.ts";
 
 test("remote Q2 Display brightness changes actual pixels without reconnecting", async () => {
@@ -46,6 +47,6 @@ test("remote Q2 Display brightness changes actual pixels without reconnecting", 
     expect(sum(bright)).toBeGreaterThan(sum(dark) * 1.15);
     expect(await Bun.file(join(root, "settings/images.cfg")).text()).toContain('r_gamma "2"');
     expect(remote.networkPhase).toBe("active"); expect(server.networkClients[0]).toBe(peer); expect(remote.localPlayers[0]?.seat).toBe(local.seat);
-    await Bun.write("/tmp/video-settings-remote-cpu.png", encodePng(640, 480, bright));
+    await writeCapture("video-settings-remote-cpu.png", encodePng(640, 480, bright));
   } finally { await client?.close(); await server?.close(); await rm(root, { recursive: true, force: true }); }
 }, 60000);

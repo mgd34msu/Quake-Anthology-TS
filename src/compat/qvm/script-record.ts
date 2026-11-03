@@ -2,8 +2,8 @@
 // and botlib/l_script.c:StripDoubleQuotes. Copyright (C) 1999-2005 Id Software, Inc.
 // GPL-2.0-or-later.
 import { BinaryError } from "../../core/binary/index.ts";
-import type { ScriptToken, ScriptTokenRecord } from "../../ui/common/legacy/script/lexer.ts";
-import { SourceTokenMemory } from "../../ui/common/legacy/script/token-memory.ts";
+import type { ScriptToken, ScriptTokenRecord } from "../../content/legacy-script/lexer.ts";
+import { SourceTokenMemory } from "../../content/legacy-script/token-memory.ts";
 
 export const QVM_SCRIPT_TOKEN_BYTES = 1040;
 

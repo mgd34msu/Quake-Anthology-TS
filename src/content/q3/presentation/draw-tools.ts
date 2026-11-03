@@ -3,7 +3,7 @@
 import type { Vec4 } from "../../../core/math.ts";
 import { Draw2D } from "../../../text/draw2d.ts";
 import type { Rect as Rect2D } from "../../../contracts/render.ts";
-import { drawCgString, drawChar, drawCgProportionalString, drawCgBannerString, UI_SMALLFONT, proportionalStringWidth, bannerStringWidth } from "../../../text/q3-font.ts";
+import { drawCgString, drawChar, drawCgProportionalString, drawCgBannerString, proportionalStringWidth, bannerStringWidth } from "../../../text/q3-font.ts";
 import type { FixedTextOptions, UiTextOptions, LegacyFonts } from "../../../text/q3-font.ts";
 import type { SceneShader } from "./ref-entity.ts";
 import type { Refdef } from "./refdef.ts";
@@ -26,7 +26,6 @@ export function drawStrlen(text: string): number {
 }
 
 export { proportionalStringWidth, bannerStringWidth };
-export function proportionalSizeScale(style: number): number { return (style & UI_SMALLFONT) !== 0 ? 0.75 : 1; }
 
 export function fadeColor(time: number, startMsec: number, totalMsec: number): Vec4 | null {
   const start = startMsec | 0, total = totalMsec | 0, elapsed = ((time | 0) - start) | 0;

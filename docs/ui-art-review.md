@@ -1,6 +1,6 @@
 # Native menu art review
 
-Three reusable raster assets were generated with the built-in ChatGPT image-generation tool on 2026-09-11. The tool did not expose a model identifier. No CLI, API fallback, copied retail artwork, or pixel-processing script was used. The selected PNGs are unchanged copies of generated outputs, including their provenance metadata.
+Three reusable frame assets, the main-menu backdrop and the splash title were generated with the built-in ChatGPT image-generation tool on 2026-09-11. The tool did not expose a model identifier. No CLI, API fallback, copied retail artwork, or pixel-processing script was used. The selected PNGs are unchanged copies of generated outputs, including their provenance metadata.
 
 The materials draw on Quake's worn stone, Quake II's industrial iron, and Quake III's restrained arena colors. The center stays dark enough for live text. All text, controls, hover behavior, and focus state remain native UI elements.
 
@@ -11,6 +11,10 @@ The materials draw on Quake's worn stone, Quake II's industrial iron, and Quake 
 | [Background](../assets/ui/menu-background.png) | 1536 × 1024 | Fully opaque RGB | Full image | None | None |
 | [Panel](../assets/ui/menu-panel.png) | 1254 × 1254 | RGBA, transparent center | Full image | 160 pixels on each edge | 32 logical pixels at scale 0.2 |
 | [Focus frame](../assets/ui/menu-focus.png) | 2172 × 724 | RGBA, transparent center | x=0..2172, y=68..701 | 96 pixels on each edge | 6 logical pixels at scale 0.0625 |
+| [Main-menu backdrop](../assets/ui/main-menu-background.png) | 1672 × 941 | Fully opaque RGB | Full image, cropped to the window aspect | None | None |
+| [Splash title](../assets/ui/title.png) | 1536 × 1024 | Opaque | Full image, cover-fit to the splash window | None | None |
+
+The production menus draw only the main-menu backdrop (startup menu) and the splash title; the background, panel and focus frames are kept and checked but not drawn by the flat menu skin.
 
 Region endpoints are exclusive. The focus frame's UV rectangle is `(0, 68/724)` to `(1, 701/724)`, with region dimensions 2172 × 633. The PNG stays intact; cropping occurs through UV coordinates. Panel UVs cover `(0, 0)` to `(1, 1)`.
 
@@ -20,7 +24,7 @@ The background is a full-screen image rather than a seamless tile. It fits a 3:2
 
 ## Inspection and limits
 
-`bun run assets/ui/inspect.ts` decodes the actual files through `src/formats/images/png.ts`, checks their dimensions and SHA-256 hashes, and measures every alpha sample. The command passed for all three files.
+`bun run assets/ui/inspect.ts` decodes the actual files through `src/formats/images/png.ts`, checks their dimensions and SHA-256 hashes, and measures every alpha sample. The command checks every file listed in the manifest.
 
 The background contains 1,572,864 opaque pixels. The panel contains 1,173,850 fully transparent pixels, 397,241 partial-alpha pixels, and 1,425 opaque pixels. The focus frame contains 1,396,697 fully transparent pixels, 172,488 partial-alpha pixels, and 3,343 opaque pixels. Both frame centers have alpha zero. Their partial alpha is retained, so they blend with the underlying native fill.
 
@@ -69,3 +73,5 @@ Use case: stylized-concept. Asset type: a single transparent PNG focus-ring bord
 ```
 
 The generated sizes and border extents differ from the requested ideals. The manifest records measured dimensions and conservative source caps rather than treating prompt dimensions as output facts.
+
+Coverage note: the entries above review the three reusable raster assets. The main-menu backdrop (`assets/ui/main-menu-background.png`, prompt and hash in `assets/ui/main-menu-background.prompt.md`) and the splash title (`assets/ui/title.png`, added in 1.2.5) were generated in the same way but have no review entry here.

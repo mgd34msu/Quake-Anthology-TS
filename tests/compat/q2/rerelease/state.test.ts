@@ -11,7 +11,12 @@ import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from
 import { X64Cpu } from "../../../../src/guest/x64/index.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
 import { GameplayAuthority, SharedInventoryTable } from "../../../../src/world/gameplay/index.ts";
-import { cgameExportLayout, edictLayout, fieldOffset, gameExportLayout, gameImportLayout, gameImports, guestInt, guestPointer, privateClientPrefixLayout, RereleaseQ2GuestHost, RereleaseSourceClient, RereleaseSourceEdict, sourceRereleaseClientProfile } from "../../../../src/compat/q2/rerelease/index.ts";
+import { cgameExportLayout, gameExportLayout, gameImportLayout, gameImports } from "../../../../src/compat/q2/rerelease/api.ts";
+import { edictLayout, fieldOffset, privateClientPrefixLayout } from "../../../../src/compat/q2/rerelease/layouts.ts";
+import { guestInt, guestPointer } from "../../../../src/compat/q2/rerelease/module.ts";
+import { RereleaseQ2GuestHost } from "../../../../src/compat/q2/rerelease/host.ts";
+import { RereleaseSourceClient, RereleaseSourceEdict } from "../../../../src/compat/q2/rerelease/source-state.ts";
+import { sourceRereleaseClientProfile } from "../../../../src/compat/q2/rerelease/client-profile.ts";
 
 function unavailable(): never { throw new Error("This binding check does not provide gameplay, assets or transport"); }
 function stateFixture(budgets: { readonly instructionBudget?: number; readonly loadingInstructionBudget?: number } = {}, registry?: SessionActorRegistry) {
@@ -84,7 +89,9 @@ test("shared body and callbacks mutate live private bytes, retain link snapshots
   expect(first.health).toBe(51);
   memory.writeInt32(first.at("spawn_count"), 2); host.reconcile();
   expect(actors.isLive(actor.id)).toBe(false);
-  expect(first.raw.currentActor()?.generation).not.toBe(actor.id.generation);
+  const replacement = first.raw.currentActor();
+  if (replacement === null) throw new Error("Replaced source lifetime has no current actor");
+  expect(replacement.generation).toBeGreaterThan(actor.id.generation);
 });
 
 test("BoxEdicts synchronous filters return Keep/Skip/End and capacity zero counts without an output pointer", () => {
@@ -100,13 +107,46 @@ test("BoxEdicts synchronous filters return Keep/Skip/End and capacity zero count
   expect(invokeImport("BoxEdicts", [args[0], args[1], guestPointer(null), { kind: "uint64", value: 0n }, guestInt(1), guestPointer(skipEnd), guestPointer(null)])).toEqual({ kind: "uint64", value: 0n });
 });
 
+test("BoxEdicts plain Skip continues to the next candidate and a full list stops counting", () => {
+  const { host, memory, first, second, invokeImport, code } = stateFixture(); host.reconcile();
+  const bounds = memory.allocate({ byteLength: 24 });
+  const output = memory.allocate({ byteLength: 16 });
+  const boxArguments = (list: ReturnType<typeof guestPointer>, capacity: bigint, filter: ReturnType<typeof guestPointer>): readonly GuestCallValue[] =>
+    [guestPointer(bounds), guestPointer(memory.offset(bounds, 12n)), list, { kind: "uint64", value: capacity }, guestInt(1), filter, guestPointer(null)];
+  const healthAsOutcome = code(new Uint8Array([0x8b, 0x81, 0x78, 0x07, 0, 0, 0xc3])); // MOV EAX,[RCX+health=1912]; RET
+  first.health = 1; second.health = 0; // first is a plain Skip, second a plain Keep
+  expect(invokeImport("BoxEdicts", boxArguments(guestPointer(output), 2n, guestPointer(healthAsOutcome)))).toEqual({ kind: "uint64", value: 1n });
+  expect(memory.readPointer(output)?.byteOffset).toBe(second.raw.address.byteOffset);
+  first.health = 0; second.health = 0; // both Keep
+  memory.writePointer(memory.offset(output, 8n), null);
+  expect(invokeImport("BoxEdicts", boxArguments(guestPointer(output), 1n, guestPointer(healthAsOutcome)))).toEqual({ kind: "uint64", value: 1n });
+  expect(memory.readPointer(memory.offset(output, 8n))).toBeNull();
+});
+
+test("BoxEdicts filters may link entities, as M_CheckDodge does through monsterinfo.dodge", () => {
+  const { host, memory, links, invokeImport, code } = stateFixture(); host.reconcile();
+  const bounds = memory.allocate({ byteLength: 24 });
+  const trap = memory.readPointer(memory.offset(host.module.gameImportAddress, BigInt(fieldOffset(gameImportLayout, "linkentity"))));
+  if (trap === null) throw new Error("Missing linkentity trap");
+  const stub = new Uint8Array(24);
+  stub.set([0x48, 0x83, 0xec, 0x28, 0x48, 0xb8]); new DataView(stub.buffer).setBigUint64(6, trap.byteOffset, true);
+  stub.set([0xff, 0xd0, 0x48, 0x83, 0xc4, 0x28, 0x31, 0xc0, 0xc3], 14); // sub rsp,40; mov rax,trap; call rax; add rsp,40; xor eax,eax; ret
+  const filter = code(stub);
+  links.length = 0;
+  const count = invokeImport("BoxEdicts", [guestPointer(bounds), guestPointer(memory.offset(bounds, 12n)), guestPointer(null), { kind: "uint64", value: 0n }, guestInt(1), guestPointer(filter), guestPointer(null)]);
+  expect(count).toEqual({ kind: "uint64", value: 2n });
+  expect(links).toHaveLength(2);
+});
+
 test("source tag cleanup retires raw actors before a native level may reuse its same address", () => {
   const { host, memory, actors, first, invokeImport } = stateFixture(); host.reconcile();
   const previous = first.raw.currentActor(); if (previous === null) throw new Error("Missing first source lifetime");
   invokeImport("FreeTags", [guestInt(766)]);
   expect(actors.isLive(previous)).toBe(false);
   host.reconcile();
-  expect(first.raw.currentActor()?.generation).not.toBe(previous.generation);
+  const rebound = first.raw.currentActor();
+  if (rebound === null) throw new Error("Reused source address has no current actor");
+  expect(rebound.generation).toBeGreaterThan(previous.generation);
   expect(memory.readUint8(memory.offset(first.raw.address, BigInt(fieldOffset(edictLayout, "inuse"))))).toBe(1);
 });
 
@@ -127,9 +167,11 @@ test("original source reconstruction retires saved edicts never materialized by 
     expect(actors.resolveSaved(firstSaved.id)).toBeNull(); expect(actors.resolveSaved(secondSaved.id)).toBeNull();
     expect(actors.isLive(restoredWorld.id)).toBe(true);
     host.reconcile(); actors.rebindRestoredSource("test:rr-bindings");
-    expect(actors.resolveSaved(firstSaved.id)?.id ?? null).toBe(first.raw.currentActor());
-    expect(actors.resolveSaved(secondSaved.id)?.id ?? null).toBe(second.raw.currentActor());
-    expect(actors.resolveSaved(secondSaved.id)?.id.generation).not.toBe(unseen.id.generation);
+    const firstCurrent = first.raw.currentActor(), secondCurrent = second.raw.currentActor();
+    if (firstCurrent === null || secondCurrent === null) throw new Error("Candidate edicts have no current actor");
+    expect(actors.resolveSaved(firstSaved.id)?.id).toBe(firstCurrent);
+    expect(actors.resolveSaved(secondSaved.id)?.id).toBe(secondCurrent);
+    expect(secondCurrent.generation).toBeGreaterThan(unseen.id.generation);
     expect(actors.resolveSaved(world.id)).toBe(restoredWorld);
   } finally { host.shutdown(); }
   expect(actors.isLive(restoredWorld.id)).toBe(true);

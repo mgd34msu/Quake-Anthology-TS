@@ -572,6 +572,8 @@ interface Type2Context {
     stack: number[];
     nStems: number;
     widthParsed: boolean;
+    /** Remaining charstring operations; subroutine fan-out is otherwise exponential. */
+    budget: number;
 }
 function moveTo(ctx: Type2Context, dx: number, dy: number): void {
     if (ctx.current !== null && ctx.current.length > 0)
@@ -737,6 +739,8 @@ function execCharstring(code: Uint8Array, ctx: Type2Context, globalSubrs: Uint8A
     const stack = ctx.stack;
     let i = 0;
     while (i < code.length) {
+        if (--ctx.budget < 0)
+            throw new RangeError("CFF charstring exceeds its operation budget");
         const b0 = at(code, i, "code");
         if (b0 >= 32 || b0 === 28) {
             let v: number;
@@ -760,6 +764,8 @@ function execCharstring(code: Uint8Array, ctx: Type2Context, globalSubrs: Uint8A
                 v = readInt32BE(code, i + 1) / 65536;
                 i += 5;
             }
+            if (stack.length >= 513)
+                throw new RangeError("CFF charstring stack overflow");
             stack.push(v);
             continue;
         }
@@ -965,7 +971,7 @@ function getCffContours(cff: CffFont, gid: number): FlattenedContourT[] {
         localSubrs = at(cff.fdLocalSubrs, fd, "CFF font dictionary");
         localBias = at(cff.fdLocalBias, fd, "CFF local subroutine bias");
     }
-    const ctx: Type2Context = { x: 0, y: 0, contours: [], current: null, stack: [], nStems: 0, widthParsed: false };
+    const ctx: Type2Context = { x: 0, y: 0, contours: [], current: null, stack: [], nStems: 0, widthParsed: false, budget: 1_000_000 };
     execCharstring(code, ctx, cff.globalSubrs, cff.globalBias, localSubrs, localBias, 0);
     if (ctx.current !== null && ctx.current.length > 0)
         ctx.contours.push(ctx.current);
@@ -1179,12 +1185,17 @@ function parseFontData(buf: Uint8Array): ParseFontResultT {
             return { ok: false, reason: "invalid loca table" };
         const locaOffsets = readLoca(view, locaT.offset, numGlyphs, indexToLocFormat);
         const rawCache = new Map<number, RawPoint[][]>();
+        // Components can reference themselves at every level, so breadth needs a budget as well as depth.
+        let resolveBudget = 0;
         const getRaw = (gid: number, depth: number): RawPoint[][] => {
             if (depth === 0) {
                 const cached = rawCache.get(gid);
                 if (cached !== undefined)
                     return cached;
+                resolveBudget = 4096;
             }
+            else if (--resolveBudget < 0)
+                throw new RangeError("Composite glyph exceeds its component budget");
             if (!Number.isInteger(gid) || gid < 0 || gid >= numGlyphs)
                 return [];
             if (depth > 8)
@@ -1364,7 +1375,9 @@ export function rasterizeContours(contoursPx: FlattenedContourT[], width: number
 }
 export function rasterizeGlyph(font: ParsedFontT, gid: number, px: number): RasterizedGlyphT {
     const scale = px / font.unitsPerEm;
-    const width = Math.max(1, Math.round(font.advanceWidth(gid) * scale));
+    // Metrics come from the font file; a glyph cell is never legitimately many times the pixel size.
+    const limit = Math.max(64, Math.ceil(px * 4));
+    const width = Math.min(limit, Math.max(1, Math.round(font.advanceWidth(gid) * scale)));
     const contours = font.contours(gid);
     let yMin = 0;
     for (const c of contours)
@@ -1372,7 +1385,7 @@ export function rasterizeGlyph(font: ParsedFontT, gid: number, px: number): Rast
             if (p.y < yMin)
                 yMin = p.y;
     const bottom = Math.min(0, yMin);
-    const height = Math.max(1, Math.round((font.ascent - bottom) * scale));
+    const height = Math.min(limit, Math.max(1, Math.round((font.ascent - bottom) * scale)));
     if (contours.length === 0) {
         return { width, height, coverage: new Uint8Array(width * height) };
     }
@@ -1415,7 +1428,8 @@ export function rasterizeColorGlyph(font: ParsedFontT, baseGid: number, px: numb
     if (layers === null)
         return null;
     const scale = px / font.unitsPerEm;
-    const width = Math.max(1, Math.round(font.advanceWidth(baseGid) * scale));
+    const limit = Math.max(64, Math.ceil(px * 4));
+    const width = Math.min(limit, Math.max(1, Math.round(font.advanceWidth(baseGid) * scale)));
     const resolved: {
         contours: FlattenedContourT[];
         color: {
@@ -1438,7 +1452,7 @@ export function rasterizeColorGlyph(font: ParsedFontT, baseGid: number, px: numb
         resolved.push({ contours, color });
     }
     const bottom = Math.min(0, yMin);
-    const height = Math.max(1, Math.round((font.ascent - bottom) * scale));
+    const height = Math.min(limit, Math.max(1, Math.round((font.ascent - bottom) * scale)));
     const pixels = new Uint8Array(width * height * 4);
     for (const { contours, color } of resolved) {
         if (contours.length === 0)
@@ -1479,28 +1493,37 @@ type AtlasCellT = AtlasCellFields & ({
     color: false;
     coverage: Uint8Array;
 });
+/** 4096 x 4096 texels, the practical GL texture ceiling for UI atlases. */
+const MAX_ATLAS_PIXELS = 4096 * 4096;
 export function buildFontAtlas(font: ParsedFontT, codepoints: Iterable<number, unknown, unknown>, px: number, maxWidth = 512): FontAtlasT {
     if (!Number.isFinite(px) || px <= 0 || !Number.isSafeInteger(maxWidth) || maxWidth < 1)
         throw new RangeError("Font atlas pixel size and width must be positive");
     const cells: AtlasCellT[] = [];
     let lineHeight = 0;
     for (const cp of codepoints) {
-        const gid = font.cmapLookup(cp);
-        if (gid === 0)
-            continue;
-        if (font.colorLayers(gid) !== null) {
-            const raster = rasterizeColorGlyph(font, gid, px);
-            if (raster === null)
+        // cmap, outline and color tables decode lazily, so a hostile glyph throws here rather than in parseFont.
+        try {
+            const gid = font.cmapLookup(cp);
+            if (gid === 0)
                 continue;
+            if (font.colorLayers(gid) !== null) {
+                const raster = rasterizeColorGlyph(font, gid, px);
+                if (raster === null)
+                    continue;
+                if (raster.height > lineHeight)
+                    lineHeight = raster.height;
+                cells.push({ codepoint: cp, width: raster.width, height: raster.height, color: true, rgba: raster.pixels });
+                continue;
+            }
+            const raster = rasterizeGlyph(font, gid, px);
             if (raster.height > lineHeight)
                 lineHeight = raster.height;
-            cells.push({ codepoint: cp, width: raster.width, height: raster.height, color: true, rgba: raster.pixels });
-            continue;
+            cells.push({ codepoint: cp, width: raster.width, height: raster.height, color: false, coverage: raster.coverage });
         }
-        const raster = rasterizeGlyph(font, gid, px);
-        if (raster.height > lineHeight)
-            lineHeight = raster.height;
-        cells.push({ codepoint: cp, width: raster.width, height: raster.height, color: false, coverage: raster.coverage });
+        catch (error) {
+            if (!(error instanceof RangeError))
+                throw error;
+        }
     }
     const sorted = [...cells].sort((a, b) => b.height - a.height);
     const gap = 1;
@@ -1526,6 +1549,8 @@ export function buildFontAtlas(font: ParsedFontT, codepoints: Iterable<number, u
             shelfHeight = height;
     }
     const atlasHeight = cursorY + shelfHeight + gap;
+    if (atlasWidth * atlasHeight > MAX_ATLAS_PIXELS)
+        throw new RangeError("Font atlas exceeds the size limit");
     const pixels = new Uint8Array(atlasWidth * atlasHeight * 4);
     const glyphs = new Map<number, AtlasRectT>();
     for (const cell of cells) {

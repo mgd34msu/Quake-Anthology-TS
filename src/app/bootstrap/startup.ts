@@ -7,6 +7,7 @@ import { buildUnifiedComposition } from "./network/unified-content.ts";
 import { applicationOptionsForRecipe, loadApplicationContent } from "./content.ts";
 import { addressKey } from "../../network/common/endpoint.ts";
 import { localClientAccount } from "./client-bootstrap.ts";
+import { ApplicationMatchRankings } from "./match-results.ts";
 import { readSeatLanguage } from "../../ui/settings/language.ts";
 import { parseLoadRequest } from "./save-requests.ts";
 import { q3MapLaunch } from "./q3-map-command.ts";
@@ -39,7 +40,6 @@ import { MusicControls } from "../../audio/music.ts";
 import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { SeatConsole } from "../../console/session.ts";
 import { registerDiscoveryCommands } from "../../console/discovery.ts";
-import { primeLlmConsoleSession } from "../../console/llm.ts";
 import { drawConsole } from "../../console/draw.ts";
 import { consoleMetrics } from "../../console/metrics.ts";
 import { SeatTextPresentation } from "../../text/layout.ts";
@@ -51,9 +51,8 @@ import { ControllerSettings } from "./controller-settings.ts";
 import { StartupServerBrowser } from "./server-browser.ts";
 import type { BrowserConnection } from "./server-browser.ts";
 import { ConfigStore, settingsPath } from "../../settings/config.ts";
-import { defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
+import { defaultUserContentRoot, userDataDirectory, userProductDirectory } from "../../content/user-data.ts";
 import { RemoteApplication } from "./remote-application.ts";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { createIdentityOwner } from "../../contracts/identity.ts";
 import type { ClientId, SeatId } from "../../contracts/identity.ts";
@@ -65,7 +64,7 @@ import { EngineSession, type SessionSeat } from "../../world/session/index.ts";
 import { InputRouter } from "../../input/router.ts";
 import { SdlControllers } from "../../platform/controller.ts";
 import { prepareApplicationSave } from "./original-save.ts";
-import { saveCommandPath } from "../../persistence/save-policy.ts";
+import { assertLoadPathAllowed, saveCommandPath } from "../../persistence/save-policy.ts";
 import { SceneFrameBuilder } from "../../render/commands/frame.ts";
 import { SceneImageRegistry } from "../../render/scene/resources.ts";
 import { loadNativeUiArt } from "../../ui/common/index.ts";
@@ -147,6 +146,7 @@ export class StartupApplication {
   private lobbyTransition: { run(): Promise<void>; cancel(error: Error): void } | null = null;
   private lobbyPoll: Promise<void> | null = null;
   private lobbySource: ClientSourceLifetime | null = null;
+  private readonly matchRankings: ApplicationMatchRankings;
   private readonly keys = new ApplicationKeys(text => this.print(text));
   private readonly musicControls = new MusicControls();
   private scripts: ConsoleScriptFiles | null = null;
@@ -180,6 +180,7 @@ export class StartupApplication {
   private frontendRouting: ApplicationConsoleRouting | null = null;
 
   private constructor(readonly model: StartupSelectionModel, private readonly host: ApplicationHost & { readonly localLobbies?: LocalLobbyService }, saveDirectory: string, private readonly entry: "menu" | "run") {
+    this.matchRankings = host.localRankings ?? new ApplicationMatchRankings();
     this.lobby = new ApplicationLocalLobby(host.localLobbies ?? new LocalLobbyService(), localClientAccount(this.identity), {
       host: async () => {
         const selection = this.lobbySelection;
@@ -206,9 +207,13 @@ export class StartupApplication {
     });
   }
 
-  static async open(options: ApplicationOptions, host: ApplicationHost & { readonly localLobbies?: LocalLobbyService }, saveDirectory = join(homedir(), ".local", "share", "quake-typescript", "saves"), entry: "menu" | "run" = "menu"): Promise<StartupApplication> {
+  static async open(options: ApplicationOptions, host: ApplicationHost & { readonly localLobbies?: LocalLobbyService }, saveDirectory = userDataDirectory("saves", options.userContentRoot), entry: "menu" | "run" = "menu"): Promise<StartupApplication> {
     const application = new StartupApplication(await createStartupSelection(options), host, saveDirectory, entry); startupStamp("selection+catalog");
-    try { application.browser = await StartupServerBrowser.open(new ConfigStore(join(saveDirectory, "..", "settings"))); startupStamp("server-browser"); await application.openGraphics(); startupStamp("openGraphics"); return application; }
+    try {
+      // The browser is optional: a denied UDP bind must not stop single-player.
+      try { application.browser = await StartupServerBrowser.open(new ConfigStore(join(saveDirectory, "..", "settings"))); }
+      catch (error) { application.print(`Server browser unavailable: ${error instanceof Error ? error.message : String(error)}\n`); }
+      startupStamp("server-browser"); await application.openGraphics(); startupStamp("openGraphics"); return application; }
     catch (error) { await application.close(); throw error; }
   }
 
@@ -248,13 +253,19 @@ export class StartupApplication {
     await this.preferences.saveGlobal();
   }
 
+  /** A settings write failure (full disk, read-only folder) is reported; it does not end the application. */
+  private async persistPreferencesOrWarn(): Promise<void> {
+    try { await this.persistPreferences(); }
+    catch (error) { this.print(`Could not save settings: ${error instanceof Error ? error.message : String(error)}\n`); }
+  }
+
   private async refreshPreferenceBaseline(force = false): Promise<void> {
     const options = this.model.options;
-    const inputKey = JSON.stringify([movementDialect(options), this.model.bindingItems()]);
+    const inputKey = `${movementDialect(options)}|${this.model.bindingItemsKey()}`;
     if (!force && this.baselineProduct === options.product && this.baselineInput === inputKey) return;
     // Never persist before the first baseline load: writing the (default)
     // global tuning first would clobber the per-product seat profile being read.
-    if (this.baselineProduct !== null) await this.persistPreferences();
+    if (this.baselineProduct !== null) await this.persistPreferencesOrWarn();
     const product = this.model.catalog.product(options.product);
     const settings = new ConfigStore(product.userContent?.root
       ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
@@ -317,7 +328,7 @@ export class StartupApplication {
       typography = await loadMenuTypography(this.model.catalog, images, font.font.classic, imageSettings.policy); startupStamp("typography");
       const fontSource = font.font.classic.picture.image.source;
       if (fontSource.kind !== "resource") throw new Error("Startup font has no mounted resource identity");
-      art = await loadNativeUiArt(fontSource.resource.id, images, loadMenuArtImage); startupStamp("ui-art");
+      art = await loadNativeUiArt(fontSource.resource.id, images, loadMenuArtImage, { frames: false }); startupStamp("ui-art");
       renderer = await NativeRenderer.open({ ...options, renderWorker: imageSettings.cvars.variableValue("r_smp") !== 0 }, owner, images); startupStamp("renderer");
       const native = renderer;
       await imageSettings.refreshDisplay(renderer);
@@ -543,6 +554,7 @@ export class StartupApplication {
     return this.client?.platform.current?.kind === "world" ? (this.game ?? this.remote)?.input(event) ?? false
       : this.client?.locals[0]?.prepared.input.input(event) ?? false;
   }
+  get quitRequested(): boolean { return this.stopping; }
   requestQuit(): void { this.gtvAbort?.abort(); this.stopping = true; this.game?.requestQuit(); this.remote?.requestQuit(); }
   readPixels(): Uint8Array { if (this.graphics === null) throw new Error("Startup menu is not visible"); return this.graphics.renderer.readPixels(); }
   captureNextFrame(): Promise<Uint8Array> { if (this.graphics === null) return Promise.reject(new Error("Startup menu is not visible")); return this.graphics.renderer.captureNextFrame().then(frame => frame.pixels); }
@@ -619,6 +631,8 @@ export class StartupApplication {
       } });
     this.demos = demos; this.releaseDemos = demos.attach(prepared.commands);
     for (const name of ["connect", "disconnect", "quit"]) {
+      // PreparedStartup already owns these names and forwards them to routeCommand through frontendCommand.
+      if (prepared.commands.exists(name)) continue;
       const handler = (command: import("../../core/commands/index.ts").CommandInvocation): undefined => {
         this.routeCommand(name, command.args, command.source, prepared); prepared.noteWorldAction();
         return undefined;
@@ -698,17 +712,24 @@ export class StartupApplication {
     }
     if (this.game === null && (name === "map" || prepared?.commands.dialect === "q3" && ["devmap", "spmap", "spdevmap"].includes(name))) {
       if (args.length !== 1 || args[0] === undefined) { this.print("Usage: " + name + " <name>\n"); return true; }
+      let mapName: string;
+      try { mapName = mapResourcePath(args[0]); } catch (error) { this.print(`${error instanceof Error ? error.message : String(error)}\n`); return true; }
       if (prepared !== undefined && prepared.commands.dialect === "q3") {
         const launch = q3MapLaunch(options.q3Product?.policy ?? { kind: "retail" }, name,
           Number(prepared.source.find("g_gametype")?.latchedValue ?? prepared.source.variableString("g_gametype")));
         const { teamArenaSkirmish: _teamArenaSkirmish, ...rest } = options;
-        this.pending = { kind: "initial", options: { ...rest, q3MapLaunch: launch, mode: launch.singlePlayer ? "singleplayer" : "deathmatch", map: mapResourcePath(args[0]), network: { kind: "offline" } } };
-      } else this.pending = { kind: "initial", options: { ...options, map: mapResourcePath(args[0]), network: { kind: "offline" } } };
+        this.pending = { kind: "initial", options: { ...rest, q3MapLaunch: launch, mode: launch.singlePlayer ? "singleplayer" : "deathmatch", map: mapName, network: { kind: "offline" } } };
+      } else this.pending = { kind: "initial", options: { ...options, map: mapName, network: { kind: "offline" } } };
       return true;
     }
     if (this.game === null && name === "load") {
-      const request = parseLoadRequest(args);
-      this.pending = { kind: "load", path: saveCommandPath(this.saves.directory, request.name), ...(request.sourceProduct === undefined ? {} : { sourceProduct: request.sourceProduct }) }; return true;
+      try {
+        const request = parseLoadRequest(args);
+        const path = saveCommandPath(this.saves.directory, request.name);
+        assertLoadPathAllowed(this.saves.directory, path, source, { allowAnyPath: options.allowLoadPaths === true, trustedDirectories: [] });
+        this.pending = { kind: "load", path, ...(request.sourceProduct === undefined ? {} : { sourceProduct: request.sourceProduct }) };
+      } catch (error) { this.print(`${error instanceof Error ? error.message : String(error)}\n`); }
+      return true;
     }
     return false;
   }
@@ -800,15 +821,12 @@ export class StartupApplication {
       if (origin?.kind !== "local-seat" || origin.seat.equals(local.seat.id) && origin.client.equals(local.client.id)) console.print(text);
     });
     const releaseDiscovery = registerDiscoveryCommands(prepared.commands, text => console.print(text));
-    // Warm the one LLM session while the user is still choosing a game; the
-    // same settings service (and therefore session) is reused by every world.
-    if (this.host.llm !== undefined) void primeLlmConsoleSession(prepared.commands, this.host.llm, context).catch(() => undefined);
     this.releaseMenuInput = () => { releaseInput(); releaseOutput(); releaseDiscovery(); };
   }
 
   private serverProfileLibrary(): LibraryMenuService {
     let entries: readonly LibraryEntry[] = [], status = "", generation = 0;
-    const store = new ConfigStore(join(homedir(), ".local", "share", "quake-typescript", "settings"));
+    const store = new ConfigStore(join(this.saves.directory, "..", "settings"));
     const refresh = async (): Promise<void> => {
       const revision = ++generation;
       try {
@@ -1068,6 +1086,14 @@ export class StartupApplication {
     graphics.router.updateCapture();
   }
 
+  /** A fault in a game or remote session ends that session, not the program. World corruption still ends the process. */
+  private async failActiveSource(active: Application | RemoteApplication, error: unknown): Promise<void> {
+    if (this.closed || this.stopping || (active instanceof Application && active.worldFailed)) throw error;
+    this.print(`Session ended by an error: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+    this.status = error instanceof Error ? error.message : String(error);
+    await this.returnToFrontend();
+  }
+
   private async returnToFrontend(): Promise<void> {
     const client = this.client;
     if (client === null) throw new Error("Retained client is unavailable");
@@ -1079,7 +1105,7 @@ export class StartupApplication {
     this.activateFrontend();
     source?.releaseSettings();
     const retired = client.session.detachWorld();
-    this.game = null; this.remote = null;
+    this.game = null; this.remote = null; this.gtv = null;
     client.source.current = null;
     try { await source?.retire(); } finally { await retired.close(); }
     if (localPlayerCount !== undefined) this.model.select("seats", String(localPlayerCount));
@@ -1168,7 +1194,7 @@ export class StartupApplication {
     this.closeFrontendMovie();
     const previous = this.client?.source.current;
     if (this.game !== null) this.preferences.values = this.game.frontendSettings;
-    await this.persistPreferences();
+    await this.persistPreferencesOrWarn();
     this.graphics?.menu.setStatus("Loading...", true);
     this.graphics?.draw(previous ?? null);
     try {
@@ -1206,7 +1232,7 @@ export class StartupApplication {
             if (this.lobbySource === null || this.client?.source.current !== this.lobbySource) return;
             await this.lobby.complete(); this.pending = { kind: "frontend" };
           },
-        } } : {}), saveDirectory: this.saves.directory, externalSaveDirectories: this.saves.externalDirectories, loading: { deferWindowVisibility: true, nextFrame: async () => {
+        }, account: this.lobby.account } : {}), localRankings: this.matchRankings, saveDirectory: this.saves.directory, externalSaveDirectories: this.saves.externalDirectories, loading: { deferWindowVisibility: true, nextFrame: async () => {
           await nextFrame(); if (this.stopping) throw new Error("Startup cancelled");
         },
           stage: message => loading?.menu.setStatus(message, true) } }, selected.recipe, this.preferences.values, selected.image);
@@ -1381,7 +1407,11 @@ export class StartupApplication {
     if (this.closed || this.stopping) return;
     const active = this.game ?? this.remote;
     if (active !== null && !this.stopping) {
-      const output = await active.step(active === source ? elapsed : 4);
+      let output: Awaited<ReturnType<typeof active.step>>;
+      const operations = active instanceof Application ? active.worldOperationCount : 0;
+      try { output = await active.step(active === source ? elapsed : 4); }
+      catch (error) { await this.failActiveSource(active, error); return; }
+      if (active instanceof Application && active.worldOperationCount !== operations) this.lastFrame = performance.now();
       if (active instanceof RemoteApplication && !active.presentedCinematic && output === null && active === this.remote
         && (client.platform.current?.kind === "world" || client.capture.pendingReadback)) {
         graphics.draw(client.source.current);
@@ -1433,18 +1463,18 @@ export class StartupApplication {
     if (this.closed) return;
     this.closed = true; this.stopping = true;
     this.lobbyTransition?.cancel(new Error("Startup closed before lobby launch")); this.lobbyTransition = null;
-    await this.addons.close();
+    const errors: unknown[] = [];
+    try { await this.addons.close(); } catch (error) { errors.push(error); }
     this.gtvAbort?.abort();
     try { await this.gtvPreparation; } catch { /* Connection preparation reports its own failure. */ }
     this.gtv = null;
     this.movieGeneration++; this.pendingMovie = null;
-    await Promise.all(this.moviePreparations);
+    try { await Promise.all(this.moviePreparations); } catch (error) { errors.push(error); }
     if (this.game !== null) this.preferences.values = this.game.frontendSettings;
     try { await this.saveFrontendInput(); await this.preferences.saveGlobal(); }
     catch (error) { this.print(`Could not save controls: ${error instanceof Error ? error.message : String(error)}\n`); }
     try { if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore); }
     catch (error) { this.print(`Could not save audio settings: ${error instanceof Error ? error.message : String(error)}\n`); }
-    const errors: unknown[] = [];
     try { await this.lobby.close(); } catch (error: unknown) { errors.push(error); }
     try { await this.client?.inputDevices.save(); } catch (error) { errors.push(error); }
     try { await this.keys.save(); } catch (error) { errors.push(error); }
@@ -1464,8 +1494,9 @@ export class StartupApplication {
     this.imageSettings = null;
     this.releaseMenuInput?.(); this.releaseMenuInput = null;
     this.releaseDemos?.(); this.releaseDemos = null;
-    this.releaseSourceCommands.runAll();
-    this.frontendRouting?.close(); this.frontendRouting = null;
+    try { this.releaseSourceCommands.runAll(); } catch (error) { errors.push(error); }
+    try { this.frontendRouting?.close(); } catch (error) { errors.push(error); }
+    this.frontendRouting = null;
     try { this.graphics?.close(); } catch (error) { errors.push(error); }
     this.graphics = null; this.client = null; this.game = null; this.remote = null;
     if (errors.length !== 0) throw new AggregateError(errors, "Shared client shutdown failed");

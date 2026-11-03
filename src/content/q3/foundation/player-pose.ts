@@ -99,6 +99,8 @@ function milliseconds(value: number, name: string, allowNegative: boolean): numb
 
 function angleSubtract(first: number, second: number): number {
   let angle = Math.fround(first - second);
+  // At large magnitudes angle - 360 rounds back to angle in binary32 and the source loop never ends.
+  if (Math.abs(angle) > 0x1000000) angle = Math.fround(angle % 360);
   while (angle > 180) angle = Math.fround(angle - 360);
   while (angle < -180) angle = Math.fround(angle + 360);
   return angle;

@@ -4,27 +4,30 @@ import type { MappedGuestMemory } from "../../../guest/core/contracts.ts";
 import { q2Double, q2Int, q2Pointer } from "./layout.ts";
 import { readClassicString } from "./records.ts";
 
-interface Conversion { readonly start: number; readonly end: number; readonly flags: string; readonly width: string; readonly precision: string | undefined; readonly type: string }
+interface Conversion { readonly start: number; readonly end: number; readonly flags: string; readonly width: string; readonly precision: string | undefined; readonly size: string; readonly type: string }
 function conversions(format: string): readonly Conversion[] {
   const entries: Conversion[] = [];
   for (let index = 0; index < format.length; index++) {
     if (format[index] !== "%") continue;
-    const match = /^%([-+ #0]*)(\*|\d*)(?:\.(\*|\d*))?(?:l)?([%diuoxXcspfeEgG])/.exec(format.slice(index));
-    if (match === null) throw new Error(`Unsupported API 3 printf conversion at ${format.slice(index, index + 12)}`);
-    const flags = match[1], width = match[2], type = match[4];
+    const match = /^%([-+ #0]*)(\*|\d*)(?:\.(\*|\d*))?(hh|h|ll|l|I64|I32|I|L|j|z|t|w)?([%diuoxXcspfeEgG])/.exec(format.slice(index, index + 64));
+    // The CRT prints what it cannot convert, so a stray or unsupported specifier is ordinary text.
+    if (match === null) continue;
+    const flags = match[1], width = match[2], type = match[5];
     if (flags === undefined || width === undefined || type === undefined) throw new Error("Invalid API 3 printf parser result");
-    entries.push({ start: index, end: index + match[0].length, flags, width, precision: match[3], type });
+    entries.push({ start: index, end: index + match[0].length, flags, width, precision: match[3], size: match[4] ?? "", type });
     index += match[0].length - 1;
   }
   return entries;
 }
+const q2Int64: GuestValueLayout = { kind: "scalar", storage: "int64" };
+function wide(entry: Conversion): boolean { return "diuoxX".includes(entry.type) && ["ll", "I64", "j"].includes(entry.size); }
 export function classicPrintfLayouts(format: string): readonly GuestValueLayout[] {
   const result: GuestValueLayout[] = [];
   for (const entry of conversions(format)) {
     if (entry.type === "%") continue;
     if (entry.width === "*") result.push(q2Int);
     if (entry.precision === "*") result.push(q2Int);
-    result.push("feEgG".includes(entry.type) ? q2Double : "sp".includes(entry.type) ? q2Pointer : q2Int);
+    result.push("feEgG".includes(entry.type) ? q2Double : "sp".includes(entry.type) ? q2Pointer : wide(entry) ? q2Int64 : q2Int);
   }
   return result;
 }
@@ -50,15 +53,22 @@ export function classicPrintf(memory: MappedGuestMemory, format: string, argumen
       text = text.replace(/e([+-])(\d)$/, "e$10$2");
       if (entry.type === entry.type.toUpperCase()) text = text.toUpperCase();
     } else {
-      if (item.kind !== "int32" && item.kind !== "uint32") throw new TypeError("API 3 printf integer required");
-      const signed = item.value | 0, unsigned = item.value >>> 0;
-      if (entry.type === "c") text = String.fromCharCode(unsigned & 255);
+      const bits = wide(entry) ? 64 : entry.size === "h" ? 16 : entry.size === "hh" ? 8 : 32;
+      let signed: bigint, unsigned: bigint;
+      if (bits === 64) {
+        if (item.kind !== "int64" && item.kind !== "uint64") throw new TypeError("API 3 printf 64-bit integer required");
+        signed = BigInt.asIntN(64, item.value); unsigned = BigInt.asUintN(64, item.value);
+      } else {
+        if (item.kind !== "int32" && item.kind !== "uint32") throw new TypeError("API 3 printf integer required");
+        signed = BigInt.asIntN(bits, BigInt(item.value)); unsigned = BigInt.asUintN(bits, BigInt(item.value));
+      }
+      if (entry.type === "c") text = String.fromCharCode(Number(unsigned & 255n));
       else if ("di".includes(entry.type)) text = String(signed);
       else text = unsigned.toString(entry.type === "o" ? 8 : entry.type === "u" ? 10 : 16);
       if (entry.type === "X") text = text.toUpperCase();
-      if (precision === 0 && unsigned === 0 && entry.type !== "c") text = entry.type === "o" && entry.flags.includes("#") ? "0" : "";
+      if (precision === 0 && unsigned === 0n && entry.type !== "c") text = entry.type === "o" && entry.flags.includes("#") ? "0" : "";
       if (precision !== undefined && entry.type !== "c") text = text.startsWith("-") ? `-${text.slice(1).padStart(precision, "0")}` : text.padStart(precision, "0");
-      if (entry.flags.includes("#") && unsigned !== 0) text = entry.type === "o" ? `0${text}` : entry.type === "x" ? `0x${text}` : entry.type === "X" ? `0X${text}` : text;
+      if (entry.flags.includes("#") && unsigned !== 0n) text = entry.type === "o" ? `0${text}` : entry.type === "x" ? `0x${text}` : entry.type === "X" ? `0X${text}` : text;
     }
     if ("difeEgG".includes(entry.type) && !text.startsWith("-")) text = entry.flags.includes("+") ? `+${text}` : entry.flags.includes(" ") ? ` ${text}` : text;
     const left = width < 0 || entry.flags.includes("-"), fill = !left && entry.flags.includes("0") && precision === undefined && !"sc".includes(entry.type) ? "0" : " ";

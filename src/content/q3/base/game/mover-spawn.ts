@@ -171,7 +171,8 @@ export class MoverSpawnRuntime {
     if (destination === null) throw new Error("Train path was removed during target dispatch");
     entity.nextTrain = destination; entity.pos1 = { ...next.s.origin }; entity.pos2 = { ...destination.s.origin };
     const speed = Math.max(1, next.speed !== 0 ? next.speed : entity.speed);
-    const duration = floatInt(f32(f32(length3(sub3(entity.pos2, entity.pos1)) * 1000) / speed));
+    // A leg shorter than one millisecond would give setState an infinite delta (0 * Infinity is NaN); ioquake3 clamps the same way.
+    const duration = Math.max(1, floatInt(f32(f32(length3(sub3(entity.pos2, entity.pos1)) * 1000) / speed)));
     entity.s.pos = { ...entity.s.pos, duration }; entity.s.loopSound = next.soundLoop;
     this.core.setState(entity, MoverState.ONE_TO_TWO, this.time);
     if (next.wait !== 0) {
@@ -285,8 +286,4 @@ export class MoverSpawnRuntime {
     this.host.movers.host.combat.entities.callbacks.reached.intern("q3.base.game.mover-spawn.train.reached", self => { this.reachedTrain(self); });
     this.host.movers.host.combat.entities.callbacks.think.intern("q3.base.game.mover-spawn.train.think", self => { this.setupTrain(self); });
   }
-}
-
-export function createMoverSpawnHandlers(host: MoverSpawnHost): ReadonlyMap<string, SpawnHandler> {
-  return new MoverSpawnRuntime(host).handlers();
 }

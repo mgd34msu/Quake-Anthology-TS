@@ -28,7 +28,7 @@ export function checkTeamLock(state: CtfState, actor: ActorId): undefined {
   if (teamNumber(current) === state.number(actor, "lastteam")) return undefined;
   if ((state.teamplay & CTF_FLAGS.staticTeams) && state.number(actor, "lastteam") >= 0) {
     if (previous !== null) {
-      if (state.number(actor, "suicideCount") > 3) state.services.disconnect(actor);
+      if (state.number(actor, "suicideCount") > 3) { state.services.disconnect(actor); return undefined; }
       state.set(actor, "killed", state.number(actor, "killed") === 1 ? 1 : 2);
       state.game.host.combat.setTraits(state.owner(actor), { invulnerable: false });
       state.game.damage(actor, actor, actor, 1000, null, "direct", "ctf:teamchange");
@@ -45,11 +45,14 @@ export function spawnPoint(state: CtfState, actor: ActorId): Q1Actor | null {
   if (state.game.options.coop || state.game.options.deathmatch === 0) return state.context.base.spawnSelector.select(true);
   const classname = state.startMap && state.number(actor, "killed") !== 0 ? "info_vote_destination" :
     state.number(actor, "killed") === 0 && team !== null ? team === "red" ? "info_player_team1" : "info_player_team2" : "info_player_deathmatch";
-  const spots = entities.filter(entity => entity.classname === classname), last = state.world.references.get(`ctf.spawn.${classname}`);
-  const index = spots.findIndex(spot => last !== undefined && last !== null && sameActor(spot.actor.id, last));
-  const spot = spots[(index + 1) % spots.length] ?? null;
-  if (spot === null) return entities.find(entity => entity.classname === "info_player_deathmatch") ?? entities.find(entity => entity.classname === "info_player_start") ?? null;
-  state.world.references.set(`ctf.spawn.${classname}`, spot.actor.id); return spot;
+  const rotate = (name: string): Q1Actor | null => {
+    const spots = entities.filter(entity => entity.classname === name), last = state.world.references.get(`ctf.spawn.${name}`);
+    const index = spots.findIndex(spot => last !== undefined && last !== null && sameActor(spot.actor.id, last));
+    const spot = spots[(index + 1) % spots.length] ?? null;
+    if (spot !== null) state.world.references.set(`ctf.spawn.${name}`, spot.actor.id);
+    return spot;
+  };
+  return rotate(classname) ?? (classname === "info_player_deathmatch" ? null : rotate("info_player_deathmatch")) ?? entities.find(entity => entity.classname === "info_player_start") ?? null;
 }
 export function showTeamPrompt(state: CtfState, actor: ActorId): undefined {
   if (state.services.promptSupported(actor)) return state.services.prompt(actor, "$qc_ctf_intro", [

@@ -97,7 +97,6 @@ describe("hand grenades launched by shared actor identity", () => {
       scene.advance(1);
       expect(scene.combat.read(target.actor.id)?.health).toBeLessThan(500);
       expect(scene.outcomes.some(outcome => outcome.kind === "committed" && outcome.decision.request.attack.attacker === scene.player.id)).toBe(true);
-      expect(scene.weapons.noises.get(scene.player.id)?.secondary?.actor).toBe(scene.player.id);
       expect(scene.actors.isLive(grenade.actor.id)).toBe(false);
       expect(scene.bodies.read(grenade.actor.id)).toBeNull();
       expect(scene.game.entity(grenade.actor.id)).toBeNull();

@@ -3,6 +3,7 @@ import type { Vec3 } from "../../../../contracts/math.ts";
 import { add, scale } from "../../foundation/fields.ts";
 import { clearShot, corpse, enemyBody, enemyEye, health, projectFlash, runAi, targetDistance } from "../../foundation/monsters/ai.ts";
 import { throwGib } from "../../foundation/monsters/gibs.ts";
+import type { Q2Think } from "../../foundation/host.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
 import { move, sound } from "../../base/monsters/common.ts";
 import { chainfist, checkGib, predictedDirection, reactsToPain } from "./common.ts";
@@ -23,6 +24,10 @@ function clearBeam(context: MonsterContext): undefined {
   }
   context.entity.beam = null; context.entity.beam2 = null; return undefined;
 }
+const freeBolt: Q2Think = (bolt, game) => {
+  game.host.emit({ kind: "beam", actor: bolt.actor.id, start: game.body(bolt).origin, end: bolt.pos2, width: 2, color: 0xffffffff, visible: false });
+  return game.remove(bolt);
+};
 function lightningUpdate(context: MonsterContext): undefined {
   const frame = context.entity.frame - shamblerFrame.magic01;
   if (frame >= leftHand.length) return clearBeam(context);
@@ -97,7 +102,11 @@ export const shamblerDefinition: Q2MonsterDefinition = {
       if (direction === null) return undefined;
       const { entity, game } = context;
       const trace = game.host.trace({ start, end: add(start, scale(direction, 8192)), bounds: null, ignore: entity.actor.id, mask: 0x46004003 | 8 | 16 });
-      game.host.emit({ kind: "beam", actor: entity.actor.id, start, end: trace.end, width: 2, color: 0xffffffff, visible: true });
+      // The C sends a one-shot TE_LIGHTNING; a short-lived beam entity gives the same single flash.
+      game.sourceCallbacks.register({ think: { shambler_bolt_free: freeBolt } });
+      const bolt = game.create("shambler_bolt"); game.move(bolt, { origin: start }); bolt.pos2 = trace.end;
+      game.host.emit({ kind: "beam", actor: bolt.actor.id, start, end: trace.end, width: 2, color: 0xffffffff, visible: true });
+      game.schedule(bolt, 0.1, freeBolt);
       return context.weapons.fireBullet(entity, game, start, direction, 8 + Math.floor(game.host.random() * 4), 15, 0, 0, 45);
     },
     shambler_melee1: sound("shambler/melee1.wav", 1), shambler_melee2: sound("shambler/melee2.wav", 1),

@@ -20,7 +20,7 @@ import { CpuRenderTarget } from "../../../src/render/cpu/commands.ts";
 import type { Q1LightmapEncoding } from "../../../src/materials/lighting.ts";
 import type { WorldViewInput } from "../../../src/render/scene/world.ts";
 
-const root = process.env["QFILES_ROOT"] ?? `${testCorpusRoot()}`;
+const root = testCorpusRoot();
 const cases: readonly { readonly family: "q1" | "q2"; readonly archive: string; readonly map: string; readonly encoding?: Q1LightmapEncoding }[] = [
   { family: "q1", archive: "q1/id1/PAK0.PAK", map: "maps/start.bsp" },
   { family: "q2", archive: "q2/baseq2/pak0.pak", map: "maps/base1.bsp" },
@@ -79,9 +79,9 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
       frame.begin();
       if (force) {
         const { q2FragmentLighting, ...unfragmented } = view;
-        // A nonempty light list invalidates the cache; radius < minimum adds no energy.
+        // A light that reaches the face invalidates its cache; a black light adds no energy. (An out-of-range light no longer rebuilds faces.)
         const invalidated = { ...unfragmented, lights: [...(fixture.family === "q2" && q2FragmentLighting !== undefined ? [] : view.lights ?? []),
-          { origin: camera.origin, radius: 0, minimum: 1, color: { x: 1, y: 1, z: 1 } }] };
+          { origin: camera.origin, radius: 1e9, minimum: 0, color: { x: 0, y: 0, z: 0 } }] };
         scene.prepareModel(0, transform, invalidated);
         for (const model of view.inlineModels ?? []) scene.prepareModel(model.model, model.transform, invalidated);
       }

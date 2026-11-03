@@ -5,7 +5,9 @@ import type { ModuleIdentity } from "../../../contracts/execution.ts";
 import type { EquipmentMovement } from "../../../contracts/movement.ts";
 import type { Q2EntityState, Q2PlayerState, Q2UserCommand } from "../../../contracts/protocol.ts";
 import type { WindowsCapabilities } from "../../../guest/runtime/windows/index.ts";
+import { fitClassicUserinfo } from "../../../compat/q2/classic/records.ts";
 import { ClassicGuestSource, type PreparedClassicGuest } from "./classic-guest-source.ts";
+import { driveTravel, driveTravelLoading } from "./native-guest-travel.ts";
 import { NativeInputBinding, type NativeInputServices } from "../../../compat/q2/native-input.ts";
 import { ClassicGuestServices, type ClassicGuestMessage, type ClassicGuestServicesOptions, type ClassicGuestMapServices } from "./classic-guest-services.ts";
 
@@ -18,6 +20,10 @@ export interface ClassicGuestWorldOptions {
 }
 export interface ClassicGuestRevisit { readonly levelPath: string; readonly restoreServerState: (world: ClassicGuestWorld) => void }
 export interface ClassicGuestClient { readonly slot: number; readonly phase: "connected" | "active"; readonly userinfo: string }
+type ClassicTravelStep =
+  | { readonly kind: "spawn"; readonly map: ClassicGuestMap }
+  | { readonly kind: "frames"; readonly count: number; readonly settle: boolean }
+  | { readonly kind: "read-level"; readonly path: string };
 interface CommandContext { value: { readonly arguments: readonly string[]; readonly args: string } | null }
 
 /** API 3 owns time, movement and private gameplay data. The facade only sequences its exported calls. */
@@ -124,68 +130,54 @@ export class ClassicGuestWorld {
   }
   /** Irreversible ownership transfer after the caller has staged the destination map. */
   travel(map: ClassicGuestMap, binding: ClassicGuestMapServices, revisit?: ClassicGuestRevisit): ClassicGuestWorld {
-    return this.operation(() => {
-      this.requireRunning();
-      const source = this.source, services = this.services;
-      services.validateMap(binding);
-      if (revisit !== undefined && services.options.cvars.variableValue("deathmatch") !== 0) throw new Error("Original API 3 deathmatch does not restore hub levels");
-      this.finishInputRetirements();
-      const clients = this.clients;
-      const next = new ClassicGuestWorld(source, services, this.commandContext);
-      this.inputBinding?.close(); this.inputBinding = null;
-      next.#phase = "initialized"; this.#phase = "transferred"; this.#clients.clear();
-      try {
-        for (const actor of services.options.engine.actors.ownedBy(source.host.options.provider)) services.options.engine.actors.release(actor);
-        services.rebindWorld({ ...binding, command: () => this.commandContext.value ?? binding.command() });
-        source.host.rebindWorld();
-        source.host.spawnEntities(map.map, map.entities, map.spawnPoint);
-        source.host.runFrame(); source.host.runFrame();
-        if (revisit !== undefined) {
-          services.drainMessages(); revisit.restoreServerState(next); source.host.save("ReadLevel", revisit.levelPath);
-          for (let frame = 0; frame < 100; frame++) source.host.runFrame();
-        }
-        for (const client of clients) { source.host.edicts.retainClient(client.slot); next.#clients.set(client.slot, { ...client, phase: "connected" }); }
-        services.completeSpawn(); next.#phase = "running";
-        return next;
-      } catch (error) {
-        try { next.close(); }
-        catch (cleanup) { throw new AggregateError([error, cleanup], "Native map travel and retained module cleanup failed"); }
-        finally { next.#phase = "closed"; next.#clients.clear(); }
-        throw error;
+    return this.operation(() => { const host = this.source.host; return driveTravel(this.travelStages(map, binding, revisit), step => {
+      switch (step.kind) {
+        case "spawn": host.spawnEntities(step.map.map, step.map.entities, step.map.spawnPoint); break;
+        case "frames": for (let frame = 0; frame < step.count; frame++) host.runFrame(); break;
+        case "read-level": host.save("ReadLevel", step.path); break;
       }
-    });
+    }); });
   }
   async travelLoading(map: ClassicGuestMap, binding: ClassicGuestMapServices, nextFrame: () => Promise<void>, revisit?: ClassicGuestRevisit): Promise<ClassicGuestWorld> {
-    return this.operationLoading(async () => {
-      this.requireRunning();
-      const source = this.source, services = this.services;
-      services.validateMap(binding);
-      if (revisit !== undefined && services.options.cvars.variableValue("deathmatch") !== 0) throw new Error("Original API 3 deathmatch does not restore hub levels");
-      this.finishInputRetirements();
-      const clients = this.clients;
-      const next = new ClassicGuestWorld(source, services, this.commandContext);
-      this.inputBinding?.close(); this.inputBinding = null;
-      next.#phase = "initialized"; this.#phase = "transferred"; this.#clients.clear();
-      try {
-        for (const actor of services.options.engine.actors.ownedBy(source.host.options.provider)) services.options.engine.actors.release(actor);
-        services.rebindWorld({ ...binding, command: () => this.commandContext.value ?? binding.command() });
-        source.host.rebindWorld();
-        await source.host.spawnEntitiesLoading(map.map, map.entities, map.spawnPoint, nextFrame);
-        await source.host.callLoading("RunFrame", [], nextFrame); await source.host.callLoading("RunFrame", [], nextFrame);
-        if (revisit !== undefined) {
-          services.drainMessages(); revisit.restoreServerState(next); await source.host.saveLoading("ReadLevel", revisit.levelPath, nextFrame);
-          for (let frame = 0; frame < 100; frame++) { await source.host.callLoading("RunFrame", [], nextFrame); await nextFrame(); }
-        }
-        for (const client of clients) { source.host.edicts.retainClient(client.slot); next.#clients.set(client.slot, { ...client, phase: "connected" }); }
-        services.completeSpawn(); next.#phase = "running";
-        return next;
-      } catch (error) {
-        try { next.close(); }
-        catch (cleanup) { throw new AggregateError([error, cleanup], "Native map travel and retained module cleanup failed"); }
-        finally { next.#phase = "closed"; next.#clients.clear(); }
-        throw error;
+    return this.operationLoading(() => { const host = this.source.host; return driveTravelLoading(this.travelStages(map, binding, revisit), async step => {
+      switch (step.kind) {
+        case "spawn": await host.spawnEntitiesLoading(step.map.map, step.map.entities, step.map.spawnPoint, nextFrame); break;
+        case "frames": for (let frame = 0; frame < step.count; frame++) { await host.callLoading("RunFrame", [], nextFrame); if (step.settle) await nextFrame(); } break;
+        case "read-level": await host.saveLoading("ReadLevel", step.path, nextFrame); break;
       }
-    });
+    }); });
+  }
+  /** Travel as stages; the caller executes each yielded host step synchronously or through the loading path. */
+  private *travelStages(map: ClassicGuestMap, binding: ClassicGuestMapServices, revisit?: ClassicGuestRevisit): Generator<ClassicTravelStep, ClassicGuestWorld> {
+    this.requireRunning();
+    const source = this.source, services = this.services;
+    services.validateMap(binding);
+    if (revisit !== undefined && services.options.cvars.variableValue("deathmatch") !== 0) throw new Error("Original API 3 deathmatch does not restore hub levels");
+    this.finishInputRetirements();
+    const clients = this.clients;
+    const next = new ClassicGuestWorld(source, services, this.commandContext);
+    this.inputBinding?.close(); this.inputBinding = null;
+    next.#phase = "initialized"; this.#phase = "transferred"; this.#clients.clear();
+    try {
+      for (const actor of services.options.engine.actors.ownedBy(source.host.options.provider)) services.options.engine.actors.release(actor);
+      services.rebindWorld({ ...binding, command: () => this.commandContext.value ?? binding.command() });
+      source.host.rebindWorld();
+      yield { kind: "spawn", map };
+      yield { kind: "frames", count: 2, settle: false };
+      if (revisit !== undefined) {
+        services.drainMessages(); revisit.restoreServerState(next);
+        yield { kind: "read-level", path: revisit.levelPath };
+        yield { kind: "frames", count: 100, settle: true };
+      }
+      for (const client of clients) { source.host.edicts.retainClient(client.slot); next.#clients.set(client.slot, { ...client, phase: "connected" }); }
+      services.completeSpawn(); next.#phase = "running";
+      return next;
+    } catch (error) {
+      try { next.close(); }
+      catch (cleanup) { throw new AggregateError([error, cleanup], "Native map travel and retained module cleanup failed"); }
+      finally { next.#phase = "closed"; next.#clients.clear(); }
+      throw error;
+    }
   }
   connect(slot: number, userinfo: string): ReturnType<ClassicGuestSource["host"]["clientConnect"]> {
     return this.operation(() => {
@@ -210,8 +202,7 @@ export class ClassicGuestWorld {
   }
   setUserinfoStorage(slot: number, value: string): void {
     this.requireRunning(); const client = this.requireClient(slot);
-    if (new TextEncoder().encode(value).length >= 512 || value.includes("\0")) throw new RangeError("Classic userinfo exceeds its source string limits");
-    this.#clients.set(slot, { ...client, userinfo: value });
+    this.#clients.set(slot, { ...client, userinfo: fitClassicUserinfo(value) });
   }
   command(slot: number, arguments_: readonly string[], args: string): void {
     this.operation(() => {

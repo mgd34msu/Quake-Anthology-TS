@@ -1,5 +1,5 @@
 import type { SeatInputEvent, UiControl, UiMenuId } from "../../contracts/ui.ts";
-import { KeyCode } from "../../input/key-codes.ts";
+import { KeyCode } from "../../core/key-codes.ts";
 import { menuRow, NativeUiController } from "../../ui/common/index.ts";
 import type { SavedGameMenuService } from "../../ui/saves/menu.ts";
 

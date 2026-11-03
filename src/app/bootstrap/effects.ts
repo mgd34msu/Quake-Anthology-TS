@@ -68,6 +68,7 @@ interface Steam {
   readonly content: ContentId; readonly event: Extract<Q2MissionPackEntityEvent, { readonly kind: "steam" }>;
   readonly end: number; next: number;
 }
+const MAX_BEAM_SEGMENTS = 512;
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const white: Vec3 = { x: 1, y: 1, z: 1 };
 const orange: Vec3 = { x: 1, y: 0.5, z: 0.5 };
@@ -249,8 +250,8 @@ export class ApplicationEffects {
 ): Promise<void> {
     if (this.closed) throw new Error("Effect world is closed");
     const now = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
-    if (this.time !== null && now < this.time) throw new Error("Effect time rewound without replacing its world owner");
-    const elapsed = this.time === null ? 0 : now - this.time;
+    // A server can send a lower time, as with a NetQuake svc_time. Effects hold still for that frame rather than ending the client.
+    const elapsed = this.time === null || now < this.time ? 0 : now - this.time;
     this.styles = snapshot.scene.lightStyles;
     this.poses = [...characters, ...presentations.filter(pose => !pose.viewWeapon),
       ...snapshot.bodies.map(({ actor, body }) => ({ actor, origin: body.origin, angles: body.angles }))];
@@ -269,7 +270,9 @@ export class ApplicationEffects {
       const event = steam.event, particles = (await this.group(steam.content)).particles;
       if (particles.q2Steam(event.origin, event.direction, event.color, event.count, event.speed, now)) steam.next += 0.1;
     }
-    this.beams = this.beams.filter(beam => beam.die >= now);
+    // A Q2 laser beam has no end time: it goes away with its target entity.
+    const beamActorGone = (actor: ActorId | null | undefined): boolean => actor != null && !snapshot.actors.some(live => live.id.equals(actor));
+    this.beams = this.beams.filter(beam => beam.die >= now && (beam.die !== Number.POSITIVE_INFINITY || !beamActorGone(beam.actor)));
     this.explosions = this.explosions.filter(explosion => Math.floor((Math.round(now * 1000) - Math.round(explosion.start * 1000)) / 100) < explosion.frames - 1);
     this.lights.retain(light => light.die >= now && light.radius - light.decay * (now - light.born) > 0);
     if (!this.eventsOnly) await this.q1Entities(presentations, now, elapsed > 0 || this.time === null);
@@ -320,7 +323,8 @@ export class ApplicationEffects {
         { blend: { source: "src-alpha", destination: "one-minus-src-alpha" }, depthTest: "less-equal", depthWrite: false,
           alphaTest: "none", cull: "none", depthRange: [0, 1], polygonOffset: null })]));
     }
-    const q1Styles = Array.from({ length: 256 }, (_, index) => { const value = this.styles.find(style => style.kind === "q1" && style.style === index); return value?.kind === "q1" ? value.value : 256; });
+    // The table only feeds static brush models.
+    const q1Styles = this.staticBrushes.length === 0 ? [] : Array.from({ length: 256 }, (_, index) => { const value = this.styles.find(style => style.kind === "q1" && style.style === index); return value?.kind === "q1" ? value.value : 256; });
     const operations: SceneOperation[] = [...this.staticBrushes.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform,
       { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights, q1Styles, ...(q1Fog === undefined ? {} : { q1Fog }), animationFrame: brush.frame })), ...prepared];
     const sourceLights: SurfaceDynamicLight[] = [], q3Admissions: Q3SceneAdmission[] = [];
@@ -698,7 +702,8 @@ export class ApplicationEffects {
       const pitch = beam.family === "q1" ? Math.trunc(pitchAngle) : pitchAngle < 0 ? pitchAngle + 360 : pitchAngle;
       const lightning = beam.model === Q2_TRANSIENT_MODELS.lightning, modelLength = lightning ? 35 : 30;
       const beamLength = lightning ? length - 20 : length, shortLightning = lightning && beamLength <= modelLength;
-      const steps = shortLightning ? 1 : Math.ceil(beamLength / modelLength), spacing = beam.family === "q1" ? 30 : steps > 1 ? (beamLength - modelLength) / (steps - 1) : 0;
+      if (!Number.isFinite(beamLength)) return models;
+      const steps = shortLightning ? 1 : Math.min(MAX_BEAM_SEGMENTS, Math.ceil(beamLength / modelLength)), spacing = beam.family === "q1" ? 30 : steps > 1 ? (beamLength - modelLength) / (steps - 1) : 0;
       for (let segment = 0; segment < steps; segment++) {
         const origin = shortLightning ? beam.end : add3(start, scale3(direction, segment * spacing));
         const roll = rolls[segment] ?? this.random.nextInteger() % 360; rolls[segment] = roll;

@@ -23,7 +23,8 @@ export class RogueTag {
     game.named.register("rogue:tag_touch", { touch: (g, e, other) => { if (!g.isPlayer(other)) return undefined; this.take(e, other, 30); g.sound(e, "runes/end1.wav"); return this.announce("$qc_got_token", other); } });
     game.registerSpawn("dmatch_tag_token", (g, e) => { if (g.options.teamplay !== 3) return g.remove(e); e.model = "progs/sphere.mdl"; e.skin = 1; e.effects |= 8; e.touch = g.named.touch(e, "rogue:tag_touch"); g.setBounds(e, { min: { x: -16, y: -16, z: -16 }, max: { x: 16, y: 16, z: 16 } }); return later(g, e, 0.2, "rogue:tag_place"); });
   }
-  private announce(text: string, actor: ActorId): undefined { if (this.hooks.playerName === undefined) throw new Error("Rogue token messages require shared player names"); for (const player of this.game.host.players()) this.game.host.emit({ kind: "message", player, text, args: [this.hooks.playerName(actor)], center: false }); return undefined; }
+  private announce(text: string, actor: ActorId): undefined { if (this.game.host.actors.resolveOwned(actor) === null) return undefined; // The token holder may have left.
+    if (this.hooks.playerName === undefined) throw new Error("Rogue token messages require shared player names"); for (const player of this.game.host.players()) this.game.host.emit({ kind: "message", player, text, args: [this.hooks.playerName(actor)], center: false }); return undefined; }
   private token(): Q1Actor | undefined { return [...this.game.entities.values()].find(entity => entity.classname === "dmatch_tag_token"); }
   private dropFloor(entity: Q1Actor): boolean { const body = this.game.body(entity), hit = this.game.host.trace({ start: body.origin, end: vadd(body.origin, { x: 0, y: 0, z: -256 }), bounds: body.bounds, ignore: entity.actor.id, monsters: true }); if (hit.fraction === 1 || hit.allSolid) return false; this.game.setBody(entity, { origin: hit.end, ground: hit.actor }); this.game.link(entity); return true; }
   private take(token: Q1Actor, actor: ActorId, announcementDelay: number): undefined { const game = this.game; game.world?.references.set("rogue:tag_token_owner", actor); token.owner = actor; number(token, "tag_frags", 0); number(token, "tag_message_time", game.time + announcementDelay); token.solid = "none"; token.touch = null; return later(game, token, 0.1, "rogue:tag_think"); }
@@ -32,7 +33,7 @@ export class RogueTag {
     const token = this.token(); if (token === undefined) return 1; const game = this.game, owner = game.world?.references.get("rogue:tag_token_owner") ?? null;
     if (owner !== null && sameActor(attacker, owner)) {
       number(token, "tag_frags", token.number("tag_frags") + 1);
-      if (token.number("tag_frags") === 5) { const player = game.player(attacker); if (player !== null) { game.message(attacker, "$qc_got_quad", false); game.givePowerup(player, "quad"); } }
+      if (token.number("tag_frags") === 5) { const player = game.player(attacker); if (player !== null) { game.message(attacker, "$qc_got_quad", false); game.givePowerup(player, "quad"); game.sound(player.actor, "items/damage.wav", "item"); const body = game.host.bodies.read(attacker); if (body !== null) game.effect("pickup", body.origin, attacker); } }
       else if (token.number("tag_frags") === 10) { this.announce("$qc_lost_token", attacker); this.respawn(); }
       return 3;
     }

@@ -174,7 +174,10 @@ export class SceneTextureLoader {
       ...(explicit || requestedName !== name ? [requestedName] : []), ...alternatives,
     ])];
     for (const path of candidates) {
-      const asset = await this.reader.read(path);
+      let asset: Awaited<ReturnType<typeof this.reader.read>>;
+      // An unreadable candidate (for example an ambiguous case-colliding path) is skipped like an absent one.
+      try { asset = await this.reader.read(path); }
+      catch (error) { this.requireOpen(); if (error instanceof Error && error.message.startsWith("Ambiguous content path")) continue; throw error; }
       this.requireOpen();
       if (asset === null) continue;
       // A candidate that cannot be decoded is skipped, like the source

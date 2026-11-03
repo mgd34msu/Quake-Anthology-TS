@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { testCorpusRoot } from "../support/corpus.ts";
+import { corpusFile, corpusTest } from "../support/corpus.ts";
 
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { CommandContext, CommandDialect } from "../../src/contracts/common.ts";
@@ -12,7 +12,7 @@ import { SourceMidiDecoder } from "../../src/input/source-midi.ts";
 import { parseBnvib, SeatHaptics } from "../../src/input/haptics.ts";
 import { openArchive } from "../../src/content/archive/index.ts";
 import { sourceKeyNumber } from "../../src/input/bindings.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 import { bindInputSettings } from "../../src/ui/settings/index.ts";
 import { InputCommandBuilder } from "../../src/input/user-command.ts";
 import type { UserCommandFrame } from "../../src/input/user-command.ts";
@@ -334,8 +334,8 @@ describe("seat input", () => {
   });
 });
 
-const retail = `${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`;
-test.skipIf(!await Bun.file(retail).exists())("reads actual rerelease tactile assets", async () => {
+const retail = corpusFile("q2/rerelease/baseq2/pak0.pak");
+corpusTest("q2/rerelease/baseq2/pak0.pak")("reads actual rerelease tactile assets", async () => {
   const archive = await openArchive(retail);
   try {
     const entry = archive.findEntries("tactile/weapons/hyprbf1a.bnvib")[0];
@@ -345,48 +345,51 @@ test.skipIf(!await Bun.file(retail).exists())("reads actual rerelease tactile as
   } finally { await archive.close(); }
 });
 
-test.skipIf(!await Bun.file(retail).exists())("seat tactile requests retain supported ordering and cancel across lifecycle and device changes", async () => {
-  const archive = await openArchive(retail);
+/** A 20-sample, 200 Hz BNVIB cue in the retail layout (4-byte metadata, format 3), so lifecycle tests need no game data. */
+function tactileFixture(): Uint8Array {
+  const bytes = new Uint8Array(4 + 2 + 2 + 4 + 80), view = new DataView(bytes.buffer);
+  view.setUint32(0, 4, true); view.setUint16(4, 3, true); view.setUint16(6, 200, true); view.setUint32(8, 80, true);
+  for (let index = 0; index < 20; index++) bytes.set([200, 64, 120, 64], 12 + index * 4);
+  return bytes;
+}
+
+test("seat tactile requests retain supported ordering and cancel across lifecycle and device changes", async () => {
+  const bytes = tactileFixture(), identity = createIdentityOwner("haptic-order");
+  const requests: { readonly content: string; readonly path: string; readonly resolve: (bytes: Uint8Array | null) => void }[] = [];
+  const output: { readonly device: number; readonly low: number; readonly high: number }[] = [];
+  let device: number | null = 7;
+  const haptics = new SeatHaptics({ seat: identity.seat(0), controller: () => device, now: () => 0,
+    controllers: { rumble: (device, low, high) => { output.push({ device, low, high }); return { kind: "accepted" }; } },
+    load: request => new Promise(resolve => { requests.push({ ...request, resolve }); }) });
+  const resolve = (index: number, value: Uint8Array | null): void => {
+    const request = requests[index]; if (request === undefined) throw new Error("No pending tactile load"); request.resolve(value);
+  };
   try {
-    const entry = archive.findEntries("tactile/weapons/hyprbf1a.bnvib")[0];
-    if (entry === undefined) throw new Error("Retail tactile cue missing");
-    const bytes = await archive.readEntry(entry), identity = createIdentityOwner("haptic-order");
-    const requests: { readonly content: string; readonly path: string; readonly resolve: (bytes: Uint8Array | null) => void }[] = [];
-    const output: { readonly device: number; readonly low: number; readonly high: number }[] = [];
-    let device: number | null = 7;
-    const haptics = new SeatHaptics({ seat: identity.seat(0), controller: () => device, now: () => 0,
-      controllers: { rumble: (device, low, high) => { output.push({ device, low, high }); return { kind: "accepted" }; } },
-      load: request => new Promise(resolve => { requests.push({ ...request, resolve }); }) });
-    const resolve = (index: number, value: Uint8Array | null): void => {
-      const request = requests[index]; if (request === undefined) throw new Error("No pending tactile load"); request.resolve(value);
-    };
-    try {
-      const older = haptics.sound("q2:rerelease:baseq2:installed", "sound/weapons/hyprbf1a.wav");
-      const missing = haptics.sound("q2:rerelease:baseq2:installed", "sound/misc/no-pattern.wav");
-      resolve(1, null); await missing; resolve(0, bytes); await older;
-      expect(haptics.scheduler.active).toBe(true);
-      expect(requests[0]?.path).toBe("tactile/weapons/hyprbf1a.bnvib");
-      const first = haptics.sound("q2:classic:baseq2:installed", "weapons/hyprbf1a.wav");
-      const newer = haptics.sound("q2:rerelease:baseq2:installed", "weapons/new.wav");
-      resolve(3, bytes); await newer;
-      const count = output.length; resolve(2, bytes); await first; expect(output.length).toBe(count);
-      expect(requests[2]?.content).toBe("q2:classic:baseq2:installed");
-      for (const cancel of [() => haptics.setEnabled(false), () => haptics.setActive(false), () => haptics.invalidateAssets()]) {
-        haptics.setEnabled(true); haptics.setActive(true);
-        const pending = haptics.sound("q2:rerelease:baseq2:installed", `weapons/pending${requests.length}.wav`);
-        cancel(); resolve(requests.length - 1, bytes); await pending;
-        expect(haptics.scheduler.active).toBe(false);
-      }
+    const older = haptics.sound("q2:rerelease:baseq2:installed", "sound/weapons/hyprbf1a.wav");
+    const missing = haptics.sound("q2:rerelease:baseq2:installed", "sound/misc/no-pattern.wav");
+    resolve(1, null); await missing; resolve(0, bytes); await older;
+    expect(haptics.scheduler.active).toBe(true);
+    expect(requests[0]?.path).toBe("tactile/weapons/hyprbf1a.bnvib");
+    const first = haptics.sound("q2:classic:baseq2:installed", "weapons/hyprbf1a.wav");
+    const newer = haptics.sound("q2:rerelease:baseq2:installed", "weapons/new.wav");
+    resolve(3, bytes); await newer;
+    const count = output.length; resolve(2, bytes); await first; expect(output.length).toBe(count);
+    expect(requests[2]?.content).toBe("q2:classic:baseq2:installed");
+    for (const cancel of [() => haptics.setEnabled(false), () => haptics.setActive(false), () => haptics.invalidateAssets()]) {
       haptics.setEnabled(true); haptics.setActive(true);
-      const pending = haptics.sound("q2:rerelease:baseq2:installed", "weapons/reassign.wav");
-      device = 8; haptics.update(); resolve(requests.length - 1, bytes); await pending;
+      const pending = haptics.sound("q2:rerelease:baseq2:installed", `weapons/pending${requests.length}.wav`);
+      cancel(); resolve(requests.length - 1, bytes); await pending;
       expect(haptics.scheduler.active).toBe(false);
-      expect(output.some(value => value.device === 8 && (value.low > 0 || value.high > 0))).toBe(false);
-      const closing = haptics.sound("q2:rerelease:baseq2:installed", "weapons/closing.wav");
-      haptics.close(); resolve(requests.length - 1, bytes); await closing;
-      expect(haptics.scheduler.active).toBe(false);
-    } finally { haptics.close(); }
-  } finally { await archive.close(); }
+    }
+    haptics.setEnabled(true); haptics.setActive(true);
+    const pending = haptics.sound("q2:rerelease:baseq2:installed", "weapons/reassign.wav");
+    device = 8; haptics.update(); resolve(requests.length - 1, bytes); await pending;
+    expect(haptics.scheduler.active).toBe(false);
+    expect(output.some(value => value.device === 8 && (value.low > 0 || value.high > 0))).toBe(false);
+    const closing = haptics.sound("q2:rerelease:baseq2:installed", "weapons/closing.wav");
+    haptics.close(); resolve(requests.length - 1, bytes); await closing;
+    expect(haptics.scheduler.active).toBe(false);
+  } finally { haptics.close(); }
 });
 
 test("seat vibration strength scales both motors without restarting the authored envelope", async () => {

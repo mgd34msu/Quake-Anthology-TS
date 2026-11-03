@@ -79,7 +79,8 @@ export class Q2CtfPresentation {
     };
     const sight = (): string => { const names = game.host.players().filter(actor => actor !== entity.actor.id).flatMap(actor => { const target = game.entity(actor); return target !== null && ctfCanSee(target, entity, game) ? [ctfName(this.context, actor)] : []; }); return names.length < 2 ? names[0] ?? "no one" : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`; };
     if (words.startsWith('"')) words = words.slice(1, words.endsWith('"') ? -1 : undefined);
-    const text = words.replace(/%(.)/g, (_match: string, character: string) => {
+    const expansions = new Map<string, string>();
+    const expand = (character: string): string => {
       switch (character.toLowerCase()) {
         case "l": return this.location(entity, game);
         case "a": return armor();
@@ -89,7 +90,17 @@ export class Q2CtfPresentation {
         case "n": return sight();
         default: return character;
       }
-    }).slice(0, 1023);
+    };
+    let text = "";
+    for (let index = 0; index < words.length && text.length < 1023; index++) {
+      const character = words.charAt(index), next = words.charAt(index + 1);
+      if (character !== "%" || next === "" || next === "\n") { text += character; continue; }
+      const key = next.toLowerCase();
+      let expanded = expansions.get(key);
+      if (expanded === undefined) { expanded = expand(next); expansions.set(key, expanded); }
+      text += expanded; index++;
+    }
+    text = text.slice(0, 1023);
     for (const actor of game.host.players()) if (this.context.states.get(actor)?.team === state.team) ctfPrint(game, `(${ctfName(this.context, entity.actor.id)}): ${text}\n`, actor, "chat");
     return undefined;
   }

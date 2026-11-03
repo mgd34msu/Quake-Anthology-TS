@@ -370,6 +370,8 @@ export interface BotBrainMemory {
   saidThisLevel: Set<string>;
   levelStarted: boolean;
   checkSixUntil: number;
+  /** Yaw to look at for the whole window, fixed when it opens. */
+  checkSixYaw: number;
   checkSixNextAt: number;
   roamPoint: BotVec3 | null;
   roamUntil: number;
@@ -424,6 +426,7 @@ function newBrainMemory(): BotBrainMemory {
     saidThisLevel: new Set<string>(),
     levelStarted: false,
     checkSixUntil: 0,
+    checkSixYaw: 0,
     checkSixNextAt: 0,
     roamPoint: null,
     roamUntil: 0,
@@ -451,6 +454,13 @@ export interface BotBrainCheckpoint {
 
 export class BotBrain {
   private state: BotBrainMemory = newBrainMemory();
+  /** Goal of the last failed plan; pacing only, so it is not part of the checkpoint. */
+  private failedPlanGoal: BotVec3 | null = null;
+  /** The goal the current path was planned for; a path ends at the nearest node, which can stay far from the goal. */
+  private plannedGoal: BotVec3 | null = null;
+  /** Node hazard contents are a property of the map, so they outlive a plan; derived, so not checkpointed. */
+  private hazardNodes: readonly unknown[] | null = null;
+  private readonly hazardByNode = new Map<number, boolean>();
   get guardRefusals(): number { return this.state.guardRefusals; }
   get gapJumps(): number { return this.state.gapJumps; }
   get hazardFrames(): number { return this.state.hazardFrames; }
@@ -477,6 +487,7 @@ export class BotBrain {
   restore(checkpoint: BotBrainCheckpoint): void {
     if (checkpoint.version !== 1 || checkpoint.skill !== this.settings.skill) throw new Error("Bot behavior checkpoint has another source skill/profile version");
     const copy = structuredClone(checkpoint);
+    this.failedPlanGoal = null; this.plannedGoal = null;
     const { awareness, unreachableUntil, objectiveHome, saidThisLevel, ...scalars } = copy.memory;
     this.state = { ...scalars, awareness: new Map(awareness.map(record => [record.entity, record.value])),
       unreachableUntil: new Map(unreachableUntil.map(record => [record.entity, record.time])),
@@ -560,6 +571,7 @@ export class BotBrain {
     this.state.roamPoint = null;
     this.state.roamUntil = 0;
     this.state.checkSixUntil = 0;
+    this.state.checkSixYaw = 0;
     this.state.checkSixNextAt = 0;
     this.state.deadSince = -1;
     this.state.lastWeaponNumber = 0;
@@ -592,11 +604,6 @@ export class BotBrain {
 
   //--------------------------------------------------------------------------
 
-  /** The awareness record for one entity, for tests and debugging. */
-  awarenessOf(id: number): BotAwarenessT | undefined {
-    return this.state.awareness.get(id);
-  }
-
   /** The enemy the brain is currently fighting, or -1. */
   currentTarget(): number {
     return this.state.targetId;
@@ -605,11 +612,6 @@ export class BotBrain {
   /** The path the brain is currently following, or null. */
   currentPath(): NavPathT | null {
     return this.state.pathState.path;
-  }
-
-  /** The index of the point the follower is steering at, for a trace or a debugger. */
-  currentPathIndex(): number {
-    return this.state.pathState.index;
   }
 
   //--------------------------------------------------------------------------
@@ -683,7 +685,7 @@ export class BotBrain {
 
     //---- 1/2: senses and target selection -----------------------------------
     this.updateSenses(world, self, entities, sounds, dt, now);
-    this.updateObjectives(entities, self, now);
+    this.updateObjectives(entities, self);
     const target = this.selectTarget(entities, self.team, self.origin);
     this.state.targetId = target === null ? -1 : target.id;
 
@@ -728,7 +730,6 @@ export class BotBrain {
           ...(this.config.runSpeed === undefined ? {} : { runSpeed: this.config.runSpeed }),
           ...(this.config.walkSpeed === undefined ? {} : { walkSpeed: this.config.walkSpeed }) },
         this.settings.movement,
-        this.config.rng,
       );
 
       if (follow.status === BotPathStatus.Stuck) {
@@ -954,15 +955,22 @@ export class BotBrain {
     } else if (this.state.gateShootAt !== null) {
       aimAt = bvecSub(this.state.gateShootAt, self.eye);
     } else if (this.shouldCheckSix(now)) {
-      const { forward } = { forward: bvec(Math.cos(((this.state.aim.yaw + 180) * Math.PI) / 180), Math.sin(((this.state.aim.yaw + 180) * Math.PI) / 180), 0) };
-      aimAt = forward;
+      aimAt = bvec(Math.cos((this.state.checkSixYaw * Math.PI) / 180), Math.sin((this.state.checkSixYaw * Math.PI) / 180), 0);
     } else if (moveTarget !== null) {
       aimAt = bvecSub(moveTarget, self.origin);
       aimAt.z = 0;
     }
 
+    const yawBefore = this.state.aim.yaw;
     if (aimAt !== null) aimStep(this.state.aim, aimAt, this.settings.aiming, dt, now);
     cmd.viewAngles = bvec(this.state.aim.pitch, angleMod(this.state.aim.yaw), 0);
+    if (this.state.aim.yaw !== yawBefore && (cmd.forwardmove !== 0 || cmd.sidemove !== 0)) {
+      // The move fields were projected onto yawBefore but the server applies them to the new view; carry the same world direction over.
+      const before = angleVectors(0, yawBefore, 0), after = angleVectors(0, this.state.aim.yaw, 0);
+      const wx = before.forward.x * cmd.forwardmove + before.right.x * cmd.sidemove, wy = before.forward.y * cmd.forwardmove + before.right.y * cmd.sidemove;
+      cmd.forwardmove = wx * after.forward.x + wy * after.forward.y;
+      cmd.sidemove = wx * after.right.x + wy * after.right.y;
+    }
 
     // A shot at the gate once the view has come round to it. One press per
     // GATE_SHOT_SECONDS: a secret door swings on the first hit, and the
@@ -973,15 +981,6 @@ export class BotBrain {
         this.state.gateFiredAt = now;
       }
     }
-
-    // forwardmove/sidemove above were projected onto the view the bot held
-    // when the frame began, but the usercmd carries the view it holds NOW,
-    // and the server moves the bot with the angles in that same command --
-    // exactly as a human client does, projecting onto the angles it is about
-    // to send. Left uncorrected the world direction comes out rotated by
-    // however far the tracker turned this frame: a few degrees while it is
-    // settling, hundreds while it is not. A bot in the middle of a turn then
-    // walks into the wall beside its route instead of along it.
 
     //---- 7: weapon and trigger ----------------------------------------------
     if (target !== null) {
@@ -1007,7 +1006,7 @@ export class BotBrain {
     }
 
     // Interactables that only need a nudge: press use when standing on one.
-    if (this.wantsUse(world, entities, self.origin)) cmd.buttons |= BOT_BUTTON_USE;
+    if (this.wantsUse(entities, self.origin)) cmd.buttons |= BOT_BUTTON_USE;
 
     this.state.lastCmd = cmd;
     return cmd;
@@ -1035,8 +1034,12 @@ export class BotBrain {
       const geom = evaluateSightGeometry(self.eye, this.state.aim.pitch, this.state.aim.yaw, ent.center, ent.invisible, senses, weapons);
       // The center sits inside the target's own box, so the trace legitimately
       // stops on the target itself; that is a clear line, not an obstruction.
-      const sightTrace = world.traceLine(self.eye, ent.center);
-      const clear = geom.withinInvisRange && (sightTrace.fraction >= 1 || sightTrace.hitId === ent.id);
+      // senseStep reads line of sight only together with a view cone, so the trace waits for one.
+      let clear = false;
+      if (geom.withinInvisRange && (geom.inSightFov || geom.inWeaponFov)) {
+        const sightTrace = world.traceLine(self.eye, ent.center);
+        clear = sightTrace.fraction >= 1 || sightTrace.hitId === ent.id;
+      }
 
       let audible = false;
       for (const s of sounds) {
@@ -1180,7 +1183,7 @@ export class BotBrain {
    * where it spawned has to be remembered rather than looked up: that point
    * is the base a carrier runs to, a defender guards, and an attacker camps.
    */
-  private updateObjectives(entities: readonly BotEntityT[], self: ReturnType<BotWorldT["self"]>, now: number): void {
+  private updateObjectives(entities: readonly BotEntityT[], self: ReturnType<BotWorldT["self"]>): void {
     const knowledge = this.config.knowledge;
     for (const ent of entities) {
       if (ent.kind !== BotEntityKind.Item) continue;
@@ -1201,7 +1204,7 @@ export class BotBrain {
       this.emitChatOnce(this.state.objectiveRole === "defend" ? "ctf_on_defense" : "ctf_on_offense");
     }
 
-    if (this.state.objectiveRole === "attack" && this.state.enemyObjectiveHome !== null && now > 0) {
+    if (this.state.objectiveRole === "attack" && this.state.enemyObjectiveHome !== null) {
       if (bvecDistance(self.origin, this.state.enemyObjectiveHome) < OBJECTIVE_GUARD_RADIUS) this.emitChatOnce("ctf_camping_enemy_base");
     }
   }
@@ -1279,7 +1282,7 @@ export class BotBrain {
       return this.state.ownObjectiveHome;
     }
 
-    if (target !== null && target.kind === BotEntityKind.Player && target.team > 0 && target.team !== self.team) {
+    if (target !== null && target.kind === BotEntityKind.Player && target.carryingObjective === true && target.team > 0 && target.team !== self.team) {
       this.emitChatOnce("ctf_attacking_enemy_carrier");
     }
 
@@ -1298,9 +1301,9 @@ export class BotBrain {
     if (ourCarrier !== null) {
       const carrierHome = this.state.ownObjectiveHome !== null && bvecDistance(ourCarrier.origin, this.state.ownObjectiveHome) < CARRIER_HOLD_RADIUS;
       if (carrierHome) return enemyCarrier !== null ? huntEnemyCarrier(enemyCarrier) : null;
+      if (bvecDistance(self.origin, ourCarrier.origin) < ESCORT_DISTANCE) return null; // close enough: fight, pick up, roam
       this.state.goalEntityId = ourCarrier.id;
       this.state.goalIsLive = true;
-      if (bvecDistance(self.origin, ourCarrier.origin) < ESCORT_DISTANCE) return null; // close enough: fight, pick up, roam
       return ourCarrier.origin;
     }
     // Nobody on our side has it and it is not lying about: whoever holds it
@@ -1505,7 +1508,6 @@ export class BotBrain {
     return world.pointContents(above) === BotContents.Empty;
   }
 
-  /** In coop, the human the bot regroups with. See COOP_REGROUP_SECONDS. */
   /**
    * The nearest thing worth opening, while the bot is blocked. See
    * INTERACT_RADIUS. A brush entity's `origin` is the world origin, so the
@@ -1836,13 +1838,15 @@ export class BotBrain {
    * hazards get refused: a nav node standing in lava or slime is a node the
    * mapper connected for a monster that does not care, and a bot that paths
    * through one dies within seconds. The contents lookup is memoised per
-   * plan because A* visits the same node many times.
+   * navigation graph, because every plan asks about every node.
    */
   private traverseCaps(world: BotWorldT): NavTraverseCapsT {
     const caps = defaultTraverseCaps();
     caps.jump = !this.settings.movement.walkOnly || this.settings.movement.allowJumpingInCombat;
 
-    const hazard = new Map<number, boolean>();
+    const nodes = world.nav()?.nodes ?? null;
+    if (nodes !== this.hazardNodes) { this.hazardNodes = nodes; this.hazardByNode.clear(); }
+    const hazard = this.hazardByNode;
     caps.avoid = (node): boolean => {
       const cached = hazard.get(node.index);
       if (cached !== undefined) return cached;
@@ -1873,13 +1877,21 @@ export class BotBrain {
       const step = nav.transport?.(train, self.origin);
       if (step?.kind === "ride" || step?.kind === "wait" || step?.kind === "move" && step.stage === "exit") return;
     }
-    const stale = this.state.pathState.path === null || !nav.pathValid(this.state.pathState.path) || now - this.state.pathState.plannedAt > REPLAN_SECONDS;
+    // Bots start their replan clocks together, so spread the interval by id: a quarter-second step per bot, repeating every four.
+    const interval = REPLAN_SECONDS + (self.id & 3) * 0.25;
+    const pacedFailure = this.state.pathState.path === null && this.failedPlanGoal !== null && bvecDistance(this.failedPlanGoal, goal) < 96
+      && now - this.state.pathState.plannedAt <= interval;
+    if (pacedFailure) return;
+    const stale = this.state.pathState.path === null || !nav.pathValid(this.state.pathState.path) || now - this.state.pathState.plannedAt > interval;
     if (!stale) {
       // A followed entity that has walked away from the path's end needs a
       // fresh plan even before the timer runs out.
-      const points = this.state.pathState.path?.points;
-      const end = points === undefined ? undefined : points[points.length - 1];
-      if (end === undefined || bvecDistance(end, goal) < 96) return;
+      if (this.plannedGoal !== null) { if (bvecDistance(this.plannedGoal, goal) < 96) return; }
+      else {
+        const points = this.state.pathState.path?.points;
+        const end = points === undefined ? undefined : points[points.length - 1];
+        if (end === undefined || bvecDistance(end, goal) < 96) return;
+      }
     }
 
     // The corner-cut test sweeps the bot's own body, not a line: a line at
@@ -1897,6 +1909,8 @@ export class BotBrain {
     const path = nav.planPath(self.origin, goal, { caps: this.traverseCaps(world), visible, startAbove: this.config.movement?.startAbove ?? PLAN_START_ABOVE });
     setPath(this.state.pathState, path, self.origin, now);
     if (path === null) this.state.pathState.plannedAt = now;
+    this.failedPlanGoal = path === null ? goal : null;
+    this.plannedGoal = goal;
   }
 
   //--------------------------------------------------------------------------
@@ -1970,15 +1984,14 @@ export class BotBrain {
     this.state.checkSixNextAt = now + randomRange(this.config.rng, 3, 8);
     if (!randomChance(this.config.rng, 35)) return false;
     this.state.checkSixUntil = now + 0.5;
-    // Captured ONCE, here. Recomputing "180 degrees from where I am facing"
-    // on every frame of the window makes the ideal angle run away from the
-    // tracker exactly as fast as the tracker turns, so the bot pirouettes at
-    // several hundred degrees a second for the whole window instead of
-    // looking behind itself -- and a pirouette is a bot that is not steering.
+    // Captured once, here: recomputing "180 degrees from where I am facing"
+    // every frame makes the ideal angle run away from the tracker, so the bot
+    // would pirouette through the whole window instead of looking behind it.
+    this.state.checkSixYaw = this.state.aim.yaw + 180;
     return true;
   }
 
-  private wantsUse(_world: BotWorldT, entities: readonly BotEntityT[], origin: BotVec3): boolean {
+  private wantsUse(entities: readonly BotEntityT[], origin: BotVec3): boolean {
     const knowledge = this.config.knowledge;
     for (const ent of entities) {
       if (ent.kind !== BotEntityKind.Interactable) continue;

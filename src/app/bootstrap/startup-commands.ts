@@ -1,4 +1,8 @@
-import type { CommandDialect } from "../../contracts/common.ts";
+import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
+import type { InputBinding } from "../../contracts/ui.ts";
+import { CvarFlag, type CvarRegistry } from "../../core/cvars/index.ts";
+import { physicalInputKey } from "../../input/seat.ts";
+import { namedPhysicalInput } from "../../input/bindings.ts";
 import { asciiFold, commandSeparatorOffset, sourceCommandText, tokenizeCommand } from "../../core/commands/text.ts";
 
 function operand(value: string): string {
@@ -46,4 +50,44 @@ export function startupCommandPhases(lines: readonly string[], dialect: CommandD
   }
   const text = (commands: readonly string[]): string => commands.length === 0 ? "" : `${commands.join("\n")}\n`;
   return { early: text(early), late: text(late), stuffed: text(lines), variables, safe: safeIndex !== -1 };
+}
+
+/** Q3 `set` lines from the launch command are applied as user-created variables to whichever registry owns each name. */
+export function applyStartupVariables(variables: readonly { readonly name: string; readonly value: string }[],
+  owner: (name: string, context: CommandContext) => CvarRegistry, context: CommandContext): void {
+  for (const variable of variables) {
+    const registry = owner(variable.name, context);
+    registry.set(variable.name, variable.value, true);
+    const registered = registry.register(variable.name, "");
+    if (registered === undefined) throw new Error(`Q3 startup variable registration rejected: ${variable.name}`);
+    registry.addFlags(registered.name, CvarFlag.UserCreated);
+  }
+}
+
+/** The authored baseline a later seat inherits: the primary seat's authored bindings plus any default it lacks. */
+export function inheritedBindingBaseline(primary: readonly InputBinding[], defaults: readonly InputBinding[]): InputBinding[] {
+  const baseline = new Map(primary.map(binding => [physicalInputKey(binding.input), binding]));
+  for (const binding of defaults) if (!baseline.has(physicalInputKey(binding.input))) baseline.set(physicalInputKey(binding.input), binding);
+  return [...baseline.values()];
+}
+
+/** Replace a seat's weapon, impulse and use binds with the selected defaults; returns the seat's authored bindings. */
+export function applySelectedBindingDefaults(seat: { readonly bindings: readonly InputBinding[]; unbind(input: InputBinding["input"]): unknown; bind(binding: InputBinding): unknown },
+  defaults: readonly InputBinding[]): InputBinding[] {
+  for (const binding of seat.bindings) if (binding.target.kind === "command" && /^(?:weapon|impulse|use)\s/i.test(binding.target.text)) seat.unbind(binding.input);
+  const authored = new Map(seat.bindings.map(binding => [physicalInputKey(binding.input), binding]));
+  for (const binding of defaults) {
+    seat.bind(binding);
+    if (!authored.has(physicalInputKey(binding.input))) authored.set(physicalInputKey(binding.input), binding);
+  }
+  return [...authored.values()];
+}
+
+/** Record what a bind, unbind or unbindall in a startup script chose, so selected defaults do not overwrite it. */
+export function noteBindingCommand(tokens: readonly string[], choices: { all: boolean; readonly overridden: Set<string> }): void {
+  const [rawName, key] = tokens, name = asciiFold(rawName ?? "");
+  if (name === "unbindall") choices.all = true;
+  if ((name === "bind" || name === "unbind") && key !== undefined) {
+    const input = namedPhysicalInput(key); if (input !== null) choices.overridden.add(physicalInputKey(input));
+  }
 }

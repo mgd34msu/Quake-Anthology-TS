@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect } from "bun:test";
+import { corpusTest, corpusFile } from "../../support/corpus.ts";
 
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { createMountIdentity, type ContentId, type ContentMount } from "../../../src/contracts/content.ts";
@@ -13,6 +13,7 @@ import { SceneTextureLoader } from "../../../src/render/scene/textures.ts";
 import { SceneShaderRegistry } from "../../../src/render/scene/shaders.ts";
 import { SceneMaterialRegistrations } from "../../../src/render/scene/material-registrations.ts";
 import { DEFAULT_MODEL_REPLACEMENT_POLICY } from "../../../src/render/scene/models/replacements.ts";
+const test = corpusTest("q2/rerelease/Q2Game.kpf");
 
 const identity = createIdentityOwner("q2-source-localization");
 
@@ -29,7 +30,7 @@ test("Q2 presentation keeps missing keys, argument text and source newlines with
 });
 
 test("Q2 base and expansion source messages use their mounted catalog and selected seat language", async () => {
-  const archivePath = `${testCorpusRoot()}/q2/rerelease/Q2Game.kpf`;
+  const archivePath = corpusFile("q2/rerelease/Q2Game.kpf");
   const archiveDigest = await digestFile(archivePath);
   const sources: readonly ContentId[] = ["q2:rerelease:baseq2:retail", "q2:rerelease:xatrix:retail", "q2:rerelease:rogue:retail", "q2:rerelease:mg1:retail"];
   for (const source of sources) {

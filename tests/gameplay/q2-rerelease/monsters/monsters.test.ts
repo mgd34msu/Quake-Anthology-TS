@@ -1,18 +1,18 @@
 import { monsterPowerArmor } from "../../../../src/content/q2/missionpacks/monsters/power-armor.ts";
-import { testCorpusRoot } from "../../../support/corpus.ts";
+import { corpusTest, corpusDescribe, corpusFile } from "../../../support/corpus.ts";
 
 import { decodeQ2MonstersCheckpoint, encodeQ2MonstersCheckpoint } from "../../../../src/persistence/q2-monsters.ts";
 import { findRereleaseSpawnPoint, checkRereleaseGroundSpawnPoint } from "../../../../src/content/q2/rerelease/monsters/spawn-placement.ts";
 import { Q2MissionPackMonsterState } from "../../../../src/content/q2/missionpacks/monsters/state.ts";
 import { medicFrame } from "../../../../src/content/q2/rerelease/monsters/tables/medic.ts";
 import { decodeQ2MissionPackMonstersCheckpoint, encodeQ2MissionPackMonstersCheckpoint } from "../../../../src/persistence/q2-missionpacks.ts";
-import { describe, expect, test } from "bun:test";
+import { expect } from "bun:test";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
 import type { Vec3 } from "../../../../src/contracts/math.ts";
 import type { TraceResult } from "../../../../src/contracts/scene.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ2Bsp } from "../../../../src/formats/q2-map/index.ts";
 import { parseQ2Entities } from "../../../../src/content/q2/foundation/fields.ts";
@@ -31,13 +31,16 @@ import { Q2RereleaseRandom } from "../../../../src/core/random/q2-rerelease.ts";
 import { insaneFrame } from "../../../../src/content/q2/rerelease/monsters/tables/insane.ts";
 import { parasiteFrame } from "../../../../src/content/q2/rerelease/monsters/tables/parasite.ts";
 import { brainFrame } from "../../../../src/content/q2/rerelease/monsters/tables/brain.ts";
+import { inertAuthority } from "../../../support/authority.ts";
+const test = corpusTest("q2/rerelease/baseq2/pak0.pak");
+const describe = corpusDescribe("q2/rerelease/baseq2/pak0.pak");
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
 function fixture(isN64 = false, gravity = 800) {
   const actors = new SessionActorRegistry(createIdentityOwner("q2-base-monsters")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors), scheduled = new Map<OwnedActor, number>(), events: Q2PresentationEvent[] = [];
   const world = actors.allocateAtSource("q2:game", 0, "q2:worldspawn"), player = actors.allocate("q3:character", "q3:sarge");
   bodies.create(world, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
@@ -105,7 +108,7 @@ describe("rerelease species on the shared Q2 controller", () => {
     expect(() => parseQ2Entities('{ "classname" "func_button" // no closing brace', "rerelease")).toThrow("EOF without closing brace");
   });
   test("admits real retail rerelease monster records and source registrations", async () => {
-    const scene = fixture(), archive = await openArchive(`${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`);
+    const scene = fixture(), archive = await openArchive(corpusFile("q2/rerelease/baseq2/pak0.pak"));
     try {
       const wanted = new Set(["monster_berserk", "monster_arachnid", "monster_guardian", "monster_guncmdr", "monster_gunner", "monster_shambler", "monster_tank", "monster_tank_commander", "monster_gladiator", "monster_gladb", "monster_supertank", "monster_boss5", "monster_flipper", "monster_floater", "monster_hover", "monster_flyer", "monster_chick", "monster_mutant", "monster_boss2", "monster_jorg", "monster_makron", "misc_insane"]), representatives = new Map<string, Q2SpawnFields>();
       for (const classname of ["monster_brain", "monster_chick_heat", "monster_parasite"]) wanted.add(classname);
@@ -152,6 +155,7 @@ describe("rerelease species on the shared Q2 controller", () => {
       expect(scene.game.body(monster.entity).velocity).toEqual({ x: 425, y: 0, z: 160 });
       const source = scene.game.capture(), controller = scene.monsters.capture();
       expect(source.entities.find(entity => entity.actor.slot === monster.entity.actor.id.slot)?.callbacks.touch).toBe("mutant_jump_touch");
+      monster.entity.touch = null; // restore must bring the named callback back, not find it still bound
       scene.game.restore(source); scene.monsters.restore(scene.game, controller);
       const restored = scene.monsters.context(monster.entity.actor.id);
       if (restored === null || restored.entity.touch === null) throw new Error("Mutant jump touch was not restored");
@@ -207,6 +211,7 @@ describe("rerelease species on the shared Q2 controller", () => {
       monster.dispatch("hover_dead");
       const source = scene.game.capture(), controller = scene.monsters.capture();
       expect(source.entities.find(entity => entity.actor.slot === monster.entity.actor.id.slot)?.callbacks.think).toBe("hover_deadthink");
+      monster.entity.think = null; // restore must bring the named callback back, not find it still bound
       scene.game.restore(source); scene.monsters.restore(scene.game, controller);
       const restored = scene.monsters.context(monster.entity.actor.id);
       if (restored === null || restored.entity.think === null) throw new Error("Hover corpse think was not restored");
@@ -432,11 +437,17 @@ test("Rerelease medic timeout marks a corpse and summoned deaths release their w
     expect(medic.entity.enemy).toBe(scene.player.id);
     const child = scene.spawn("monster_medic");
     child.state.spawnedBy = "medic"; child.state.commander = medic.entity.actor.id; child.state.monsterSlots = 3;
+    child.entity.enemy = scene.player.id; // an enemy-less monster takes the doubled sneak-attack damage and would gib
     medic.state.monsterSlots = 9; medic.state.monsterUsed = 5;
     scene.game.damage(child.entity.actor.id, scene.playerEntity, scene.player.id, 350, 0, zero, zero, zero, 0);
     scene.monsters.endFrame(scene.game);
     expect(medic.state.monsterSlots).toBe(9);
+    // g_monster.cpp refunds a medic's child only when it is gibbed, so an ungibbed death keeps its slots.
+    expect(medic.state.monsterUsed).toBe(5);
+    scene.game.damage(child.entity.actor.id, scene.playerEntity, scene.player.id, 1000, 0, zero, zero, zero, 0);
+    scene.monsters.endFrame(scene.game);
     expect(medic.state.monsterUsed).toBe(2);
+    expect(child.state.commander).toBeNull();
   } finally { scene.actors.close(); }
 });
 
@@ -492,4 +503,54 @@ test("rerelease gunner prediction and grenade launch use host gravity without a 
   expect(low.trajectory.end.z).toBeGreaterThan(normal.trajectory.end.z);
   expect(low.velocity.z).toBeLessThan(normal.velocity.z);
   expect(low.velocity).not.toEqual(normal.velocity);
+});
+
+describe("rerelease monster AI follows the rerelease source", () => {
+  test("a player beside a monster is seen, and an unalerted ambush monster keeps the narrower cone", () => {
+    const scene = fixture();
+    scene.bodies.write(scene.player, { ...scene.game.body(scene.playerEntity), origin: { x: 0, y: 300, z: 24 } });
+    const watcher = scene.spawn("monster_tank", new Map([["origin", "0 0 24"]]));
+    scene.advance(0.1);
+    watcher.findTarget();
+    expect(watcher.entity.enemy).toBe(scene.player.id);
+
+    const ambusher = scene.spawn("monster_tank", new Map([["origin", "0 0 24"], ["spawnflags", "1"]]));
+    scene.advance(0.2);
+    ambusher.findTarget();
+    expect(ambusher.entity.enemy).toBeNull();
+    scene.actors.close();
+  });
+
+  test("a walker with a clear line to its goal steps straight at it instead of stair-stepping", () => {
+    const scene = fixture(), tank = scene.spawn("monster_tank", new Map([["origin", "0 0 24"]]));
+    scene.bodies.write(scene.player, { ...scene.game.body(scene.playerEntity), origin: { x: 300, y: 0, z: 24 } });
+    tank.entity.enemy = scene.player.id; tank.entity.goal = scene.player.id;
+    scene.game.move(tank.entity, { ground: scene.game.host.worldActor() }, false);
+    scene.advance(0.1);
+    const before = scene.game.body(tank.entity).origin;
+    tank.state.idealYaw = 45;
+    expect(tank.moveToGoal(10)).toBe(true);
+    const after = scene.game.body(tank.entity).origin;
+    expect(after.x).toBeGreaterThan(before.x);
+    expect(Math.abs(after.y - before.y)).toBeLessThan(1e-6);
+    scene.actors.close();
+  });
+  test("a living player's fresh noise is heard through its own record, and records and AI_NOSTEP survive a checkpoint", () => {
+    const scene = fixture(), tank = scene.spawn("monster_tank", new Map([["origin", "0 0 24"], ["spawnflags", "0"]]));
+    tank.state.noStep = true;
+    scene.bodies.write(scene.player, { ...scene.game.body(scene.playerEntity), origin: { x: 0, y: -900, z: 24 } });
+    scene.advance(0.1);
+    scene.monsters.reportNoise(scene.player.id, { x: 120, y: 0, z: 24 }, false);
+    tank.findTarget();
+    expect(tank.entity.enemy).toBe(scene.player.id);
+    const saved = decodeQ2MonstersCheckpoint(encodeQ2MonstersCheckpoint(scene.monsters.capture()));
+    expect(saved.actors.some(actor => actor.state.noStep)).toBe(true);
+    expect(saved.perception.noises[0]?.primaryRecord?.origin).toEqual({ x: 120, y: 0, z: 24 });
+    scene.combat.setHealth(scene.player, -5);
+    tank.entity.enemy = null; tank.state.soundTarget = null;
+    scene.advance(0.15); scene.monsters.reportNoise(scene.player.id, { x: 130, y: 0, z: 24 }, false);
+    tank.findTarget();
+    expect(tank.entity.enemy).toBeNull();
+    scene.actors.close();
+  });
 });

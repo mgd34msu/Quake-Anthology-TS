@@ -1,3 +1,4 @@
+import { writeCapture } from "../support/capture.ts";
 import { expect, spyOn, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -11,7 +12,7 @@ import { discoverInstalledContent } from '../../src/content/catalog/index.ts';
 import { sharedBindingActions } from '../../src/ui/settings/action-catalog.ts';
 import { Q2Ballistics } from "../../src/content/q2/foundation/weapons/ballistics.ts";
 import { encodePng } from "../../src/formats/images/png.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 import { fitUi } from "../../src/ui/common/layout.ts";
 import type { PhysicalInput, SeatInputEvent } from '../../src/contracts/ui.ts';
 
@@ -83,7 +84,7 @@ test('binding editor captures shared offhand and primary actions and restores th
     expect(local.input.binding({ kind: 'key', code: 119 })).toEqual(beforeConflict);
     expect(local.input.focus.kind === 'menu' && local.input.focus.menu).toBe('menu:bindings:conflict');
     const conflictImage = application.captureNextFrame(); await application.step(1);
-    await Bun.write('/tmp/binding-conflict.png', encodePng(640, 480, await conflictImage));
+    await writeCapture('binding-conflict.png', encodePng(640, 480, await conflictImage));
     key(13, true); key(13, false);
     expect(local.input.binding({ kind: 'key', code: 119 })).toEqual(beforeConflict);
     capture('back', { kind: 'key', code: 119 }, false);
@@ -104,7 +105,7 @@ test('binding editor captures shared offhand and primary actions and restores th
     expect(local.input.binding({ kind: 'key', code: 103 })).toEqual({ kind: 'command', text: '+grenade' });
     expect(local.input.binding({ kind: 'key', code: 104 })).toEqual({ kind: 'command', text: '+grenade' });
     const detailsImage = application.captureNextFrame(); await application.step(1);
-    await Bun.write('/tmp/binding-details.png', encodePng(640, 480, await detailsImage));
+    await writeCapture('binding-details.png', encodePng(640, 480, await detailsImage));
     ui.controller.closeAll();
     event({ kind: 'focus', seat, timeMilliseconds: input.now(), focused: true });
     const grenadeInput = spyOn(application.simulation, "setHandGrenadeInput");

@@ -41,7 +41,7 @@ export interface SourceEffectSound {
 const numeric: NumericProfile = { id: "q3:effect", arithmetic: { kind: "binary32", round: "each-operation" }, scalarStorage: "binary32", floatToInt: "qvm-indefinite", integerOverflow: "wrap32" };
 const primitiveState: RenderState = { blend: { source: "one", destination: "zero" }, depthTest: "less-equal", depthWrite: true,
   alphaTest: "none", cull: "back", depthRange: [0, 1], polygonOffset: null };
-interface CapturedRef { readonly entityIndex: number; readonly ref: RefEntity; readonly cullRadius: number; readonly hiddenFor?: ActorId; }
+interface CapturedRef { readonly entityIndex: number; readonly ref: RefEntity; readonly cullRadius: number; }
 
 export class Q3ApplicationEffects {
   private refs: CapturedRef[] = [];
@@ -49,11 +49,10 @@ export class Q3ApplicationEffects {
   private lights: DynamicLight[] = [];
   private readonly models: { readonly entityIndex: number; readonly entity: SceneEntity }[] = [];
   private readonly options = new Map<SceneEntity, ModelSourceOptions>();
-  private readonly bloodOwners: WeakMap<RefEntity, ActorId>;
   private constructor(readonly content: ContentId, readonly assets: ApplicationAssets,
     readonly state: { time: number; readonly product: Product }, readonly effects: ClientEffects,
     readonly system: LocalEntitySystem, readonly marks: ImpactMarkSystem, readonly shaders: ReadonlyMap<string, RegisteredSceneMaterial>,
-    readonly renderer: SceneModelRenderer, readonly sounds: EventRing<SourceEffectSound>, bloodOwners: WeakMap<RefEntity, ActorId>) { this.bloodOwners = bloodOwners; }
+    readonly renderer: SceneModelRenderer, readonly sounds: EventRing<SourceEffectSound>) {}
   private soundCursor: EventCursor | null = null;
   private takeSounds(): SourceEffectSound[] { this.soundCursor ??= this.sounds.openCursor(); const taken = this.sounds.take(this.soundCursor); this.sounds.retire(); return taken; }
 
@@ -121,8 +120,7 @@ export class Q3ApplicationEffects {
     } }, clientNum: -1, random, marks };
     const system = new LocalEntitySystem(effects, product === "baseq3" ? { ...shared, product, media: localMedia } : { ...shared, product,
       media: { ...localMedia, kamikazeShockWave: await model("models/weaphits/kamwave.md3"), kamikazeExplodeSound: await sound("sound/items/kam_explode.wav"), kamikazeImplodeSound: await sound("sound/items/kam_implode.wav") } });
-    const bloodOwners = new WeakMap<RefEntity, ActorId>();
-    const result = new Q3ApplicationEffects(content, assets, state, effects, system, marks, shaders, renderer, sounds, bloodOwners);
+    const result = new Q3ApplicationEffects(content, assets, state, effects, system, marks, shaders, renderer, sounds);
     preloading = false;
     return result;
   }
@@ -146,10 +144,19 @@ export class Q3ApplicationEffects {
     this.state.time = timeMilliseconds; this.refs = []; this.lights = []; this.models.length = 0; this.options.clear();
     // Camera-near puff removal belongs to each seat; it must not retire another seat's effect.
     const far = this.assets.world.bounds.max;
+    // The pool list is walked once per frame, and again only when entities were allocated or freed while adding.
+    let owners = new Map<object, { readonly radius: number }>(), ownersCount = -1;
+    const ownerOf = (ref: object): { readonly radius: number } | undefined => {
+      const known = owners.get(ref);
+      if (known !== undefined || ownersCount === this.effects.pool.activeCount) return known;
+      owners = new Map(this.effects.pool.activeEntities().map(local => [local.refEntity, local]));
+      ownersCount = this.effects.pool.activeCount;
+      return owners.get(ref);
+    };
     this.system.addEntities({ time: this.state.time, frameTime: elapsedMilliseconds, viewOrigin: { x: far.x + 65536, y: far.y + 65536, z: far.z + 65536 } }, {
       addRefEntity: ref => {
-        const owner = this.effects.pool.activeEntities().find(local => local.refEntity === ref), hiddenFor = this.bloodOwners.get(ref);
-        this.refs.push({ entityIndex: this.refs.length, ref: copyRefEntity(ref), cullRadius: owner?.radius ?? 0, ...(hiddenFor === undefined ? {} : { hiddenFor }) });
+        const owner = ownerOf(ref);
+        this.refs.push({ entityIndex: this.refs.length, ref: copyRefEntity(ref), cullRadius: owner?.radius ?? 0 });
       },
       addLight: light => { this.lights.push(light); },
     });
@@ -165,7 +172,7 @@ export class Q3ApplicationEffects {
     }
     await this.renderer.preload(this.models.map(model => model.entity), entity => this.options.get(entity) ?? {});
   }
-  frame(camera: SceneCamera, source: SourceSceneOrder, viewer: ActorId | null = null, q1Fog?: import("../../../contracts/render.ts").SceneFog & { readonly kind: "q1" }): { readonly admission: Q3SceneAdmission; readonly operations: readonly SceneOperation[]; readonly q3Lights: readonly DynamicLight[] } {
+  frame(camera: SceneCamera, source: SourceSceneOrder, _viewer: ActorId | null = null, q1Fog?: import("../../../contracts/render.ts").SceneFog & { readonly kind: "q1" }): { readonly admission: Q3SceneAdmission; readonly operations: readonly SceneOperation[]; readonly q3Lights: readonly DynamicLight[] } {
     const input = { ...(q1Fog === undefined ? {} : { q1Fog }), camera, time: { kind: "milliseconds", value: this.state.time }, target: { kind: "preview", id: "effects" } } satisfies Parameters<ApplicationAssets["world"]["materialContext"]>[0];
     const world = this.assets.world, operations: SceneOperation[] = [];
     const admission = this.admission;
@@ -182,7 +189,6 @@ export class Q3ApplicationEffects {
     for (const captured of this.refs) {
       const ref = captured.ref;
       if (camera.clip.kind === "portal" && (ref.renderFlags & 4) !== 0) continue;
-      if (viewer !== null && captured.hiddenFor?.equals(viewer)) continue;
       if (ref.kind === "portal-surface") continue;
       const entity = { kind: "refentity", index: firstEntity + captured.entityIndex } satisfies import("../../../render/scene/submissions.ts").SourceEntityOrder;
       if (ref.kind === "model") {
@@ -220,7 +226,6 @@ export class Q3ApplicationEffects {
   }
   drainSounds(): readonly SourceEffectSound[] { return this.takeSounds(); }
   resetRound(): void {
-    for (const entity of this.effects.pool.activeEntities()) this.bloodOwners.delete(entity.refEntity);
     this.effects.pool.initialize(); this.marks.reset();
     this.refs = []; this.admission = snapshotQ3SceneAdmission("mixed", [], []); this.lights = [];
     this.models.length = 0; this.options.clear(); this.sounds.reset();

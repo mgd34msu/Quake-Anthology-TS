@@ -4,6 +4,8 @@ import type { UnifiedPacket } from './packet.ts';
 export interface UnifiedChannelLimits {
   readonly datagramBytes: number;
   readonly messageBytes: number;
+  /** Largest message a peer may announce; a server keeps this far below what it sends itself. */
+  readonly inboundMessageBytes: number;
   readonly queuedReliableBytes: number;
   readonly queuedReliableMessages: number;
   readonly reliableWindowMessages: number;
@@ -13,7 +15,7 @@ export interface UnifiedChannelLimits {
   readonly maximumTransmissions: number;
   readonly assemblyMilliseconds: number;
 }
-const defaults: UnifiedChannelLimits = { datagramBytes: 1200, messageBytes: 4 * 1024 * 1024, queuedReliableBytes: 8 * 1024 * 1024,
+const defaults: UnifiedChannelLimits = { datagramBytes: 1200, messageBytes: 4 * 1024 * 1024, inboundMessageBytes: 4 * 1024 * 1024, queuedReliableBytes: 8 * 1024 * 1024,
   queuedReliableMessages: 256, reliableWindowMessages: 8, fragments: 8192, packetsPerFlush: 32, retryMilliseconds: 250, maximumTransmissions: 40, assemblyMilliseconds: 30000 };
 
 export type UnifiedDelivery =
@@ -62,8 +64,8 @@ export class UnifiedChannel {
   private waitingFrame: Extract<UnifiedDelivery, { readonly kind: 'frame' }> | null = null;
   private readonly acknowledgments = new Map<string, { readonly sequence: number; readonly fragment: number }>();
   constructor(token: string, limits: Partial<UnifiedChannelLimits> = {}) {
-    this.token = unifiedToken(token); this.limits = { ...defaults, ...limits };
-    const values = [this.limits.datagramBytes, this.limits.messageBytes, this.limits.queuedReliableBytes, this.limits.queuedReliableMessages, this.limits.reliableWindowMessages,
+    this.token = unifiedToken(token); this.limits = { ...defaults, ...limits, inboundMessageBytes: limits.inboundMessageBytes ?? limits.messageBytes ?? defaults.inboundMessageBytes };
+    const values = [this.limits.datagramBytes, this.limits.messageBytes, this.limits.inboundMessageBytes, this.limits.queuedReliableBytes, this.limits.queuedReliableMessages, this.limits.reliableWindowMessages,
       this.limits.fragments, this.limits.packetsPerFlush, this.limits.retryMilliseconds, this.limits.maximumTransmissions, this.limits.assemblyMilliseconds];
     for (const value of values) if (!Number.isSafeInteger(value) || value < 1) throw new RangeError('Invalid unified channel limit');
     if (this.limits.datagramBytes <= UNIFIED_PACKET_HEADER_BYTES || this.limits.datagramBytes > 65507 || this.limits.messageBytes > UNIFIED_SEQUENCE_MAX
@@ -140,7 +142,7 @@ export class UnifiedChannel {
     if (datagram.length > this.limits.datagramBytes) return [];
     const packet = decodeUnifiedPacket(datagram);
     if (packet === null || packet.token !== this.token) return [];
-    if (packet.kind !== 'ack' && (packet.totalBytes > this.limits.messageBytes || packet.fragments > this.limits.fragments)) return [];
+    if (packet.kind !== 'ack' && (packet.totalBytes > this.limits.inboundMessageBytes || packet.fragments > this.limits.fragments)) return [];
     this.acceptAcknowledgment(packet);
     const delivered: UnifiedDelivery[] = [];
     if (packet.kind === 'ack') return delivered;
@@ -152,7 +154,7 @@ export class UnifiedChannel {
         // Future assemblies cannot occupy the space needed to close the first gap.
         let reserve = 0;
         for (let sequence = this.reliableReceived + 1; sequence < packet.sequence; sequence++) {
-          if (!this.reliableAssemblies.has(sequence)) { reserve = this.limits.messageBytes; break; }
+          if (!this.reliableAssemblies.has(sequence)) { reserve = this.limits.inboundMessageBytes; break; }
         }
         if (this.receivedBytes + packet.totalBytes + reserve > this.limits.queuedReliableBytes) return delivered;
         assembly = this.assembly(packet, now); this.reliableAssemblies.set(packet.sequence, assembly); this.receivedBytes += packet.totalBytes;

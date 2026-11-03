@@ -1,5 +1,6 @@
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q2RereleaseUserCommand, Q2UserCommand, UserCommand } from "../../../contracts/protocol.ts";
+import type { ClockProfile } from "../../../contracts/time.ts";
 import type { MovementPlayer } from "./players.ts";
 
 type NativeCommand = Q2UserCommand | Q2RereleaseUserCommand;
@@ -41,4 +42,28 @@ export function selectedNativeCommand(command: NativeCommand, aim: Vec3,
       upMove: jump ? 127 : crouch ? -127 : 0, buttons: attack ? 1 : 0,
       weapon: player.arsenal.state.kind === "q3" ? player.arsenal.state.sourceWeapon : 0 };
   }
+}
+
+/**
+ * Quotes one guest command interval in the selected provider's own quanta.
+ * A provider with a fixed step gets k whole steps and the remainder carried
+ * to the actor's next command; one with only a maximum step gets whole
+ * maxima plus a final shorter step. Providers with no per-command bound
+ * (Q2), or that slice from their own command clock (Q3), take the interval
+ * whole. The guest interval is always conserved: slices plus carry equal
+ * the incoming carry plus the interval.
+ */
+export function nativeMoveSlices(clock: ClockProfile, milliseconds: number, carry = 0): { readonly slices: readonly number[]; readonly carry: number } {
+  const fixed = clock.kind === "q1-netquake" && clock.fixedFrameSeconds !== null ? clock.fixedFrameSeconds * 1000 : null;
+  const maximum = clock.kind === "q1-netquake" ? clock.maximumFrameSeconds * 1000 : clock.kind === "q1-quakeworld" ? clock.maximumCommandMilliseconds : null;
+  if (fixed !== null && fixed > 0) {
+    const total = carry + milliseconds, count = Math.floor(total / fixed + 1e-9);
+    return { slices: Array.from({ length: count }, () => fixed), carry: Math.max(0, total - count * fixed) };
+  }
+  if (maximum === null || !(maximum > 0) || milliseconds <= maximum) return { slices: [milliseconds], carry: 0 };
+  const slices: number[] = [];
+  let left = milliseconds;
+  while (left > maximum) { slices.push(maximum); left -= maximum; }
+  if (left > 0) slices.push(left);
+  return { slices, carry: 0 };
 }

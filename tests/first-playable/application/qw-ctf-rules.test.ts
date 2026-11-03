@@ -6,7 +6,6 @@ import { Application } from "../../../src/app/bootstrap/application.ts";
 import { createStartupSelection } from "../../../src/app/bootstrap/startup-selection.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import type { ActorId } from "../../../src/contracts/identity.ts";
-import { callMethod, numberValue, objectValue, readBoolean, readField, readObject } from "../../support/reflect.ts";
 
 // Shared CTF (provider q1:ctf) must run on QuakeWorld programs like on every
 // other provider: the unified flag layer spawns both flags (authored flag
@@ -14,36 +13,30 @@ import { callMethod, numberValue, objectValue, readBoolean, readField, readObjec
 // teams, and runs take/capture through the same machinery as foreign LMCTF.
 type Simulation = import("../../../src/app/bootstrap/simulation/runtime.ts").SharedSimulation;
 
-function ctfFlag(sim: Simulation, team: number): { id: ActorId; state: object } | null {
-  const flags = readObject(sim, "lmctfFlags");
-  const entry: unknown = callMethod(flags, "get", team);
-  if (typeof entry !== "object" || entry === null) return null;
-  const actor: unknown = readField(entry, "actor");
-  if (actor === null) return null;
-  const id: unknown = readField(objectValue(actor, "flag actor"), "id");
-  const found = sim.actors.observations().find(candidate => candidate.id === id);
-  return found === undefined ? null : { id: found.id, state: entry };
+function ctfFlag(sim: Simulation, team: 1 | 2): { id: ActorId } | null {
+  const actor = sim.diagnostics().lmctf.flag(team)?.actor;
+  if (actor === undefined || actor === null) return null;
+  const found = sim.actors.observations().find(candidate => candidate.id === actor.id);
+  return found === undefined ? null : { id: found.id };
 }
 
-function ctfCarrier(sim: Simulation, team: number): ActorId | null {
-  const flags = readObject(sim, "lmctfFlags");
-  const entry: unknown = callMethod(flags, "get", team);
-  if (typeof entry !== "object" || entry === null) return null;
-  const carrier: unknown = readField(entry, "carrier");
-  if (carrier === null) return null;
+function ctfCarrier(sim: Simulation, team: 1 | 2): ActorId | null {
+  const carrier = sim.diagnostics().lmctf.flag(team)?.carrier;
+  if (carrier === undefined || carrier === null) return null;
   return sim.players().find(actor => actor === carrier) ?? null;
 }
 
 function teleport(sim: Simulation, actor: ActorId, origin: { x: number; y: number; z: number }): void {
-  callMethod(sim, "setPlayerMovement", actor, {
+  sim.diagnostics().movePlayer(actor, {
     kind: "teleport", origin, angles: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 },
     commandAngles: { x: 0, y: 0, z: 0 }, holdMilliseconds: 0, spectator: false,
   });
 }
 
 function matchScore(sim: Simulation, actor: ActorId): number {
-  const player = objectValue(callMethod(sim, "primaryMatchPlayer", actor), "match player");
-  return numberValue(callMethod(player, "score"), "match score");
+  const player = sim.diagnostics().matchPlayer(actor);
+  if (player === null) throw new Error("Missing match player");
+  return player.score();
 }
 
 async function playCtf(mapSet: string, map: string): Promise<void> {
@@ -60,14 +53,14 @@ async function playCtf(mapSet: string, map: string): Promise<void> {
     const sim = app.simulation;
     const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
     expect(sim.recipe.match.provider).toBe("q1:ctf");
-    expect(readBoolean(sim, "foreignCtf")).toBe(true);
+    expect(sim.diagnostics().modes.ctf).toBe(true);
     const stepUntil = async (condition: () => boolean, label: string): Promise<void> => {
       for (let index = 0; index < 400; index++) { await app?.step(50); if (condition()) return; }
       throw new Error(`Timed out waiting for ${label}`);
     };
 
     await stepUntil(() => ctfFlag(sim, 1) !== null && (ctfFlag(sim, 2) !== null || ctfCarrier(sim, 2) !== null), "both flags to spawn");
-    expect(callMethod(readObject(sim, "lmctfTeams"), "get", local.actor)).toBe(1);
+    expect(sim.diagnostics().lmctf.team(local.actor)).toBe(1);
     expect(sim.combat.read(local.actor)?.team).toBe("red");
     const ownFlag = ctfFlag(sim, 1); if (ownFlag === null) throw new Error("Red flag missing");
     expect(sim.presentations().find(model => model.actor.equals(ownFlag.id))?.path).toBe("progs/flag.mdl");
@@ -86,7 +79,7 @@ async function playCtf(mapSet: string, map: string): Promise<void> {
     if (ownOrigin === undefined || ownOrigin === null) throw new Error("Red flag has no body");
     teleport(sim, local.actor, ownOrigin);
     await stepUntil(() => ctfCarrier(sim, 2) === null && ctfFlag(sim, 2) !== null, "capture to reset the blue flag");
-    expect(matchScore(sim, local.actor) - before).toBeGreaterThanOrEqual(15);
+    expect(matchScore(sim, local.actor) - before).toBe(15);
   } finally { try { await app?.close(); } finally { await rm(root, { recursive: true, force: true }); } }
 }
 

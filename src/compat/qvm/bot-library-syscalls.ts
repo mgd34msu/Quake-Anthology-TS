@@ -28,6 +28,8 @@ export interface QvmBotLibraryServices {
     userCommand(client: number, command: WireUserCommand): void | Promise<void>;
     allocateClient(): number;
     freeClient(client: number): void | Promise<void>;
+    /** Runs after the library has taken the frame time; AAS_InvalidateEntities belongs here. */
+    startedFrame?(): void;
 }
 export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryServices): QvmHostResult | null {
     const legacy = qvmLegacyBotLibrarySyscall(call, services);
@@ -51,7 +53,7 @@ export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryS
         case QvmGameImport.BOTLIB_LIBVAR_SET: library.variables.set(text(1), text(2)); return 0;
         case QvmGameImport.BOTLIB_LIBVAR_GET: guest.writeString(int(2), library.variables.getString(text(1)), int(3)); return 0;
         case QvmGameImport.BOTLIB_PC_ADD_GLOBAL_DEFINE: return Number(library.globals.add(text(1)));
-        case QvmGameImport.BOTLIB_START_FRAME: return library.startFrame(float(1));
+        case QvmGameImport.BOTLIB_START_FRAME: { const result = library.startFrame(float(1)); services.startedFrame?.(); return result; }
         case QvmGameImport.BOTLIB_LOAD_MAP: return services.loadMap(text(1));
         case QvmGameImport.BOTLIB_UPDATENTITY: return services.updateEntity(int(1), call, int(2));
         case QvmGameImport.BOTLIB_GET_SNAPSHOT_ENTITY: return services.snapshotEntity(int(1), int(2));
@@ -151,7 +153,7 @@ export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryS
             const location = call.code === QvmGameImport.BOTLIB_AI_GET_MAP_LOCATION_GOAL;
             const output = location ? 2 : 3;
             const result = location ? library.goals.getMapLocationGoal(text(1), goal(output)) : library.goals.getLevelItemGoal(int(1), text(2), goal(output));
-            if (result === null) return 0; writeQvmBotGoal(guest.view(int(output), QVM_BOT_GOAL_BYTES), result, location ? 'location' : 'level-item'); return location ? 1 : result.number;
+            if (result === null) return location ? 0 : -1; writeQvmBotGoal(guest.view(int(output), QVM_BOT_GOAL_BYTES), result, location ? 'location' : 'level-item'); return location ? 1 : result.number;
         }
         case QvmGameImport.BOTLIB_AI_GET_NEXT_CAMP_SPOT_GOAL: {
             const result = library.goals.getNextCampSpotGoal(int(1), goal(2)); if (result === null) return 0;

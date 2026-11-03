@@ -114,8 +114,8 @@ test("native original payload retains versioned departed levels and accepts olde
     { ...visited, level: new Uint8Array(0) }, { ...visited, configstrings: [...visited.configstrings, ...visited.configstrings] },
     { ...visited, portals: [...visited.portals, ...visited.portals] },
     { ...visited, configstrings: [{ index: 2080, value: "invalid" }] }, { ...visited, portals: [{ portal: 1024, open: true }] },
-  ]) expect(() => encodeQ2ClassicOriginalSave({ ...current, visitedLevels: [changed] })).toThrow();
+  ]) expect(() => encodeQ2ClassicOriginalSave({ ...current, visitedLevels: [changed] })).toThrow(/Invalid classic native (visited level|level metadata)/);
   expect(() => encodeQ2ClassicOriginalSave({ ...current, visitedLevels: [visited, visited] })).toThrow("visited");
   const future = { ...encodeQ2ClassicOriginalSave(current), bytes: encodeCheckpointValue({ ...current, visitedLevels: [{ ...visited, version: 2 }] }) };
-  expect(() => decodeQ2ClassicOriginalSave(future, identity)).toThrow();
+  expect(() => decodeQ2ClassicOriginalSave(future, identity)).toThrow("visitedLevels[0].version: expected 1");
 });

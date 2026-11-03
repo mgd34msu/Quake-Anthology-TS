@@ -7,7 +7,7 @@ bun start --preset q2-q1-q3
 bun start --preset q1-q2
 bun start --renderer cpu --width 640 --height 480
 bun start --seats 2 --mode coop
-bun start --dedicated
+bun start --dedicated --listen 26000   # without a listener a dedicated server is headless and unreachable
 bun start --game q3-baseq3 --map q3dm1 --movement q3 --character q3 --mode deathmatch
 bun start --game q2-classic-baseq2 --movement q2 --character q2 --mode coop --dedicated --listen-q2 27910
 bun start --game q2-classic-baseq2 --movement q2 --character q2 --mode coop --connect-q2 localhost:27910
@@ -29,12 +29,12 @@ Quake III games create a separate native cgame for each seat. Its actual snapsho
 
 Weapon selection and holdable use carry the selected arsenal identity independently of movement commands. Quake II rerelease presentation uses its mounted Kfont, localized messages and story text, per-player fog, and source sky changes. Restoring a save republishes retained story, sky, and player fog state. Fresh level entries write autosaves under `~/.local/share/quake-typescript/saves/`.
 
-Use `save quicksave` and `load quicksave` in the console. Relative names use the configured save directory and add `.sav` when no extension is supplied. Explicit save paths must stay inside that directory; `load` also accepts an absolute path to an existing save elsewhere. `Application.saveGame()` and `loadGame()` accept explicit file paths. Quake I and II saves restore the exact recipe, source state, scheduled callbacks, actors, and clocks. A saved profile can change the active movement and character selections. Connected client slots must match the saved players. Native Quake III whole-game checkpoints and providers without complete state serializers report an error.
+Use `save quicksave` and `load quicksave` in the console. Relative names use the configured save directory and add `.sav` when no extension is supplied. Explicit save paths must stay inside that directory; `load` also accepts an absolute path to an existing save elsewhere. `Application.saveGame()` and `loadGame()` accept explicit file paths. Quake I and II saves restore the exact recipe, source state, scheduled callbacks, actors, and clocks. A saved profile can change the active movement and character selections. Connected client slots must match the saved players. Providers without a complete state serializer report an error when saving. Quake III server state is serialized by `src/persistence/q3.ts`.
 
-`--listen-q2` binds the native Quake II protocol to the same authoritative simulation. `--bind` selects its local IP; port 0 requests an available port. The source wire rejects mixed recipes and unbound protocol layouts. Channels survive map travel while player actors and signon state change. Unified mixed-game networking remains separate work.
+`--listen-q2` binds the native Quake II protocol to the same authoritative simulation. `--bind` selects its local IP; port 0 requests an available port. The source wire rejects mixed recipes and unbound protocol layouts. Channels survive map travel while player actors and signon state change. Mixed-game hosting is `--listen-unified` (see `docs/networking-unified.md`); `--listen-q2` and `--listen` serve the native protocols.
 
 `--connect-q2` starts `RemoteApplication`, which receives native Quake II snapshots and presents the remote world. It preserves the window, seat, and input settings during server map changes. It owns no local authoritative simulation.
 
 `captureNextFrame()` captures CPU or GL output before presentation. CPU output can also be read with `readPixels()` after a step. A dedicated application has no local input, renderer, or framebuffer.
 
-This entry point is still receiving source provider joins. Complete content coverage, remaining campaign presentation, all multiplayer permutations, and exhaustive source fidelity remain integration work; a successful launch is not full release acceptance.
+A successful launch is not full release acceptance: content coverage, campaign presentation, multiplayer permutations and source fidelity are tracked in `docs/status.md`.

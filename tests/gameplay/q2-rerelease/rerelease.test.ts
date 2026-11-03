@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ActorId } from "../../../src/contracts/identity.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
 import { Q2Foundation } from "../../../src/content/q2/foundation/runtime.ts";
 import { createQ2TargetModule } from "../../../src/content/q2/foundation/targets.ts";
 import { createQ2ItemModule } from "../../../src/content/q2/foundation/items.ts";
@@ -18,11 +18,12 @@ import { decodeQ2RereleasePlayersCheckpoint, encodeQ2RereleasePlayersCheckpoint,
 import { killQ2RereleaseBox } from "../../../src/content/q2/rerelease/killbox.ts";
 import { q2WorldText } from "../../../src/content/q2/rerelease/world-text.ts";
 import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
+import { inertAuthority } from "../../support/authority.ts";
 
 function rerelease(initializeInventory = true, worldFields = "", startItems = "") {
   const actors = new SessionActorRegistry(createIdentityOwner("rr-source-check")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const inventory = new SharedInventoryTable(actors), combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const inventory = new SharedInventoryTable(actors), combat = inertAuthority(actors, callbacks);
   const ids: ActorId[] = [], events: Q2RereleaseEvent[] = [], messages: string[] = [], transitions: string[] = [];
   const zero = { x: 0, y: 0, z: 0 }, bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
   const movements = new Map<ActorId, Q2PlayerMovement>();
@@ -59,7 +60,7 @@ function rerelease(initializeInventory = true, worldFields = "", startItems = ""
   for (let slot = 0; slot < 2; slot++) {
     const actor = actors.allocateAtSource("q2:players", slot + 1, "q2:male"); ids.push(actor.id);
     bodies.create(actor, { origin: zero, angles: zero, velocity: zero, bounds, ground: null });
-    movements.set(actor.id, { viewAngles: zero, commandAngles: zero, waterLevel: 0, waterType: 0, grounded: true, ducked: false, buttons: 0, standingBounds: bounds, animateQ2: false });
+    movements.set(actor.id, { viewAngles: zero, commandAngles: zero, waterLevel: 0, waterType: 0, grounded: true, ducked: false, buttons: 0, upMove: 0, standingBounds: bounds, animateQ2: false });
     const entity = game.attachPlayer(actor); players.attach(entity, game, { slot, userinfo: `\\name\\Player${slot}`, initializeInventory, useQ2Weapons: false });
   }
   const firstId = ids[0], secondId = ids[1];
@@ -283,6 +284,9 @@ test("Q64 moving scenery and camera use shared bodies and the source scheduler",
   expect(light.skin >>> 0).toBe(0x7f007f00); expect(light.nextThink).toBe(0.225);
   expect(active.events.flatMap(event => event.kind === "dynamic-light" && event.actor === light.actor.id ? [event.radius] : [])).toEqual([64, 64, 64]);
   const checkpoint = decodeQ2RereleaseModuleCheckpoint(encodeQ2RereleaseModuleCheckpoint(module.capture()));
+  expect(checkpoint.q64.cameras).toHaveLength(1);
+  module.q64.restore(game, { eyes: [], cameras: [], dummies: [] }); // restore must repopulate state the module no longer holds
+  expect(module.q64.capture().cameras).toHaveLength(0);
   module.restore(game, checkpoint);
   expect(module.q64.capture()).toEqual(checkpoint.q64);
 });

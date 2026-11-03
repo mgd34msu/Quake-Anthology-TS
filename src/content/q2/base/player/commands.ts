@@ -1,12 +1,12 @@
 import type { CommandDocumentation } from "../../../../core/commands/documentation.ts";
 import type { Q2PlayerContext } from "./types.ts";
 import type { Q2Players } from "./index.ts";
-import { q2EnvironmentDamage } from "./environment.ts";
+import { zero } from "../../foundation/fields.ts";
 
 function team(context: Q2PlayerContext, skin: string): string {
   const slash = skin.indexOf("/");
   if (slash < 0) return skin;
-  return (context.game.options.deathmatchFlags & 64) !== 0 ? skin.slice(0, slash) : skin.slice(slash + 1);
+  return (context.game.options.deathmatchFlags & 128) !== 0 ? skin.slice(0, slash) : skin.slice(slash + 1);
 }
 function print(context: Q2PlayerContext, text: string): undefined {
   return context.hooks.emit({ kind: "print", target: context.entity.actor.id, level: "high", text });
@@ -15,32 +15,48 @@ function publishInventory(context: Q2PlayerContext): undefined {
   return context.hooks.emit({ kind: "inventory", actor: context.entity.actor.id, entries: context.game.host.inventory.entries(context.entity.actor.id),
     visible: context.state.showInventory, selected: context.state.selectedItem, labels: context.items.list().map(item => ({ item: item.id, name: item.name })) });
 }
+/** itemlist order in g_items.c, restricted to what a player can hold; other items keep catalog order after it. */
+const inventoryOrder = ["item_power_screen", "item_power_shield", "weapon_blaster", "weapon_shotgun", "weapon_supershotgun", "weapon_machinegun", "weapon_chaingun",
+  "ammo_grenades", "weapon_grenadelauncher", "weapon_rocketlauncher", "weapon_hyperblaster", "weapon_railgun", "weapon_bfg", "ammo_shells", "ammo_bullets", "ammo_cells",
+  "ammo_rockets", "ammo_slugs", "item_quad", "item_invulnerability", "item_silencer", "item_breather", "item_enviro", "item_ancient_head", "item_adrenaline",
+  "item_bandolier", "item_pack", "key_data_cd", "key_power_cube", "key_pyramid", "key_data_spinner", "key_pass", "key_blue_key", "key_red_key", "key_commander_head", "key_airstrike_target"];
+function itemRank(classname: string): number {
+  const index = inventoryOrder.indexOf(classname);
+  return index < 0 ? inventoryOrder.length : index;
+}
 function select(context: Q2PlayerContext, direction: 1 | -1, filter: "all" | "weapon" | "power"): undefined {
   const { entity, game, state, items } = context;
-  const list = items.list(), first = list.findIndex(item => item.id === state.selectedItem);
+  const list = [...items.list()].sort((left, right) => itemRank(left.classname) - itemRank(right.classname)), first = list.findIndex(item => item.id === state.selectedItem);
   for (let index = 1; index <= list.length; index++) {
     const item = list[(first + direction * index + list.length * 2) % list.length];
     if (item !== undefined && item.usable && game.host.inventory.count(entity.actor.id, item.id) > 0 &&
-      (filter === "all" || filter === "weapon" && item.kind === "weapon" || filter === "power" && item.kind === "power")) {
+      (filter === "all" || filter === "weapon" && item.weapon || filter === "power" && item.kind === "power")) {
       state.selectedItem = item.id; return undefined;
     }
   }
   state.selectedItem = null;
   return undefined;
 }
+function validateSelection(context: Q2PlayerContext): undefined {
+  const { entity, game, state } = context;
+  if (state.selectedItem !== null && game.host.inventory.count(entity.actor.id, state.selectedItem) === 0) select(context, 1, "all");
+  return undefined;
+}
 function use(context: Q2PlayerContext, value: string): undefined {
-  const { entity, game, state, weapons, items } = context;
+  const { entity, game, weapons, items } = context;
   const item = items.lookup(value);
   if (item === null) return print(context, `unknown item: ${value}\n`);
   if (!item.usable) return print(context, "Item is not usable.\n");
   if (game.host.inventory.count(entity.actor.id, item.id) === 0) return print(context, `Out of item: ${item.name}\n`);
   const weapon = weapons.registeredDefinitions().find(candidate => candidate.item === item.id);
   if (weapon !== undefined) {
-    const result = weapons.requestWeapon(entity, game, weapon.name);
-    if (result === "no-ammo" || result === "not-enough-ammo") return print(context, `Not enough ${weapon.ammo ?? "ammo"} for ${item.name}.\n`);
+    const result = weapons.requestWeapon(entity, game, weapon.name, context.hooks.selectEmpty?.() === true);
+    if (result === "no-ammo" || result === "not-enough-ammo") {
+      const ammo = weapon.ammo === null ? undefined : items.lookup(weapon.ammo)?.name;
+      return print(context, `${result === "no-ammo" ? "No" : "Not enough"} ${ammo ?? "ammo"} for ${item.name}.\n`);
+    }
   } else items.use(entity.actor, item.id, game);
-  state.selectedItem = item.id;
-  return undefined;
+  return validateSelection(context);
 }
 function drop(players: Q2Players, context: Q2PlayerContext, value: string): undefined {
   const { entity, game, items, weapons } = context;
@@ -56,7 +72,8 @@ function drop(players: Q2Players, context: Q2PlayerContext, value: string): unde
   if (grenade && count - quantity <= 0) return print(context, "Can't drop current weapon\n");
   const dropped = items.drop(entity, game, item.id, { playerDeath: false });
   if (dropped !== null) { dropped.count = quantity; game.host.inventory.consume(entity.actor, item.id, quantity); }
-  return undefined;
+  if (item.kind === "power-armor") items.syncPowerArmor(entity.actor, game);
+  return validateSelection(context);
 }
 function weaponCycle(context: Q2PlayerContext, direction: 1 | -1): undefined {
   const current = context.weapons.states.get(context.entity.actor.id)?.weapon;
@@ -123,17 +140,24 @@ const listPlayers: Q2CommandHandler = (players, context, _args, command) => {
 
 const score: Q2CommandHandler = (players, context) => {
   const { entity, game, state } = context;
-  state.showInventory = false; state.showHelp = false; state.showScores = !state.showScores;
+  state.showInventory = false; state.showHelp = false;
+  if (game.options.mode === "singleplayer") { publishInventory(context); return; }
+  state.showScores = !state.showScores;
   publishInventory(context);
-  if (state.showScores && game.options.mode !== "singleplayer") players.scoreboard(entity, game);
+  if (state.showScores) players.scoreboard(entity, game);
 };
 
 const showHelp: Q2CommandHandler = (players, context) => {
   const { entity, game, state, hooks } = context;
+  if (game.options.mode === "deathmatch") { score(players, context, [], "score"); return; }
   state.showInventory = false; state.showScores = false;
   publishInventory(context);
-  if (game.options.mode === "deathmatch") { state.showScores = true; players.scoreboard(entity, game); }
-  else { state.showHelp = !state.showHelp; hooks.emit({ kind: "help", actor: entity.actor.id, visible: state.showHelp }); }
+  if (game.options.edition === "classic") {
+    // Cmd_Help_f: an open computer closes only when no objective changed since it was read.
+    if (state.showHelp && state.gameHelpChanged === game.helpChanged) state.showHelp = false;
+    else { state.showHelp = true; state.helpChanged = 0; }
+  } else state.showHelp = !state.showHelp;
+  hooks.emit({ kind: "help", actor: entity.actor.id, visible: state.showHelp });
 };
 
 const useItem: Q2CommandHandler = (_players, context, args) => {
@@ -159,17 +183,16 @@ const selectItem: Q2CommandHandler = (players, context, _args, command) => {
 const selectedItem: Q2CommandHandler = (players, context, _args, command) => {
   const { entity, game, state } = context;
   if (state.selectedItem === null || game.host.inventory.count(entity.actor.id, state.selectedItem) === 0) select(context, 1, "all");
-  if (state.selectedItem === null) print(context, "No item to use.\n");
+  if (state.selectedItem === null) print(context, command === "invuse" ? "No item to use.\n" : "No item to drop.\n");
   else if (command === "invuse") use(context, state.selectedItem); else drop(players, context, state.selectedItem);
 };
 
-// The original next/previous names traverse the item table in reverse/forward order respectively.
 const previousWeapon: Q2CommandHandler = (_players, context) => {
-  weaponCycle(context, 1);
+  weaponCycle(context, -1);
 };
 
 const nextWeapon: Q2CommandHandler = (_players, context) => {
-  weaponCycle(context, -1);
+  weaponCycle(context, 1);
 };
 
 const lastWeapon: Q2CommandHandler = (_players, context) => {
@@ -182,7 +205,10 @@ const killPlayer: Q2CommandHandler = (_players, context) => {
   const { entity, game, state } = context;
   if (game.options.edition === "rerelease" && state.spectator || game.host.now() - state.respawnTime < 5) return;
   state.god = false; entity.flags &= ~16; game.host.combat.setTraits(entity.actor, { invulnerable: false });
-  q2EnvironmentDamage(context, Math.max(1, game.host.combat.read(entity.actor.id)?.health ?? 0) + 1, 23, 32);
+  const health = game.host.combat.read(entity.actor.id)?.health ?? 0;
+  if (health <= 0) return;
+  game.host.combat.apply({ attack: game.attack(entity, entity.actor.id, 23, 32, null), target: entity.actor.id, amount: health, knockback: 0, direction: zero,
+    point: game.body(entity).origin, normal: zero, delivery: "direct" });
 };
 
 const putAway: Q2CommandHandler = (_players, context) => {

@@ -60,6 +60,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   readonly #messageCursor: EventCursor = this.#messages.openCursor();
   readonly #links = new Map<ActorId, LinkMetadata>();
   readonly #buffer = messageBuffer();
+  readonly #scratch = messageBuffer();
   #options: RereleaseGuestServicesOptions;
   #memory: MappedGuestMemory | null = null;
   #host: RereleaseQ2GuestHost | null = null;
@@ -169,9 +170,12 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   validateMap(binding: RereleaseGuestMapServices): void { if (binding.scene.geometry.models.length >= 8191) throw new RangeError("API2023 map exceeds model capacity"); }
   private seedMap(): void { for (const kind of resourceKinds) this.#resourceNames[kind].clear(); this.#weaponModels.clear(); this.weaponModels = ["weapon.md2"]; this.storeConfigstring(63, this.options.mapPath); for (let i = 1; i < this.options.scene.geometry.models.length; i++) this.storeConfigstring(63 + i + (i >= 254 ? 1 : 0), `*${i}`); }
   rebindWorld(binding: RereleaseGuestMapServices): void { this.validateMap(binding); this.#options = { ...this.#options, ...binding }; this.#loading = true; this.#frame = 0; this.#strings.clear(); this.#messages.reset(); this.#links.clear(); SZ_Clear(this.#buffer); this.seedMap(); }
+  /** Messages are written and copied out synchronously, so one cleared buffer serves every caller. */
+  private scratchBuffer(): SizeBuf { SZ_Clear(this.#scratch); return this.#scratch; }
   completeSpawn(): void { this.#loading = false; }
   beginFrame(frame: number): void { if (!Number.isInteger(frame) || frame < 0 || frame > 0xffffffff) throw new RangeError("Invalid API2023 frame"); this.#frame = frame; for (const actor of this.#links.keys()) if (!this.options.engine.actors.isLive(actor)) this.#links.delete(actor); }
-  configstrings(): ReadonlyMap<number, string> { return new Map(this.#strings); }
+  /** The live table: callers read it in place and copy it only when they retain it across a mutation. */
+  configstrings(): ReadonlyMap<number, string> { return this.#strings; }
   restoreConfigstrings(values: ReadonlyMap<number, string>): void {
     for (const [index, value] of values) this.validateConfigstring(index, value);
     this.#strings.clear(); this.#weaponModels.clear();
@@ -196,7 +200,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     else if (removedWeapon) this.rebuildWeaponModels();
     if (index >= 10814 && index < 11070) this.options.engine.emit({ kind: "lightstyle", style: index - 10814, pattern: value });
     if (index === 1) this.options.engine.emit({ kind: "music", track: value });
-    if (!this.#loading) { const buffer = messageBuffer(); MSG_WriteByte(buffer, 13); MSG_WriteShort(buffer, index); MSG_WriteString(buffer, value); this.enqueue({ kind: "multicast", origin: zero, scope: "all" }, true, buffer.data.slice(0, buffer.cursize)); }
+    if (!this.#loading) { const buffer = this.scratchBuffer(); MSG_WriteByte(buffer, 13); MSG_WriteShort(buffer, index); MSG_WriteString(buffer, value); this.enqueue({ kind: "multicast", origin: zero, scope: "all" }, true, buffer.data.slice(0, buffer.cursize)); }
     return undefined;
   }
   resource(kind: "model" | "sound" | "image", index: number): string { return this.#strings.get(resourceRanges[kind].base + index) ?? ""; }
@@ -287,7 +291,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   private print(slot: number | null, level: number, text: string, broadcast: boolean, center = false): void {
     if (!broadcast && slot === null) { this.options.print(text); return; }
     if (slot !== null && !this.acceptsClient(slot)) return;
-    const buffer = messageBuffer(); MSG_WriteByte(buffer, center ? 15 : 10); if (!center) MSG_WriteByte(buffer, level); MSG_WriteString(buffer, text);
+    const buffer = this.scratchBuffer(); MSG_WriteByte(buffer, center ? 15 : 10); if (!center) MSG_WriteByte(buffer, level); MSG_WriteString(buffer, text);
     this.enqueue(broadcast ? { kind: "multicast", origin: zero, scope: "all" } : { kind: "unicast", slot: slot ?? 0 }, true, buffer.data.slice(0, buffer.cursize)); if (broadcast) this.options.print(text);
   }
   private sound(event: RereleaseSoundEvent): void {
@@ -297,7 +301,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     const origin = event.origin ?? (state === null ? zero : view?.byte("solid") === 3 ? { x: state.origin.x + (state.bounds.min.x + state.bounds.max.x) * 0.5, y: state.origin.y + (state.bounds.min.y + state.bounds.max.y) * 0.5, z: state.origin.z + (state.bounds.min.z + state.bounds.max.z) * 0.5 } : state.origin);
     const positioned = true;
     const flags = (event.entitySlot === null ? 0 : 8) | (event.volume !== 1 ? 1 : 0) | (event.attenuation !== 1 ? 2 : 0) | (positioned ? 4 : 0) | (event.timeOffset !== 0 ? 16 : 0) | (event.soundIndex > 255 ? 32 : 0);
-    const buffer = messageBuffer(); MSG_WriteByte(buffer, 9); MSG_WriteByte(buffer, flags); if ((flags & 32) !== 0) MSG_WriteShort(buffer, event.soundIndex); else MSG_WriteByte(buffer, event.soundIndex);
+    const buffer = this.scratchBuffer(); MSG_WriteByte(buffer, 9); MSG_WriteByte(buffer, flags); if ((flags & 32) !== 0) MSG_WriteShort(buffer, event.soundIndex); else MSG_WriteByte(buffer, event.soundIndex);
     if ((flags & 1) !== 0) MSG_WriteByte(buffer, event.volume * 255); if ((flags & 2) !== 0) MSG_WriteByte(buffer, event.attenuation * 64); if ((flags & 16) !== 0) MSG_WriteByte(buffer, event.timeOffset * 1000);
     if (event.entitySlot !== null) MSG_WriteShort(buffer, event.entitySlot << 3 | event.channel & 7);
     if (positioned) { MSG_WriteFloat(buffer, origin.x); MSG_WriteFloat(buffer, origin.y); MSG_WriteFloat(buffer, origin.z); }

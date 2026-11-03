@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { ActorId } from "../../../../src/contracts/identity.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { Q2Weapons } from "../../../../src/content/q2/foundation/weapons/index.ts";
 import type { Q2FoundationHost } from "../../../../src/content/q2/foundation/host.ts";
 import type { Q2PlayerHooks, Q2PlayerMovement } from "../../../../src/content/q2/base/player/index.ts";
@@ -21,7 +21,7 @@ import { Q2Horde } from "../../../../src/content/q2/multiplayer/horde.ts";
 function compose(initializeInventory = true, entities = '{ "classname" "worldspawn" } { "classname" "info_player_start" }', match: Q2MatchSelection = { kind: "standard" }, clientCount = 2, deathmatchFlags?: Q2CompositionServices["deathmatchFlags"], options: Pick<Q2CompositionServices, "randomItems" | "dropQuadFire"> = {}) {
   const actors = new SessionActorRegistry(createIdentityOwner("rr-source-check")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const inventory = new SharedInventoryTable(actors), combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const inventory = new SharedInventoryTable(actors), combat = inertAuthority(actors, callbacks);
   const ids: ActorId[] = [], events: Q2RereleaseEvent[] = [], messages: string[] = [];
   const zero = { x: 0, y: 0, z: 0 }, bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
   const movements = new Map<ActorId, Q2PlayerMovement>();
@@ -63,7 +63,7 @@ function compose(initializeInventory = true, entities = '{ "classname" "worldspa
   for (let slot = 0; slot < clientCount; slot++) {
     const actor = actors.allocateAtSource("q2:players", slot + 1, "q2:male"); ids.push(actor.id);
     bodies.create(actor, { origin: zero, angles: zero, velocity: zero, bounds, ground: null });
-    movements.set(actor.id, { viewAngles: zero, commandAngles: zero, waterLevel: 0, waterType: 0, grounded: true, ducked: false, buttons: 0, standingBounds: bounds, animateQ2: false });
+    movements.set(actor.id, { viewAngles: zero, commandAngles: zero, waterLevel: 0, waterType: 0, grounded: true, ducked: false, buttons: 0, upMove: 0, standingBounds: bounds, animateQ2: false });
     if (match.kind === "ctf" || match.kind === "lmctf") composition.admit(actor, { slot, userinfo: `\\name\\Player${slot}`, initializeInventory, useQ2Weapons: false });
     else { const entity = game.attachPlayer(actor); players.attach(entity, game, { slot, userinfo: `\\name\\Player${slot}`, initializeInventory, useQ2Weapons: false }); }
   }
@@ -272,6 +272,7 @@ test("LMCTF referee countdown and team lock survive the shared checkpoint", () =
 
 import { readInventoryEntry } from "../../../../src/persistence/save-image.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../../src/persistence/value.ts";
+import { inertAuthority } from "../../../support/authority.ts";
 
 test("LMCTF plasma retains signed native cell debits and infinite-ammo counters through saves", () => {
   for (const scenario of [{ cells: 1, infinite: false, expected: -9 }, { cells: 1, infinite: true, expected: -8 }, { cells: 10, infinite: false, expected: 0 }, { cells: 10, infinite: true, expected: 1 }]) {

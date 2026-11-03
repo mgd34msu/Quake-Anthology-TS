@@ -1,6 +1,5 @@
 /* Wire shapes derived from id Software's Quake, Quake II, Quake II rerelease,
  * and Quake III public headers. GPL-2.0-or-later. */
-import type { ClientId, SeatId, SessionId } from "./identity.ts";
 import type { Vec3, Vec4 } from "./math.ts";
 
 export type Q1ProtocolIdentity =
@@ -78,13 +77,6 @@ export interface Q3UserCommand {
   readonly upMove: number;
 }
 export type UserCommand = Q1UserCommand | QwUserCommand | Q2UserCommand | Q2RereleaseUserCommand | Q3UserCommand;
-export interface SeatUserCommand {
-  readonly seat: SeatId;
-  readonly client: ClientId;
-  readonly sequence: number;
-  readonly command: UserCommand;
-}
-
 /** Source numbers identify wire slots, never generation-checked shared actors. */
 export interface Q1EntityState {
   readonly number: number;
@@ -348,13 +340,3 @@ export type NetworkEvent =
   | { readonly kind: "q2-muzzle-flash"; readonly entityNumber: number; readonly flash: number; readonly monster: boolean }
   | { readonly kind: "q3-server-command"; readonly sequence: number; readonly text: string }
   | { readonly kind: "disconnect"; readonly reason: string };
-export interface NetworkDelivery {
-  readonly session: SessionId;
-  readonly client: ClientId;
-  readonly protocol: ProtocolIdentity;
-  readonly sequence: number;
-  readonly events: readonly NetworkEvent[];
-}
-export type ProtocolSupport =
-  | { readonly kind: "supported"; readonly protocol: ProtocolIdentity }
-  | { readonly kind: "unsupported"; readonly protocol: ProtocolIdentity; readonly reasons: readonly string[] };

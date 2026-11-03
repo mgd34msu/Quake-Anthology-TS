@@ -7,8 +7,7 @@
  * Run: bun run tools/bench-foundation.ts
  */
 import {
-  EventRing, IdIndex, StampSet, StringTable, createVec3Store,
-  vec3AngleVectors, vec3Cross, vec3Normalize, vec3Scratch, vec3Set, vec3Sub,
+  EventRing, IdIndex, StampSet, StringTable,
 } from "../src/foundation/index.ts";
 import {
   angleVectors, angleVectorsInto, cross3, cross3Into, dot3,
@@ -63,17 +62,6 @@ function allocatingChain(): number {
   return value.x + value.y + value.z;
 }
 {
-  const s1 = vec3Scratch();
-  const s2 = vec3Scratch();
-  const s3 = vec3Scratch();
-  report("normalize(cross(sub)) allocating vs Into (plain scratch)",
-    bench(200_000, allocatingChain),
-    bench(200_000, () => {
-      sub3Into(s1, a, b);
-      cross3Into(s2, s1, a);
-      normalize3Into(s3, s2);
-      return s3.x + s3.y + s3.z;
-    }));
   const retained = mutableVec3();
   const retained2 = mutableVec3();
   const retained3 = mutableVec3();
@@ -85,25 +73,14 @@ function allocatingChain(): number {
       normalize3Into(retained3, retained2);
       return retained3.x + retained3.y + retained3.z;
     }));
-  const store = createVec3Store(4);
-  vec3Set(store, 0, a.x, a.y, a.z);
-  vec3Set(store, 1, b.x, b.y, b.z);
-  report("normalize(cross(sub)) allocating vs Float32Array store",
-    bench(200_000, allocatingChain),
-    bench(200_000, () => {
-      vec3Sub(store, 2, 0, 1);
-      vec3Cross(store, 3, 2, 0);
-      vec3Normalize(store, 3, 3);
-      return (store[9] ?? 0) + (store[10] ?? 0) + (store[11] ?? 0);
-    }));
 }
 
 // 3. Angle vectors.
 {
-  const s1 = vec3Scratch();
-  const s2 = vec3Scratch();
-  const s3 = vec3Scratch();
-  report("angleVectors allocating vs Into (plain scratch)",
+  const s1 = mutableVec3();
+  const s2 = mutableVec3();
+  const s3 = mutableVec3();
+  report("angleVectors allocating vs Into (retained binary32 scratch)",
     bench(200_000, () => {
       const value = angleVectors(angles);
       return value.forward.x + value.right.y + value.up.z;
@@ -111,17 +88,6 @@ function allocatingChain(): number {
     bench(200_000, () => {
       angleVectorsInto(s1, s2, s3, angles);
       return s1.x + s2.y + s3.z;
-    }));
-  const store = createVec3Store(4);
-  vec3Set(store, 0, angles.x, angles.y, angles.z);
-  report("angleVectors allocating vs store",
-    bench(200_000, () => {
-      const value = angleVectors(angles);
-      return value.forward.x + value.right.y + value.up.z;
-    }),
-    bench(200_000, () => {
-      vec3AngleVectors(store, 1, 2, 3, 0);
-      return (store[3] ?? 0) + (store[7] ?? 0) + (store[11] ?? 0);
     }));
 }
 
@@ -257,38 +223,6 @@ report("lookAtMat4",
       const rows = [...thinks];
       rows.sort((left, right) => left.rank - right.rank || left.slot - right.slot || left.sequence - right.sequence);
       return rows[0]?.sequence ?? 0;
-    }));
-}
-
-// 10. Bulk entity-style processing: retained results prevent allocation
-// sinking, which is the shape the flat store is built for (512 vectors).
-{
-  const count = 512;
-  const inputs: Vec3[] = [];
-  for (let i = 0; i < count; i++) inputs.push(vec3(i * 0.5 - 128, 64 - i * 0.25, (i % 97) - 48));
-  const retained: Vec3[] = new Array<Vec3>(count);
-  const bulkStore = createVec3Store(count * 2);
-  for (let i = 0; i < count; i++) {
-    const value = inputs[i] ?? vec3(0, 0, 0);
-    vec3Set(bulkStore, i, value.x, value.y, value.z);
-  }
-  report("bulk normalize x512 (retained objects vs store slots)",
-    bench(2_000, () => {
-      let sum = 0;
-      for (let i = 0; i < count; i++) {
-        const value = normalize3(inputs[i] ?? vec3(0, 0, 0));
-        retained[i] = value;
-        sum += value.x;
-      }
-      return sum;
-    }),
-    bench(2_000, () => {
-      let sum = 0;
-      for (let i = 0; i < count; i++) {
-        vec3Normalize(bulkStore, count + i, i);
-        sum += bulkStore[(count + i) * 3] ?? 0;
-      }
-      return sum;
     }));
 }
 

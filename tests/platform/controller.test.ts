@@ -94,7 +94,10 @@ describe("SDL controller resources", () => {
       controllers.pollEvents();
       const explicit = selection(device(controllers, first.instance));
       controllers.setAssignments([{ kind: "automatic" }, explicit, explicit, { kind: "none" }]);
-      expect(controllers.assignments).toEqual([second.instance, first.instance, null, null]);
+      // Automatic takes the first device not claimed explicitly, which is a physical pad when one is attached.
+      const automatic = controllers.devices.find(candidate => candidate.instance !== first.instance);
+      expect(automatic).toBeDefined();
+      expect(controllers.assignments).toEqual([automatic?.instance ?? null, first.instance, null, null]);
       controllers.setAssignments([explicit, { kind: "none" }]);
       expect(controllers.assignments).toEqual([first.instance, null]);
       second.setButton(2, true);

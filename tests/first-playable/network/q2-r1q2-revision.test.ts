@@ -1,7 +1,5 @@
 import { nextActorGeneration } from '../../../src/world/actors/registry.ts';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rm } from 'node:fs/promises';
 import { openRemoteContent } from "../../../src/app/bootstrap/content.ts";
 import type { RemoteContentMounts } from "../../../src/app/bootstrap/content.ts";
 import { remoteContentSelection } from "../../../src/content/catalog/index.ts";
@@ -17,6 +15,8 @@ import { createIdentityOwner } from '../../../src/contracts/identity.ts';
 import { EngineSession } from '../../../src/world/session/session.ts';
 import { EntityStateT, PlayerStateT } from '../../../src/network/q2/state.ts';
 import { createNumericOperations } from '../../../src/core/numeric.ts';
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 // q2proto_proto_r1q2.c serverdata followed by U_MOREBITS1/2/3 | U_SOLID baseline.
 // Written independently of the engine encoder: bbox [-17,-17,-25]..[17,17,33].
@@ -93,7 +93,7 @@ test('negotiated R1Q2 strafejump flag suppresses native landing delay for both r
 
 
 test('remote presentation admits negotiated flags and publishes matching native entity bounds', async () => {
-    const userRoot = await mkdtemp(join(tmpdir(), 'q2-r1q2-content-'));
+    const userRoot = await tempDirectory('q2-r1q2-content-');
     const corpusRoot = process.env['QUAKE_Q2_CORPUS_ROOT'];
     const launch = parseApplicationCommand(['--user-content-root', userRoot, '--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2',
         ...(corpusRoot === undefined ? [] : ['--content-root', corpusRoot])]);

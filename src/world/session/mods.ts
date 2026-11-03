@@ -220,13 +220,6 @@ export class SessionMods implements SessionResource {
     return undefined;
   }
 
-  async setEnabled(selection: ModSelection, enabled: boolean): Promise<void> {
-    await this.exclusive(async () => {
-      const next = this.selection(this.enabled()); next.setEnabled(selection, enabled);
-      await this.apply(next.enabled());
-    });
-  }
-
   async checkpoint(): Promise<ModSessionCheckpoint> {
     return await this.exclusive(() => this.capture());
   }
@@ -266,37 +259,6 @@ export class SessionMods implements SessionResource {
         mods.push({ identity: entry.identity, state });
       }
       return { version: 1, mods };
-    });
-  }
-
-  async restore(saved: ModSessionCheckpoint): Promise<void> {
-    await this.exclusive(async () => {
-      this.validateSaved(this.active, saved);
-      const previous = await this.capture(), changed: number[] = [];
-      try {
-        for (const [index, entry] of this.active.entries()) {
-          const checkpoint = saved.mods[index];
-          if (checkpoint === undefined) throw new Error("Validated mod checkpoint disappeared");
-          changed.push(index);
-          if (this.options.services?.engine !== undefined) this.options.presentation?.refreshOwner(modInstanceProvider(entry.identity.selection));
-          await entry.runtime.restore(checkpoint.state); this.assertOpen(); entry.runtime.activate?.(); this.assertOpen();
-        }
-      } catch (error) {
-        if (this.closed) throw error;
-        const errors: unknown[] = [error];
-        for (const index of changed.reverse()) {
-          const entry = this.active[index], checkpoint = previous.mods[index];
-          if (entry === undefined || checkpoint === undefined) throw new Error("Mod restore lost its rollback state");
-          try {
-            if (this.options.services?.engine !== undefined) this.options.presentation?.refreshOwner(modInstanceProvider(entry.identity.selection));
-            await entry.runtime.restore(checkpoint.state); entry.runtime.activate?.(); } catch (rollback) { errors.push(rollback); }
-        }
-        if (errors.length > 1) {
-          try { this.close(); } catch (cleanup) { errors.push(cleanup); }
-          throw new AggregateError(errors, "Mod restore and rollback failed; mod runtimes were closed");
-        }
-        throw error;
-      }
     });
   }
 
@@ -380,12 +342,9 @@ export class SessionMods implements SessionResource {
     }
     if (saved !== undefined) this.validateSaved(prepared, saved);
     if (travel !== undefined) this.validateTravel(prepared, travel);
-    const retained = new Map(this.active.map(entry => [modSelectionKey(entry.identity.selection), entry]));
     const opened: ActiveMod[] = [], scopes: ResourceScope[] = [], next: ActiveMod[] = [];
     try {
       for (const [index, entry] of prepared.entries()) {
-        const previous = retained.get(modSelectionKey(entry.identity.selection));
-        if (previous !== undefined) { next.push(previous); continue; }
         const resources = new ResourceScope(`mod ${modSelectionKey(entry.identity.selection)}`);
         scopes.push(resources); this.pending.add(resources);
         const assertCurrent = (): void => { this.assertOpen(); resources.assertOpen(); };
@@ -414,8 +373,6 @@ export class SessionMods implements SessionResource {
       try { closeScopes(scopes); } catch (cleanup) { throw new AggregateError([error, cleanup], "Mod preparation and cleanup failed"); }
       throw error;
     } finally { for (const scope of scopes) this.pending.delete(scope); }
-    const removed = this.active.filter(entry => !next.includes(entry));
     this.active = next;
-    closeScopes(removed.map(entry => entry.resources));
   }
 }

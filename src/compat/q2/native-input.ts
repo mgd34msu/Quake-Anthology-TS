@@ -4,7 +4,7 @@ import type { ModClientMovementOutputs } from "../../contracts/mod-client-output
 import { clientMovementType, clientStanceCommand } from "../../movement/client-outputs.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { GuestAddress, GuestCallResult, GuestCallValue } from "../../contracts/execution.ts";
-import type { Bounds, Vec3 } from "../../contracts/math.ts";
+import type { Bounds, Plane, Vec3 } from "../../contracts/math.ts";
 import type { NumericOperations } from "../../contracts/numeric.ts";
 import type { Q2UserCommand, Q2RereleaseUserCommand } from "../../contracts/protocol.ts";
 import type { FrameContext } from "../../contracts/time.ts";
@@ -37,8 +37,51 @@ export interface NativeInputMotionOutputs {
   readonly viewAngles: Vec3;
   /** Hull the guest copies back to its edict after Pmove (mins/maxs). */
   readonly bounds: Bounds;
-  /** Guest edict slots bumped during the move (Pmove touch list). */
-  readonly touches: readonly number[];
+  /** Guest edict slots bumped during the move (Pmove touch list), each
+   * with the plane of the contact the provider reported. Classic pmove_t
+   * stores only the entity pointers; the rerelease touch list also
+   * carries the plane. */
+  readonly touches: readonly NativeInputTouch[];
+  /** Plane of the surface the player stands on (rerelease groundplane); null when airborne. */
+  readonly groundPlane: Plane | null;
+}
+export interface NativeInputTouch { readonly slot: number; readonly plane: Plane; }
+
+/**
+ * What the selected foreign movement does with each pmove_t field the guest
+ * reads after Pmove. "provider" fields are written from the provider's own
+ * result; "zero" fields are cleared because the eye height already rides in
+ * pm_state.viewheight; "guest" fields are left exactly as the guest wrote them before
+ * the call, because no foreign provider models them (they would otherwise
+ * be fabricated). Editions without the field are listed as "absent".
+ */
+export type NativePmoveDisposition = "provider" | "guest" | "zero" | "absent";
+export const NATIVE_PMOVE_DISPOSITION: Readonly<Record<string, { readonly classic: NativePmoveDisposition; readonly rerelease: NativePmoveDisposition }>> = {
+  origin: { classic: "provider", rerelease: "provider" },
+  velocity: { classic: "provider", rerelease: "provider" },
+  pm_flags_ducked_grounded: { classic: "provider", rerelease: "provider" },
+  viewangles: { classic: "provider", rerelease: "provider" },
+  mins_maxs: { classic: "provider", rerelease: "provider" },
+  viewheight: { classic: "provider", rerelease: "provider" },
+  watertype_waterlevel: { classic: "provider", rerelease: "provider" },
+  groundentity: { classic: "provider", rerelease: "provider" },
+  groundplane: { classic: "absent", rerelease: "provider" },
+  touch_list: { classic: "provider", rerelease: "provider" },
+  viewoffset: { classic: "absent", rerelease: "zero" },
+  pm_time: { classic: "guest", rerelease: "guest" },
+  delta_angles: { classic: "guest", rerelease: "guest" },
+  step_clip: { classic: "absent", rerelease: "guest" },
+  impact_delta: { classic: "absent", rerelease: "guest" },
+  screen_blend: { classic: "absent", rerelease: "guest" },
+  rdflags: { classic: "absent", rerelease: "guest" },
+  jump_sound: { classic: "absent", rerelease: "guest" },
+};
+
+function planeType(normal: Vec3): number {
+  if (normal.x === 1 || normal.x === -1) return 0;
+  if (normal.y === 1 || normal.y === -1) return 1;
+  if (normal.z === 1 || normal.z === -1) return 2;
+  return 3;
 }
 export interface NativeInputMotion {
   read(): { readonly origin: Vec3; readonly velocity: Vec3 };
@@ -258,8 +301,8 @@ export class NativeInputBinding {
             const count = Math.min(outputs.touches.length, 32);
             view.setInt32(48, count, true);
             for (let index = 0; index < count; index++) {
-              const slot = outputs.touches[index]; if (slot === undefined) continue;
-              memory.writePointer(memory.offset(address, BigInt(52 + index * 4)), source.host.edicts.at(slot).address);
+              const touch = outputs.touches[index]; if (touch === undefined) continue;
+              memory.writePointer(memory.offset(address, BigInt(52 + index * 4)), source.host.edicts.at(touch.slot).address);
             }
           }
         } else {
@@ -273,6 +316,15 @@ export class NativeInputBinding {
           const minsOffset = fieldOffset(pmoveLayout, "mins"), maxsOffset = fieldOffset(pmoveLayout, "maxs");
           for (const [axis, value] of [outputs.bounds.min.x, outputs.bounds.min.y, outputs.bounds.min.z].entries()) view.setFloat32(minsOffset + axis * 4, value, true);
           for (const [axis, value] of [outputs.bounds.max.x, outputs.bounds.max.y, outputs.bounds.max.z].entries()) view.setFloat32(maxsOffset + axis * 4, value, true);
+          const writePlane = (base: string, plane: Plane | null): void => {
+            const normal = plane?.normal ?? { x: 0, y: 0, z: 0 };
+            const offset = fieldOffset(pmoveLayout, `${base}.normal`);
+            view.setFloat32(offset, normal.x, true); view.setFloat32(offset + 4, normal.y, true); view.setFloat32(offset + 8, normal.z, true);
+            view.setFloat32(fieldOffset(pmoveLayout, `${base}.dist`), plane?.distance ?? 0, true);
+            view.setUint8(fieldOffset(pmoveLayout, `${base}.type`), plane === null ? 0 : planeType(normal));
+            view.setUint8(fieldOffset(pmoveLayout, `${base}.signbits`), plane === null ? 0 : (normal.x < 0 ? 1 : 0) | (normal.y < 0 ? 2 : 0) | (normal.z < 0 ? 4 : 0));
+          };
+          writePlane("groundplane", outputs.groundPlane);
           const viewOffset = fieldOffset(pmoveLayout, "viewoffset");
           view.setFloat32(viewOffset, 0, true); view.setFloat32(viewOffset + 4, 0, true); view.setFloat32(viewOffset + 8, 0, true);
           if (source.edition === "rerelease") memory.writePointer(memory.offset(address, BigInt(fieldOffset(pmoveLayout, "groundentity"))),
@@ -281,10 +333,9 @@ export class NativeInputBinding {
             const count = Math.min(outputs.touches.length, 32);
             view.setUint32(fieldOffset(pmoveLayout, "touch.num"), count, true);
             for (let index = 0; index < count; index++) {
-              const slot = outputs.touches[index]; if (slot === undefined) continue;
-              const plane = memory.offset(address, BigInt(fieldOffset(pmoveLayout, `touch.touches[${index}].plane.normal`)));
-              memory.writeFloat32(plane, 0); memory.writeFloat32(memory.offset(plane, 4n), 0); memory.writeFloat32(memory.offset(plane, 8n), 1);
-              memory.writePointer(memory.offset(address, BigInt(fieldOffset(pmoveLayout, `touch.touches[${index}].ent`))), source.host.entities().atSlot(slot).address);
+              const touch = outputs.touches[index]; if (touch === undefined) continue;
+              writePlane(`touch.touches[${index}].plane`, touch.plane);
+              memory.writePointer(memory.offset(address, BigInt(fieldOffset(pmoveLayout, `touch.touches[${index}].ent`))), source.host.entities().atSlot(touch.slot).address);
             }
           }
         }

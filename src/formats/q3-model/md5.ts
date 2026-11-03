@@ -188,6 +188,8 @@ export function parseMd5Anim(text: string, source = "<md5anim>", scaleSource: Md
   tokens.expect("numJoints"); const jointCount = tokens.integer(1, 256);
   tokens.expect("frameRate"); const frameRate = tokens.integer(1, 1000);
   tokens.expect("numAnimatedComponents"); const componentCount = tokens.integer(0, jointCount * 6);
+  // Each frame expands into per-joint pose objects, so bound the expansion by the input and by an absolute budget.
+  if (frameCount * jointCount > Math.min(500_000, Math.max(4096, text.length))) tokens.fail("animation expands far beyond its data");
   tokens.expect("hierarchy"); tokens.expect("{");
   const rawHierarchy: Md5HierarchyJoint[] = [];
   for (let i = 0; i < jointCount; i++) {

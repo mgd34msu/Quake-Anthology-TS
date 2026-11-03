@@ -1,4 +1,4 @@
-import { containedFileParts } from "../../platform/files/contained.ts";
+import { containedFileParts } from "../../core/files/contained.ts";
 import { pathToFileURL } from "node:url";
 import { createContentDigest } from "../../contracts/content.ts";
 import { createHash } from "node:crypto";
@@ -8,7 +8,7 @@ import { openArchive } from "../../content/archive/index.ts";
 import { managedAddonHidden, addonInstallPath, parseAddonCatalog, quaddictedCatalogUrl, resolveAddonPackages, type AddonPackage } from "../../content/catalog/addons.ts";
 import type { HttpDownloadResult } from "../../network/services/http-downloads.ts";
 import { HttpDownloadQueue } from "../../network/services/http-downloads.ts";
-import { UserFileStore } from "../../platform/files/writable.ts";
+import { UserFileStore } from "../../core/files/writable.ts";
 import { isRecord } from "../../network/common/value.ts";
 import type { LibraryEntry, LibraryMenuService } from "../../ui/library/menu.ts";
 
@@ -30,7 +30,12 @@ export class AddonLibrary implements LibraryMenuService {
   private queue: HttpDownloadQueue | null = null;
   private closed = false;
   private cancelled = false;
+  private skippedRows: string[] = [];
   private readonly abort = new AbortController();
+  private catalogAbort: AbortController | null = null;
+  private cancelQueue(): void {
+    try { this.queue?.cancel(); } catch (error) { this.message = error instanceof Error ? error.message : String(error); }
+  }
   constructor(private readonly options: AddonLibraryOptions) {}
   private get contentParent(): string { return this.options.edition === "rerelease" ? "q1/rerelease" : "q1"; }
   private product(directory: string): string { return `q1-${this.options.edition ?? "classic"}-${directory}`; }
@@ -53,16 +58,19 @@ export class AddonLibrary implements LibraryMenuService {
     for (const item of this.installed) if (!rows.some(row => row.id === item.sha256)) rows.unshift({ id: `local:${item.directory}`, label: item.title, detail: "Installed — play" });
     return rows;
   }
-  readonly stop = { label: "Cancel download", activate: (): void => { this.cancelled = true; this.queue?.cancel(); } };
+  readonly stop = { label: "Cancel download", activate: (): void => { this.cancelled = true; this.catalogAbort?.abort(); this.cancelQueue(); } };
   refresh(): void { this.run(async () => {
     await this.readInstalled();
-    this.message = "Reading Quaddicted catalog…";
+    this.message = "Reading Quaddicted catalog…"; this.skippedRows = [];
     try {
-      const response = await fetch(quaddictedCatalogUrl, { signal: this.abort.signal });
+      const request = new AbortController();
+      this.catalogAbort = request;
+      // A stalled connection ends after 20 seconds, or at once through Cancel.
+      const response = await fetch(quaddictedCatalogUrl, { signal: AbortSignal.any([this.abort.signal, request.signal, AbortSignal.timeout(20000)]) });
       if (!response.ok) throw new Error(`Quaddicted returned HTTP ${response.status}`);
       const text = await response.text();
       const data: unknown = JSON.parse(text);
-      const catalog = parseAddonCatalog(data);
+      const catalog = parseAddonCatalog(data, reason => { this.skippedRows.push(reason); });
       await this.ensureDirectory(".addons");
       const cached = new UserFileStore(this.options.root).open(".addons/quaddicted.json", "write");
       if (cached === null) throw new Error("Cannot save add-on catalog");
@@ -74,7 +82,7 @@ export class AddonLibrary implements LibraryMenuService {
       catch { throw error; }
       this.message = "Quaddicted unavailable — showing cached catalog"; return;
     }
-    this.message = `Quaddicted — ${this.catalog.length} community packages`;
+    this.message = `Quaddicted — ${this.catalog.length} community packages${this.skippedRows.length === 0 ? "" : ` (${this.skippedRows.length} invalid entries skipped)`}`;
   }); }
   activate(id: string): void {
     if (this.pending !== null) return;
@@ -125,14 +133,17 @@ export class AddonLibrary implements LibraryMenuService {
     const installed: InstalledAddon[] = [];
     for (const entry of await readdir(root, { withFileTypes: true })) {
       if (!entry.isDirectory() || !/^qd_[a-f0-9]{20}_[a-f0-9]{20}$/.test(entry.name)) continue;
-      if (await managedAddonHidden(this.options.root, this.contentParent + "/" + entry.name)) continue;
+      if (await managedAddonHidden(this.options.root, this.contentParent + "/" + entry.name)) {
+        if (!this.purged) await this.purgeHidden(root, entry.name);
+        continue;
+      }
       try {
         const value: unknown = JSON.parse(await readFile(join(root, entry.name, ".quaddicted.json"), "utf8"));
         if (isRecord(value) && typeof value["sha256"] === "string" && /^[a-f0-9]{64}$/.test(value["sha256"]) && typeof value["title"] === "string" && typeof value["group"] === "string"
           && (value["start"] === null || typeof value["start"] === "string")) installed.push({ directory: entry.name, group: value["group"], sha256: value["sha256"], title: value["title"], start: value["start"] });
       } catch { /* Unmanaged directories are not offered for removal. */ }
     }
-    this.installed = installed;
+    this.installed = installed; this.purged = true;
   }
   private async install(selected: AddonPackage): Promise<void> {
     await this.readInstalled();
@@ -195,6 +206,18 @@ export class AddonLibrary implements LibraryMenuService {
     catch (error) { await rm(join(this.options.root, ".addons", "removed", this.contentParent, item.directory), { force: true }); throw error; }
     await this.readInstalled();
   }
+  private purged = false;
+  /** Removal only hides a copy so running worlds keep reading it; hidden copies are deleted at the next start, when nothing has them mounted. */
+  private async purgeHidden(root: string, name: string): Promise<void> {
+    try {
+      let sha256: unknown;
+      try { const value: unknown = JSON.parse(await readFile(join(root, name, ".quaddicted.json"), "utf8")); sha256 = isRecord(value) ? value["sha256"] : undefined; }
+      catch { sha256 = undefined; } // An unreadable record only means the cached package is left alone.
+      await rm(join(root, name), { recursive: true, force: true });
+      if (typeof sha256 === "string" && /^[a-f0-9]{64}$/.test(sha256)) await rm(join(this.options.root, ".addons", `${sha256}.zip`), { force: true });
+      await rm(join(this.options.root, ".addons", "removed", this.contentParent, name), { force: true });
+    } catch { /* The copy stays hidden by its tombstone; only the space is not reclaimed yet. */ }
+  }
   private async ensureDirectory(name: string): Promise<string> {
     await mkdir(this.options.root, { recursive: true });
     let path = this.options.root;
@@ -214,6 +237,6 @@ export class AddonLibrary implements LibraryMenuService {
     file.close();
   }
   async settle(): Promise<void> { await this.pending; }
-  async suspend(): Promise<void> { this.cancelled = true; this.queue?.cancel(); await this.pending; }
+  async suspend(): Promise<void> { this.cancelled = true; this.catalogAbort?.abort(); this.cancelQueue(); await this.pending; }
   async close(): Promise<void> { this.closed = true; this.abort.abort(); await this.queue?.cancel(); await this.pending; }
 }

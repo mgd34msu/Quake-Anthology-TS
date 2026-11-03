@@ -2,6 +2,8 @@ import type { Vec3 } from "../../contracts/math.ts";
 import type { NavigationRuntime } from "./runtime.ts";
 import type { NavigationEdge, NavigationNode } from "./types.ts";
 import { distance } from "./helpers.ts";
+import { navigationEdgeIsBarrierJump } from "./graph.ts";
+import { MinHeap } from "./heap.ts";
 
 export interface RereleasePathRequest {
   readonly start: Vec3; readonly goal: Vec3; readonly flags: number; readonly moveDistance: number;
@@ -25,7 +27,7 @@ function nodeAllowed(node: NavigationNode, request: RereleasePathRequest): boole
 }
 function linkType(edge: NavigationEdge): number {
   if (edge.mode === "drop") return 1;
-  if (edge.mode === "jump") return edge.sourceTravelType === 5 ? 3 : 2;
+  if (edge.mode === "jump") return navigationEdgeIsBarrierJump(edge) ? 3 : 2;
   return edge.mode === "mover" ? 4 : 0;
 }
 function linkAllowed(edge: NavigationEdge, request: RereleasePathRequest): boolean {
@@ -34,8 +36,8 @@ function linkAllowed(edge: NavigationEdge, request: RereleasePathRequest): boole
   switch (edge.mode) {
     case "walk": case "swim": return edge.entity === null;
     case "drop": return (request.flags & 4) !== 0 && (request.dropHeight <= 0 || edge.start.z - edge.end.z <= request.dropHeight);
-    case "jump": return (request.flags & (edge.sourceTravelType === 5 ? 16 : 8)) !== 0
-      && (edge.sourceTravelType !== 5 || request.jumpHeight <= 0 || edge.end.z - edge.start.z <= request.jumpHeight);
+    case "jump": return (request.flags & (navigationEdgeIsBarrierJump(edge) ? 16 : 8)) !== 0
+      && (!navigationEdgeIsBarrierJump(edge) || request.jumpHeight <= 0 || edge.end.z - edge.start.z <= request.jumpHeight);
     case "mover": return (request.flags & 32) !== 0;
     default: return false;
   }
@@ -50,17 +52,22 @@ export function rereleasePathToGoal(runtime: NavigationRuntime | null, request: 
     target: { kind: "world" }, policy: { kind: "q2", contentsMask: 0x30003, leafContents: "merged" },
     numeric: graph.profile.movement.numeric, passActor: world.passActor });
   const nearest = (point: Vec3): NavigationNode | null => {
-    let selected: NavigationNode | null = null, best = request.radius > 0 ? request.radius : 512;
-    for (const node of graph.nodes) {
+    const limit = request.radius > 0 ? request.radius : 512;
+    const candidates: { readonly node: NavigationNode; readonly d: number; readonly order: number }[] = [];
+    for (const [order, node] of graph.nodes.entries()) {
       if (!nodeAllowed(node, request) || node.origin.z < point.z - (request.minHeight > 0 ? request.minHeight : 64)
         || node.origin.z > point.z + (request.maxHeight > 0 ? request.maxHeight : 64)) continue;
       const d = Math.hypot(node.origin.x - point.x, node.origin.y - point.y);
-      if (d > best) continue;
+      if (d <= limit) candidates.push({ node, d, order });
+    }
+    // Nearest first, so only the candidates closer than the winner are traced; of equal distances the later node wins, as a forward scan would.
+    candidates.sort((a, b) => a.d - b.d || b.order - a.order);
+    for (const { node } of candidates) {
       const result = trace(point, { ...node.origin, z: node.origin.z + 32 });
       if (result.fraction < 1 || result.startSolid || result.allSolid) continue;
-      selected = node; best = d;
+      return node;
     }
-    return selected;
+    return null;
   };
   const start = nearest(request.start); if (start === null) return failure(9);
   const goal = nearest(request.goal); if (goal === null) return failure(10);
@@ -70,16 +77,17 @@ export function rereleasePathToGoal(runtime: NavigationRuntime | null, request: 
     if (trace(request.goal, request.goal).startSolid) return failure(7);
   }
   const costs = new Map<number, number>([[start.id, 0]]), previous = new Map<number, NavigationEdge>();
-  const queue = [{ node: start.id, cost: 0 }];
-  while (queue.length > 0) {
-    let best = 0;
-    for (let index = 1; index < queue.length; index++) if ((queue[index]?.cost ?? Infinity) < (queue[best]?.cost ?? Infinity)) best = index;
-    const current = queue.splice(best, 1)[0]; if (current === undefined) break;
+  const queue = new MinHeap<{ readonly node: number; readonly cost: number }>(item => item.cost), allowed = new Map<number, boolean>();
+  queue.push({ node: start.id, cost: 0 });
+  for (let current = queue.pop(); current !== null; current = queue.pop()) {
     if (current.cost !== costs.get(current.node)) continue;
     if (current.node === goal.id) break;
     for (const edge of runtime.outgoing(current.node)) {
       const node = runtime.node(edge.to);
-      if (node === null || !nodeAllowed(node, request) || !linkAllowed(edge, request) || !runtime.edgeAllowed(edge)) continue;
+      if (node === null || !nodeAllowed(node, request) || !linkAllowed(edge, request)) continue;
+      let usable = allowed.get(edge.id);
+      if (usable === undefined) { usable = runtime.edgeAllowed(edge); allowed.set(edge.id, usable); }
+      if (!usable) continue;
       const cost = current.cost + (edge.mode === "teleport" ? 1 : distance(runtime.node(edge.from)?.origin ?? edge.start, node.origin));
       if (cost >= (costs.get(edge.to) ?? Infinity)) continue;
       costs.set(edge.to, cost); previous.set(edge.to, edge); queue.push({ node: edge.to, cost });

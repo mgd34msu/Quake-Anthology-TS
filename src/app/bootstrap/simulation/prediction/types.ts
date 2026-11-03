@@ -57,6 +57,7 @@ export interface PredictionStepOptions {
   readonly rereleaseMovement: Q2RereleaseMovementContext;
   readonly fixedMilliseconds: number | null;
   readonly noFootsteps: boolean;
+  readonly ladders?: boolean;
   readonly gauntletHit: boolean;
   readonly traceMask: number | null;
   readonly firstCommand: boolean;

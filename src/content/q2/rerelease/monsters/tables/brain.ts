@@ -304,17 +304,6 @@ export const brainMoves: readonly MonsterMove[] = [
     { ai: "walk", distance: Math.fround(-1), actions: ["monster_footstep"], lerpFrame: -1 },
     { ai: "walk", distance: Math.fround(2), actions: [], lerpFrame: -1 },
   ] },
-  { name: "brain_move_defense", firstFrame: 154, lastFrame: 161, end: null, sidestepScale: 0, frames: [
-    { ai: "move", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-    { ai: "move", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-    { ai: "move", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-    { ai: "move", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-    { ai: "move", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-    { ai: "move", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-    { ai: "move", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-    { ai: "move", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-    { ai: "move", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-  ] },
   { name: "brain_move_pain3", firstFrame: 117, lastFrame: 122, end: "brain_run", sidestepScale: 0, frames: [
     { ai: "move", distance: Math.fround(-2), actions: [], lerpFrame: -1 },
     { ai: "move", distance: Math.fround(2), actions: [], lerpFrame: -1 },

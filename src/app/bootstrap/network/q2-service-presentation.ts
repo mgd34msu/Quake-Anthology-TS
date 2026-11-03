@@ -61,7 +61,8 @@ export function translateQ2ServiceRecords(records: readonly Q2ServerRecord[], ho
       }
     } else if (event.kind === 'sound') {
       const path = host.configString(host.soundConfigOffset + event.sound.index);
-      if (path === undefined) throw new Error(`Q2 sound ${event.sound.index} has no configstring`);
+      // cl_parse.c returns when the precache slot is empty; gi.soundindex("") yields index 0.
+      if (path === undefined) continue;
       const entity = host.entity(event.sound.entity);
       host.emit({ kind: 'q2', sequence: host.nextSequence(), content: host.content(), seconds: host.seconds, sourceEntity: event.sound.entity,
         event: { kind: 'sound', actor: event.sound.entity === 0 ? null : host.actor(event.sound.entity),
@@ -73,7 +74,9 @@ export function translateQ2ServiceRecords(records: readonly Q2ServerRecord[], ho
         if (entity === null) { remaining.push(record); continue; }
         const actor = host.actor(event.entity);
         if (actor === null) { remaining.push(record); continue; }
-        const axes = angleVectorsRule(entity.angles, "native"), offset = muzzleOffset(host.edition ?? 'classic', event.flash), origin = entity.origin;
+        const axes = angleVectorsRule(entity.angles, "native"), origin = entity.origin;
+        let offset: ReturnType<typeof muzzleOffset>;
+        try { offset = muzzleOffset(host.edition ?? 'classic', event.flash); } catch { continue; } // a flash number outside the table is dropped
         host.emit({ kind: 'q2', sequence: host.nextSequence(), content: host.content(), seconds: host.seconds, sourceEntity: event.entity,
           event: { kind: 'monster-muzzleflash', actor, flash: event.flash,
             origin: { x: origin.x + axes.forward.x * offset.x + axes.right.x * offset.y,

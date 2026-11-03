@@ -2,11 +2,11 @@ import { readQ2ServerDemo } from '../../../src/network/q2/server-demo.ts';
 import { writeQ2DemoRecord } from '../../../src/network/q2/demo.ts';
 import { MvdPlayback } from '../../../src/network/q2/mvd-playback.ts';
 import type { MvdCapture } from '../../../src/network/q2/mvd-encoding.ts';
-import { Q2GameCallbackError, q2GameCallback } from '../../../src/app/bootstrap/network/types.ts';
+import { q2GameCallback } from '../../../src/app/bootstrap/network/types.ts';
 import { CvarRegistry } from '../../../src/core/cvars/index.ts';
 import { expandCommandMacros } from '../../../src/core/commands/text.ts';
 import { expect, test } from 'bun:test';
-import { LoopbackHub } from '../../../src/network/common/loopback.ts';
+import { LoopbackHub } from '../../support/loopback.ts';
 import { Q2ClientNetwork, Q2ServerNetwork } from '../../../src/app/bootstrap/network/q2.ts';
 import { Q2ClientReceiver } from '../../../src/app/bootstrap/network/q2-client-receiver.ts';
 import type { Q2ApplicationServerHost, Q2ApplicationClientHost } from '../../../src/app/bootstrap/network/types.ts';
@@ -81,11 +81,9 @@ test('Q2 recording preserves reliable messages while waiting for a requested ful
         expect(clientCommands).toHaveLength(1);
         server.publish(output, [], now); await client.poll(now);
         client.command('fail');
-        let failure: unknown;
-        try { await poll(); } catch (error) { failure = error; }
-        expect(failure).toBeInstanceOf(Q2GameCallbackError);
-        if (!(failure instanceof Q2GameCallbackError)) throw new Error('Guest failure was swallowed as a packet error');
-        expect(failure.cause).toBe(guestFailure);
+        await poll();
+        expect(server.clients).toEqual([]);
+        expect(server.phase).toBe('active');
     } finally { client.close(); server.close(); hub.close(); }
 });
 
@@ -143,8 +141,8 @@ test('authoritative MVD recording captures all players once, retains subframe me
         expect(observed).toBe(6); expect(captured).toBe(7);
         expect(order.slice(-2)).toEqual(['observe', 'capture']);
         let closed = false; const closing = server.close().then(() => { closed = true; });
-        await Promise.resolve(); expect(closed).toBe(false);
+        await Bun.sleep(20); expect(closed).toBe(false);
         release?.(); await closing; expect(closed).toBe(true);
-        expect(() => server.mvdRecording.seed()).toThrow();
+        expect(() => server.mvdRecording.seed()).toThrow("MVD recording requires an active authoritative Q2 capture source");
     } finally { release?.(); await server.close(); hub.close(); }
 });

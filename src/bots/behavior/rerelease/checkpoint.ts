@@ -56,6 +56,7 @@ function memory(r: SaveReader): BotBrainCheckpointMemory {
     coopRegroupUntil: r.field("coopRegroupUntil").finite(),
     levelStarted: r.field("levelStarted").boolean(),
     checkSixUntil: r.field("checkSixUntil").finite(),
+    checkSixYaw: r.field("checkSixYaw").value === undefined ? 0 : r.field("checkSixYaw").finite(),
     checkSixNextAt: r.field("checkSixNextAt").finite(),
     roamPoint: nullableVector(r.field("roamPoint")),
     roamUntil: r.field("roamUntil").finite(),

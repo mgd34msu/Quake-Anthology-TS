@@ -36,7 +36,7 @@ export interface Q2ClientRecord {
 export function readQ2ClientMessages(wire: Q2WireCodec, bytes: Uint8Array, sequence: number, seats = 1): Q2ClientRecord[] {
     wire.begin(bytes);
     const m = wire.message, records: Q2ClientRecord[] = [];
-    let moved = false;
+    let moved = false, stringCommands = 0;
     while (m.readcount < m.cursize) {
         const start = m.readcount, raw = MSG_ReadByte(m), op = wire.protocol.kind === 'q2-q2pro' ? raw & 31 : raw;
         let event: Q2ClientEvent;
@@ -103,6 +103,8 @@ export function readQ2ClientMessages(wire: Q2WireCodec, bytes: Uint8Array, seque
             default: throw new Error(`Unknown Q2 client opcode ${op}`);
         }
         checkMessageRead(m);
+        // sv_user.c MAX_STRINGCMDS: past the seventh string command in a packet, the rest are read and ignored.
+        if (event.kind === 'command' && ++stringCommands >= 8) continue;
         records.push({ seat: selectedSeat, event, raw: m.data.slice(start, m.readcount) });
     }
     return records;

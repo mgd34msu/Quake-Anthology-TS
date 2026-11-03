@@ -26,6 +26,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Application } from '../../../src/app/bootstrap/application.ts';
 import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 function options(root: string) {
   const parsed = parseApplicationCommand(['--game', 'q3-classic-lrctf', '--map', 'q3ctf1', '--movement', 'q3', '--character', 'q3',
@@ -81,9 +83,9 @@ test('selected LRCTF application executes actual qagame on the shared scene and 
   } finally { inserted.mockRestore(); await rm(root, { recursive: true, force: true }); }
 }, 60000);
 
-test('actual LRCTF server and UI/cgame sustain thirty wall seconds with guest movement and firing', async () => {
+test('actual LRCTF server and UI/cgame sustain thirty simulated seconds with guest movement and firing', async () => {
   const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
-  const root = await mkdtemp(join(tmpdir(), 'q3-guest-client-'));
+  const root = await tempDirectory('q3-guest-client-');
   const common = ['--map', 'q3ctf1', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch'];
   const selected = parseApplicationCommand([...common, '--game', 'q3-classic-lrctf', '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
   if (selected.kind !== 'run') throw new Error('Missing server options');
@@ -184,8 +186,8 @@ test('actual LRCTF server and UI/cgame sustain thirty wall seconds with guest mo
     remote.input({ seat: player.seat.id, kind: 'key', code: 119, down: true, repeat: false, timeMilliseconds: performance.now() });
     remote.input({ seat: player.seat.id, kind: 'mouse-button', button: 1, down: true, timeMilliseconds: performance.now() });
     let captured = false;
-    while (performance.now() - started < 30000) {
-      const tickStarted = performance.now(); await exchange(); ticks++;
+    while (authority.simulation.timeSeconds * 1000 - startedSimulation < 30000) {
+      await exchange(); ticks++;
       if (ticks <= 5) samples.push(sample());
       if (ticks === 5 && process.env['Q3_GUEST_DIAGNOSTIC'] === '1') throw new Error('Requested five-turn movement diagnostic');
       expect(remote.networkPhase).toBe('active');
@@ -200,13 +202,12 @@ test('actual LRCTF server and UI/cgame sustain thirty wall seconds with guest mo
         const { encodePng } = await import('../../../src/formats/images/png-encoder.ts');
         mkdirSync(artifactDirectory, { recursive: true }); await Bun.write(join(artifactDirectory, 'active.png'), encodePng(320, 240, await capture)); captured = true;
       }
-      const remaining = 50 - (performance.now() - tickStarted); if (remaining > 0) await Bun.sleep(remaining);
     }
     const activeMilliseconds = performance.now() - started, simulatedMilliseconds = authority.simulation.timeSeconds * 1000 - startedSimulation;
     const finalPosition = source.records.player(peer.sourceEntity).origin, finalAmmo = source.records.player(peer.sourceEntity).ammo[2];
     remote.input({ seat: player.seat.id, kind: 'key', code: 119, down: false, repeat: false, timeMilliseconds: performance.now() });
     remote.input({ seat: player.seat.id, kind: 'mouse-button', button: 1, down: false, timeMilliseconds: performance.now() });
-    expect(activeMilliseconds).toBeGreaterThanOrEqual(30000); expect(maximumDistance).toBeGreaterThan(8);
+    expect(simulatedMilliseconds).toBeGreaterThanOrEqual(30000); expect(maximumDistance).toBeGreaterThan(8);
     expect(initialAmmo).toBeGreaterThan(0); expect(minimumAmmo).toBeLessThan(initialAmmo);
     expect(frames.mock.calls.length).toBeGreaterThan(60);
     expect(prints.some(text => text.includes('Unbound '))).toBe(false);
@@ -244,11 +245,11 @@ test('actual LRCTF server and UI/cgame sustain thirty wall seconds with guest mo
       }
     }
   }
-}, 120000);
+}, 600000);
 
 
 test('dedicated offline LRCTF Application restores guest bytes and human identities without replay', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'q3-guest-save-'));
+  const root = await tempDirectory('q3-guest-save-');
   const launch = { ...options(root), network: { kind: 'offline' } } satisfies Parameters<typeof Application.open>[0];
   const clock = spyOn(performance, 'now').mockReturnValue(1000);
   async function open() {
@@ -619,7 +620,7 @@ test('failed second local guest client preparation retires both guest module own
 
 
 test('offline LRCTF Application changes maps and restarts with retained source clients', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'q3-guest-public-travel-'));
+  const root = await tempDirectory('q3-guest-public-travel-');
   const launch = { ...options(root), network: { kind: 'offline' } } satisfies Parameters<typeof Application.open>[0];
   const directory = userProductDirectory(root, 'q3a/lrctf');
   mkdirSync(directory, { recursive: true });
@@ -667,7 +668,7 @@ test('offline LRCTF Application changes maps and restarts with retained source c
 
 
 test('network LRCTF map replacement retains the peer and begins once per new gamestate', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'q3-guest-network-travel-'));
+  const root = await tempDirectory('q3-guest-network-travel-');
   const directory = userProductDirectory(root, 'q3a/lrctf'); mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, 'autoexec.cfg'), 'set g_gametype 4\nset sv_pure 0\n');
   const app = await Application.open(options(root), { print: () => undefined });

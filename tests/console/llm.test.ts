@@ -4,7 +4,7 @@ import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
 import { CvarFlag, CvarRegistry } from "../../src/core/cvars/index.ts";
 import { registerLlmCommands, type LlmCommandRequester } from "../../src/console/llm.ts";
-import { llmExecInstructions } from "../../src/console/llm-batch.ts";
+import { llmExecInstructions, validateLlmBatch } from "../../src/console/llm-batch.ts";
 import { SeatInput } from "../../src/input/seat.ts";
 import type { LlmRequestInput } from "../../src/llm/request.ts";
 
@@ -37,13 +37,15 @@ test("LLM asks route answers independently to the invoking seats and reject dupl
   expect(f.requests[0]?.input.prompt).toBe("first question"); expect(f.requests[0]?.input.sessionInstructions).toContain("Examples: game_action"); f.remove();
 });
 
-test("registering LLM commands primes the process session with the live catalog", () => {
+test("PLATFORM-009 registering LLM commands sends nothing; the first request carries the live catalog", () => {
   const f = fixture();
-  expect(f.primes).toHaveLength(1);
-  expect(f.primes[0]).toContain("This session stays open for the whole program run");
-  expect(f.primes[0]).toContain("command:game_action");
-  expect(f.primes[0]).toContain("cvar:password");
-  expect(f.primes[0]).not.toContain("SECRET-MUST-STAY-LOCAL");
+  expect(f.primes).toHaveLength(0);
+  f.send('llm_ask "hello"');
+  const session = f.requests[0]?.input.sessionInstructions;
+  expect(session).toContain("This session stays open for the whole program run");
+  expect(session).toContain("command:game_action");
+  expect(session).toContain("cvar:password");
+  expect(session).not.toContain("SECRET-MUST-STAY-LOCAL");
   f.remove();
 });
 
@@ -87,11 +89,11 @@ test("LLM ask permits general questions and preserves code text without executin
 
 test("LLM executes registered game commands and cvars in the original context, preserving quoted semicolons", async () => {
   const f = fixture(); let literal = "";
-  f.commands.register("record", invocation => { literal = invocation.args[0] ?? ""; return undefined; });
+  f.commands.register("note_text", invocation => { literal = invocation.args[0] ?? ""; return undefined; });
   f.send('llm_exec "make changes"', f.second);
-  f.requests[0]?.resolve('sensitivity 5; record "a;b"; game_action'); await settle();
+  f.requests[0]?.resolve('sensitivity 5; note_text "a;b"; game_action'); await settle();
   expect(f.cvars.variableString("sensitivity")).toBe("5"); expect(literal).toBe("a;b"); expect(f.effects).toEqual([f.second]);
-  expect(f.output[1]).toEqual({ text: 'sensitivity 5; record "a;b"; game_action\n', source: f.second }); f.remove();
+  expect(f.output[1]).toEqual({ text: 'sensitivity 5; note_text "a;b"; game_action\n', source: f.second }); f.remove();
 });
 
 test("LLM rejects server, remote client, script, and alias request origins without a provider call", () => {
@@ -185,4 +187,15 @@ test("direct cancel affects only its seat and late answers never execute", async
   expect(f.effects).toHaveLength(1);
   f.send('llm_ask "retry"'); expect(f.requests).toHaveLength(3);
   f.remove(); expect(f.requests[2]?.input.signal?.aborted).toBe(true);
+});
+
+test("PLATFORM-006 llm_exec rejects session-ending, connecting, file-writing and command-valued cvar changes", () => {
+  const f = fixture();
+  for (const line of ["quit", "connect evil.example.org", "say hello", "writeconfig config", "condump autoexec.cfg", 'echo "bind w quit"; condump autoexec.cfg', "disconnect", "unbindall", "map q3dm1"]) {
+    expect(() => validateLlmBatch(line, f.commands, f.source)).toThrow();
+  }
+  f.cvars.register("nextmap", "", 0);
+  expect(() => validateLlmBatch('set nextmap "exec evil.cfg"', f.commands, f.source)).toThrow("runs as a command");
+  expect(validateLlmBatch("game_action; sensitivity 4", f.commands, f.source)).toEqual(["game_action", "sensitivity 4"]);
+  f.remove();
 });

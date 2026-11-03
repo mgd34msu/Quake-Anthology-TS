@@ -23,6 +23,13 @@ export function frameTimeCvarNames(dialect: CommandDialect): readonly string[] {
     : dialect.startsWith("q2") ? ["timescale", "fixedtime"] : ["timescale", "fixedtime", "com_cameraMode"];
 }
 
+/** Host_FilterTime: Q1 hosts never run above 72 Hz, and dedicated servers pace to sys_ticrate. */
+export function minimumFrameMilliseconds(cvars: CvarRegistry | null, dedicated: boolean): number {
+  if (cvars === null || !cvars.dialect.startsWith("q1")) return 4;
+  const ticrate = cvars.find("sys_ticrate")?.numericValue ?? 0.05;
+  return dedicated && Number.isFinite(ticrate) && ticrate > 0 ? ticrate * 1000 : 1000 / 72;
+}
+
 export function refreshFrameTimeCvars(owner: CvarRegistry, mirror: CvarRegistry): void {
   for (const name of frameTimeCvarNames(owner.dialect)) {
     const value = owner.find(name);
@@ -43,7 +50,7 @@ export function registerFrameTimeCvars(cvars: CvarRegistry): void {
     if (!q1 || cvars.find(name) === undefined) cvars.register(name, value, flags);
   };
   register("timescale", "1", q1 ? 0 : q2 ? Q2CvarFlag.Cheat : CvarFlag.Cheat | CvarFlag.SystemInfo);
-  if (q1) register("host_framerate", "0", 0);
+  if (q1) { register("host_framerate", "0", 0); register("sys_ticrate", "0.05", 0); }
   else {
     register("fixedtime", "0", q2 ? Q2CvarFlag.Cheat : CvarFlag.Cheat);
     if (!q2) register("com_cameraMode", "0", CvarFlag.Cheat);
@@ -69,7 +76,9 @@ export function sourceFrameMilliseconds(dialect: CommandDialect, rawMilliseconds
   }
   if (dialect === "q2-classic" || dialect === "q2-rerelease") {
     if (controls.fixedtime !== 0) return controls.fixedtime;
-    return controls.timescale === 0 ? rawMilliseconds : Math.max(1, rawMilliseconds * controls.timescale);
+    const scaled = controls.timescale === 0 ? rawMilliseconds : Math.max(1, rawMilliseconds * controls.timescale);
+    // sv_main.c never lets the server fall more than one tic behind; this bounds a stall such as a map load.
+    return Math.min(scaled, host.dedicated || !host.localServer ? 5000 : 200);
   }
   let milliseconds = Math.trunc(rawMilliseconds);
   const scale = Math.fround(controls.timescale);
@@ -77,9 +86,8 @@ export function sourceFrameMilliseconds(dialect: CommandDialect, rawMilliseconds
   if (fixedtime !== 0) milliseconds = fixedtime;
   else if (scale !== 0 || cameraMode !== 0) {
     const product = Math.fround(Math.fround(milliseconds) * scale);
-    if (!Number.isFinite(product) || product < -2147483648 || product >= 2147483648)
-      throw new RangeError("Undefined native common float-to-int time conversion");
-    milliseconds = Math.trunc(product) + 0;
+    // timescale is a console cvar; a value that overflows the source's int cast just stops the clock for this frame.
+    milliseconds = !Number.isFinite(product) || product < -2147483648 || product >= 2147483648 ? 0 : Math.trunc(product) + 0;
   }
   if (milliseconds < 1 && scale !== 0) milliseconds = 1;
   return Math.min(milliseconds, host.dedicated || !host.localServer ? 5000 : 200);

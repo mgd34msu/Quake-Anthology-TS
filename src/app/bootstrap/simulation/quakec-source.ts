@@ -26,7 +26,7 @@ import type { UserCommand } from "../../../contracts/protocol.ts";
 import type { NetQuakeMessage } from "../../../network/q1/netquake.ts";
 import type { QcNetQuakeMessageServices } from "../../../compat/qc/presentation-host.ts";
 import type { Q1SaveData } from "../../../persistence/q1.ts";
-import { captureQ1SourceSave, restoreQ1SourceSave } from "../../../persistence/q1-source.ts";
+import { captureQ1SourceSave, restoreQ1SourceSave } from "../../../compat/qc/q1-source-save.ts";
 import { registerQuakeWorldEngineCvars } from "./quakeworld-cvars.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue, namespaced } from "../../../persistence/value.ts";
 import { captureQcCheckpoint, restoreQcCheckpoint, type QcExecutorHost } from "../../../compat/qc/executor.ts";
@@ -84,6 +84,8 @@ import type { Q1PusherServices } from "../../../movement/q1/types.ts";
 import type { SharedPhysics, SharedSolid, SharedPhysicsFlags } from "./physics.ts";
 import type { SimulationEvents } from "./events.ts";
 import type { SourceRandom } from "./random.ts";
+import type { NetworkEvent } from "../../../contracts/protocol.ts";
+import { decodeLocalizationKey } from "../../../text/localization-key.ts";
 
 type QuakeCExecution = Extract<ExecutableRecipe["execution"][number], { readonly kind: "quakec" }>;
 interface NativeWeapon {
@@ -235,7 +237,7 @@ export class QuakeCSource {
   private readonly signon: QcRoutedMessage[] = [];
   private readonly netQuakeSignon: NetQuakeMessage[] = [];
   private readonly netQuakeSignonViews = new Map<number, ActorId | null>();
-  private readonly netQuakeRouted = new EventRing<{ readonly messages: readonly NetQuakeMessage[]; readonly destination: QcMessageDestination; readonly viewTargets: ReadonlyMap<number, ActorId | null> }>(8192);
+  private readonly netQuakeRouted = new EventRing<{ readonly size: number; readonly messages: readonly NetQuakeMessage[]; readonly destination: QcMessageDestination; readonly viewTargets: ReadonlyMap<number, ActorId | null> }>(8192);
   private readonly localMessages = new QuakeCLocalMessages();
   private localMessagesStarted = false;
   private netQuakeWireAttached = false;
@@ -297,9 +299,9 @@ export class QuakeCSource {
         }
         else if (this.netQuakeWireAttached || this.spawning || !this.localMessagesStarted) {
           const bytes = this.messages.captureNetQuakeMessages(messages).length;
-          let queued = 0; this.netQuakeRouted.forEachLive(entry => { queued += this.messages.captureNetQuakeMessages(entry.messages).length; });
+          let queued = 0; this.netQuakeRouted.forEachLive(entry => { queued += entry.size; });
           if (queued + bytes > 8000 * (options.maxClients + 2)) throw new Error("NetQuake source output overflow");
-          this.netQuakeRouted.admit({ messages, destination, viewTargets });
+          this.netQuakeRouted.admit({ size: bytes, messages, destination, viewTargets });
         }
         if (this.localMessagesStarted) this.receiveLocalMessages(messages, destination, viewTargets);
         return undefined;
@@ -307,14 +309,15 @@ export class QuakeCSource {
     } : undefined;
     this.netQuakeRoute = nq;
     const presentation = createQcPresentationBindings(this.worldHost, { ...(qw === undefined ? {} : { qw }), ...(nq === undefined ? {} : { nq }), content: prepared.execution.owner.content, events: options.events,
-      loading: () => this.spawning, print: options.print, message: (event, actor) => { if (!this.activeClients.has(actor)) throw new Error("QC message requires an admitted client"); return options.events.message(event, actor); }, precache: (kind, name) => this.precache(kind, name), lookup: (kind, name) => this.precached.get(`${kind}:${name}`) ?? null });
+      loading: () => this.spawning, print: options.print, message: (event, actor) => { if (!this.activeClients.has(actor)) throw new Error("QC message requires an admitted client"); return this.presentMessage(event, actor); }, precache: (kind, name) => this.precache(kind, name), lookup: (kind, name) => this.precached.get(`${kind}:${name}`) ?? null });
     const movement = createQcMovementBindings(this.worldHost, { scene: options.scene, random: options.random, touchTriggers: actor => options.physics.touchTriggers(actor) });
     this.messages = new QcBroadcastMessages({ options: { ...this.worldHost.options, slots: {
       at: slot => this.borrowed.actor(slot) ?? this.slots.at(slot) } }, actor: slot => this.worldHost.actor(slot) },
-      (event, recipient) => options.events.emit(prepared.execution.owner.content, { kind: "q1", event }, undefined, recipient), qw, nq);
+      (event, recipient) => options.events.emit(prepared.execution.owner.content, { kind: "q1", event }, undefined, recipient), qw, nq, options.print);
     const host = new Map([...this.worldHost.host, ...presentation, ...movement, ...this.clients.host, ...this.messages.host]);
     if (this.cvars.find("developer") === undefined) this.cvars.register("developer", "0");
-    host.set("dprint", vm => { if (this.cvars.variableValue("developer") !== 0) options.print(vm.varString(0)); });
+    // QuakeWorld prints unconditionally (Con_Printf); only the NetQuake family gates on developer (Con_DPrintf).
+    host.set("dprint", vm => { if (qw !== undefined || this.cvars.variableValue("developer") !== 0) options.print(vm.varString(0)); });
     host.set("cvar", vm => { vm.returnFloat(this.cvars.variableValue(vm.argString(0))); });
     host.set("setcolor", vm => { vm.entities.fromReference(vm.argInt(0)).setFloat(vm.fieldOffset("colormap"), Math.trunc(vm.argFloat(1))); });
     host.set("setspawnparms", vm => {
@@ -353,7 +356,10 @@ export class QuakeCSource {
       registerQuakeWorldEngineCvars(this.cvars);
       host.set("infokey", vm => {
         const slot = this.entities.slot(vm.argInt(0)), key = vm.argString(1);
-        const value = this.userInfo.get(slot)?.get(key) ?? (slot === 0 ? this.cvars.variableString(key) : "");
+        const network = slot > 0 && this.userInfo.has(slot) ? this.clientNetwork.get(slot) : undefined;
+        // QW pr_cmds.c: world reads serverinfo then localinfo; a client's ip and ping come from its connection, everything else from its userinfo.
+        const value = key === "ip" && network !== undefined ? network.address() : key === "ping" && network !== undefined ? String(network.ping())
+          : this.userInfo.get(slot)?.get(key) ?? (slot === 0 ? this.cvars.variableString(key) || (this.cvars.localInfo.get(key) ?? "") : "");
         vm.returnInt(vm.strings.setEngine(`qw-infokey:${slot}:${key}`, value, 1024));
       });
       host.set("logfrag", vm => {
@@ -407,7 +413,7 @@ export class QuakeCSource {
       functionBoundary: this.weaponStage?.composeFunctions(functions) ?? functions,
       observeCall: call => { pickups.validate(); return damage.observeCall(call); },
       inlineBoundary: this.weaponStage?.composeRegions(regions) ?? regions, validateEntityAccess: (reference, word, words, kind) => { pickups.validate(); this.borrowed.access(reference, word, words, kind); },
-      observeEntityStore: store => { pickups.observeStore(store); this.projectiles.observeStore(store); return damage.observeEntityStore(store); } });
+      observeEntityStore: store => { pickups.observeStore(store); this.projectiles.observeStore(store); this.borrowed.observeStore(store); return damage.observeEntityStore(store); } });
     this.actorState = new QcActorState({ machine: this.machine, rerelease: options.recipe.engineBehavior.content.startsWith("q1:rerelease:"),
       sourceSlot: actor => this.sourceSlot(actor), reference: reference => this.slots.at(this.entities.slot(reference))?.id ?? null,
       isClient: actor => this.isReservedClient(actor) });
@@ -581,7 +587,7 @@ export class QuakeCSource {
     const nqRouted = reader.field("netQuakeRouted");
     if (nqRouted.value !== undefined) { const restored = nqRouted.list(item => {
       const messages = this.messages.restoreNetQuakeMessages(item.field("bytes").bytes());
-      return { messages, destination: readQcDestination(item.field("destination"), resolve), viewTargets: views(item.field("views"), messages) };
+      return { size: this.messages.captureNetQuakeMessages(messages).length, messages, destination: readQcDestination(item.field("destination"), resolve), viewTargets: views(item.field("views"), messages) };
     }); if (restored.length !== 0) this.netQuakeRouted.admitAll(restored); }
     const vector = (item: SaveReader): Vec3 => ({ x: item.field("x").finite(), y: item.field("y").finite(), z: item.field("z").finite() });
     this.models.clear(); for (const entry of reader.field("models").list(item => item)) {
@@ -657,7 +663,7 @@ export class QuakeCSource {
     this.setClientInfoStorage(client, values);
     const actor = this.slots.at(client.slot + 1);
     if (actor !== null && (this.activeClients.has(actor.id) || this.preparedClients.has(client.slot + 1))) this.entities.at(client.slot + 1).setInt(this.field("netname"),
-      this.kind === "quakeworld" ? this.machine.strings.setEngine(`qw-name:${client.slot + 1}`, values.get("name") ?? "unnamed", 32) : this.machine.strings.allocate(values.get("name") ?? "unnamed"));
+      this.machine.strings.setEngine(`${this.kind === "quakeworld" ? "qw" : "nq"}-name:${client.slot + 1}`, (values.get("name") ?? "unnamed").slice(0, 31), 32));
   }
   setClientInfoStorage(client: ClientId, values: ReadonlyMap<string, string>): void {
     if (client.slot < 0 || client.slot >= this.options.maxClients) throw new Error("QC userinfo slot is unavailable");
@@ -698,6 +704,8 @@ export class QuakeCSource {
     return this.worldHost.actor(client.slot + 1);
   }
   clientInfo(client: ClientId): ReadonlyMap<string, string> { return this.userInfo.get(client.slot + 1) ?? new Map<string, string>(); }
+  private readonly clientNetwork = new Map<number, { address(): string; ping(): number }>();
+  setClientNetwork(client: ClientId, info: { address(): string; ping(): number }): undefined { this.clientNetwork.set(client.slot + 1, info); return undefined; }
   // Retail mods do not all declare the full parm1..parm16 set (qdoom stops
   // at parm9); absent spawn parms read as zero and are never written back.
   private readSpawnParameters(): number[] {
@@ -751,7 +759,7 @@ export class QuakeCSource {
     if (this.kind !== "quakeworld" || this.activeClients.has(actor.id)) throw new Error("QW spawn requires an inactive reserved client");
     const words = this.entities.at(slot); words.bytes.fill(0);
     words.setFloat(this.field("colormap"), slot); words.setFloat(this.field("team"), 0);
-    words.setInt(this.field("netname"), this.machine.strings.setEngine(`qw-name:${slot}`, this.userInfo.get(slot)?.get("name") ?? "unnamed", 32));
+    words.setInt(this.field("netname"), this.machine.strings.setEngine(`qw-name:${slot}`, (this.userInfo.get(slot)?.get("name") ?? "unnamed").slice(0, 31), 32));
     for (const [name, value] of [["gravity", 1], ["maxspeed", this.cvars.variableValue("sv_maxspeed")]] satisfies readonly (readonly [string, number])[]) {
       const field = this.prepared.program.fieldsByName.get(name); if (field !== undefined) words.setFloat(field.offset, value);
     }
@@ -810,8 +818,9 @@ export class QuakeCSource {
     }
     return message(`${name === "god" ? "godmode" : name} ${enabled ? "ON" : "OFF"}\n`);
   }
+  private giveMessage(actor: ActorId, text: string): undefined { this.options.events.message({ kind: "print", level: 2, text }, actor); return undefined; }
   private hostGive(actor: ActorId, slot: number, args: readonly string[]): undefined {
-    const input = args[0]?.toLowerCase(); if (input === undefined) throw new Error("Usage: give <all|weapons|ammo|health|armor|keys|item> [amount]");
+    const input = args[0]?.toLowerCase(); if (input === undefined) return this.giveMessage(actor, "Usage: give <all|weapons|ammo|health|armor|keys|item> [amount]\n");
     if (input !== "all" && this.options.giveInventory?.(actor, args) === true) return undefined;
     const words = this.entities.at(slot), all = input === "all", amount = args[1] === undefined ? undefined : nativeAtoi(args[1]);
     const write = (name: string, value: number) => { words.setFloat(this.field(name), value); };
@@ -854,14 +863,14 @@ export class QuakeCSource {
     }
     const classname = input === "quad" ? "item_artifact_super_damage" : input === "pent" ? "item_artifact_invulnerability"
       : input === "ring" ? "item_artifact_invisibility" : input === "suit" ? "item_artifact_envirosuit" : input;
-    if (!classname.startsWith("item_") && !classname.startsWith("weapon_")) throw new Error(`Unknown QuakeC item: ${input}`);
+    if (!classname.startsWith("item_") && !classname.startsWith("weapon_")) return this.giveMessage(actor, `Unknown item: ${input}\n`);
     let template: Uint8Array | null = null;
     for (let candidate = this.reservedClientSlots + 1; candidate < this.entities.count; candidate++) {
       const owner = this.slots.at(candidate), source = this.entities.at(candidate);
       if (owner !== null && this.options.actors.isLive(owner.id) && source.int(this.field("touch")) !== 0
         && this.machine.strings.get(source.int(this.field("classname"))) === classname) { template = source.bytes.slice(); break; }
     }
-    if (template === null) throw new Error(`Cannot give ${classname}: this map has no source item template`);
+    if (template === null) return this.giveMessage(actor, `Cannot give ${classname}: this map has no source item template\n`);
     this.machine.execute(this.prepared.program.functionNamed("spawn").index);
     const reference = this.machine.globals.int(1), itemSlot = this.entities.slot(reference), item = this.worldHost.actor(itemSlot), itemWords = this.entities.at(itemSlot);
     try {
@@ -1264,6 +1273,15 @@ export class QuakeCSource {
       const words = this.entities.at(slot); return { origin: words.vector(this.field("origin")), angles: words.vector(this.field("angles")) };
     } });
   }
+  /** A localization-key print becomes the same message event native rules emit, so it localizes like theirs. */
+  private presentMessage(event: NetworkEvent, actor: ActorId | null): undefined {
+    if (actor !== null && (event.kind === "print" || event.kind === "center-print")) {
+      const localized = decodeLocalizationKey(event.text);
+      if (localized !== null) return this.options.events.emit(this.prepared.execution.owner.content, { kind: "q1",
+        event: { kind: "message", player: actor, text: localized.key, center: event.kind === "center-print", args: localized.args } }, undefined, actor);
+    }
+    return this.options.events.message(event, actor);
+  }
   private receiveLocalMessages(messages: readonly NetQuakeMessage[], destination: QcMessageDestination, viewTargets?: ReadonlyMap<number, ActorId | null>): void {
     if (destination.kind === "multicast") throw new Error("NetQuake has no multicast destination");
     const target = destination.kind === "client" ? destination.actor : null;
@@ -1278,7 +1296,7 @@ export class QuakeCSource {
         sound: index => { const name = this.precacheNames("sound")[index - 1]; if (name === undefined) throw new Error(`Unknown QC service sound ${index}`); return name; },
         model: index => { const name = this.precacheNames("model")[index - 1]; if (name === undefined) throw new Error(`Unknown QC service model ${index}`); return name; },
         emit: (event, recipient = target ?? undefined) => this.options.events.emit(this.prepared.execution.owner.content,{kind:"q1",event}, undefined, recipient),
-        message: (event, actor) => this.options.events.message(event,actor),
+        message: (event, actor) => this.presentMessage(event, actor),
         music: track => this.options.events.emit(this.prepared.execution.owner.content,{kind:"music",event:{kind:"cd-track",track}}, undefined, target ?? undefined),
         angles: (actor, angles) => this.options.events.emit(this.prepared.execution.owner.content,{kind:"view-reset",reason:"source",actor,angles}, undefined, target ?? undefined),
         pause: paused => this.options.events.emit(this.prepared.execution.owner.content,{kind:"music",event:{kind:"pause",paused}}, undefined, target ?? undefined),

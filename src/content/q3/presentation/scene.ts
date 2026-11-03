@@ -7,7 +7,7 @@ import type { SceneEntity, SceneLight } from "../../../contracts/scene.ts";
 import type { ModelSourceOptions } from "../../../render/scene/models/types.ts";
 import type { RailSettings } from "../../../render/scene/particles/primitives.ts";
 import { perspectiveProjection } from "../../../render/scene/view.ts";
-import { copyRefEntity, copyRefPoly } from "./ref-entity.ts";
+import { copyRefEntity, copyRefPoly, refEntityIsAdmissible, refPolyIsAdmissible } from "./ref-entity.ts";
 import type { Q3AdmittedRefEntity, RefEntity, RefModelEntity, RefPoly, RefPortalEntity, SceneShader } from "./ref-entity.ts";
 import { copyRefdef } from "./refdef.ts";
 import type { Refdef } from "./refdef.ts";
@@ -118,12 +118,25 @@ export class Q3SceneRecorder {
   private readonly lights: SceneLight[] = [];
   constructor(readonly target: Q3SceneTarget) {}
   clearScene(): void { this.entities.length = 0; this.polygons.length = 0; this.lights.length = 0; }
-  addRefEntity(entity: Q3AdmittedRefEntity): void { this.entities.push(copyRefEntity(entity)); }
+  private rejected = false;
+  /** A server controls these values through entity state, and one bad record must not end the frame. */
+  private reject(what: string): void {
+    if (this.rejected) return;
+    this.rejected = true;
+    this.target.print(`^3WARNING: ${what}: non-finite or out-of-range coordinates, dropped\n`);
+  }
+  addRefEntity(entity: Q3AdmittedRefEntity): void {
+    if (!refEntityIsAdmissible(entity)) { this.reject("RE_AddRefEntityToScene"); return; }
+    this.entities.push(copyRefEntity(entity));
+  }
   addPoly(poly: RefPoly): void {
     if (poly.shader === null) { this.target.print("^3WARNING: RE_AddPolyToScene: NULL poly shader\n"); return; }
+    if (!refPolyIsAdmissible(poly)) { this.reject("RE_AddPolyToScene"); return; }
     this.polygons.push(admitQ3Poly(poly, this.target.fogSelections()));
   }
-  addLight(light: DynamicLight): void { this.lights.push({ ...light, origin: { ...light.origin }, color: { ...light.color }, additive: light.additive ?? false, profile: { kind: "q3" } }); }
+  addLight(light: DynamicLight): void {
+    if (!Number.isFinite(light.origin.x + light.origin.y + light.origin.z + light.radius + light.color.x + light.color.y + light.color.z)) { this.reject("RE_AddLightToScene"); return; }
+    this.lights.push({ ...light, origin: { ...light.origin }, color: { ...light.color }, additive: light.additive ?? false, profile: { kind: "q3" } }); }
   capture(): Q3SceneContent {
     const admission = snapshotQ3SceneAdmission("native", this.entities, this.polygons);
     const models: PresentedModel[] = [], effects: PresentedGeometry[] = [], portals: PresentedPortal[] = [];

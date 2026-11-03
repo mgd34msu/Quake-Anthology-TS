@@ -1,11 +1,12 @@
 /* Quake pr_edict.c entity/global save fields. GPL-2.0-or-later. */
 import { quakeAtof } from "../../core/cvars/numbers.ts";
 import { cvarValueText } from "../../core/cvars/numbers.ts";
+import type { QcTextPair } from "../../persistence/q1.ts";
 import type { QcMachine } from "./machine.ts";
 import type { QcWords } from "./memory.ts";
 import type { QcDefinition } from "./program.ts";
 
-export interface QcTextPair { readonly key: string; readonly value: string; }
+export type { QcTextPair };
 export interface QcEntityParseResult {
   readonly empty: boolean;
   readonly unknown: readonly QcTextPair[];

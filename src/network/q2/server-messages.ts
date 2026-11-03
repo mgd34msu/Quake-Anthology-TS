@@ -14,6 +14,9 @@ import type { SizeBuf } from './message.ts';
 import { readZPacketPayload } from './codecs/zpacket.ts';
 import { readGamePosition, readTempEntity } from './temp-entities.ts';
 import type { Q2TempEntity } from './temp-entities.ts';
+
+const MAX_STREAM_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+
 export interface Q2SoundMessage {
     readonly flags: number;
     readonly index: number;
@@ -170,9 +173,10 @@ export class Q2ServerMessageReader {
         this.configStrings.set(index, value);
         return { kind: 'config-string', index, value };
     }
-    private baseline(): Q2ServerEvent | null {
+    /** In a signon stream entity 0 terminates the list; as svc_spawnbaseline it is an ordinary record, as in cl_parse.c. */
+    private baseline(terminated: boolean): Q2ServerEvent | null {
         const header = this.wire.codec.readEntityBits();
-        if (header.number === 0)
+        if (terminated && header.number === 0)
             return null;
         const entity = new EntityStateT();
         this.wire.codec.readDeltaEntity(new EntityStateT(), entity, header.number, header.bits);
@@ -214,11 +218,13 @@ export class Q2ServerMessageReader {
             return { kind: 'download', percent, bytes: inflated };
         }
         // Q2rePRO keeps a single raw deflate stream across download packets.
+        if (this.compressedDownload.length + bytes.length > MAX_STREAM_DOWNLOAD_BYTES)
+            throw new Error('Q2 compressed download stream exceeds its limit');
         const joined = new Uint8Array(this.compressedDownload.length + bytes.length);
         joined.set(this.compressedDownload);
         joined.set(bytes, this.compressedDownload.length);
         this.compressedDownload = joined;
-        const inflated = new Uint8Array(inflateRawSync(joined, { finishFlush: percent === 100 ? zlibConstants.Z_FINISH : zlibConstants.Z_SYNC_FLUSH }));
+        const inflated = new Uint8Array(inflateRawSync(joined, { maxOutputLength: MAX_STREAM_DOWNLOAD_BYTES, finishFlush: percent === 100 ? zlibConstants.Z_FINISH : zlibConstants.Z_SYNC_FLUSH }));
         const delta = inflated.slice(this.inflatedDownloadBytes);
         this.inflatedDownloadBytes = inflated.length;
         if (percent === 100) {
@@ -234,7 +240,7 @@ export class Q2ServerMessageReader {
         while (m.readcount < m.cursize) {
             const start = m.readcount;
             if (this.stream !== 'none') {
-                const mode = this.stream, event = mode === 'baseline' ? this.baseline() : this.config();
+                const mode = this.stream, event = mode === 'baseline' ? this.baseline(true) : this.config();
                 if (event !== null)
                     records.push(this.record(mode === 'baseline' ? 39 : 38, start, event));
                 else
@@ -299,9 +305,9 @@ export class Q2ServerMessageReader {
                     break;
                 }
                 case 14: {
-                    const parsed = this.baseline();
+                    const parsed = this.baseline(false);
                     if (parsed === null)
-                        throw new Error('Q2 zero spawn baseline');
+                        throw new Error('Q2 spawn baseline missing');
                     event = parsed;
                     break;
                 }

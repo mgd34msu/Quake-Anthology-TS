@@ -4,6 +4,7 @@ import type { Vec2, Vec3 } from "../../contracts/math.ts";
 import type { Palette, RenderImage } from "../../contracts/render.ts";
 import type { ModelFrame, ModelVertex, Q1AliasModel, Q1SpriteModel, Q2AliasModel, TimedFrames } from "../../contracts/scene.ts";
 import { at } from "./common.ts";
+import { PoseLru } from "./pose-lru.ts";
 
 /** Q1 stores cumulative endpoints, not durations. A boundary selects the next frame. */
 export function sampleTimedFrame<T>(frames: TimedFrames<T>, timeSeconds: number, syncBase = 0): T {
@@ -19,7 +20,7 @@ export function sampleTimedFrame<T>(frames: TimedFrames<T>, timeSeconds: number,
 }
 
 /** Q1 and Q2 light the current pose's normal while interpolating vertex positions. */
-const aliasInterpolationCache = new WeakMap<ModelFrame, WeakMap<ModelFrame, Map<string, readonly ModelVertex[]>>>();
+const aliasInterpolationCache = new PoseLru<readonly ModelVertex[]>(256);
 
 export function interpolateAliasFrames(current: ModelFrame, previous: ModelFrame, backLerp: number,
   previousOriginDelta: Vec3 = { x: 0, y: 0, z: 0 }): readonly ModelVertex[] {
@@ -27,8 +28,8 @@ export function interpolateAliasFrames(current: ModelFrame, previous: ModelFrame
   if (current.vertices.length !== previous.vertices.length) throw new RangeError("Alias poses have different vertex counts");
   // Pure in its inputs; shared poses repeat across entities and frames.
   const cacheKey = `${backLerp}|${previousOriginDelta.x}|${previousOriginDelta.y}|${previousOriginDelta.z}`;
-  let byPrevious = aliasInterpolationCache.get(current);
-  const cached = byPrevious?.get(previous)?.get(cacheKey);
+  const key = aliasInterpolationCache.key([current, previous], cacheKey);
+  const cached = aliasInterpolationCache.get(key);
   if (cached !== undefined) return cached;
   const frontLerp = 1 - backLerp;
   const result = current.vertices.map((vertex, index) => {
@@ -39,11 +40,7 @@ export function interpolateAliasFrames(current: ModelFrame, previous: ModelFrame
       z: Math.fround(vertex.position.z * frontLerp + (old.position.z + previousOriginDelta.z) * backLerp),
     } };
   });
-  if (byPrevious === undefined) { byPrevious = new WeakMap<ModelFrame, Map<string, readonly ModelVertex[]>>(); aliasInterpolationCache.set(current, byPrevious); }
-  let byKey = byPrevious.get(previous);
-  if (byKey === undefined) { byKey = new Map<string, readonly ModelVertex[]>(); byPrevious.set(previous, byKey); }
-  if (byKey.size >= 256) byKey.clear();
-  byKey.set(cacheKey, result);
+  aliasInterpolationCache.set(key, result);
   return result;
 }
 

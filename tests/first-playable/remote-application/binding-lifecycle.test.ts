@@ -1,3 +1,4 @@
+import { writeCapture } from "../../support/capture.ts";
 import { expect, spyOn, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,9 +16,11 @@ import { ConfigStore } from '../../../src/settings/config.ts';
 import { UdpTransport } from '../../../src/network/common/transport.ts';
 import { decodeConnectionless } from '../../../src/network/q3/connectionless.ts';
 import { encodeQ3Status } from '../../../src/network/q3/discovery.ts';
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 for (const ownership of ['borrowed', 'owned']) test(`remote browser ${ownership} lifetime retains actual UDP polling`, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'quake-remote-browser-'));
+  const root = await tempDirectory('quake-remote-browser-');
   const endpoint = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
   let borrowed: StartupServerBrowser | null = null, client: RemoteApplication | null = null;
   try {
@@ -117,7 +120,7 @@ test('Q3 remote bindings wait for decoded player state and capture input after a
       }
       expect(ui.controller.activeMenu).toBe('menu:bindings:0');
       expect(playerReads).toBeGreaterThan(0);
-      await Bun.write('/tmp/quake-q3-binding-lifecycle.png', encodePng(640, 480, remote.readPixels()));
+      await writeCapture('quake-q3-binding-lifecycle.png', encodePng(640, 480, remote.readPixels()));
       click(400, 148);
       expect(ui.controller.bindingCapture).toBe(true);
       key(107);

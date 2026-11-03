@@ -1,14 +1,19 @@
 import { expect, test } from "bun:test";
-import { corpusFile, testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import { existsSync } from "node:fs";
 import { openArchive } from "../../../src/content/archive/index.ts";
+import { parsePlayerAnimationConfig } from "../../../src/content/q3/foundation/animation-config.ts";
 import type { ArchiveHandle } from "../../../src/content/archive/index.ts";
-import { createMd5Model, interpolateSurface, lerpTag, loadMd3Lods, md3AtLod, parseMd3, parseMd5Anim, parseMd5Mesh, parsePlayerAnimationConfig, parseSkin, q1ReplacementSkinSelection, sampleMd5Pose, skinMd5Mesh, toSceneMd3 } from "../../../src/formats/q3-model/index.ts";
+import { createMd5Model, parseMd5Anim, parseMd5Mesh, sampleMd5Pose, skinMd5Mesh } from "../../../src/formats/q3-model/md5.ts";
+import { interpolateSurface, lerpTag, parseMd3, parseSkin } from "../../../src/formats/q3-model/md3.ts";
+import { loadMd3Lods, md3AtLod } from "../../../src/formats/q3-model/lod.ts";
+import { q1ReplacementSkinSelection } from "../../../src/formats/q3-model/replacements.ts";
+import { toSceneMd3 } from "../../../src/formats/q3-model/scene.ts";
 
-const q3Archive = `${testCorpusRoot()}/q3a/baseq3/pak0.pk3`;
+const q3Archive = corpusFile("q3a/baseq3/pak0.pk3");
 const q2Archive = corpusFile("q2/rerelease/baseq2/pak0.pak");
-const q1Archive = `${testCorpusRoot()}/q1/rerelease/id1/pak0.pak`;
+const q1Archive = corpusFile("q1/rerelease/id1/pak0.pak");
 
 async function read(archive: ArchiveHandle, path: string): Promise<Uint8Array> {
   const entry = archive.findEntries(path)[0];

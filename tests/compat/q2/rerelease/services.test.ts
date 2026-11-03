@@ -6,7 +6,10 @@ import { createNumericOperations, Q2_DONOR_PROFILE } from "../../../../src/core/
 import { GuestCallRunner } from "../../../../src/guest/abi/index.ts";
 import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from "../../../../src/guest/core/index.ts";
 import { X64Cpu } from "../../../../src/guest/x64/index.ts";
-import { cgameExportLayout, edictLayout, fieldOffset, gameExportLayout, gameImportLayout, gameImports, guestInt, guestPointer, RereleaseQ2GuestHost } from "../../../../src/compat/q2/rerelease/index.ts";
+import { cgameExportLayout, gameExportLayout, gameImportLayout, gameImports } from "../../../../src/compat/q2/rerelease/api.ts";
+import { edictLayout, fieldOffset } from "../../../../src/compat/q2/rerelease/layouts.ts";
+import { guestInt, guestPointer } from "../../../../src/compat/q2/rerelease/module.ts";
+import { RereleaseQ2GuestHost } from "../../../../src/compat/q2/rerelease/host.ts";
 import { clientLayout } from "../../../../src/compat/q2/rerelease/layouts.ts";
 import { RereleasePublicEdict } from "../../../../src/compat/q2/rerelease/public-state.ts";
 import { RereleaseGuestServices } from "../../../../src/app/bootstrap/simulation/rerelease-guest-services.ts";
@@ -114,7 +117,8 @@ test("API2023 services retain public records, ordered native messages and exact 
     expect(Object.isFrozen(edictLayout) && Object.isFrozen(edictLayout.fields) && edictLayout.fields.every(Object.isFrozen)).toBe(true);
     const fields: GuestFieldLayout[] = [{ name: "value", byteOffset: 0, storage: "int32", count: 1 }];
     const external: GuestLayout = { ...edictLayout, fields }; expect(fieldOffset(external, "value")).toBe(0);
-    fields[0] = { name: "value", byteOffset: 4, storage: "int32", count: 1 }; expect(fieldOffset(external, "value")).toBe(4);
+    // Offsets are indexed once per layout object, so a different layout reads its own fields.
+    expect(fieldOffset({ ...edictLayout, fields: [{ name: "value", byteOffset: 4, storage: "int32", count: 1 }] }, "value")).toBe(4);
     const info = string("\\name\\old\\name\\duplicate"); expect(invoke("Info_RemoveKey", [guestPointer(info), guestPointer(string("name"))])).toEqual({ kind: "uint32", value: 1 }); expect(readGuestString(memory, info)).toBe("");
     const longValue = "v".repeat(200); invoke("Info_SetValueForKey", [guestPointer(info), guestPointer(string("name")), guestPointer(string(longValue))]); expect(readGuestString(memory, info)).toBe(`\\name\\${longValue}`);
     host.reserveClient(1); adapter.completeSpawn(); adapter.setConfigstring(60, "2"); invoke("WriteByte", [guestInt(42)]); invoke("unicast", [guestPointer(view.record.address), { kind: "uint32", value: 1 }, { kind: "uint32", value: 7 }]);

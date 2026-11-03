@@ -4,6 +4,7 @@ import type { ResolvedResourceReference } from "../../src/contracts/content.ts";
 import type { BatchLighting, DrawBatch, Q2ShadowProjection, DynamicImageSource, ImageResourceOperation, RenderCommand, RendererImage, RendererResourceOwner, RenderOperation } from "../../src/contracts/render.ts";
 import { WireDecoder, WireEncoder, decodeImageLevel } from "../../src/render/worker-protocol.ts";
 import type { ExecutionOperation } from "../../src/render/execution.ts";
+import type { Mat4 } from "../../src/contracts/math.ts";
 import { resolveDrawTextures } from "../../src/render/commands/dynamic-texture.ts";
 
 function owner(): RendererResourceOwner { return { identity: Symbol("wire test"), session: createIdentityOwner("wire test").session, generation: 0 }; }
@@ -76,7 +77,7 @@ test("later invalid batch preserves valid operation and draw prefix", () => {
   expect(() => draws.next()).toThrow("another renderer lifetime");
 });
 test("all immediate operation families preserve data and replace images", () => {
-  const { frontend, encoder, decoder } = setup(), white = image(frontend), v = { x: 0, y: 0, z: 0, w: 1 };
+  const { frontend, receiver, encoder, decoder } = setup(), white = image(frontend), v = { x: 0, y: 0, z: 0, w: 1 };
   const operations: RenderOperation[] = [
     { kind: "disable-portal-clip" }, { kind: "depth-range", range: [0, 1] }, { kind: "cull", cull: "back" }, { kind: "polygon-offset", value: { factor: 1, units: 2 } },
     { kind: "depth-atlas", image: white, passes: [{ viewport: { x: 0, y: 0, width: 1, height: 1 }, clearDepth: 1, draws: [{ positions: new Float64Array([0, 0, 0, 1]), indices: [0], cull: "none", polygonOffset: null }] }] },
@@ -86,13 +87,22 @@ test("all immediate operation families preserve data and replace images", () => 
     { kind: "q2-fog", camera: { origin: { x: 0, y: 0, z: 0 }, axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }], projection: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], viewport: { x: 0, y: 0, width: 1, height: 1 }, clip: { kind: "none" } },
       farDepth: 1, skyDrawn: true, fog: { kind: "q2", color: { x: 1, y: 1, z: 1 }, density: 0.1, skyFactor: 1, height: { start: { color: { x: 1, y: 0, z: 0 }, distance: 0 }, end: { color: { x: 0, y: 1, z: 0 }, distance: 100 }, density: 0.2, falloff: 0.5 } } },
   ];
-  for (const operation of operations) expect(decoder.operation(encoder.operation(operation)).kind).toBe(operation.kind);
+  const receiverEncoder = new WireEncoder(receiver);
+  for (const operation of operations) {
+    const wire = encoder.operation(operation), decoded = decoder.operation(wire);
+    expect(decoded.kind).toBe(operation.kind);
+    if (decoded.kind === "draw" || decoded.kind === "object-opacity") throw new Error("Immediate operation decoded as a draw");
+    // The receiver re-encodes to exactly the frontend's wire form, so no field was dropped or altered.
+    expect(receiverEncoder.operation(decoded)).toEqual(wire);
+    const images = [...("image" in decoded ? [decoded.image] : []), ...("whiteImage" in decoded ? [decoded.whiteImage] : [])];
+    for (const field of images) { expect(field.owner).toBe(receiver); expect(field).not.toBe(white); }
+  }
 });
 test("malformed boundary variants and readback dimensions reject", () => {
   const { decoder } = setup();
-  expect(() => decoder.command({ kind: "draw-buffer", buffer: "invented", clear: false })).toThrow();
-  expect(() => decoder.image({ ordinal: -1, width: 1, height: 1, name: "bad" })).toThrow();
-  expect(() => decodeImageLevel({ width: 2, height: 1, pixels: new Uint8Array(4) })).toThrow();
+  expect(() => decoder.command({ kind: "draw-buffer", buffer: "invented", clear: false })).toThrow("Invalid renderer wire variant");
+  expect(() => decoder.image({ ordinal: -1, width: 1, height: 1, name: "bad" })).toThrow("Invalid renderer wire integer");
+  expect(() => decodeImageLevel({ width: 2, height: 1, pixels: new Uint8Array(4) })).toThrow("Invalid renderer RGBA readback");
   expect(decodeImageLevel({ width: 1, height: 1, pixels: new Uint8Array(4) }).width).toBe(1);
 });
 
@@ -112,7 +122,7 @@ test("view state decoding waits until after before-view operations", () => {
   const command = decoder.command({ kind: "view", view: { viewport: null, clear: null, clipPlane: null, beforeView: [{ kind: "cull", cull: "front" }], operations: [] } });
   if (command.kind !== "view") throw new Error("Wrong view command");
   expect([...command.view.beforeView]).toEqual([{ kind: "cull", cull: "front" }]);
-  expect(() => command.view.viewport).toThrow();
+  expect(() => command.view.viewport).toThrow("Invalid renderer wire record");
 });
 
 test("Q2 fragment lighting and shadow atlas variants roundtrip with data snapshots", () => {
@@ -149,4 +159,24 @@ test("image operations preserve depth storage, update levels, filters and acknow
     expect(decoded.kind).toBe(operation.kind);
     expect(encoder.acknowledge(decoder.acknowledgment(decoded))).toEqual(operation);
   }
+});
+test("world-space batches and the view projection cross the wire", () => {
+  const { frontend, encoder, decoder } = setup();
+  const source: DrawBatch = { ...batch({ kind: "bind-image", image: image(frontend) }), space: "world" };
+  const decodedBatch = decoder.batch(encoder.batch(source));
+  expect(decodedBatch.space).toBe("world");
+  const projection: Mat4 = [1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 3, 0, 4, 5, 6, 1];
+  const command: RenderCommand = { kind: "view", view: { viewport: { x: 0, y: 0, width: 4, height: 4 }, clear: null, clipPlane: null, viewProjection: projection,
+    target: { kind: "preview", id: "wire" }, time: { kind: "seconds", value: 0 }, beforeView: [], operations: [] } };
+  const decoded = decoder.command(encoder.command(command));
+  if (decoded.kind !== "view") throw new Error("Wrong command kind");
+  expect(decoded.view.viewProjection).toEqual([...projection]);
+});
+test("acknowledged image releases drop their wire handles", () => {
+  const { frontend, encoder, decoder } = setup(), target = image(frontend, 7);
+  const wire = encoder.imageOperation({ kind: "release-image", image: target });
+  expect(encoder.originalImage(7)).toBe(target);
+  const restored = decoder.imageOperation(wire);
+  encoder.acknowledge(decoder.acknowledgment(restored));
+  expect(() => encoder.originalImage(7)).toThrow("Unknown renderer image ordinal");
 });

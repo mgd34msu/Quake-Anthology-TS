@@ -26,7 +26,7 @@ export interface Id1EnvironmentalDamage {
 /** Classifies proven artifact sites; other native source calls retain unclassified provenance. */
 export class Id1Environment {
   private readonly binding: Id1ProgramBinding;
-  constructor(private readonly source: Pick<QcWorldHostOptions, "program" | "entities" | "actors" | "slots">,
+  constructor(private readonly source: Pick<QcWorldHostOptions, "program" | "entities" | "actors" | "slots"> & Partial<Pick<QcWorldHostOptions, "foreignActor" | "foreignReference">>,
     private readonly machine: () => QcMachine) {
     this.binding = id1ProgramBinding(source.program);
     for (const site of this.binding.environment) {
@@ -36,6 +36,10 @@ export class Id1Environment {
         throw new QcProgramError(`id1 environmental statement ${site.statement} mismatch`);
     }
   }
+  private foreignReference(actor: ActorId): number {
+    if (this.source.foreignReference === undefined) throw new QcProgramError("id1 damage references an actor without a source projection");
+    return this.source.foreignReference(actor);
+  }
   resolve(call: Id1DamageCall, callback: Id1PhysicsCallback | null): Id1EnvironmentalDamage | null {
     const site = this.binding.environment.find(value => value.caller === call.call.caller && value.statement === call.call.statement);
     if (site === undefined) return null;
@@ -44,9 +48,8 @@ export class Id1Environment {
       throw new QcProgramError("Unmatched id1 environmental machine or function");
     const reference = (actor: ActorId): number => {
       const owned = this.source.actors.sourceOf(actor);
-      if (!this.source.actors.isLive(actor) || owned?.provider !== this.source.slots.options.provider)
-        throw new QcProgramError("id1 environment references a foreign or stale actor");
-      return this.source.entities.reference(owned.slot);
+      if (!this.source.actors.isLive(actor)) throw new QcProgramError("id1 environment references a stale actor");
+      return owned?.provider === this.source.slots.options.provider ? this.source.entities.reference(owned.slot) : this.foreignReference(actor);
     };
     const target = reference(call.target), inflictor = reference(call.inflictor), attacker = reference(call.attacker);
     const self = vm.globals.int(vm.globalOffset("self")), other = vm.globals.int(vm.globalOffset("other"));

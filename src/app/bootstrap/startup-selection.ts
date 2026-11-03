@@ -452,7 +452,16 @@ export class StartupSelectionModel {
   }
   private product(field: "product" | "movement" | "character"): CatalogProduct { return this.catalog.product(this.values[field]); }
   private geometry(): CatalogProduct { return this.catalog.require(this.values.mapProduct); }
+  private readonly fileSets = new WeakMap<CatalogProduct, { readonly loose: readonly string[] | undefined; readonly paths: ReadonlySet<string> }>();
+  /** Rebuilt only when the product object or its loose-model list changes; the menu asks every frame. */
   private files(product: CatalogProduct): ReadonlySet<string> {
+    const loose = this.looseModels.get(product.expectation.id), cached = this.fileSets.get(product);
+    if (cached !== undefined && cached.loose === loose) return cached.paths;
+    const paths = this.collectFiles(product);
+    this.fileSets.set(product, { loose, paths });
+    return paths;
+  }
+  private collectFiles(product: CatalogProduct): Set<string> {
     const paths = new Set([...product.archives.flatMap(archive => archive.entries.map(entry => entry.path.toLowerCase())), ...this.looseModels.get(product.expectation.id) ?? []]);
     if (product.expectation.baseProduct !== null) for (const path of this.files(this.catalog.product(product.expectation.baseProduct))) paths.add(path);
     return paths;
@@ -774,10 +783,13 @@ export class StartupSelectionModel {
     return [...this.rows().filter(row => row.id !== "renderer").map(row => `${row.label}: ${row.choices.find(choice => choice.id === row.value)?.label ?? row.value}`),
       "Pickups: authored map items supply the selected arsenal through its admitted mappings. Independent pickup replacement is not implemented."];
   }
+  private bindingProduct() { return this.values.weapons === "native" ? this.product("product") : this.catalog.require(this.values.weapons); }
   bindingItems(): readonly WeaponBindingItem[] {
-    const product = this.values.weapons === "native" ? this.product("product") : this.catalog.require(this.values.weapons);
+    const product = this.bindingProduct();
     return baseWeaponBindingItems(product.expectation.family, product.expectation.campaign);
   }
+  /** What bindingItems depends on, cheap enough to compare every frame. */
+  bindingItemsKey(): string { const { expectation } = this.bindingProduct(); return `${expectation.family}:${String(expectation.campaign)}`; }
   bindingCapabilities(): BindingCapabilities {
     const base = applicationPreset(this.catalog, this.options), equipment = this.selectedEquipment(base.equipment);
     const family = this.catalog.require(base.engineBehavior.content).expectation.family;

@@ -8,6 +8,7 @@ import type { Vec3 } from "../../../../contracts/math.ts";
 import { add, scale, zero } from "../fields.ts";
 import type { Q2GameServices } from "../host.ts";
 import { Q2Ballistics } from "./ballistics.ts";
+import { noInfiniteAmmo } from "../infinite-ammo.ts";
 import { q2WeaponDamageMultiplier } from "./damage.ts";
 import { Q2_BASE_WEAPONS } from "./definitions.ts";
 import { calculateHandThrow, handFuseDeadline, handRecoverySeconds } from "./hand-grenade.ts";
@@ -16,9 +17,13 @@ import { millisecondSum, stepQ2ClassicFrame, stepQ2RereleaseFrame } from "./gene
 import type { Q2RereleaseFrameHooks } from "./generic-frame.ts";
 import { MOD, Q2WeaponState } from "./types.ts";
 import type { Q2WeaponDefinition, Q2WeaponInput, Q2WeaponName } from "./types.ts";
-import type { Q2NoiseRecord } from "./types.ts";
-import type { Q2NoiseCheckpoint, Q2WeaponsCheckpoint } from "./checkpoint.ts";
+import type { Q2WeaponsCheckpoint } from "./checkpoint.ts";
 import { restoreQ2Actor } from "../checkpoint.ts";
+
+/** gi.local_sound: the owner alone hears it. */
+function localSound(game: Q2GameServices, self: Parameters<Q2GameServices["sound"]>[0], path: string): undefined {
+  return game.host.emit({ kind: "sound", actor: self.actor.id, origin: game.body(self).origin, path, channel: 0, volume: 1, attenuation: 1, reliable: false, loop: "once", local: true });
+}
 
 export type Q2WeaponSelection = "selected" | "current" | "not-owned" | "no-ammo" | "not-enough-ammo";
 export interface Q2WeaponContext {
@@ -59,6 +64,7 @@ export type Q2WeaponSourceRules =
 export class Q2Weapons extends Q2Ballistics {
   private readonly definitions = new Map<string, Q2WeaponDefinition>(Q2_BASE_WEAPONS.map(definition => [definition.name, definition]));
   private readonly extensions = new Map<string, Q2WeaponExtension>();
+  private readonly dualfireSoundTime = new Map<ActorId, number>();
   private fallbackOrder: readonly Q2WeaponName[] | null = null;
   private sourceRules: Q2WeaponSourceRules | null = null;
 
@@ -68,16 +74,11 @@ export class Q2Weapons extends Q2Ballistics {
   }
 
   capture(game: Q2GameServices): Q2WeaponsCheckpoint {
-    const saveNoise = (noise: Q2NoiseRecord | null): Q2NoiseCheckpoint | null => noise === null ? null : {
-      actor: { slot: noise.actor.slot, generation: noise.actor.generation }, origin: { ...noise.origin }, time: noise.time, secondary: noise.secondary };
-    return { formatVersion: 2, silencerCharges: [...this.silencerCharges].filter(([actor]) => game.host.actors.isLive(actor)).map(([actor, charges]) => ({ actor: { slot: actor.slot, generation: actor.generation }, charges })), sourceRules: this.sourceRules?.kind ?? "base", registered: [...this.definitions.keys()], fallbackOrder: this.fallbackOrder === null ? null : [...this.fallbackOrder],
+    return { formatVersion: 3, silencerCharges: [...this.silencerCharges].filter(([actor]) => game.host.actors.isLive(actor)).map(([actor, charges]) => ({ actor: { slot: actor.slot, generation: actor.generation }, charges })), sourceRules: this.sourceRules?.kind ?? "base", registered: [...this.definitions.keys()], fallbackOrder: this.fallbackOrder === null ? null : [...this.fallbackOrder],
       states: [...this.states].filter(([actor]) => game.host.actors.isLive(actor)).map(([actor, state]) => ({
         actor: { slot: actor.slot, generation: actor.generation }, state: { ...state, kickAngles: { ...state.kickAngles }, kickOrigin: { ...state.kickOrigin } } })),
       inputs: [...this.inputs].filter(([actor]) => game.host.actors.isLive(actor)).map(([actor, input]) => ({
         actor: { slot: actor.slot, generation: actor.generation }, input: { ...input, angles: { ...input.angles } } })),
-      noises: [...this.noises].filter(([actor]) => game.host.actors.isLive(actor)).map(([actor, records]) => ({
-        actor: { slot: actor.slot, generation: actor.generation }, primary: saveNoise(records.primary), secondary: saveNoise(records.secondary) })),
-      soundEntity: saveNoise(this.soundEntity), sound2Entity: saveNoise(this.sound2Entity),
       blasterCauses: [...this.blasterCauses].filter(([actor]) => game.host.actors.isLive(actor)).map(([actor, meansOfDeath]) => ({ actor: { slot: actor.slot, generation: actor.generation }, meansOfDeath })),
     };
   }
@@ -85,12 +86,10 @@ export class Q2Weapons extends Q2Ballistics {
   restore(game: Q2GameServices, checkpoint: Q2WeaponsCheckpoint): undefined {
     if (checkpoint.sourceRules !== (this.sourceRules?.kind ?? "base")) throw new Error("Q2 weapon checkpoint source rules differ from the selected game module");
     if (checkpoint.registered.length !== this.definitions.size || checkpoint.registered.some(name => !this.definitions.has(name))) throw new Error("Q2 weapon checkpoint arsenal differs from the selected source modules");
-    this.states.clear(); this.inputs.clear(); this.noises.clear(); this.blasterCauses.clear(); this.silencerCharges.clear();
+    this.states.clear(); this.inputs.clear(); this.blasterCauses.clear(); this.silencerCharges.clear();
     this.trackActors(game);
     this.fallbackOrder = checkpoint.fallbackOrder === null ? null : [...checkpoint.fallbackOrder];
     if (this.fallbackOrder !== null) for (const name of this.fallbackOrder) this.definition(name);
-    const restoreNoise = (noise: Q2NoiseCheckpoint | null): Q2NoiseRecord | null => noise === null ? null : {
-      actor: game.host.actors.resolveSaved(noise.actor)?.id ?? game.host.actors.referenceSaved(noise.actor), origin: { ...noise.origin }, time: noise.time, secondary: noise.secondary };
     for (const saved of checkpoint.states) {
       const actor = restoreQ2Actor(game, saved.actor);
       for (const name of [saved.state.weapon, saved.state.pending, saved.state.lastWeapon]) if (name !== null) this.definition(name);
@@ -99,8 +98,6 @@ export class Q2Weapons extends Q2Ballistics {
     }
     for (const saved of checkpoint.silencerCharges) this.grantSilencer(restoreQ2Actor(game, saved.actor).id, game, saved.charges);
     for (const saved of checkpoint.inputs) this.inputs.set(restoreQ2Actor(game, saved.actor).id, { ...saved.input, angles: { ...saved.input.angles } });
-    for (const saved of checkpoint.noises) this.noises.set(restoreQ2Actor(game, saved.actor).id, { primary: restoreNoise(saved.primary), secondary: restoreNoise(saved.secondary) });
-    this.soundEntity = restoreNoise(checkpoint.soundEntity); this.sound2Entity = restoreNoise(checkpoint.sound2Entity);
     for (const saved of checkpoint.blasterCauses) this.blasterCauses.set(restoreQ2Actor(game, saved.actor).id, saved.meansOfDeath);
     return game.sourceCallbacks.register(this.callbacks);
   }
@@ -257,10 +254,14 @@ export class Q2Weapons extends Q2Ballistics {
 
   consume(context: Q2WeaponContext, count = context.definition.quantity, infinite = true): undefined {
     const { self, game, definition } = context;
-    if (definition.ammo === null || infinite && (context.rerelease ? context.input.infiniteAmmo : (game.options.deathmatchFlags & 8192) !== 0)) return undefined;
+    if (definition.ammo === null || infinite && (context.rerelease ? context.input.infiniteAmmo : (game.options.deathmatchFlags & 8192) !== 0) && !noInfiniteAmmo(game, definition.ammo)) return undefined;
     const before = this.ammo(context);
-    if (!game.host.inventory.consume(self.actor, definition.ammo, count)) throw new Error("Q2 weapon fired without its admitted ammunition");
-    if (context.rerelease && before > definition.warning && this.ammo(context) <= definition.warning) game.sound(self, "weapons/lowammo.wav", 0);
+    // A player can drop ammunition during a multi-frame shot. C went negative there; the shot spends what is left.
+    if (!game.host.inventory.consume(self.actor, definition.ammo, count)) {
+      const remaining = game.host.inventory.count(self.actor.id, definition.ammo);
+      if (remaining > 0) game.host.inventory.consume(self.actor, definition.ammo, remaining);
+    }
+    if (context.rerelease && before > definition.warning && this.ammo(context) <= definition.warning) localSound(game, self, "weapons/lowammo.wav");
     return this.hooks.ammoChanged(self.actor.id, definition.ammo);
   }
 
@@ -273,7 +274,7 @@ export class Q2Weapons extends Q2Ballistics {
     const before = this.ammo(context);
     if (!game.host.inventory.consume(self.actor, "q2:ammo_grenades", 1)) return false;
     state.handReservation = { kind: "finite" };
-    if (context.rerelease && before > context.definition.warning && this.ammo(context) <= context.definition.warning) game.sound(self, "weapons/lowammo.wav", 0);
+    if (context.rerelease && before > context.definition.warning && this.ammo(context) <= context.definition.warning) localSound(game, self, "weapons/lowammo.wav");
     this.hooks.ammoChanged(self.actor.id, "q2:ammo_grenades");
     return true;
   }
@@ -355,7 +356,8 @@ export class Q2Weapons extends Q2Ballistics {
 
   animationTime(context: Q2WeaponContext): number {
     const { state, input, game } = context;
-    const rate = q2WeaponAnimationRate({ ...input, frameSeconds: game.host.frameSeconds(), phase: state.phase, frame: state.frame, now: context.now });
+    const rate = q2WeaponAnimationRate({ ...input, frameSeconds: game.host.frameSeconds(), phase: state.phase, frame: state.frame, now: context.now,
+      noHaste: context.definition.noHaste === true && state.phase === "firing" });
     // rerelease gtime_t keeps integral milliseconds.
     const native = Math.trunc(1000 / rate) / 1000;
     const interval = state.phase === "firing" ? this.firingInterval(context.self.actor.id, native) : native;
@@ -409,6 +411,10 @@ export class Q2Weapons extends Q2Ballistics {
     if (ctf?.strengthSound(context) !== true) {
       const sound = q2PowerupSound({ ...input, now, rerelease: context.rerelease });
       if (sound !== null) game.sound(self, sound, 3);
+      else if (context.rerelease && input.quadFireUntil > now && (this.dualfireSoundTime.get(self.actor.id) ?? 0) < now) {
+        this.dualfireSoundTime.set(self.actor.id, now + 1);
+        game.sound(self, "ctf/tech3.wav", 3);
+      }
     }
     ctf?.hasteSound(context);
     return undefined;

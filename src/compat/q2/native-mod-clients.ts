@@ -101,7 +101,8 @@ export class NativeModClientsBinding {
     });
   }
   frame(slot: number): boolean {
-    const entry = [...this.entries.values()].find(entry => entry.slot + 1 === slot);
+    let entry: Entry | undefined;
+    for (const candidate of this.entries.values()) if (candidate.slot + 1 === slot) { entry = candidate; break; }
     if (entry === undefined) return false;
     const client = this.operations.services.forActor(entry.actor);
     if (client !== null && this.operations.services.actor(client)?.equals(entry.actor) === true && this.admitted(entry.actor))

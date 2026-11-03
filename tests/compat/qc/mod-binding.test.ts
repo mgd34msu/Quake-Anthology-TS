@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { testCorpusRoot, corpusFile } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { QcProgram, QcOpcode, loadQcProgram, QcEntityMemory, QcMachine, classicQcEntityLayout, createQcBuiltins, createQcSourceSlotStorage } from "../../../src/compat/qc/index.ts";
@@ -189,7 +189,7 @@ test("native armor projection requires the source inventory constants", async ()
   expect(id1ProgramBinding(program).armorField).toBe("items2");
   expect(id1ProgramBinding(program).armorMasks).toEqual([1, 2, 4]);
 });
-test("source calls after the reaction cannot hide helper combat writes", async () => {
+test("source calls after the reaction degrade to observation for non-pinned programs", async () => {
   const base = await readProgram("id1/PAK0.PAK"), layout = id1ProgramBinding(base);
   const sites = layout.damage;
   if (sites.kind !== "sites") throw new Error("Expected pinned fixture sites");
@@ -208,20 +208,23 @@ test("source calls after the reaction cannot hide helper combat writes", async (
     localWords: 0, name: "AfterDamage", file: "test.qc", parameterSizes: [], namedBuiltin: false }];
   const program = new QcProgram(base.source, base.api, statements, base.globals, base.fields, functions,
     base.strings, initial, base.entityFieldWords, base.checksum, createContentDigest("1".repeat(64)));
-  expect(() => run(program, true, "normal")).toThrow("combat store follows its reaction continuation");
+  // GAPCOMPAT-007: a non-pinned program's helper store after the reaction is observation-only, not a fatal integrity error.
+  const result = run(program, true, "normal");
+  expect(result.outcomes).toHaveLength(1);
 });
 
-test("retargeting a damage parameter cannot silently damage another actor on an early return", async () => {
+test("retargeting a damage parameter is observed without a fatal error on an early return", async () => {
   const base = await readProgram("id1/PAK0.PAK"), layout = id1ProgramBinding(base);
   const sites = layout.damage;
   if (sites.kind !== "sites") throw new Error("Expected pinned fixture sites");
   const statements = base.statements.map((statement, index) => index === layout.damage.firstStatement + 4
     ? { opcode: QcOpcode.StoreEnt, a: layout.damage.parameterStart + 2, b: layout.damage.parameterStart, c: 0 }
     : index === sites.healthStore + 1 ? { opcode: QcOpcode.Return, a: 0, b: 0, c: 0 } : statement);
-  expect(() => run(changedProgram(base, statements), true, "normal")).toThrow("redirects a combat store to another actor");
+  // GAPCOMPAT-007: stores to another actor are ignored by the target frame rather than ending the process.
+  expect(() => run(changedProgram(base, statements), true, "normal")).not.toThrow();
 });
 
-test("a helper that redirects the target cannot omit its subsequent combat stores", async () => {
+test("a helper that redirects the target does not end the process", async () => {
   const base = await readProgram("id1/PAK0.PAK"), layout = id1ProgramBinding(base);
   const sites = layout.damage;
   if (sites.kind !== "sites") throw new Error("Expected pinned fixture sites");
@@ -237,7 +240,7 @@ test("a helper that redirects the target cannot omit its subsequent combat store
     localWords: 0, name: "RedirectDamage", file: "test.qc", parameterSizes: [], namedBuiltin: false }];
   const program = new QcProgram(base.source, base.api, statements, base.globals, base.fields, functions,
     base.strings, initial, base.entityFieldWords, base.checksum, createContentDigest("2".repeat(64)));
-  expect(() => run(program, true, "normal")).toThrow("redirects a combat store to another actor");
+  expect(() => run(program, true, "normal")).not.toThrow();
 });
 
 test("native arithmetic is observed without imposing an id1 subtraction template", async () => {
@@ -258,7 +261,7 @@ test("native arithmetic is observed without imposing an id1 subtraction template
 test("declared original Threewave QuakeWorld combat retains source stores; unqualified binding derives without a declaration", async () => {
   const { validateQcModCombat } = await import("../../../src/compat/qc/mod-combat.ts");
   const { readQuakeCCompatibility } = await import("../../../src/compat/qc/compatibility.ts");
-  const bytes = await Bun.file(`${testCorpusRoot()}/q1/ctf/qwprogs.dat`).bytes(), program = loadQcProgram(bytes);
+  const bytes = await Bun.file(corpusFile("q1/ctf/qwprogs.dat")).bytes(), program = loadQcProgram(bytes);
   const raw = { version: 1, artifactDigest: program.digest, combat: { damage: { function: "T_Damage",
     arguments: [{ kind: "input", name: "self" }, { kind: "input", name: "inflictor" }, { kind: "input", name: "attacker" }, { kind: "input", name: "amount" }],
     globals: [{ name: "time", value: { kind: "input", name: "time" } }] } } };
@@ -268,9 +271,9 @@ test("declared original Threewave QuakeWorld combat retains source stores; unqua
   // Unqualified programs derive their binding from bytecode proofs; no
   // declaration is attached until one validates.
   expect(id1ProgramBinding(program).damage.call.declaration).toBeUndefined();
-  expect(() => validateQcModCombat(program, { ...declaration, damage: { ...declaration.damage, arguments: declaration.damage.arguments.slice(0, 3) } })).toThrow();
+  expect(() => validateQcModCombat(program, { ...declaration, damage: { ...declaration.damage, arguments: declaration.damage.arguments.slice(0, 3) } })).toThrow("Mod callback T_Damage has an incompatible source signature");
   expect(id1ProgramBinding(program).damage.call.declaration).toBeUndefined();
-  expect(() => readQuakeCCompatibility(encoded, "sha256:" + "0".repeat(64))).toThrow();
+  expect(() => readQuakeCCompatibility(encoded, "sha256:" + "0".repeat(64))).toThrow("quakec-compatibility.json.artifactDigest: expected sha256");
   validateQcModCombat(program, declaration);
   const binding = id1ProgramBinding(program);
   expect(binding.kind).toBe("quakeworld"); expect(binding.attribution).toBe("native");
@@ -281,7 +284,7 @@ test("declared original Threewave QuakeWorld combat retains source stores; unqua
     const outcome = observed.outcomes[0]; if (outcome?.kind !== "committed") throw new Error("Missing original damage outcome");
     expect(outcome.decision.reaction).toBe(variant === "death" ? "death" : "pain");
   }
-  expect(id1ProgramBinding(loadQcProgram(await Bun.file(`${testCorpusRoot()}/q1/qw/qwprogs.dat`).bytes())).attribution).toBe("pinned");
+  expect(id1ProgramBinding(loadQcProgram(await Bun.file(corpusFile("q1/qw/qwprogs.dat")).bytes())).attribution).toBe("pinned");
 });
 
 
@@ -289,7 +292,7 @@ test("declared attacker scaling queries original rune and quad paths once while 
   const { validateQcModCombat } = await import("../../../src/compat/qc/mod-combat.ts");
   const { readQuakeCCompatibility } = await import("../../../src/compat/qc/compatibility.ts");
   const { qcDamageScale } = await import("../../../src/content/q1/quakec/damage-scale.ts");
-  const program = loadQcProgram(await Bun.file(`${testCorpusRoot()}/q1/ctf/qwprogs.dat`).bytes());
+  const program = loadQcProgram(await Bun.file(corpusFile("q1/ctf/qwprogs.dat")).bytes());
   const declaration = readQuakeCCompatibility(new TextEncoder().encode(JSON.stringify({ version: 1, artifactDigest: program.digest,
     combat: { damage: { function: "T_Damage", arguments: [{ kind: "input", name: "self" }, { kind: "input", name: "inflictor" },
       { kind: "input", name: "attacker" }, { kind: "input", name: "amount" }], globals: [{ name: "time", value: { kind: "input", name: "time" } }] },

@@ -9,7 +9,7 @@ import { QvmMemory } from "../../../src/compat/qvm/memory.ts";
 import { QvmUiImport } from "../../../src/compat/qvm/abi.ts";
 import { QvmClientScripts, qvmClientScriptSyscall } from "../../../src/compat/qvm/client-script-syscalls.ts";
 import type { QvmHostCall } from "../../../src/compat/qvm/syscalls.ts";
-import { ScriptGlobalDefines, ScriptSourceReader } from "../../../src/ui/common/legacy/script/preprocessor.ts";
+import { ScriptGlobalDefines, ScriptSourceReader } from "../../../src/content/legacy-script/preprocessor.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "qvm-scripts-"));

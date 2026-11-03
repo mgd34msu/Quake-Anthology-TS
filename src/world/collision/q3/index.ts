@@ -2,12 +2,11 @@ import type { Bounds, Vec3 } from '../../../contracts/math.ts';
 import type { LeafQueryResult, PointContentsQuery, PointContentsResult, Q3WorldGeometry, TraceQuery, TraceResult } from '../../../contracts/scene.ts';
 import { createNumericOperations } from '../../../core/numeric.ts';
 import { geometryMask } from '../contents.ts';
-import { CollisionMapResource, decodedCollisionMap } from './map-resource.ts';
+import { decodedCollisionMap } from './map-resource.ts';
 import { CollisionWorld, sourceTraceView } from './world.ts';
 import type { TraceQuery as Q3TraceQuery } from './world.ts';
 import type { TraceMedia } from '../media.ts';
 export { CollisionWorld, emptySourceTrace, sourceTraceView, sourceTraceEnd } from './world.ts';
-export { CollisionMapResource } from './map-resource.ts';
 export { SourceClipModels } from './clip-models.ts';
 export { createBoxModel, createCapsuleModel, TemporaryCollisionModel } from './model.ts';
 export { generatePatchCollide, tracePatch, positionInPatch, CollisionDebugSurface } from './patch.ts';
@@ -66,13 +65,3 @@ export class Q3Collision {
     }
 }
 export function createQ3Collision(geometry: Q3WorldGeometry): Q3Collision { return new Q3Collision(geometry); }
-/** Retains raw source clip-map records when a guest exposes their addresses. */
-export function createSourceQ3Collision(bytes: Uint8Array, source = '<q3-bsp>'): Q3Collision {
-    const resource = new CollisionMapResource(source, { kind: 'unaccounted' }, null);
-    resource.load(bytes);
-    resource.initializeBoxHull();
-    return new Q3Collision(new CollisionWorld(resource));
-}
-
-export { CollisionMapLoader } from './map-loader.ts';
-export { collisionChecksum, collisionLumpChecksum } from './checksum.ts';

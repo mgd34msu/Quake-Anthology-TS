@@ -11,7 +11,7 @@ import type { Q3PlayerState } from "../../src/contracts/protocol.ts";
 import type { SaveImage } from "../../src/contracts/session.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
 import type { WireUserCommand } from "../../src/network/q3/message.ts";
-import { UserFileStore } from "../../src/platform/files/writable.ts";
+import { UserFileStore } from "../../src/core/files/writable.ts";
 import { readSaveImage, writeSaveImage } from "../../src/persistence/save-image.ts";
 import { EngineSession } from "../../src/world/session/session.ts";
 

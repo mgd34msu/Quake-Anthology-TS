@@ -23,7 +23,7 @@ const binary = new Set([QcOpcode.AddF, QcOpcode.SubF, QcOpcode.MulF, QcOpcode.Di
 export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: ModQcDamageScale | undefined): QcDamageScale | null {
   if (source === undefined) return null;
   const reject = (reason: string): never => { throw new QcProgramError(`Unsupported QC damage scale: ${reason}`, program.source); };
-  const fn = program.functionNamed(source.function), end = program.functions.reduce((limit, other) => other.firstStatement > fn.firstStatement ? Math.min(limit, other.firstStatement) : limit, program.statements.length);
+  const fn = program.functionNamed(source.function), end = program.functionEnd(fn);
   if (source.function !== call.function || fn.firstStatement <= 0 || fn.namedBuiltin
     || !Number.isInteger(source.entry) || !Number.isInteger(source.exit) || source.entry < fn.firstStatement || source.exit <= source.entry || source.exit >= end)
     reject("original damage region bounds");

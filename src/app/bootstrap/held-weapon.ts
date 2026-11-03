@@ -1,4 +1,5 @@
 import type { SimulationPresentation } from "./simulation/types.ts";
+import { cacheEvictingRejection } from "./cached-promise.ts";
 import type { Q3CharacterPass, Q3CharacterView } from "../../content/q3/foundation/presentation.ts";
 import { q2WeaponAttachment } from "../../content/q2/foundation/weapon-attachments.ts";
 import type { HeldWeaponDeclaration, HeldWeaponModel } from "../../contracts/held-weapon.ts";
@@ -31,7 +32,7 @@ export class ForeignHeldWeapons {
       const file = await (await this.assets.provider(source.content)).mounts.open(`${source.path}.held.json`);
       return file === null ? undefined : readHeldWeaponFile(file.bytes);
     })();
-    this.declarations.set(key, pending); return pending;
+    return cacheEvictingRejection(this.declarations, key, pending);
   }
 
   private model(source: SimulationPresentation, held: HeldWeaponModel): Promise<HeldAsset | null> {
@@ -49,7 +50,7 @@ export class ForeignHeldWeapons {
       if (triangles.length === 0) throw new Error("Held model part has no source triangles");
       return { ...asset, model: { ...model, triangles, replacement: null } };
     })();
-    this.models.set(key, loaded); return loaded;
+    return cacheEvictingRejection(this.models, key, loaded);
   }
 
   async frame(source: SimulationPresentation, character: Pick<Q3CharacterView, "origin" | "color" | "opacity">): Promise<readonly Q3CharacterPass[]> {

@@ -14,7 +14,7 @@ import type { MaterialGeometry } from "../../materials/geometry.ts";
 import { RendererNoise } from "../../materials/deform.ts";
 import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches, q1AnimatedTexture, q1SkyTexCoords, q1SurfaceKind, q1TextureAnimations, splitQ1SkyTexture, splitQ64SkyTexture } from "../../materials/legacy.ts";
 import type { Q1Material, Q2Material } from "../../materials/legacy.ts";
-import { buildQ1Lightmap, buildQ2Lightmap, directLightmapPixels } from "../../materials/lighting.ts";
+import { buildQ1Lightmap, buildQ2Lightmap, directLightmapPixels, dynamicLightReachesFace } from "../../materials/lighting.ts";
 import type { LightmapFace, Q1LightmapEncoding, Q2LightStyle, SurfaceDynamicLight } from "../../materials/lighting.ts";
 import { fogSceneOperations } from "./q1-fog.ts";
 import { createFogTexture, fogCoordinates, prepareFogVolume } from "../../materials/fog.ts";
@@ -40,7 +40,7 @@ import { bmodelDlightMask, faceDlightMask, gridDlightMask, transformDlights, pro
 import type { DynamicLight } from "../../materials/q3-lighting.ts";
 import { Q2ShadowScene, StaticShadowWorld, shadowCaster, shadowMesh } from "./shadows.ts";
 import type { PreparedShadows, ShadowAtlasOptions, ShadowCaster, ShadowMesh } from "./shadows.ts";
-import { shadowMaterialGeometry } from "./shadow-geometry.ts";
+import { shadowFinishQuad, shadowMaterialGeometry } from "./shadow-geometry.ts";
 import { q2SkySides } from "./q2-sky.ts";
 import type { Q2SkyView } from "./q2-sky.ts";
 
@@ -65,6 +65,8 @@ export type WorldSurface = SurfaceBase & (
 export interface WorldSceneOptions {
   readonly subdivisions?: number;
   readonly q3LightmapOverbright?: number;
+  /** tr.identityLight at load: the factor the source applies to fog volume colors. */
+  readonly q3IdentityLight?: number;
   readonly q1LightmapEncoding?: Q1LightmapEncoding;
   readonly q1WaterAlpha?: number;
   readonly q2SkyName?: string;
@@ -74,10 +76,12 @@ export interface WorldSurfaceAdmission {
   readonly view: SourceSceneOrder;
   readonly submittedSurfaces: Map<WorldScene, Set<number>>;
   readonly worldOperations: Map<WorldScene, readonly SceneOperation[]>;
+  /** Traversal result shared by the world-operation and view passes of one accepted view. */
+  readonly worldVisibility: Map<WorldScene, VisibleWorld>;
 }
 /** One context owns one accepted view after its camera and lights are finalized. */
 export function createWorldSurfaceAdmission(view: SourceSceneOrder): WorldSurfaceAdmission {
-  return { view, submittedSurfaces: new Map<WorldScene, Set<number>>(), worldOperations: new Map<WorldScene, readonly SceneOperation[]>() };
+  return { view, submittedSurfaces: new Map<WorldScene, Set<number>>(), worldOperations: new Map<WorldScene, readonly SceneOperation[]>(), worldVisibility: new Map<WorldScene, VisibleWorld>() };
 }
 export interface WorldViewInput extends WorldVisibilityOptions {
   readonly noWorldModel?: boolean;
@@ -105,6 +109,8 @@ export interface WorldViewInput extends WorldVisibilityOptions {
   readonly operations?: readonly SceneOperation[];
   readonly beforeView?: readonly RenderOperation[];
   /** Entity lighting, video upload, shadows and private game overlays join here. */
+  /** Source r_shadows for model surfaces: 2 draws stencil shadow volumes, 3 projects RF_SHADOW_PLANE entities onto their plane. */
+  readonly modelShadows?: 2 | 3;
   readonly materialContext?: Partial<Pick<MaterialDrawContext, "lighting" | "entityRGBA" | "projectionShadow">>;
   readonly inlineModels?: readonly { readonly model: number; readonly transform: ModelTransform; readonly animationFrame?: number; readonly alternateAnimation?: boolean; readonly castsShadow?: boolean; readonly entityRGBA?: MaterialDrawContext["entityRGBA"] }[];
   readonly prepareFlare?: (surface: WorldSurface, context: MaterialDrawContext) => readonly RenderOperation[];
@@ -228,7 +234,7 @@ export class WorldScene {
       for (const [index, fog] of map.fogs.entries()) {
         const material = await shaders.register(fog.shader);
         fogs.push(fog.brush < 0 || material.material.fog === null ? null : prepareFogVolume({ ...map,
-          brushes: map.brushes.map(brush => ({ firstSide: brush.sides.first, sideCount: brush.sides.count })) }, index, material.material.fog));
+          brushes: map.brushes.map(brush => ({ firstSide: brush.sides.first, sideCount: brush.sides.count })) }, index, material.material.fog, options.q3IdentityLight ?? 1));
       }
       for (const [index, volume] of fogs.entries()) if (volume !== null) fogSelections.push({ index, volume });
       const patchOrdinals: number[] = [], patches: PatchGrid[] = [];
@@ -506,9 +512,9 @@ export class WorldScene {
   /** Admit world surfaces before preparing polygons and refentities in this view. */
   prepareWorldOperations(input: WorldViewInput, visibility?: VisibleWorld): readonly SceneOperation[] {
     if (input.noWorldModel === true) return [];
-    visibility ??= visibleWorld(this.map, input.camera, input);
     const cached = input.source?.worldOperations.get(this);
     if (cached !== undefined) return cached;
+    visibility ??= this.visibleFor(input);
     const operations: SceneOperation[] = [];
     const context = this.materialContext(input), worldModel = this.map.models[0];
     const worldRange = worldModel === undefined ? { first: 0, count: this.surfaces.length } : "surfaces" in worldModel ? worldModel.surfaces : worldModel.faces;
@@ -519,7 +525,12 @@ export class WorldScene {
       if (surface.kind !== "legacy") throw new Error("Compiled surface lost its shader");
       return surface.q1Sky !== null || surface.material.kind === "q2" && (surface.material.surfaceFlags & 4) !== 0 ? 2 : surface.material.alpha < 1 ? 9 : 3;
     };
-    if (surfaces.some(surface => surface.shader === null)) surfaces.sort((a, b) => order(a) - order(b));
+    if (surfaces.some(surface => surface.shader === null)) {
+      // The walk is front to back; blended legacy surfaces must draw back to front (Q2 R_DrawAlphaSurfaces).
+      const visit = new Map(surfaces.map((surface, index) => [surface, index]));
+      const translucentRank = (surface: WorldSurface): number => visit.get(surface) ?? 0;
+      surfaces.sort((a, b) => order(a) - order(b) || (order(a) === 9 ? translucentRank(b) - translucentRank(a) : 0));
+    }
     const frustum = cameraFrustum(input.camera);
     const lights = input.q3Lights ?? [];
     for (const surface of surfaces) {
@@ -538,9 +549,17 @@ export class WorldScene {
   }
 
 
+  private visibleFor(input: WorldViewInput): VisibleWorld {
+    const known = input.source?.worldVisibility.get(this);
+    if (known !== undefined) return known;
+    const visibility = visibleWorld(this.map, input.camera, input);
+    input.source?.worldVisibility.set(this, visibility);
+    return visibility;
+  }
+
   prepareView(input: WorldViewInput): PreparedWorldView {
     const visibility: VisibleWorld = input.noWorldModel === true ? { leaf: -1, leaves: [], surfaces: [], surfaceDlightMasks: new Map<number, number>() }
-      : visibleWorld(this.map, input.camera, input), operations: SceneOperation[] = [];
+      : this.visibleFor(input), operations: SceneOperation[] = [];
     const surfaces = visibility.surfaces.map(index => at(this.surfaces, index));
     // Legacy sequence groups keep insertion order downstream, so translucent
     // world/brush surfaces must be deferred until opaque model and entity
@@ -564,10 +583,15 @@ export class WorldScene {
       skyDrawn: surfaces.some(surface => (this.remap(surface)?.material ?? surface.shader) !== null
         ? (this.remap(surface)?.material ?? surface.shader)?.finished.iterator.kind === "sky"
         : surface.kind === "legacy" && surface.material.kind === "q2" && (surface.material.surfaceFlags & 4) !== 0) });
+    const sorted = finishSceneOperations(operations);
+    // RB_ShadowFinish runs once after the whole draw list, and only where stencil volumes were drawn.
+    const finished = input.modelShadows === 2 && sorted.some(operation => operation.kind === "shadow-volume")
+      ? [...sorted, { kind: "shadow-finish", whiteImage: this.shaders.textures.white.image, positions: shadowFinishQuad(input.camera) } satisfies RenderOperation] : sorted;
+    const clear = input.clear === undefined ? { color: null, depth: 1, stencil: false } : input.clear;
     return { visibility, imageOperations: this.shaders.textures.images.drainOperations(), view: { target: input.target, time: input.time,
       viewProjection: viewProjectionMatrix(input.camera),
-      viewport: input.camera.viewport, clear: input.clear === undefined ? { color: null, depth: 1, stencil: false } : input.clear,
-      clipPlane: portalClipPlane(input.camera), beforeView: input.beforeView ?? [], operations: mergeDrawOperations(fogSceneOperations(finishSceneOperations(operations), input.noWorldModel === true ? undefined : input.q1Fog)) } };
+      viewport: input.camera.viewport, clear: clear !== null && input.modelShadows === 2 ? { ...clear, stencil: true } : clear,
+      clipPlane: portalClipPlane(input.camera), beforeView: input.beforeView ?? [], operations: mergeDrawOperations(fogSceneOperations(finished, input.noWorldModel === true ? undefined : input.q1Fog)) } };
   }
 
   private surfaceOperations(surface: WorldSurface, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform, lighting?: { readonly mask: number; readonly lights: readonly DynamicLight[] }, order?: SourceSurfaceOrder): readonly SceneOperation[] {
@@ -583,11 +607,13 @@ export class WorldScene {
     if (surface.lightmap !== null) {
       const lightmap = surface.lightmap;
       const sourceLights = material.kind === "q2" && input.q2FragmentLighting !== undefined ? [] : input.lights ?? [];
-      const lights = model === undefined ? sourceLights : sourceLights.map(light => {
+      const localLights = model === undefined ? sourceLights : sourceLights.map(light => {
         const scale = Math.abs(modelScale(model));
         return { ...light, origin: localPoint(light.origin, model), radius: light.radius / scale, minimum: light.minimum / scale,
           color: { x: light.color.x * scale, y: light.color.y * scale, z: light.color.z * scale } };
       });
+      // Only lights that can reach this face force a rebuild; the rest leave its cached static lightmap valid.
+      const lights = lightmap.face.lighting === null ? [] : localLights.filter(light => dynamicLightReachesFace(lightmap.face, light));
       const styles: number[] = [this.options.q2LightModulate ?? 1];
       for (const index of lightmap.face.styles) {
         if (index === 255) break;
@@ -738,7 +764,7 @@ export class WorldScene {
 
   private remap(surface: WorldSurface): SceneMaterialRemap | null { return surface.shader === null ? this.rawRemaps.get(surface.index) ?? null : currentRemap(surface.shader); }
 
-  private releaseImages(): void { this.staticShadowWorld = null; this.staticLightStyles.clear(); this.shadowScene.close(); for (const image of this.owned) this.shaders.textures.images.release(image); this.owned.length = 0; }
+  private releaseImages(): void { this.staticShadowWorld = null; this.staticLightStyles.clear(); this.legacyBatchCache.clear(); this.fragmentBatchCache.clear(); this.shadowScene.close(); for (const image of this.owned) this.shaders.textures.images.release(image); this.owned.length = 0; }
   close(): void { if (this.closed) return; this.closed = true; this.imageGeneration++; this.shaders.registrations.owner.releaseWorld(this); this.releaseImages(); }
 
   /** Replace only renderer data; BSP identity and source light/style owners remain live. */
@@ -818,7 +844,7 @@ export class WorldScene {
     if (input.noWorldModel === true) return [this.prepareView(input)];
     const result: PreparedWorldView[] = [];
     if (input.camera.clip.kind === "none" && portals.length !== 0) {
-      const visible = visibleWorld(this.map, input.camera, input);
+      const visible = this.visibleFor(input);
       for (const index of visible.surfaces) {
         const surface = at(this.surfaces, index);
         const shader = this.remap(surface)?.material ?? surface.shader;

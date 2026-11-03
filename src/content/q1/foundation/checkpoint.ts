@@ -28,7 +28,7 @@ export interface Q1SavedEntity {
   readonly owner: SavedActorId | null;
   readonly activator: SavedActorId | null;
   readonly doorGroup: readonly SavedActorId[];
-  readonly monster: (Omit<Q1Monster, "enemy" | "oldEnemy"> & { readonly enemy: SavedActorId | null; readonly oldEnemy: SavedActorId | null }) | null;
+  readonly monster: (Omit<Q1Monster, "enemy" | "oldEnemy"> & { readonly enemy: SavedActorId | null; readonly oldEnemy: SavedActorId | null; readonly legacyAnimation?: Q1LegacyAnimation }) | null;
   readonly move: { readonly destination: import("../../../contracts/math.ts").Vec3; readonly done: string } | null;
   readonly callbacks: Q1SavedCallbacks;
 }
@@ -38,10 +38,12 @@ export interface Q1SavedPlayer {
   readonly state: Omit<Q1PlayerState, "actor" | "powerups" | "alpha" | "scale"> & { readonly alpha?: number; readonly scale?: number };
   readonly powerups: readonly { readonly kind: Q1Powerup; readonly expires: number }[];
 }
+/** Where a version 5 grunt or dog was in its frame sequence; version 6 saves the animation in the base controller. */
+export interface Q1LegacyAnimation { readonly mode: "stand" | "walk" | "run" | "attack" | "leap" | "pain" | "death"; readonly firstFrame: number; readonly frameIndex: number; }
 export interface Q1FoundationCheckpoint {
   readonly format: "q1-foundation";
   readonly provider: ProviderId;
-  readonly version: 5;
+  readonly version: 5 | 6;
   readonly precaches: Q1PrecacheTables;
   readonly edition: "classic" | "rerelease";
   readonly time: number;
@@ -92,14 +94,14 @@ function saveEntity(game: Q1EntityServices, entity: Q1Actor): Q1SavedEntity {
     state: captureEntitySourceState(entity), fields: [...entity.fields].map(([key, value]) => ({ key, value })),
     references: [...entity.references].map(([key, actor]) => ({ key, actor: saveQ1Actor(actor) })),
     owner: saveQ1Actor(entity.owner), activator: saveQ1Actor(entity.activator), doorGroup: entity.doorGroup.map(door => savedOwned(door.actor)),
-    monster: monster === null ? null : { ...monster, sequence: [...monster.sequence], enemy: saveQ1Actor(monster.enemy), oldEnemy: saveQ1Actor(monster.oldEnemy) },
+    monster: monster === null ? null : { ...monster, enemy: saveQ1Actor(monster.enemy), oldEnemy: saveQ1Actor(monster.oldEnemy) },
     move: move === null || done === null ? null : { destination: { ...move.destination }, done },
     callbacks: { think: callbackName(entity.think), use: callbackName(entity.use), touch: callbackName(entity.touch), pain: callbackName(entity.pain), die: callbackName(entity.die), blocked: callbackName(entity.blocked), pathEnd: callbackName(entity.pathEnd) },
   };
 }
 export function captureFoundation(game: Q1EntityServices, sequence: number, nextDynamicSlot: number): Q1FoundationCheckpoint {
   return {
-    format: "q1-foundation", provider: game.provider, version: 5,
+    format: "q1-foundation", provider: game.provider, version: 6,
     precaches: { phase: game.precaches.phase, models: [...game.precaches.models], sounds: [...game.precaches.sounds] }, edition: game.options.edition, time: game.time, frameSeconds: game.frameSeconds, forceRetouch: game.forceRetouch, basis: { forward: { ...game.basis.forward }, right: { ...game.basis.right }, up: { ...game.basis.up } }, sequence, nextDynamicSlot,
     totalSecrets: game.totalSecrets, foundSecrets: game.foundSecrets, totalMonsters: game.totalMonsters, killedMonsters: game.killedMonsters,
     worldType: game.worldType, mapName: game.mapName, world: game.world === null ? null : savedOwned(game.world.actor),
@@ -116,7 +118,7 @@ export function captureFoundation(game: Q1EntityServices, sequence: number, next
 
 /** Restores source objects around existing authority tables. It never runs a spawn function. */
 export function restoreFoundation(game: Q1EntityServices, checkpoint: Q1FoundationCheckpoint): undefined {
-  if (checkpoint.format !== "q1-foundation" || checkpoint.version !== 5 || checkpoint.edition !== game.options.edition || checkpoint.provider !== game.provider) throw new Error("Incompatible Q1 source checkpoint");
+  if (checkpoint.format !== "q1-foundation" || (checkpoint.version !== 5 && checkpoint.version !== 6) || checkpoint.edition !== game.options.edition || checkpoint.provider !== game.provider) throw new Error("Incompatible Q1 source checkpoint");
   if (game.entities.size !== 0 || game.players.size !== 0) throw new Error("Restore Q1 source state into a fresh provider");
   game.precaches.restore(checkpoint.precaches);
   const owned = (saved: SavedActorId): OwnedActor => {
@@ -139,7 +141,12 @@ export function restoreFoundation(game: Q1EntityServices, checkpoint: Q1Foundati
     for (const entry of saved.references) entity.references.set(entry.key, reference(entry.actor));
     entity.owner = reference(saved.owner); entity.activator = reference(saved.activator);
     entity.doorGroup = saved.doorGroup.map(sourceEntity);
-    entity.monster = saved.monster === null ? null : { ...saved.monster, sequence: [...saved.monster.sequence], enemy: reference(saved.monster.enemy), oldEnemy: reference(saved.monster.oldEnemy) };
+    if (saved.monster === null) entity.monster = null;
+    else {
+      const { legacyAnimation, ...monster } = saved.monster;
+      entity.monster = { ...monster, enemy: reference(monster.enemy), oldEnemy: reference(monster.oldEnemy) };
+      if (legacyAnimation !== undefined) game.legacyAnimations.set(entity.actor, legacyAnimation);
+    }
     entity.move = saved.move === null ? null : { ...saved.move, destination: { ...saved.move.destination }, done: game.named.action(entity, saved.move.done) };
     entity.think = callbacks.think === null ? null : game.named.action(entity, callbacks.think);
     entity.use = callbacks.use === null ? null : game.named.use(entity, callbacks.use);
@@ -169,6 +176,10 @@ export function restoreFoundation(game: Q1EntityServices, checkpoint: Q1Foundati
     if (extension === undefined || restoredExtensions.has(saved.id)) throw new Error(`Unknown or duplicate Q1 saved extension: ${saved.id}`);
     extension.restore(saved.bytes.slice()); restoredExtensions.add(saved.id);
   }
-  for (const id of game.stateExtensions.keys()) if (!restoredExtensions.has(id)) throw new Error(`Missing Q1 saved extension: ${id}`);
+  for (const [id, extension] of game.stateExtensions) {
+    if (restoredExtensions.has(id)) continue;
+    if (extension.restoreAbsent === undefined) throw new Error(`Missing Q1 saved extension: ${id}`);
+    extension.restoreAbsent();
+  }
   return undefined;
 }

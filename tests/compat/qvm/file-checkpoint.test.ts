@@ -4,11 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMountPlan } from "../../../src/content/mounts/index.ts";
 import { QvmFiles } from "../../../src/compat/qvm/file-syscalls.ts";
-import { UserFileStore } from "../../../src/platform/files/writable.ts";
+import { UserFileStore } from "../../../src/core/files/writable.ts";
 import { decodeCheckpointValue, encodeCheckpointValue } from "../../../src/persistence/value.ts";
 
 const bytes = (value: string): Uint8Array => new TextEncoder().encode(value);
 function descriptors(root: string): number {
+  // Descriptor accounting reads Linux procfs; elsewhere both samples are -1 and compare equal.
+  if (!existsSync("/proc/self/fd")) return -1;
   return readdirSync("/proc/self/fd").filter(name => {
     try { return readlinkSync(`/proc/self/fd/${name}`).startsWith(`${root}/`); }
     catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return false; throw error; }
@@ -62,14 +64,14 @@ test("QVM failed restore releases staged descriptors and never creates or change
     writeFileSync(join(f.root, "existing"), "persistent");
     const files = f.create(), before = descriptors(f.root);
     const valid = { slot: 1, kind: "write", file: { path: "existing", mode: "write", position: 99 } };
-    expect(() => files.restoreCheckpoint({ handles: [valid, { ...valid, slot: 2, file: { ...valid.file, path: "missing/child" } }] })).toThrow();
+    expect(() => files.restoreCheckpoint({ handles: [valid, { ...valid, slot: 2, file: { ...valid.file, path: "missing/child" } }] })).toThrow("ENOENT: no such file or directory, open");
     expect(descriptors(f.root)).toBe(before);
     expect(readFileSync(join(f.root, "existing"), "utf8")).toBe("persistent");
     expect(readdirSync(f.root)).toEqual(["existing"]);
     expect(files.captureCheckpoint().handles).toEqual([]);
     expect(() => files.restoreCheckpoint({ handles: [valid, valid] })).toThrow("duplicate");
     expect(() => files.restoreCheckpoint({ handles: [{ ...valid, file: { ...valid.file, path: "../escape" } }] })).toThrow("stay inside its storage directory");
-    expect(() => files.restoreCheckpoint({ handles: [{ ...valid, file: { ...valid.file, position: -1 } }] })).toThrow();
+    expect(() => files.restoreCheckpoint({ handles: [{ ...valid, file: { ...valid.file, position: -1 } }] })).toThrow("qvm-files.handles[0].file.position: expected an integer in range");
     files.restoreCheckpoint({ handles: [valid] });
     files.write(1, bytes("x")); expect(readFileSync(join(f.root, "existing")).length).toBe(100);
   } finally { f.close(); }
@@ -111,21 +113,21 @@ test("QVM append checkpoint resumes in a fresh managed directory without truncat
       expect(readFileSync(join(root, "logs/games.log"), "utf8")).toBe("continued again");
     }
     const missing = join(f.root, "missing-write-root");
-    expect(() => new UserFileStore(missing).resume({ path: "state", mode: "write", position: 0 })).toThrow();
+    expect(() => new UserFileStore(missing).resume({ path: "state", mode: "write", position: 0 })).toThrow("ENOENT: no such file or directory, open");
     expect(existsSync(missing)).toBe(false);
     const outside = join(f.root, "outside"), root = join(f.root, "contained");
     mkdirSync(outside); mkdirSync(root);
     symlinkSync(outside, join(root, "logs"));
-    expect(() => new UserFileStore(root).resume({ path: "logs/games.log", mode: "append", position: 495 })).toThrow();
+    expect(() => new UserFileStore(root).resume({ path: "logs/games.log", mode: "append", position: 495 })).toThrow("ENOTDIR: not a directory, open");
     expect(readdirSync(outside)).toEqual([]);
     symlinkSync(join(outside, "games.log"), join(root, "games.log"));
-    expect(() => new UserFileStore(root).resume({ path: "games.log", mode: "append", position: 495 })).toThrow();
+    expect(() => new UserFileStore(root).resume({ path: "games.log", mode: "append", position: 495 })).toThrow("ELOOP: too many symbolic links encountered, open");
     expect(readdirSync(outside)).toEqual([]);
     const staged = f.create(), before = descriptors(f.root);
     expect(() => staged.restoreCheckpoint({ handles: [
       { slot: 1, kind: "write", file: { path: "staged.log", mode: "append", position: 495 } },
       { slot: 2, kind: "write", file: { path: "absent-state", mode: "write", position: 0 } },
-    ] })).toThrow();
+    ] })).toThrow("ENOENT");
     expect(descriptors(f.root)).toBe(before);
     expect(staged.captureCheckpoint().handles).toEqual([]);
   } finally { f.close(); }

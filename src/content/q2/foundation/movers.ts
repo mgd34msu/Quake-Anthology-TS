@@ -27,7 +27,7 @@ interface DoorState {
   team: Q2Entity[];
   debounce: number;
 }
-interface TrainState { destination: Q2Entity | null; debounce: number; readonly ship: boolean; }
+interface TrainState { destination: Q2Entity | null; debounce: number; wait: number; readonly ship: boolean; }
 export interface Q2TrainRoute {
   readonly running: boolean;
   readonly destination: ActorId | null;
@@ -37,7 +37,7 @@ export interface Q2TrainRoute {
 export interface Q2MoversCheckpoint {
   readonly doors: readonly { readonly actor: SavedActorId; readonly state: Omit<DoorState, "master" | "team">;
     readonly master: SavedActorId; readonly team: readonly SavedActorId[] }[];
-  readonly trains: readonly { readonly actor: SavedActorId; readonly destination: SavedActorId | null; readonly debounce: number; readonly ship: boolean }[];
+  readonly trains: readonly { readonly actor: SavedActorId; readonly destination: SavedActorId | null; readonly debounce: number; readonly wait?: number; readonly ship: boolean }[];
   readonly linear: Q2LinearMotionCheckpoint;
   readonly angular: Q2AngularMotionCheckpoint;
 }
@@ -103,7 +103,7 @@ export class Q2MoverModule implements Q2SpawnModule {
         const { master, team, ...state } = door;
         doors.push({ actor: reference(entity), state: structuredClone(state), master: reference(master), team: team.map(reference) });
       }
-      if (train !== undefined) trains.push({ actor: reference(entity), destination: train.destination === null ? null : reference(train.destination), debounce: train.debounce, ship: train.ship });
+      if (train !== undefined) trains.push({ actor: reference(entity), destination: train.destination === null ? null : reference(train.destination), debounce: train.debounce, wait: train.wait, ship: train.ship });
     }
     return { doors, trains, linear: this.linear.capture(game), angular: this.angular.capture(game) };
   }
@@ -116,7 +116,7 @@ export class Q2MoverModule implements Q2SpawnModule {
       return entity;
     };
     for (const saved of checkpoint.doors) this.doors.set(reference(saved.actor), { ...structuredClone(saved.state), master: reference(saved.master), team: saved.team.map(reference) });
-    for (const saved of checkpoint.trains) this.trains.set(reference(saved.actor), { destination: saved.destination === null ? null : reference(saved.destination), debounce: saved.debounce, ship: saved.ship });
+    for (const saved of checkpoint.trains) this.trains.set(reference(saved.actor), { destination: saved.destination === null ? null : reference(saved.destination), debounce: saved.debounce, wait: saved.wait ?? 0, ship: saved.ship });
     this.linear.restore(game, checkpoint.linear); this.angular.restore(game, checkpoint.angular);
     return undefined;
   }
@@ -164,7 +164,7 @@ export class Q2MoverModule implements Q2SpawnModule {
   private loop(entity: Q2Entity, game: Q2GameServices, path: string, start: boolean): undefined {
     if (path === "") return undefined;
     return game.host.emit({ kind: "sound", actor: entity.actor.id, origin: game.body(entity).origin, path,
-      channel: 2, volume: 1, attenuation: 3, reliable: false, loop: start ? "start" : "stop" });
+      channel: 2, volume: 1, attenuation: game.options.edition === "rerelease" ? 3 : 1, reliable: false, loop: start ? "start" : "stop" });
   }
 
   private doorSound(entity: Q2Entity, game: Q2GameServices, start: boolean): undefined {
@@ -177,7 +177,8 @@ export class Q2MoverModule implements Q2SpawnModule {
     };
     const sound = select(start ? "noise_start" : "noise_end", start ? 0 : 2), middle = select("noise_middle", 1);
     const attenuation = game.options.edition === "rerelease" && !state.water ? numberField(entity.spawn, "attenuation", 3) : 3;
-    if (state.master === entity && sound !== "") {
+    if (state.master !== entity) return undefined;
+    if (sound !== "") {
       let origin = game.body(entity).origin;
       if (game.options.edition === "rerelease" && state.team.length > 1) {
         const center = scale(state.team.reduce((sum, member) => {
@@ -188,7 +189,7 @@ export class Q2MoverModule implements Q2SpawnModule {
       game.host.emit({ kind: "sound", actor: entity.actor.id, origin, path: sound, channel: 2, volume: 1, attenuation: attenuation === -1 ? 0 : attenuation, reliable: false, loop: "once" });
     }
     if (middle !== "") game.host.emit({ kind: "sound", actor: entity.actor.id, origin: game.body(entity).origin, path: middle, channel: 2,
-      volume: 1, attenuation: attenuation === -1 ? 0 : attenuation, reliable: false, loop: start ? "start" : "stop" });
+      volume: 1, attenuation: game.options.edition !== "rerelease" ? 1 : attenuation === -1 ? 0 : attenuation, reliable: false, loop: start ? "start" : "stop" });
     return undefined;
   }
 
@@ -260,7 +261,7 @@ export class Q2MoverModule implements Q2SpawnModule {
       return this.smartWater(entity, game);
     }
     for (const member of state.team) {
-      member.message = ""; member.touch = null;
+      if (!state.button) { member.message = ""; member.touch = null; }
       if (close) this.down(member, game); else this.up(member, game, activator);
     }
     return undefined;
@@ -277,7 +278,7 @@ export class Q2MoverModule implements Q2SpawnModule {
     game.solid(entity, "brush"); game.motion(entity, button ? "stop" : "push");
     entity.speed ||= button ? 40 : water ? 25 : 100;
     if (!button && !angular && !water && game.options.mode === "deathmatch") entity.speed *= 2;
-    entity.accel ||= entity.speed; entity.decel ||= entity.speed; entity.wait ||= water ? -1 : 3; entity.damage ||= 2;
+    entity.accel ||= entity.speed; entity.decel ||= entity.speed; entity.wait ||= water ? -1 : 3; if (!button) entity.damage ||= 2;
     const body = game.body(entity), size = subtract(body.bounds.max, body.bounds.min);
     const direction = { x: Math.abs(entity.movedir.x), y: Math.abs(entity.movedir.y), z: Math.abs(entity.movedir.z) };
     const distance = angular ? numberField(entity.spawn, "distance") || 90 : dot(direction, size) - (numberField(entity.spawn, "lip") || (button ? 4 : water ? 0 : 8));
@@ -308,7 +309,7 @@ export class Q2MoverModule implements Q2SpawnModule {
     } else if (!button && entity.targetname !== "" && entity.message !== "") {
       entity.touch = this.doorTouch;
     }
-    entity.blocked = this.doorBlocked;
+    entity.blocked = button ? null : this.doorBlocked;
     game.show(entity);
     if (!button && !water) game.schedule(entity, game.host.frameSeconds(), this.prepareDoor);
     if (water) {
@@ -417,8 +418,9 @@ export class Q2MoverModule implements Q2SpawnModule {
       try { game.useTargets(target, entity.activator); } finally { target.target = previous; }
       if (!game.host.actors.isLive(entity.actor.id)) return undefined;
     }
-    if (target.wait === 0) return this.trainNext(entity, game);
-    if (target.wait > 0) game.schedule(entity, target.wait, this.trainNext);
+    const wait = this.train(entity).wait;
+    if (wait === 0) return this.trainNext(entity, game);
+    if (wait > 0) game.schedule(entity, wait, this.trainNext);
     else if ((entity.spawnflags & 2) !== 0) {
       if (game.options.edition === "rerelease") this.train(entity).destination = null;
       else this.trainNext(entity, game);
@@ -441,7 +443,7 @@ export class Q2MoverModule implements Q2SpawnModule {
         game.host.emit({ kind: "effect", effect: "q2:other-teleport", origin: game.body(entity).origin, direction: zero, count: 1, color: 0 });
         continue;
       }
-      this.train(entity).destination = target;
+      this.train(entity).destination = target; this.train(entity).wait = target.wait;
       if (game.options.edition === "rerelease" && target.speed !== 0) {
         entity.speed = target.speed; entity.accel = target.accel || target.speed; entity.decel = target.decel || target.speed;
       }
@@ -462,7 +464,7 @@ export class Q2MoverModule implements Q2SpawnModule {
 
   spawnTrain(entity: Q2Entity, game: Q2GameServices): undefined {
     const ship = entity.classname !== "func_train";
-    this.trains.set(entity, { destination: null, debounce: 0, ship });
+    this.trains.set(entity, { destination: null, debounce: 0, wait: 0, ship });
     if (ship) {
       entity.model = entity.classname === "misc_strogg_ship" ? "models/ships/strogg1/tris.md2" : "models/ships/viper/tris.md2";
       entity.visible = false;
@@ -495,7 +497,9 @@ export class Q2MoverModule implements Q2SpawnModule {
 
   private spawnPath(entity: Q2Entity, game: Q2GameServices): undefined {
     if (entity.targetname === "" && entity.classname === "path_corner") { game.remove(entity); return undefined; }
-    game.move(entity, { bounds: { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } } }, false);
+    if (entity.classname === "point_combat" && game.options.mode === "deathmatch") { game.remove(entity); return undefined; }
+    const half = entity.classname === "point_combat" ? 16 : 8;
+    game.move(entity, { bounds: { min: { x: -8, y: -8, z: -half }, max: { x: 8, y: 8, z: half } } }, false);
     entity.visible = false;
     entity.touch = this.pathTouch;
     game.solid(entity, "trigger");
@@ -524,7 +528,7 @@ export class Q2MoverModule implements Q2SpawnModule {
         if (!services.host.isPlayer(contact.other) || services.host.now() < state.debounce) return undefined;
         state.debounce = services.host.now() + 5;
         services.host.emit({ kind: "centerprint", actor: contact.other, text: self.message });
-        return services.sound(self, "misc/talk1.wav", 0);
+        return services.sound(services.entity(contact.other) ?? self, "misc/talk1.wav", 0);
       };
 
   private readonly doorBlocked: NonNullable<Q2Entity["blocked"]> = (self, services, other) => {
@@ -532,6 +536,7 @@ export class Q2MoverModule implements Q2SpawnModule {
       if (body === null) return undefined;
       if (!services.host.isPlayer(other) && !services.host.isMonster(other)) {
         if (services.host.combat.read(other) !== null) services.damage(other, self, self.actor.id, 100000, 1, zero, body.origin, zero, 20);
+        services.host.emit({ kind: "effect", effect: "q2:explosion1", origin: body.origin, direction: zero, count: 1, color: 0 });
         const victim = services.entity(other); if (victim !== null) services.remove(victim);
         return undefined;
       }
@@ -581,7 +586,13 @@ export class Q2MoverModule implements Q2SpawnModule {
 
   private readonly trainBlocked: NonNullable<Q2Entity["blocked"]> = (self, services, other) => {
       const state = this.train(self), body = services.host.bodies.read(other);
-      if (body === null || self.damage === 0 || services.host.now() < state.debounce) return undefined;
+      if (body === null) return undefined;
+      if (!services.host.isPlayer(other) && !services.host.isMonster(other)) {
+        if (services.host.combat.read(other) !== null) services.damage(other, self, self.actor.id, 100000, 1, zero, body.origin, zero, 20);
+        const victim = services.entity(other); if (victim !== null) services.remove(victim);
+        return undefined;
+      }
+      if (self.damage === 0 || services.host.now() < state.debounce) return undefined;
       state.debounce = services.host.now() + 0.5;
       if (services.host.combat.read(other) !== null) services.damage(other, self, self.actor.id, self.damage, 1, zero, body.origin, zero, 20);
       return undefined;

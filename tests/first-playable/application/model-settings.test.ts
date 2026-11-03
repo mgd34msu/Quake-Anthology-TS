@@ -1,4 +1,6 @@
+import { writeCapture } from "../../support/capture.ts";
 import { sceneModelBatches } from "../../../src/render/scene/submissions.ts";
+import { rendererBackends } from "../../support/gl.ts";
 import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -9,10 +11,12 @@ import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.t
 import { SceneModelRenderer } from "../../../src/render/scene/models/renderer.ts";
 import type { ActorId, SeatId } from "../../../src/contracts/identity.ts";
 import { add3, anglesToAxis, scale3 } from "../../../src/core/math.ts";
-import { KeyCode } from "../../../src/input/key-codes.ts";
+import { KeyCode } from "../../../src/core/key-codes.ts";
 import { encodePng } from "../../../src/formats/images/png.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
-for (const backend of ["cpu", "gl"]) test(`local ${backend} model controls retain native assets and select independently for two seats`, async () => {
+for (const backend of rendererBackends) test(`local ${backend} model controls retain native assets and select independently for two seats`, async () => {
   const users = await mkdtemp(join(tmpdir(), "quake-model-settings-"));
   const parsed = parseApplicationCommand(["--game", "q2-rerelease-baseq2", "--map", "base1", "--movement", "q2", "--character", "q2", "--seats", "2",
     "--renderer", backend, "--hidden", "--width", "640", "--height", "480", "--gamma", "1"]);
@@ -56,7 +60,7 @@ for (const backend of ["cpu", "gl"]) test(`local ${backend} model controls retai
     const capture = async (label: string): Promise<void> => {
       textures.clear(); actorTextures.clear(); const pending = application.captureNextFrame(); await application.step(1);
       const pixels = await pending; expect(pixels.length).toBe(640 * 480 * 4);
-      await Bun.write(`/tmp/model-settings-${backend}-${label}.png`, encodePng(640, 480, pixels));
+      await writeCapture(`model-settings-${backend}-${label}.png`, encodePng(640, 480, pixels));
     };
     for (let i = 0; i < 12; i++) await application.step(100);
     await capture("enhanced");
@@ -91,7 +95,7 @@ for (const backend of ["cpu", "gl"]) test(`local ${backend} model controls retai
   } finally { await app?.close(); prepare.mockRestore(); await rm(users, { recursive: true, force: true }); }
 }, 180000);
 
-for (const backend of ["cpu", "gl"]) test(`local ${backend} Q1 model menu accepts source on Enter and discards Escape drafts`, async () => {
+for (const backend of rendererBackends) test(`local ${backend} Q1 model menu accepts source on Enter and discards Escape drafts`, async () => {
   const users = await mkdtemp(join(tmpdir(), "quake-model-menu-"));
   const parsed = parseApplicationCommand(["--game", "q1-rerelease-id1", "--map", "e1m1", "--movement", "q1", "--character", "q1",
     "--renderer", backend, "--hidden", "--width", "640", "--height", "480", "--gamma", "1"]);
@@ -119,7 +123,7 @@ for (const backend of ["cpu", "gl"]) test(`local ${backend} Q1 model menu accept
     const command = async (value: string): Promise<void> => { key(96); text(value); key(13); await application.step(1); key(96); await application.step(1); };
     const capture = async (label: string): Promise<void> => {
       gunImages.clear(); const pending = application.captureNextFrame(); await application.step(1);
-      await Bun.write(`/tmp/model-menu-${backend}-${label}.png`, encodePng(640, 480, await pending));
+      await writeCapture(`model-menu-${backend}-${label}.png`, encodePng(640, 480, await pending));
     };
     const click = async (row: number, x = 300): Promise<void> => {
       application.input({ seat: local.seat.id, kind: "mouse-motion", position: { x, y: 106 + row * 28 }, delta: { x: 0, y: 0 }, timeMilliseconds: performance.now() });
@@ -160,7 +164,7 @@ for (const backend of ["cpu", "gl"]) test(`local ${backend} Q1 model menu accept
 }, 180000);
 
 test("enabling a previously unloaded MD5 pair rejects a malformed skin before changing the live scene", async () => {
-  const users = await mkdtemp(join(tmpdir(), "quake-model-reject-"));
+  const users = await tempDirectory("quake-model-reject-");
   const parsed = parseApplicationCommand(["--game", "q2-rerelease-baseq2", "--map", "base1", "--movement", "q2", "--character", "q2", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
   if (parsed.kind !== "run") throw new Error("Missing application options");
   const skin = join(users, "q2/rerelease/baseq2/models/weapons/v_blast/md5/skin.png");

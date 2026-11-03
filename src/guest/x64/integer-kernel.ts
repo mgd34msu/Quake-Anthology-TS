@@ -202,7 +202,7 @@ export class X64IntegerKernel {
           }
           const registers = this.registers.checkpoint(this.#checkpoint);
           this.#checkpoint = registers;
-          const lowFlags = this.flags.lowWord, highFlags = this.flags.highWord;
+          const lowFlags = this.flags.lowWord, highFlags = this.flags.highWord, deliveries = this.memory.writeDeliveries;
           try {
             const flow = this.execute(step.integer);
             if (flow.kind === 'branch') { next = flow.target; instructions++; break; }
@@ -212,7 +212,7 @@ export class X64IntegerKernel {
             throw error;
           }
           instructions++;
-          if (observed || !afterStore()) break;
+          if (observed && this.memory.writeDeliveries !== deliveries || !afterStore()) break;
           continue;
         }
         switch (op.kind) {

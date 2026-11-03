@@ -9,7 +9,8 @@ import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 const QVM_MAGIC = 0x12721444;
 const HEADER_LENGTH = 32;
 // The source allocation and next-power-of-two loop use positive signed ints.
-const MAX_DATA_LENGTH = 0x40000000;
+/** Retail modules need a few MiB; the source allocates module data from a hunk of 56 to 128 MiB. */
+const MAX_DATA_LENGTH = 0x4000000;
 const MAX_CODE_LENGTH = 0x1fffffff;
 
 // OP_ARG encodes a byte offset; aligned words occupy caller offsets 8 through 252.
@@ -102,7 +103,7 @@ export function parseQvmRestart(bytes: Uint8Array, source = "<qvm>"): QvmDataIma
   const { dataOffset, dataLength, literalLength, bssLength } = readQvmSourceHeader(bytes, source);
   const initializedLength = dataLength + literalLength, totalDataLength = initializedLength + bssLength;
   if (totalDataLength > MAX_DATA_LENGTH) {
-    throw new BinaryError(source, 28, "QVM data exceeds positive signed power-of-two allocation range");
+    throw new BinaryError(source, 28, "QVM data exceeds the supported hunk allocation");
   }
   let allocatedDataLength = 1;
   while (allocatedDataLength < totalDataLength) allocatedDataLength *= 2;
@@ -196,7 +197,7 @@ export function parseQvm(bytes: Uint8Array, source = "<qvm>"): QvmImage {
   const initializedLength = dataLength + literalLength;
   const totalDataLength = initializedLength + bssLength;
   if (totalDataLength > MAX_DATA_LENGTH) {
-    throw new BinaryError(source, 28, "QVM data exceeds positive signed power-of-two allocation range");
+    throw new BinaryError(source, 28, "QVM data exceeds the supported hunk allocation");
   }
   checkSection(reader, codeOffset, codeLength, 8);
   checkSection(reader, dataOffset, initializedLength, 16);

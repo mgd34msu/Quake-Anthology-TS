@@ -69,7 +69,6 @@ export class Q1Horde {
     game.named.register("mg1:horde:found", { action: (_game, entity) => {
       const controller = ordinaryAddonMonster(context, entity);
       if (controller !== undefined) return controller.enemy === null ? controller.play(controller.spec.stand) : controller.found(controller.enemy);
-      if (entity.monster?.species === "army" || entity.monster?.species === "dog") return game.named.action(entity, "monster_found_target")();
       throw new Error("Horde monster lost its source controller");
     } });
     game.named.register("mg1:horde:die", { die: (_game, entity, attacker) => {
@@ -83,6 +82,7 @@ export class Q1Horde {
       // The base controller owns the kill counter. Horde zombies are excluded by its source hook.
       game.named.die(entity, entity.text("horde.sourceDie"))(attacker);
       if (game.live(entity) && entity.movement === "bounce" && entity.model.startsWith("progs/h_")) this.schedule(entity, "head_fade", 1);
+      else if (game.live(entity)) context.setNumber(entity, "horde.fadeAt", Math.fround(game.time + 1 + 10 + game.host.random() * 5));
       return entity.classname === "monster_zombie" ? undefined : this.remoteWavecheck();
     } });
     game.registerSpawn("horde_manager", (_game, entity) => {
@@ -101,11 +101,26 @@ export class Q1Horde {
         if (spree > 1) { const score = Math.ceil(spree * spree / 2); game.message(player.actor.id, "$qc_horde_streak_ended", false, [score]); services.addScore(player.actor.id, score); }
         context.setPlayerNumber(player.actor.id, "killspree", 0);
       }
+      this.fadeCorpses();
       return undefined;
     } });
     registerHordeLoot(this);
   }
   get game() { return this.context.game; }
+  private lastCorpseScan = -1;
+  /** MonsterFade and MonsterFade2: a settled corpse waits 10 to 15 seconds, then loses a unit of alpha per second and is removed. */
+  private fadeCorpses(): undefined {
+    const { game, context } = this;
+    if (game.time < this.lastCorpseScan + 0.1 && game.time >= this.lastCorpseScan || context.services.cvar("horde") === 0) return undefined;
+    this.lastCorpseScan = game.time;
+    for (const entity of [...game.entities.values()]) {
+      const fadeAt = entity.number("horde.fadeAt");
+      if (fadeAt <= 0 || game.time < fadeAt) continue;
+      const alpha = Math.fround(1 - (game.time - fadeAt));
+      if (alpha <= 0) game.remove(entity); else context.alpha(entity, alpha);
+    }
+    return undefined;
+  }
   get manager(): Q1Actor | null { return [...this.game.entities.values()].find(entity => entity.classname === "horde_manager") ?? null; }
   schedule(entity: Q1Actor, name: string, delay: number): undefined { return this.game.schedule(entity, delay, this.game.named.action(entity, "mg1:horde:" + name)); }
   livingPlayers(): readonly ActorId[] { return this.game.host.players().filter(player => this.game.health(player) > 0); }
@@ -140,7 +155,7 @@ export class Q1Horde {
     const classname = kind === "grunt" ? "monster_army" : kind === "hellknight" ? "monster_hell_knight" : kind === "demon" ? "monster_demon1" : `monster_${kind}`;
     const entity = this.game.create(classname); this.game.setBody(entity, { origin, angles }); this.game.spawnEntity(entity);
     const controller = ordinaryAddonMonster(this.context, entity), monster = entity.monster;
-    if (controller === undefined && monster?.species !== "army" && monster?.species !== "dog") throw new Error(`Horde has no native monster controller for ${kind}`);
+    if (controller === undefined) throw new Error(`Horde has no native monster controller for ${kind}`);
     this.game.cancel(entity);
     if (controller !== undefined) {
       entity.model = `progs/${controller.spec.model}.mdl`; entity.solid = "slidebox"; entity.movement = "step"; entity.aimedDamage = true;

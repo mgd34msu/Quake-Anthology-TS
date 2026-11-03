@@ -20,7 +20,6 @@ export type Md4Lod = Md4Model["lods"][number];
 
 export interface DecodedMd4Model extends Md4Model {
   readonly source: string;
-  readonly bytes: Uint8Array;
   readonly boneNames: readonly string[] | null;
 }
 
@@ -179,7 +178,7 @@ export function parseMd4(bytes: Uint8Array, source = "<md4>"): DecodedMd4Model {
     reader.seek(ofsBoneNames);
     boneNames = Array.from({ length: numBones }, () => cString(reader));
   }
-  return { kind: "q3-md4", source, bytes: bytes.slice(0, ofsEnd), boneNames, version, name, numBones, byteLength: ofsEnd, frames, lods };
+  return { kind: "q3-md4", source, boneNames, version, name, numBones, byteLength: ofsEnd, frames, lods };
 }
 
 /** RB_SurfaceAnim uses global bone indices, including when boneReferences is sparse. */

@@ -32,6 +32,9 @@ export class SoundBank {
         let pcm: SoundAsset["pcm"];
         try { pcm = opened.bytes[0] === 82 ? (family === "q3" ? decodeQ3Wav : decodeQuakeWav)(opened.bytes, path) : decodeSoundBytes(opened.bytes, path); }
         catch { return null; }
+        // Source S_LoadSound rejects non-mono effects and skips them like a missing file.
+        if (pcm.channels !== 1)
+            return null;
         const asset = { resource: opened.reference.id, reference: opened.reference, name: path, pcm };
         assets.set(opened.reference.id, asset);
         this.touched.add(asset);

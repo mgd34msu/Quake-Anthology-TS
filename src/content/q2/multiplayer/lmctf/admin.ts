@@ -7,7 +7,7 @@ export function lmctfAdminCommand(context: LmctfContext, match: LmctfMatch, enti
   const state = lmctfPlayer(context, entity.actor.id);
   const print = (text: string) => lmctfPrint(game, text, entity.actor.id);
   if (name === "pausematch" || name === "unpausematch" || name === "pause_match") {
-    if (name !== "pause_match" || (state.extraFlags & 2) !== 0) match.togglePause(game);
+    if ((state.extraFlags & 2) !== 0) match.togglePause(game); else print("You are not a Referee\n");
     return true;
   }
   if (name === "referee") {

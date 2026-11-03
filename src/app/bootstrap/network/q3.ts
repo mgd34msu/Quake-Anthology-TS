@@ -3,10 +3,11 @@ import { q3ConfigstringCommands } from "../../../network/q3/configstrings.ts";
 import type { Q3GuestOutput } from '../simulation/q3/guest-runtime.ts';
 import type { ClientId } from '../../../contracts/identity.ts';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
+import { sameAddress } from '../../../network/common/endpoint.ts';
 import type { NetworkAddress } from '../../../network/common/endpoint.ts';
 import type { DatagramTransport } from '../../../network/common/transport.ts';
 import { tokenizeCommand } from '../../../core/commands/text.ts';
-import { Q3ServerAdmission, routeQ3SequencedPacket, q3IsLanAddress } from '../../../network/q3/admission.ts';
+import { Q3ServerAdmission, routeQ3SequencedPacket, q3IsLanAddress, q3PeerUserinfo } from '../../../network/q3/admission.ts';
 import type { Q3Address, Q3AdmissionSlot, Q3AcceptedConnect } from '../../../network/q3/admission.ts';
 import { checkQ3DownloadName } from '../../../network/q3/pure.ts';
 import { nativeAtoi } from '../../../core/numeric.ts';
@@ -17,7 +18,8 @@ import type { EntityStateFields } from '../../../network/q3/state/entity.ts';
 import { EntityStateRecord } from '../../../network/q3/state/entity.ts';
 import { q3ChannelDelivery } from '../../../network/q3/transport.ts';
 import { decodeConnectionless, encodeConnectionlessText } from '../../../network/q3/connectionless.ts';
-import { RconService, q3RconCommand } from '../../../network/services/admin.ts';
+import { DiagnosticBudget, printablePeerText } from '../../../network/common/diagnostics.ts';
+import { ConnectionlessGate, RconService, q3RconCommand } from '../../../network/services/admin.ts';
 import { MasterHeartbeat } from '../../../network/services/discovery.ts';
 import { q3DiscoveryWire } from '../../../network/q3/discovery.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase } from './types.ts';
@@ -30,6 +32,8 @@ export class Q3ServerNetwork implements ApplicationNetwork {
   readonly role = 'server';
   readonly wire = { kind: 'source', protocol: { kind: 'q3', version: 68 } } satisfies ApplicationNetwork['wire'];
   private ended = false;
+  private readonly gate = new ConnectionlessGate();
+  private readonly diagnostics = new DiagnosticBudget();
   private activeOperation: Promise<unknown> | null = null;
   private closing: Promise<void> | null = null;
   private now = 0;
@@ -78,8 +82,9 @@ export class Q3ServerNetwork implements ApplicationNetwork {
   get clients(): readonly Q3ApplicationPlayer[] { return [...this.peers.values()].map(peer => peer.player); }
   private requireSupported(host: Q3ApplicationServerHost): void { const support = host.supportsSourceWire(); if (support.kind === 'unsupported') throw new Error(support.reasons.join('; ')); }
   private slots(): readonly Q3AdmissionSlot[] {
+    const occupied = new Set(this.host.occupiedSlots());
     return Array.from({ length: this.host.maxClients }, (_, slot) => { const peer = this.peers.get(slot); return peer === undefined
-      ? { slot, phase: this.host.occupiedSlots().includes(slot) ? 'active' : 'free', address: null, bot: false, qport: 0, lastConnectTime: 0 }
+      ? { slot, phase: occupied.has(slot) ? 'active' : 'free', address: null, bot: false, qport: 0, lastConnectTime: 0 }
       : { slot, phase: peer.connection.phase, address: peer.remote, bot: false, qport: peer.connection.channel.qport, lastConnectTime: peer.connectedAt }; });
   }
   private delivery(peer: Peer) { return q3ChannelDelivery(this.options.transport, () => peer.remote, peer.connection.sourceState, text => this.host.print(text)); }
@@ -94,6 +99,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
   private async admit(request: Q3AcceptedConnect): Promise<string | null> {
     const host = this.host, serverId = this.serverId;
     const previous = this.peers.get(request.slot); if (previous !== undefined) await this.disconnectClient(previous.player.client, 'reconnected');
+    if ([...this.peers.values()].filter(peer => peer.slot !== request.slot && sameAddress(peer.remote, request.address, false)).length >= 8) return 'Too many connections from this address';
     this.assertWorld(host, serverId);
     const admitted = await q3GameCallback(() => host.admit(request));
     if (this.ended || this.host !== host || this.serverId !== serverId) {
@@ -117,7 +123,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
         if (name === 'nextdl') { await download.acknowledge(nativeAtoi(argv[1] ?? ''), this.host.time()); return connection.phase !== 'zombie'; }
         if (name === 'stopdl') { download.close(); return true; }
         if (name === 'donedl') { if (connection.phase !== 'active') this.gamestate(peer); return true; }
-        if (name === 'userinfo') { peer.userinfo = argv[1] ?? ''; await q3GameCallback(() => host.userinfo(peer.player, peer.userinfo)); }
+        if (name === 'userinfo') { peer.userinfo = q3PeerUserinfo((argv[1] ?? '').slice(0, 1023), peer.remote, text => this.host.print(text)); await q3GameCallback(() => host.userinfo(peer.player, peer.userinfo)); }
         else if (clientOK) await q3GameCallback(() => host.command(peer.player, name, argv.slice(1)));
         this.assertWorld(host, serverId);
         return this.peers.get(peer.slot) === peer && peer.connection.phase !== 'zombie';
@@ -156,9 +162,11 @@ export class Q3ServerNetwork implements ApplicationNetwork {
       if (event.kind === 'error') { this.host.print(event.error.message); continue; }
       if (event.kind !== 'packet' || (event.from.kind !== 'ipv4' && event.from.kind !== 'loopback' && event.from.kind !== 'ipx')) continue;
       if (this.host.administration?.rejects(event.from)) continue;
+      let owner: Peer | undefined;
       try {
         const bytes = event.payload;
         if (bytes[0] === 255 && bytes[1] === 255 && bytes[2] === 255 && bytes[3] === 255) {
+          if (!this.gate.allow(event.from, this.now)) continue;
           const packet = decodeConnectionless(bytes, 'server');
           if (packet.command === 'rcon') {
             const result = await this.rcon.handle(event.from, packet.arguments[0] ?? '', q3RconCommand(packet.line), this.now);
@@ -167,9 +175,16 @@ export class Q3ServerNetwork implements ApplicationNetwork {
         }
         else {
           const slot = routeQ3SequencedPacket(event.from, bytes, this.slots()), peer = slot === null ? undefined : this.peers.get(slot.slot);
-          if (peer !== undefined) { peer.remote = event.from; const result = await peer.connection.receiveDatagram(bytes); if (this.peers.get(peer.slot) !== peer) continue; this.assertPeer(peer, host, serverId); if (result.kind === 'accepted') { peer.lastReceived = this.now; if (peer.connection.phase === 'connected') this.gamestate(peer); } }
+          owner = peer;
+          if (peer !== undefined) { const result = await peer.connection.receiveDatagram(bytes); if (this.peers.get(peer.slot) !== peer) continue; this.assertPeer(peer, host, serverId); if (result.kind === 'accepted') { peer.remote = event.from; peer.lastReceived = this.now; if (peer.connection.phase === 'connected') this.gamestate(peer); } }
         }
-      } catch (error) { if (error instanceof Q3GameCallbackError) throw error; if (this.ended) break; this.host.print(error instanceof Error ? error.message : String(error)); }
+      } catch (error) {
+        if (this.ended) break;
+        const reason = error instanceof Error ? error.message : String(error); if (this.diagnostics.allow()) this.host.print(printablePeerText(reason));
+        // A game fault raised by one peer's packet costs that peer its connection. If the game itself is broken,
+        // the disconnect callback fails too and the application's frame boundary takes over.
+        if (error instanceof Q3GameCallbackError && owner !== undefined) await this.disconnectClient(owner.player.client, 'Server game error');
+      }
     }
     if (this.ended) { this.pending = []; return []; }
     const commands = this.pending; this.pending = []; return commands;

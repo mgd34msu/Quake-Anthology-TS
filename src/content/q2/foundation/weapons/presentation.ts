@@ -20,9 +20,9 @@ export function q2WeaponRecoil(state: Pick<Q2WeaponState, "kickOrigin" | "kickAn
 }
 export function q2AttackFrames(ducked: boolean, offset = 1) { return { first: (ducked ? 160 : 46) - offset, last: ducked ? 168 : 53 }; }
 export function q2ReverseFrames(ducked: boolean) { return { first: ducked ? 173 : 66, last: ducked ? 169 : 62 }; }
-export function q2WeaponAnimationRate(input: { readonly quickSwitch: boolean; readonly frameSeconds: number; readonly phase: Q2GenericFrameState["phase"]; readonly frame: number; readonly quadFireUntil: number; readonly haste: boolean; readonly now: number }): number {
+export function q2WeaponAnimationRate(input: { readonly quickSwitch: boolean; readonly frameSeconds: number; readonly phase: Q2GenericFrameState["phase"]; readonly frame: number; readonly quadFireUntil: number; readonly haste: boolean; readonly now: number; readonly noHaste?: boolean }): number {
   let rate = input.quickSwitch && input.frameSeconds <= 0.05 && (input.phase === "activating" || input.phase === "dropping") ? 20 : 10;
-  if (input.frame !== 0) { if (input.quadFireUntil > input.now) rate *= 2; if (input.haste) rate *= 2; }
+  if (input.frame !== 0 && input.noHaste !== true) { if (input.quadFireUntil > input.now) rate *= 2; if (input.haste) rate *= 2; }
   return rate;
 }
 export function q2PowerupSound(input: { readonly quadUntil: number; readonly doubleUntil: number; readonly rerelease: boolean; readonly now: number }): string | null {

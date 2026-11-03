@@ -1,5 +1,6 @@
 import { samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
 // Quake screen.c center-string reveal and sbar.c finale overlay. GPL-2.0-or-later.
+import { cacheEvictingRejection } from "./cached-promise.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { ImagePicture, Draw2D } from "../../text/draw2d.ts";
 import type { SeatTextPresentation } from "../../text/layout.ts";
@@ -47,13 +48,20 @@ export class SourceFinale {
         provider.palette, { kind: "index", index: 255 }), { wrap: "clamp", filter: "nearest" }, { kind: "resource", resource: picture.reference });
       return { banner: { kind: "image", name: "gfx/finale.lmp", image }, width: decoded.width, height: decoded.height };
     })();
-    this.loaded.set(content, pending); return pending;
+    return cacheEvictingRejection(this.loaded, content, pending);
   }
 
   async prepare(): Promise<void> {
     const state = this.state, revision = this.revision;
     if (state === null) return;
-    const prepared = await this.load(state.content);
+    let prepared: FinaleAssets;
+    // The banner is decoration: without its picture the finale text is not shown, but the game continues.
+    try { prepared = await this.load(state.content); }
+    catch (error) {
+      this.assets.warnOnce(`finale:${state.content}`, `Finale unavailable: ${error instanceof Error ? error.message : String(error)}\n`);
+      if (this.state === state) this.state = null;
+      return;
+    }
     const message = await this.messages.resolve(state.content, state.sourceText, []);
     if (this.state !== state || this.revision !== revision) return;
     this.prepared = prepared; this.message = message;

@@ -24,7 +24,7 @@ test("authored starts preserve order and native launch metadata, reject unsafe B
   expect(starts.episode?.command).toBe("newgame_mod");
   expect(starts.starts.map(start => start.path)).toEqual(["maps/zfirst.bsp", "maps/asecond.bsp"]);
   expect(starts.starts[0]).toMatchObject({ bsp: "intro.cin+*zfirst", startItems: "weapon_shotgun;ammo_shells 20", title: "First" });
-  expect(() => parseAuthoredStarts(encode({ maps: [{ episode: "mod", sp: true, bsp: "../escape" }] }), "mod")).toThrow();
+  expect(() => parseAuthoredStarts(encode({ maps: [{ episode: "mod", sp: true, bsp: "../escape" }] }), "mod")).toThrow("Invalid relative resource path: maps/../escape.bsp");
   expect(() => parseAuthoredStarts(encode({ maps: [{ episode: "mod", sp: "true", bsp: "first" }] }), "mod")).toThrow("flag");
 });
 

@@ -9,9 +9,12 @@ function rogueRank(weapon: Q1Weapon): number {
   const order: readonly Q1Weapon[] = ["rogue:plasma", "lightning", "rogue:multi-rocket", "rocketlauncher", "rogue:lava-supernailgun", "supernailgun", "rogue:multi-grenade", "grenadelauncher", "rogue:lava-nailgun", "supershotgun", "nailgun"];
   const rank = order.indexOf(weapon); return rank < 0 ? 12 : rank + 1;
 }
+function stays(runtime: Q1EntityServices): boolean {
+  return runtime.options.coop || runtime.options.deathmatch === 2 || runtime.options.edition === "rerelease" && [3, 5].includes(runtime.options.deathmatch);
+}
 export function registerMissionPackPickupRules(game: Q1EntityServices, pack: Q1MissionPack, players: MissionPackPlayers): undefined {
   return game.registerPickupRules({ id: `q1:${pack}:pickups`,
-    weaponLeave: runtime => runtime.options.coop || runtime.options.deathmatch === 2 || runtime.options.edition === "rerelease" && [3, 5].includes(runtime.options.deathmatch),
+    weaponLeave: stays,
     weaponRank: pack === "hipnotic" ? hipnoticWeaponRank : rogueRank,
     autoSwitch: (runtime, player, wasOwned) => {
       if (pack === "rogue" && player.weapon === "rogue:grapple" && player.attackHeld) return false;
@@ -20,6 +23,12 @@ export function registerMissionPackPickupRules(game: Q1EntityServices, pack: Q1M
     weaponGranted: (runtime, player, weapon) => {
       if (pack !== "rogue") return weapon;
       players.enableCombos(player); const inventory = runtime.host.inventory;
+      // items.qc weapon_touch: a weapon that stays also hands out the powered-weapon rounds.
+      if (stays(runtime)) {
+        if (weapon === "lightning") inventory.give(player.actor, "rogue:ammo/plasma", 5);
+        else if (weapon === "rocketlauncher" || weapon === "grenadelauncher") inventory.give(player.actor, "rogue:ammo/multi-rockets", 3);
+        else if (weapon === "nailgun" || weapon === "supernailgun") inventory.give(player.actor, "rogue:ammo/lava-nails", 20);
+      }
       switch (weapon) {
         case "lightning": return inventory.count(player.actor.id, "rogue:ammo/plasma") > 0 ? "rogue:plasma" : weapon;
         case "rocketlauncher": return inventory.count(player.actor.id, "rogue:ammo/multi-rockets") > 0 ? "rogue:multi-rocket" : weapon;

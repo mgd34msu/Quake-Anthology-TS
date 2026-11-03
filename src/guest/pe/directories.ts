@@ -179,7 +179,9 @@ export function readLoadConfiguration(image: ImageReader): PeLoadConfiguration |
   const table = directory(reader.pe, 10);
   if (table.rva === 0) return null;
   const size = reader.u32(table.rva);
-  if (size < 4 || size > table.byteLength) throw new PeError("load-config", "invalid load configuration size");
+  // Linkers targeting old Windows record a directory size of 64 while the structure's own Size is larger; the structure only has to fit the image.
+  if (size < 4) throw new PeError("load-config", "invalid load configuration size");
+  reader.range(table.rva, size);
   const width = reader.pe.abi.pointerBytes;
   function addressField(offset: number): GuestAddress | null {
     if (offset + width > size) return null;

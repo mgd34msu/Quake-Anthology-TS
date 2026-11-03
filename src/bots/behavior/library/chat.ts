@@ -4,16 +4,16 @@ import { SaveReader } from "../../../persistence/value.ts";
  * game/be_ai_chat.h. Copyright (C) 1999-2005 Id Software, Inc.
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
-import type { ScriptDiagnostic, SourceLocation } from "../../../ui/common/legacy/script/lexer.ts";
-import { ScriptSourceReader } from "../../../ui/common/legacy/script/preprocessor.ts";
+import type { ScriptDiagnostic, SourceLocation } from "../../../content/legacy-script/lexer.ts";
+import { ScriptSourceReader } from "../../../content/legacy-script/preprocessor.ts";
 import { finishCalls } from "./call-steps.ts";
 import type { CallSteps } from "./call-steps.ts";
 import type { BotActionHost } from "./actions.ts";
 import type { BotScriptReader } from "./script-sources.ts";
-import type { BotRandom } from "./weights.ts";
+import { sourceUnitRandom, type BotRandom } from "./weights.ts";
 import type { BotLog } from "./log.ts";
 import { BotMemory, type BotMemoryAllocation } from "./memory.ts";
-import { CHAT_ESCAPE, CHAT_MESSAGE_SIZE, ChatDataMemory, ChatDataParser, ChatInitial, InitialChatNotFoundError, chatTextEquals, type ChatMessage, type ChatTextSource, type InitialChat, type ChatMatchPiece, ChatMatchTemplate, ChatReply, type ChatReplyKey, type MatchTemplate, type RandomChatList, type ReplyChat, type SynonymGroup } from "./chat-data.ts";
+import { CHAT_ESCAPE, CHAT_MESSAGE_SIZE, ChatDataMemory, ChatDataParser, ChatInitial, InitialChatNotFoundError, chatTextEquals, type ChatMessage, type ChatTextSource, type InitialChat, type ChatMatchPiece, ChatMatchTemplate, ChatReply, type ChatReplyKey, type SynonymGroup } from "./chat-data.ts";
 import type { StoredRandomChatList } from "./chat-data.ts";
 export type { ChatTextSource } from "./chat-data.ts";
 
@@ -48,12 +48,6 @@ export interface BotChatOptions {
   readonly developer?: () => boolean;
 }
 export interface ChatConfigurationCounts { readonly synonyms: number; readonly randomLists: number; readonly matches: number; readonly replies: number }
-export interface ChatConfiguration {
-  readonly synonyms: readonly SynonymGroup[];
-  readonly randomLists: readonly RandomChatList[];
-  readonly matches: readonly MatchTemplate[];
-  readonly replies: readonly ReplyChat[];
-}
 
 export interface ChatMatchVariable { offset: number; length: number }
 export type ChatMatchVariables = [ChatMatchVariable, ChatMatchVariable, ChatMatchVariable, ChatMatchVariable, ChatMatchVariable, ChatMatchVariable, ChatMatchVariable, ChatMatchVariable];
@@ -257,6 +251,7 @@ function writeMessage(bytes: Uint8Array, text: string, offset = 0): void {
   for (let index = 0; index < text.length; index++) bytes[offset + index] = text.charCodeAt(index);
   bytes[offset + text.length] = 0;
 }
+const MAXIMUM_CHAT_ISSUES = 256;
 function chatSpan(bytes: Uint8Array | null, offset: number, count: number): Uint8Array {
   if (bytes === null) throw new RangeError("bot chat buffer requires a nonnull pointer");
   if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(count) || offset < 0 || count < 0 || offset + count > bytes.length) {
@@ -292,11 +287,6 @@ function capture(match: RawMatch, index: number): RawCapture { const value = mat
 function publicCapture(value: RawCapture): ChatCapture { return value.offset < 0 ? { kind: "absent" } : { kind: "present", offset: value.offset, length: value.length }; }
 function publicCaptures(values: RawCaptures): ChatCaptures { return [publicCapture(values[0]), publicCapture(values[1]), publicCapture(values[2]), publicCapture(values[3]), publicCapture(values[4]), publicCapture(values[5]), publicCapture(values[6]), publicCapture(values[7])]; }
 function copyMatch(match: RawMatch): RawMatch { const variables = rawCaptures(); for (let index = 0; index < 8; index++) Object.assign(capture({ text: "", variables }, index), capture(match, index)); return { text: match.text, variables }; }
-function sourceRandom(random: BotRandom): number {
-  const value = random.nextInt();
-  if (!Number.isInteger(value) || value < -0x80000000 || value > 0xffffffff) throw new RangeError("bot random result must be an int32 or uint32");
-  return Math.fround((value & 0x7fff) / 32767);
-}
 
 export function stringContains(text: ChatTextSource | null, part: ChatTextSource | null, caseSensitive = false): number {
   if (text === null || part === null) return -1;
@@ -400,7 +390,8 @@ function stringsMatch(pieces: ChatMatchPiece | null, match: RawMatch): boolean {
   }
   if (lastVariable < 0) return pointer === match.text.length;
   const variable = capture(match, lastVariable);
-  if (variable.offset < 0) throw new RangeError("source signed-char match offset overflow");
+  // A negative signed-char offset reads as an absent variable (BotMatchVariable, publicCapture); peers control this text.
+  if (variable.offset < 0) return true;
   variable.length = match.text.length - variable.offset;
   return true;
 }
@@ -510,12 +501,6 @@ export class BotChatLibrary {
     for (let reply = this.replies; reply !== null; reply = reply.next) replies++;
     return { synonyms: this.synonyms.length, randomLists: this.randoms.length, matches, replies };
   }
-  dumpConfiguration(): ChatConfiguration {
-    const matches: MatchTemplate[] = [], replies: ReplyChat[] = [];
-    for (let match = this.matches; match !== null; match = match.next) matches.push(match.snapshot());
-    for (let reply = this.replies; reply !== null; reply = reply.next) replies.push(reply.snapshot());
-    return structuredClone({ synonyms: this.synonyms, randomLists: this.randoms.map(list => ({ name: list.name, messages: list.messages })), matches, replies });
-  }
   dumpInitialChat(handle: number): InitialChat | null { return this.state(handle)?.chat?.snapshot() ?? null; }
   dumpSynonymList(): void {
     const file = this.options.log?.filePointer();
@@ -584,13 +569,6 @@ export class BotChatLibrary {
     }
     this.options.log?.write("}");
   }
-  printReplyChatKeys(index: number): void {
-    if (!Number.isInteger(index) || index < 0) throw new RangeError("reply chat index must be nonnegative");
-    let reply = this.replies;
-    for (let current = 0; current < index && reply !== null; current++) reply = reply.next;
-    if (reply === null) throw new RangeError("reply chat index is outside the stored reply list");
-    this.writeReplyChatKeys(reply, text => this.report("info", "print-fragment", text));
-  }
   private writeReplyChatKeys(reply: ChatReply, write: (text: string) => void): void {
     write("[");
     for (let key = reply.keys; key !== null; key = key.next) {
@@ -619,6 +597,8 @@ export class BotChatLibrary {
   }
   private report(severity: ChatDiagnostic["severity"], code: ChatDiagnostic["code"], message: string, source = "", location: SourceLocation | null = null): void {
     const issue: ChatDiagnostic = { severity, code, source, message, location };
+    // Diagnostics are a ring: runtime reports would otherwise grow, and be saved, for the whole map.
+    if (this.issues.length >= MAXIMUM_CHAT_ISSUES) this.issues.shift();
     this.issues.push(issue); this.host.report?.(issue);
   }
   private time(): number { const time = Math.fround(this.host.time()); if (!Number.isFinite(time)) throw new RangeError("chat time must be finite float32"); return time; }
@@ -989,7 +969,8 @@ export class BotChatLibrary {
     return { text: chatCString(buffer.string), type: buffer.type, subtype: buffer.subtype, variables: publicCaptures(buffer.variables) };
   }
   findMatchInto(input: ChatTextSource, context: number, buffer: ChatMatchBuffer): boolean {
-    copyChatText(buffer.string, 0, boundedChatText(input, CHAT_MESSAGE_SIZE), CHAT_MESSAGE_SIZE, buffer.writes);
+    // The source copy leaves a 256-byte input unterminated and reads on past it; the port keeps the terminator in the last byte.
+    copyChatText(buffer.string, 0, boundedChatText(input, CHAT_MESSAGE_SIZE - 1), CHAT_MESSAGE_SIZE, buffer.writes);
     let length = chatCString(buffer.string).length;
     while (length > 0 && chatByte(buffer.string, length - 1) === 10) {
       const destination = chatSpan(buffer.string, --length, 1);
@@ -1053,7 +1034,7 @@ export class BotChatLibrary {
     let text = byteCString(input);
     for (const group of this.synonyms) {
       if ((group.context & context) === 0) continue;
-      const weight = Math.fround(sourceRandom(this.host.random) * group.totalWeight);
+      const weight = Math.fround(sourceUnitRandom(this.host.random) * group.totalWeight);
       if (weight === 0) continue;
       let current = 0;
       const replacement = group.entries.find(entry => { current = Math.fround(current + entry.weight); return weight < current; });
@@ -1084,7 +1065,7 @@ export class BotChatLibrary {
   }
   randomString(name: string): string | null {
     for (const list of this.randoms) if (list.name === name) {
-      const index = Math.trunc(Math.fround(sourceRandom(this.host.random) * list.numMessages));
+      const index = Math.trunc(Math.fround(sourceUnitRandom(this.host.random) * list.numMessages));
       const message = list.message(index);
       if (message !== undefined) return message;
     }
@@ -1234,7 +1215,7 @@ export class BotChatLibrary {
       let bestTime = 0;
       for (const message of type.messages()) if (bestTime === 0 || message.time < bestTime) { selected = message; bestTime = message.time; }
     } else {
-      let index = Math.trunc(Math.fround(sourceRandom(this.host.random) * eligible));
+      let index = Math.trunc(Math.fround(sourceUnitRandom(this.host.random) * eligible));
       for (const message of type.messages()) {
         if (message.time > this.time()) continue;
         if (--index < 0) { selected = message; selected.time = Math.fround(this.time() + 20); break; }
@@ -1278,7 +1259,7 @@ export class BotChatLibrary {
       if (!found || reply.priority <= priority) continue;
       let eligible = 0;
       for (const line of reply.messages()) if (line.time <= this.time()) eligible++;
-      let selected = Math.trunc(Math.fround(sourceRandom(this.host.random) * eligible));
+      let selected = Math.trunc(Math.fround(sourceUnitRandom(this.host.random) * eligible));
       for (const line of reply.messages()) {
         if (--selected < 0) { best = { message: line, reply, match: copyMatch(match) }; priority = Math.trunc(reply.priority); break; }
         if (line.time > this.time()) continue;

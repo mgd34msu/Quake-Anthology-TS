@@ -1,4 +1,4 @@
-// QuakeWorld clear-time pacing and ordered network work. GPL-2.0-or-later.
+// QuakeWorld clear-time pacing. GPL-2.0-or-later.
 export class PacketRate {
   private clearTime = 0;
   constructor(public bytesPerSecond: number, readonly backupBytes = 200) {
@@ -12,30 +12,4 @@ export class PacketRate {
   }
   get nextSendMilliseconds(): number { return this.clearTime; }
   reset(): void { this.clearTime = 0; }
-}
-
-interface ScheduledPacket<T> { readonly sequence: number; readonly due: number; readonly value: T; }
-export class PacketScheduler<T> {
-  private readonly pending: ScheduledPacket<T>[] = [];
-  private sequence = 0;
-  schedule(dueMilliseconds: number, value: T): number {
-    if (!Number.isFinite(dueMilliseconds)) throw new RangeError("Invalid packet time");
-    const sequence = this.sequence++;
-    this.pending.push({ sequence, due: dueMilliseconds, value });
-    this.pending.sort((left, right) => left.due - right.due || left.sequence - right.sequence);
-    return sequence;
-  }
-  cancel(sequence: number): boolean {
-    const index = this.pending.findIndex(value => value.sequence === sequence);
-    if (index < 0) return false;
-    this.pending.splice(index, 1); return true;
-  }
-  drain(nowMilliseconds: number, deliver: (value: T) => void): void {
-    let count = 0;
-    while (count < this.pending.length && (this.pending[count]?.due ?? Infinity) <= nowMilliseconds) count++;
-    if (count === 0) return;
-    const ready = this.pending.splice(0, count);
-    for (const packet of ready) deliver(packet.value);
-  }
-  clear(): void { this.pending.length = 0; }
 }

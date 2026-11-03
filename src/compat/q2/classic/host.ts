@@ -7,13 +7,15 @@ import type { AttackProvenance } from "../../../contracts/gameplay.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
 import type { TraceResult } from "../../../contracts/scene.ts";
 import type { Q2FoundationHost } from "../../../content/q2/foundation/host.ts";
-import type { CvarRegistry } from "../../../core/cvars/index.ts";
+import { Q2CvarFlag, type CvarRegistry } from "../../../core/cvars/index.ts";
 import type { GuestCallRunner } from "../../../guest/abi/index.ts";
 import type { GuestCallSignature, GuestHostCallback, MappedGuestMemory } from "../../../guest/core/contracts.ts";
 import { ClassicQ2Cvars } from "./cvars.ts";
+import { CommandGuestStrings, latin1Bytes } from "../guest-strings.ts";
 import { CLASSIC_Q2_EXPORTS, CLASSIC_Q2_IMPORTS, CLASSIC_Q2_IMPORT_BYTES, CLASSIC_Q2_TRACE_LAYOUT, classicSignature, q2Pointer } from "./layout.ts";
 import { classicPrintf, classicPrintfLayouts } from "./printf.ts";
-import { ClassicQ2Edicts, allocateClassicString, classicStringAllocationBytes, readClassicString, readClassicVector, writeClassicString, writeClassicVector } from "./records.ts";
+import { ClassicQ2Edicts, allocateClassicString, classicStringAllocationBytes, fitClassicUserinfo, readClassicString, readClassicVector, writeClassicString, writeClassicVector } from "./records.ts";
+import { filterGuestConsole } from "../guest-console.ts";
 import type { ClassicQ2ActorProjection } from "./records.ts";
 import type { OriginalPickupAdmission, OriginalPickupOffer } from "../../../contracts/original-pickups.ts";
 import { NativePrimaryPickups, type NativePickupProfile, type NativePickupSupply, type NativePickupSupplyEvaluation } from "../native-pickups.ts";
@@ -29,6 +31,8 @@ export interface ClassicQ2EngineServices {
   readonly pickups?: OriginalPickupAdmission;
   readonly damageProvenance?: (attacker: ActorId, inflictor: ActorId, target: ActorId) => Omit<AttackProvenance, "attacker" | "inflictor" | "cause">;
   readonly projection?: ClassicQ2ActorProjection;
+  /** Shared actor behind a stand-in edict (a selected monster), so guest T_Damage on it reaches shared combat. */
+  readonly standInActor?: (record: RawEntityView) => ActorId | null;
   readonly engine: Pick<Q2FoundationHost, "actors" | "bodies" | "combat" | "inventory" | "callbacks" | "trace" | "pointContents" | "inPvs" | "inPhs" | "setAreaPortal" | "setSolid" | "inlineModelBounds">;
   readonly cvars: CvarRegistry;
   readonly bindEntity: (record: RawEntityView, actor: OwnedActor) => undefined;
@@ -80,6 +84,7 @@ export class ClassicQ2GuestHost {
   readonly imports: GuestAddress;
   readonly cvars: ClassicQ2Cvars;
   readonly #callbackNames = new Map<CallbackId, string>();
+  readonly #commandStrings: CommandGuestStrings;
   readonly #allocations = new Map<bigint, { readonly address: GuestAddress; readonly bytes: number; readonly tag: number }>();
   readonly #surfaces = new Map<string, GuestAddress>();
   readonly #models = new Map<number, string>();
@@ -87,6 +92,7 @@ export class ClassicQ2GuestHost {
   #exports: GuestAddress | null = null;
   #initialized = false;
   #suppressReconcile = false;
+  readonly #reloadObservers = new Set<() => void>();
   #pickups: NativePrimaryPickups | null = null;
   bindPickupSupply(owner: NativePickupSupply): () => undefined {
     if (this.#pickups === null) throw new Error("This original game has no admitted pickup supply interface");
@@ -120,6 +126,7 @@ export class ClassicQ2GuestHost {
     this.memory = options.runner.options.cpu.memory;
     if (this.memory.pointerBytes !== 4) throw new TypeError("Classic Q2 API 3 requires a 32-bit guest");
     this.cvars = new ClassicQ2Cvars(this.memory, options.services.cvars);
+    this.#commandStrings = new CommandGuestStrings(this.memory, "API 3 command text", latin1Bytes);
     this.imports = this.memory.allocate({ byteLength: CLASSIC_Q2_IMPORT_BYTES, label: "API 3 game_import_t" });
     for (const [index, entry] of CLASSIC_Q2_IMPORTS.entries()) {
       const id: CallbackId = `${options.provider}:api3.${entry.name}`;
@@ -181,6 +188,7 @@ export class ClassicQ2GuestHost {
     return undefined;
   }
   spawnEntities(map: string, entities: string, spawnPoint: string): undefined {
+    this.#reloaded();
     if (this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) if (this.options.services.engine.actors.sourceOf(actor.id)?.provider === this.options.provider) this.options.services.engine.actors.release(actor);
     const before = this.options.runner.instructionsExecuted;
     try {
@@ -205,12 +213,14 @@ export class ClassicQ2GuestHost {
   }
   async saveLoading(name: "ReadGame" | "ReadLevel", filename: string, nextFrame: () => Promise<void>): Promise<void> {
     this.#pickups?.assertIdle();
+    this.#reloaded();
     if (this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) if (this.options.services.engine.actors.sourceOf(actor.id)?.provider === this.options.provider) this.options.services.engine.actors.release(actor);
     const address = allocateClassicString(this.memory, filename);
     try { await this.callLoading(name, [{ kind: "pointer", value: address }], nextFrame, Math.min(Number.MAX_SAFE_INTEGER, this.options.instructionBudget * 10)); }
     finally { this.memory.unmap(address, classicStringAllocationBytes(filename)); }
   }
   async spawnEntitiesLoading(map: string, entities: string, spawnPoint: string, nextFrame: () => Promise<void>): Promise<void> {
+    this.#reloaded();
     if (this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) if (this.options.services.engine.actors.sourceOf(actor.id)?.provider === this.options.provider) this.options.services.engine.actors.release(actor);
     const records = [map, entities, spawnPoint].map(text => ({ text, address: allocateClassicString(this.memory, text) }));
     const before = this.options.runner.instructionsExecuted;
@@ -226,11 +236,18 @@ export class ClassicQ2GuestHost {
     if (!Number.isInteger(index) || index < 1 || index >= 256) throw new RangeError("API 3 model index outside MAX_MODELS");
     if (name === "") this.#models.delete(index); else this.#models.set(index, name);
   }
+  /** Called when the guest's edict table is replaced (level spawn, saved-game load, world rebind); stand-in edicts it held are gone. */
+  observeReload(observer: () => void): () => void {
+    this.#reloadObservers.add(observer);
+    return () => { this.#reloadObservers.delete(observer); };
+  }
+  #reloaded(): void { for (const observer of this.#reloadObservers) observer(); }
   rebindWorld(): void {
     this.#pickups?.assertIdle();
     if (!this.#initialized || this.#exports === null || this.options.runner.depth !== 0) throw new Error("API 3 world rebind requires an idle initialized module");
     this.#edicts = new ClassicQ2Edicts(this.memory, this.#exports, this.options.services.engine.actors, this.options.provider, this.options.services.bindEntity, this.options.services.projection);
     this.#models.clear();
+    this.#reloaded();
   }
   writeTravelLevel(filename: string, maxClients: number): void {
     if (!this.#initialized || this.options.runner.depth !== 0 || this.#suppressReconcile) throw new Error("API 3 travel save requires an idle initialized module");
@@ -273,7 +290,7 @@ export class ClassicQ2GuestHost {
   clientConnect(slot: number, userinfo: string): { readonly allowed: boolean; readonly userinfo: string } {
     const buffer = this.memory.allocate({ byteLength: 516, label: "API 3 mutable userinfo" });
     try {
-      writeClassicString(this.memory, buffer, userinfo, 512);
+      writeClassicString(this.memory, buffer, fitClassicUserinfo(userinfo), 512);
       const record = this.edicts.at(slot), result = this.call("ClientConnect", [{ kind: "pointer", value: record.address }, { kind: "pointer", value: buffer }], record);
       if (result.kind !== "int32") throw new Error("API 3 ClientConnect returned a non-integer result");
       return { allowed: result.value !== 0, userinfo: readClassicString(this.memory, buffer, 512) };
@@ -285,7 +302,7 @@ export class ClassicQ2GuestHost {
   clientUserinfoChanged(slot: number, userinfo: string): string {
     const buffer = this.memory.allocate({ byteLength: 516, label: "API 3 mutable userinfo change" });
     try {
-      writeClassicString(this.memory, buffer, userinfo, 512);
+      writeClassicString(this.memory, buffer, fitClassicUserinfo(userinfo), 512);
       const record = this.edicts.at(slot);
       this.call("ClientUserinfoChanged", [{ kind: "pointer", value: record.address }, { kind: "pointer", value: buffer }], record);
       return readClassicString(this.memory, buffer, 512);
@@ -301,6 +318,7 @@ export class ClassicQ2GuestHost {
   }
   save(name: "WriteGame" | "ReadGame" | "WriteLevel" | "ReadLevel", filename: string, autosave = false): undefined {
     this.#pickups?.assertIdle();
+    if (name === "ReadGame" || name === "ReadLevel") this.#reloaded();
     if ((name === "ReadGame" || name === "ReadLevel") && this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) if (this.options.services.engine.actors.sourceOf(actor.id)?.provider === this.options.provider) this.options.services.engine.actors.release(actor);
     this.withStrings([filename], pointers => { this.call(name, name === "WriteGame" ? [...pointers, { kind: "int32", value: Number(autosave) }] : pointers); return undefined; });
     return undefined;
@@ -328,7 +346,7 @@ export class ClassicQ2GuestHost {
       }
       case "TagMalloc": {
         const requested = number(0), tag = number(1);
-        if (!Number.isInteger(requested) || requested < 0) throw new RangeError("TagMalloc requires a nonnegative byte count");
+        if (!Number.isInteger(requested) || requested < 0 || requested > 0x10000000) throw new RangeError("TagMalloc size is outside the mapped-memory allocation limit");
         // MSVC's word-at-a-time string routines access the allocator's rounded tail.
         const bytes = nativeAllocationBytes(requested);
         const address = allocateNativeMemory(memory, requested, `API 3 tag ${tag}`);
@@ -343,7 +361,12 @@ export class ClassicQ2GuestHost {
         for (const [key, record] of this.#allocations) if (record.tag === number(0)) { memory.unmap(record.address, record.bytes); this.#allocations.delete(key); }
         return voidResult;
       case "cvar": services.cvars.register(string(0), string(1), number(2)); return pointerResult(this.cvars.pointer(string(0)));
-      case "cvar_set": case "cvar_forceset": services.cvars.set(string(0), string(1), name === "cvar_forceset"); return pointerResult(this.cvars.pointer(string(0)));
+      case "cvar_set": case "cvar_forceset": {
+        // A guest may not overwrite the credentials it is not allowed to read.
+        const existing = services.cvars.find(string(0));
+        if (existing === undefined || (existing.flags & Q2CvarFlag.Private) === 0) services.cvars.set(string(0), string(1), name === "cvar_forceset");
+        return pointerResult(this.cvars.pointer(string(0)));
+      }
       case "configstring": services.configstring(number(0), string(1)); return voidResult;
       case "modelindex": case "soundindex": case "imageindex": {
         const path = string(0), index = services.resourceIndex(name === "modelindex" ? "model" : name === "soundindex" ? "sound" : "image", path);
@@ -384,9 +407,14 @@ export class ClassicQ2GuestHost {
       }
       case "Pmove": services.pmove(required(0), this); return voidResult;
       case "argc": return intResult(services.command().arguments.length);
-      case "argv": return pointerResult(this.cvars.string(services.command().arguments[number(0)] ?? ""));
-      case "args": return pointerResult(this.cvars.string(services.command().args));
-      case "AddCommandString": services.addCommand(string(0)); return voidResult;
+      case "argv": { const command = services.command(); return pointerResult(this.#commandStrings.get(`${command.arguments.join("\0")}\0\0${command.args}`, command.arguments[number(0)] ?? "")); }
+      case "args": { const command = services.command(); return pointerResult(this.#commandStrings.get(`${command.arguments.join("\0")}\0\0${command.args}`, command.args)); }
+      case "AddCommandString": {
+        const filtered = filterGuestConsole(string(0));
+        if (filtered.refused.length !== 0) services.print("debug", null, 0, `game module console command refused: ${filtered.refused.join(", ")}\n`);
+        if (filtered.text !== "") services.addCommand(filtered.text);
+        return voidResult;
+      }
       case "DebugGraph": services.debugGraph(number(0), number(1)); return voidResult;
       case "multicast": case "unicast": case "WriteChar": case "WriteByte": case "WriteShort": case "WriteLong": case "WriteFloat": case "WriteString": case "WritePosition": case "WriteDir": case "WriteAngle":
         services.message(name, arguments_, context); return voidResult;
@@ -401,8 +429,9 @@ export class ClassicQ2GuestHost {
       view.setFloat32(offset, vector.x, true); view.setFloat32(offset + 4, vector.y, true); view.setFloat32(offset + 8, vector.z, true);
     }
     view.setFloat32(36, plane.distance, true); view.setUint8(40, plane.type); view.setUint8(41, plane.signbits); view.setInt32(48, trace.contents, true);
-    if (trace.surface !== null) {
-      const surface = trace.surface, key = JSON.stringify([surface.name, surface.flags, surface.value]);
+    {
+      // cmodel.c's nullsurface: the DLLs dereference trace.surface unconditionally, so it is never NULL.
+      const surface = trace.surface ?? { name: "", flags: 0, value: 0 }, key = JSON.stringify([surface.name, surface.flags, surface.value]);
       let address = this.#surfaces.get(key);
       if (address === undefined) {
         address = this.memory.allocate({ byteLength: 24, label: "API 3 csurface_t" });
@@ -412,7 +441,8 @@ export class ClassicQ2GuestHost {
       }
       view.setUint32(44, Number(address.byteOffset), true);
     }
-    const entity = trace.hit.kind === "none" ? null : trace.hit.kind === "world" ? this.edicts.at(0).address : this.edicts.pointer(trace.hit.actor);
+    // SV_Trace reports the world edict when nothing was hit.
+    const entity = trace.hit.kind === "none" || trace.hit.kind === "world" ? this.edicts.at(0).address : this.edicts.pointer(trace.hit.actor);
     view.setUint32(52, Number(entity?.byteOffset ?? 0n), true);
     return bytes;
   }

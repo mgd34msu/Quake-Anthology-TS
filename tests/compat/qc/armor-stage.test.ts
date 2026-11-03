@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { homedir } from "node:os";
 
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { copperAvailable, copperProgramPath, testCorpusRoot } from "../../support/corpus.ts";
+import { dirname } from "node:path";
 
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
@@ -15,7 +15,8 @@ import { QcEntityMemory, QcMachine, classicQcEntityLayout, createQcActorBindings
 import { SessionActorRegistry, ActorCallbackTable, SourceActorSlots, quakeEdictLifetime, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
 import { SharedInventoryTable } from "../../../src/world/gameplay/inventory.ts";
 import { SharedOriginalPickupAdmission } from "../../../src/world/gameplay/original-pickups.ts";
-import { QcModProvider, validateQcMod } from "../../../src/compat/qc/mod-provider.ts";
+import { QcModProvider } from "../../../src/compat/qc/mod-provider.ts";
+import { validateQcMod } from "../../../src/compat/qc/mod-validation.ts";
 import { SourceRandom } from "../../../src/app/bootstrap/simulation/random.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
 import { GameplayAuthority } from "../../../src/world/gameplay/authority.ts";
@@ -25,7 +26,7 @@ import { qcArmorStage } from "../../../src/content/q1/quakec/armor-stage.ts";
 import type { QcInlineBoundary } from "../../../src/compat/qc/machine.ts";
 
 const corpus = `${testCorpusRoot()}/q1/`;
-const copper = `${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`;
+const copper = copperProgramPath();
 async function readProgram(path: string): Promise<QcProgram> {
   const archive = await openArchive(corpus + path);
   try {
@@ -34,11 +35,16 @@ async function readProgram(path: string): Promise<QcProgram> {
     return loadQcProgram(await archive.readEntry(entry));
   } finally { await archive.close(); }
 }
+/** The statement window below is a position in this exact Copper progs.dat; the pin makes a different build fail here rather than slice the wrong statements. */
+const COPPER_DIGEST = "sha256:56055d61bac438c227f88b89a03e81401fdd52b10f6d3def0a3d9d261d223e9c";
+const COPPER_STAGE_ENTRY = 5592, COPPER_STAGE_EXIT = 5606;
 function copperStage(program: QcProgram): ModQcArmorStage {
+  expect(program.digest).toBe(COPPER_DIGEST);
+  const apply = program.functionNamed("T_DamageApply"), target = apply.parameterStart;
   const declaration = readModCallbacks(new TextEncoder().encode(JSON.stringify({ version: 1, runtime: "quakec",
     program: { path: "progs.dat", digest: program.digest }, actorFields: [], callbacks: [], combat: { damage: { function: "T_Damage", arguments: [], globals: [] },
-      armorStage: { function: "T_DamageApply", entry: 5592, exit: 5606, target: 5363, damage: 5366, saved: 5372,
-        flags: { kind: "bits", word: 5367, noArmor: 4, noPowerArmor: 0, noRegularArmor: 0, energy: 0 }, statements: program.statements.slice(5592, 5607) } } })));
+      armorStage: { function: "T_DamageApply", entry: COPPER_STAGE_ENTRY, exit: COPPER_STAGE_EXIT, target, damage: target + 3, saved: target + 9,
+        flags: { kind: "bits", word: target + 4, noArmor: 4, noPowerArmor: 0, noRegularArmor: 0, energy: 0 }, statements: program.statements.slice(COPPER_STAGE_ENTRY, COPPER_STAGE_EXIT + 1) } } })));
   const stage = declaration.combat?.armorStage;
   if (stage === undefined) throw new Error("Missing declared stage");
   return stage;
@@ -162,7 +168,7 @@ test("effectful QC power rebases nested damage and cancels the exact retired sou
   } finally { nested.actors.close(); retired.actors.close(); }
 });
 
-test("declared original Copper helper debits only regular savings and preserves no-armor flags", async () => {
+test.skipIf(!copperAvailable())("declared original Copper helper debits only regular savings and preserves no-armor flags", async () => {
   const program = loadQcProgram(await Bun.file(copper).bytes()), declaration = copperStage(program);
   expect(qcArmorStage(program)).toBeNull();
   for (const flags of [0, 4]) {
@@ -218,7 +224,7 @@ test("inline QC continuations execute once and preserve the original instruction
   expect(() => twice.execute(damage, 4)).toThrow("once inside its boundary"); twice.snapshot();
 });
 
-test("declared original Copper region supplies regular armor after power to original Hipnotic", async () => {
+test.skipIf(!copperAvailable())("declared original Copper region supplies regular armor after power to original Hipnotic", async () => {
   const primary = fixture(await readProgram("rerelease/hipnotic/pak0.pak")), program = loadQcProgram(await Bun.file(copper).bytes());
   const fields: ModActorField[] = [], occupied = new Set<number>();
   for (const field of program.fields) {
@@ -292,7 +298,7 @@ test("declared original Copper region supplies regular armor after power to orig
   } finally { source.close(); primary.actors.close(); }
 });
 
-test("original Copper pickups decide refusal and publish each tier store during nested source damage", async () => {
+test.skipIf(!copperAvailable())("original Copper pickups decide refusal and publish each tier store during nested source damage", async () => {
   const primary = fixture(await readProgram("rerelease/hipnotic/pak0.pak")), program = loadQcProgram(await Bun.file(copper).bytes());
   const fields: ModActorField[] = [], occupied = new Set<number>();
   for (const field of program.fields) {
@@ -374,11 +380,14 @@ test("original Copper pickups decide refusal and publish each tier store during 
   } finally { source.close(); primary.actors.close(); }
 });
 
-test("QC armor admission validates original profiles and declared statement control flow", async () => {
+test("QC armor admission validates original profiles", async () => {
   for (const path of ["id1/PAK0.PAK", "hipnotic/pak0.pak", "rogue/pak0.pak", "rerelease/id1/pak0.pak", "rerelease/hipnotic/pak0.pak",
     "rerelease/rogue/pak0.pak", "rerelease/ctf/pak0.pak", "rerelease/dopa/pak0.pak", "rerelease/mg3/pak0.pak"]) {
     expect(qcArmorStage(await readProgram(path))?.region.replaceable).toBe(true);
   }
+});
+
+test.skipIf(!copperAvailable())("QC armor admission validates declared Copper statement control flow", async () => {
   const program = loadQcProgram(await Bun.file(copper).bytes()), declaration = copperStage(program);
   expect(() => qcArmorStage(program, { ...declaration, entry: declaration.entry + 1 })).toThrow("incomplete instruction");
   expect(() => qcArmorStage(program, { ...declaration, target: declaration.damage })).toThrow("typed frame");
@@ -417,7 +426,7 @@ test("standalone QC regions reject a caller local read through nested helpers", 
 });
 
 
-test("primary Copper declaration preserves five-argument damage, borrowed armor and saved identity", async () => {
+test.skipIf(!copperAvailable())("primary Copper declaration preserves five-argument damage, borrowed armor and saved identity", async () => {
   const { Application } = await import("../../../src/app/bootstrap/application.ts");
   const { parseApplicationCommand } = await import("../../../src/app/bootstrap/options.ts");
   const { readQuakeCCompatibility } = await import("../../../src/compat/qc/compatibility.ts");
@@ -429,7 +438,7 @@ test("primary Copper declaration preserves five-argument damage, borrowed armor 
   let app: import("../../../src/app/bootstrap/application.ts").Application | null = null;
   try {
     await mkdir(mod, { recursive: true });
-    await cp(`${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper`, mod, { recursive: true });
+    await cp(dirname(copperProgramPath()), mod, { recursive: true });
     const program = loadQcProgram(await Bun.file(copper).bytes()), raw = { version: 1, artifactDigest: program.digest, combat: {
       damage: { function: "T_Damage", arguments: [{ kind: "input", name: "self" }, { kind: "input", name: "inflictor" },
         { kind: "input", name: "attacker" }, { kind: "input", name: "amount" }, { kind: "float", value: 0 }], globals: [{ name: "time", value: { kind: "input", name: "time" } }] },

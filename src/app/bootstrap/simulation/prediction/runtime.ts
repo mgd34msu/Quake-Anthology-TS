@@ -67,7 +67,7 @@ export class SelectedMovementPrediction {
       const output = predictMovementCommand(this.options, player, entry, { scene: this.options.scene,
         rereleaseMovement: this.rereleaseMovement,
         fixedMilliseconds: profile.kind === "q3" ? profile.fixedMilliseconds : null,
-        noFootsteps: profile.kind === "q3" && profile.noFootsteps, gauntletHit: false, traceMask: null, firstCommand: first });
+        noFootsteps: profile.kind === "q3" && profile.noFootsteps, ladders: profile.kind === "q3" && profile.ladders === true, gauntletHit: false, traceMask: null, firstCommand: first });
       player = output.player; effects.push(...output.result.effects); first = false;
       if (observe !== undefined) observe(copyPredictionSnapshot(player));
     });

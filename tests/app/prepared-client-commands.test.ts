@@ -204,7 +204,7 @@ test("candidate after-dispatch preserves asynchronous empty NOW rejection", asyn
     if (!preparing) return;
     preparing = false;
     const next = candidate(f);
-    expect(() => next.program.commands.executeNow("", f.context)).toThrow();
+    expect(() => next.program.commands.executeNow("", f.context)).toThrow("Command buffer is already draining asynchronously");
     next.program.commands.executeNow("set marker immediate", f.context);
     expect(next.cvars.variableString("marker")).toBe("immediate");
     next.program.publish();

@@ -102,16 +102,13 @@ export class Q2FrameHistory {
         }
         wire.codec.readPacketEntitiesBegin();
         const entities: EntityStateT[] = [], previous = old?.entities ?? [];
-        let cursor = 0, lastNumber = 0;
+        let cursor = 0;
         const unchanged = (from: EntityStateT): void => { const entity = new EntityStateT(); wire.codec.readDeltaEntity(from, entity, from.number, 0); entities.push(entity); };
         for (;;) {
             const headerEntity = wire.codec.readEntityBits();
             checkMessageRead(wire.message);
             if (headerEntity.number === 0)
                 break;
-            if (headerEntity.number <= lastNumber)
-                throw new Error('Unordered Q2 entity delta');
-            lastNumber = headerEntity.number;
             for (;;) {
                 const from = previous[cursor];
                 if (from === undefined || from.number >= headerEntity.number)
@@ -121,11 +118,8 @@ export class Q2FrameHistory {
             }
             const from = previous[cursor];
             if ((headerEntity.bits & U_REMOVE) !== 0) {
-                if (from?.number !== headerEntity.number) {
-                    if (valid)
-                        throw new Error('Q2 entity removal has no delta source');
-                }
-                else
+                // CL_ParsePacketEntities prints a mismatch and still steps past the old entity.
+                if (from !== undefined)
                     cursor++;
                 continue;
             }

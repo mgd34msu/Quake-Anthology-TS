@@ -26,7 +26,7 @@ function character() {
       deathmatch: false, defenderSphere: false, teamDamageEnabled: false, friendlyFire: false, nuke: false, noKnockback: true,
       movable: true, rejectTeamDamage: false, suppressPain: false }) }));
   const movement: { value: Q2PlayerMovement } = { value: { viewAngles: zero, commandAngles: zero, waterLevel: 3, waterType: 32,
-    grounded: false, ducked: false, buttons: 0, standingBounds: bounds, animateQ2: true } };
+    grounded: false, ducked: false, buttons: 0, upMove: 0, standingBounds: bounds, animateQ2: true } };
   const host: Q2CharacterHost = { bodies, combat, inventory, now: () => now, random: () => 0.5, movement: () => movement.value,
     pointContents: () => movement.value.waterType,
     powerups: () => ({ quadUntil: 0, invulnerabilityUntil: 0, breatherUntil: 0, enviroUntil: 0, hasteUntil: 0, regenUntil: 0, flightUntil: 0, invisUntil: 0 }), weapon: () => null,

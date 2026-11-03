@@ -8,6 +8,8 @@ import type { Q1Actor } from "../foundation/entity.ts";
 import { moveDirection } from "../foundation/entity.ts";
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import { ZERO } from "../foundation/types.ts";
+import { BLOODY_NIGHTMARE_ACTIVE } from "./campaign.ts";
+import { mg3Pickups, sourceItemStart, sourceNoMegaRot } from "../foundation/pickups.ts";
 import { mg3RuneCount } from "./campaign.ts";
 
 export type Q1AddonProgram = "dopa" | "mg1" | "mg3" | "ctf";
@@ -45,6 +47,15 @@ export class Q1AddonContext {
 
   constructor(readonly base: Q1Base, readonly program: Q1AddonProgram, readonly services: Q1AddonServices) {
     this.game = base.game;
+    if (program === "ctf") sourceNoMegaRot.add(this.game);
+    if (program === "mg1" || program === "mg3") {
+      this.game.sourceDoorKeys = true; this.game.sourceGrenadeFix = true;
+      if (program === "mg3") { mg3Pickups.add(this.game); this.game.sourceMessageAllPlayers = true; this.game.sourceBloodyNightmare = () => (base.campaign.readFlags() & BLOODY_NIGHTMARE_ACTIVE) !== 0; }
+      sourceItemStart.set(this.game, entity => {
+        if (this.removedOutsideCoop(entity) || this.removedForRunes(entity)) return null;
+        return program === "mg3" && (entity.spawnflags & 4) !== 0 ? { place: "mg3:items:place", use: "mg3:items:regenerate" } : { place: "PlaceItem", use: null };
+      });
+    }
     this.game.host.actors.onRelease(actor => { this.playerWords.delete(actor); this.playerReferences.delete(actor); const index = this.frameTicks.findIndex(entity => entity.actor === actor);
       if (index >= 0) this.frameTicks.splice(index, 1); return undefined; });
     this.game.registerStateExtension({ id: `q1:${program}:addons`, capture: () => encodeCheckpointValue({

@@ -1,4 +1,6 @@
+import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
+import type { ActorCollision } from "../../../../src/world/spatial/index.ts";
 import { corpusFile } from "../../../support/corpus.ts";
 
 import { existsSync } from "node:fs";
@@ -29,7 +31,7 @@ function cube(): Q1WorldGeometry {
     clipnodes: [], visibility: new Uint8Array(), lighting: { kind: "luminance8", samples: new Uint8Array() }, decoupledLightmaps: null, brushList: null, extensions: [] };
 }
 function query(start: Vec3, end: Vec3, shape: TraceShape = { kind: "point" }): TraceQuery {
-  return { start, end, shape, target: { kind: "world" }, policy: { kind: "q1", move: "normal", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: null };
+  return { start, end, shape, target: { kind: "world" }, policy: { kind: "q1", move: "normal", hull: null, derived: true }, numeric: Q1_DONOR_PROFILE, passActor: null };
 }
 function clipOnlyCube(): Q1WorldGeometry {
   const map = cube(), planes = [...map.planes], clipnodes: Q1ClipNode[] = [];
@@ -104,18 +106,30 @@ describe("Quake hulls and derived solid cells", () => {
     } finally { derive.mockRestore(); }
   });
   test("exact derived-cell entries evict without changing rederived results", () => {
-    const derive = spyOn(clipspace, "prepareQ1ClipSolids");
+    const original = clipspace.prepareQ1ClipSolids;
+    let derivations = 0;
+    const prepare = spyOn(clipspace, "prepareQ1ClipSolids").mockImplementation(hulls => {
+      const prepared = original(hulls);
+      return envelope => { derivations++; return prepared(envelope); };
+    });
     try {
       const collision = createQ1Collision(clipOnlyCube());
       const input = query({ x: 5, y: 0, z: 0 }, zero, { kind: "box", bounds: { min: { x: -2, y: -2, z: -2 }, max: { x: 2, y: 2, z: 2 } } });
       const firstHit = collision.trace(input);
-      expect(derive).toHaveBeenCalledTimes(1);
+      expect(derivations).toBe(1);
+      deepStrictEqual(collision.trace(input), firstHit);
+      expect(derivations).toBe(1);
+      // 128 further distinct envelopes push the first one out of the 128-entry cache.
       for (let index = 1; index <= 128; index++) collision.trace({ ...input, start: { ...input.start, y: index * 10 }, end: { ...input.end, y: index * 10 } });
+      expect(derivations).toBe(129);
       deepStrictEqual(collision.trace(input), firstHit);
-      expect(derive).toHaveBeenCalledTimes(1);
+      expect(derivations).toBe(130);
       deepStrictEqual(collision.trace(input), firstHit);
-      expect(derive).toHaveBeenCalledTimes(1);
-    } finally { derive.mockRestore(); }
+      expect(derivations).toBe(130);
+      // The most recently used entries survive: the last envelope traced is still cached.
+      collision.trace({ ...input, start: { ...input.start, y: 1280 }, end: { ...input.end, y: 1280 } });
+      expect(derivations).toBe(130);
+    } finally { prepare.mockRestore(); }
   });
   test("nonfinite derived envelopes retain the uncached behavior", () => {
     const derive = spyOn(clipspace, "deriveQ1ClipSolids");
@@ -170,7 +184,7 @@ describe("Quake hulls and derived solid cells", () => {
     for (const world of [solid, water, clipOnlyCube()]) {
       const scene = createSceneQueries(world);
       for (const policy of [
-        { kind: "q1", move: "normal", hull: null },
+        { kind: "q1", move: "normal", hull: null, derived: true },
         { kind: "q2", contentsMask: 0x46000003, leafContents: "merged" },
         { kind: "q2", contentsMask: 56, leafContents: "merged" },
         { kind: "q3", contentsMask: 0x06000039, curves: true, playerCurveClip: true },
@@ -273,4 +287,35 @@ test.skipIf(!existsSync(pakPath))("real e1m1 point contacts retain sky and ordin
     }
     expect({ sky, ordinary, inline }).toEqual({ sky: true, ordinary: true, inline: true });
   } finally { archive.close(); }
+});
+
+describe("Quake entity collision rules", () => {
+  const owner = createIdentityOwner("q1 collision rules");
+  const solid: ActorCollision = { family: "q1", shape: { kind: "box" }, contents: -2, owner: null, role: "solid", monster: false, deadMonster: false };
+  function link(scene: ReturnType<typeof createSceneQueries>, slot: number, origin: Vec3, half: number): ReturnType<typeof owner.actor> {
+    const actor = owner.actor(slot, 0), box: Bounds = { min: { x: -half, y: -half, z: -half }, max: { x: half, y: half, z: half } };
+    scene.link({ actor, state: { origin, angles: zero, velocity: zero, bounds: box, ground: null },
+      absoluteBounds: { min: { x: origin.x - half - 1, y: origin.y - half - 1, z: origin.z - half - 1 }, max: { x: origin.x + half + 1, y: origin.y + half + 1, z: origin.z + half + 1 } }, linkCount: 1 }, solid);
+    return actor;
+  }
+  test("points never interact with a sized mover, but sized candidates and unsized movers still hit", () => {
+    const scene = createSceneQueries(cube());
+    const mover = link(scene, 1, { x: 100, y: 0, z: 100 }, 16), point = link(scene, 2, { x: 120, y: 0, z: 100 }, 0), sized = link(scene, 3, { x: 120, y: 60, z: 100 }, 8);
+    const box: TraceShape = { kind: "box", bounds: { min: { x: -16, y: -16, z: -16 }, max: { x: 16, y: 16, z: 16 } } };
+    const through = { ...query({ x: 100, y: 0, z: 100 }, { x: 140, y: 0, z: 100 }, box), passActor: mover };
+    expect(scene.trace(through).fraction).toBe(1);
+    expect(scene.trace({ ...through, passActor: null }).hit).toEqual({ kind: "actor", actor: point });
+    expect(scene.trace({ ...through, start: { x: 100, y: 60, z: 100 }, end: { x: 140, y: 60, z: 100 } }).hit).toEqual({ kind: "actor", actor: sized });
+  });
+  test("native hulls are chosen by width alone and monsters of odd sizes follow the compiled clip hull", () => {
+    const collision = createQ1Collision(clipOnlyCube());
+    const policy = (hull: number | null): Extract<TraceQuery["policy"], { kind: "q1" }> => ({ kind: "q1", move: "normal", hull });
+    const box = (half: number, below: number, above: number): TraceShape => ({ kind: "box", bounds: { min: { x: -half, y: -half, z: -below }, max: { x: half, y: half, z: above } } });
+    const run = (shape: TraceShape, chosen: TraceQuery["policy"]): ReturnType<typeof collision.trace> => collision.trace({ ...query({ x: 0, y: 0, z: -80 }, zero, shape), policy: chosen });
+    expect(run(box(10, 12, 12), policy(null))).toEqual(run(box(10, 12, 12), policy(1)));
+    expect(run(box(20, 12, 12), policy(null))).toEqual(run(box(20, 12, 12), policy(2)));
+    expect(run(box(16, 24, 40), policy(null))).toEqual(run(box(16, 24, 40), policy(1)));
+    // A box shorter than the hull reaches the compiled clip ceiling, where derived cells would stop at its own extent.
+    expect(run(box(10, 12, 12), policy(null)).end.z).not.toBe(run(box(10, 12, 12), { ...policy(null), derived: true }).end.z);
+  });
 });

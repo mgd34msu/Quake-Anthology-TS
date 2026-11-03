@@ -78,7 +78,8 @@ export function createRenderWorkerRuntime(payload: unknown, request: (payload: u
   };
   const executor = new RenderExecutor(backend, {
     imageApplied: operation => {
-      journal.record(operation);
+      // Only a CPU resize replays the journal; a GL backend would hold a second copy of every texture for nothing.
+      if (backend instanceof SoftwareRenderer) journal.record(operation);
       request({ kind: "image-applied", token: decoder.acknowledgment(operation) });
     },
     swap: captures => {

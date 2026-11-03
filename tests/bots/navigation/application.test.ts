@@ -12,6 +12,9 @@ import { preloadNavigation } from "../../../src/bots/navigation/load.ts";
 import { playerCrouchedBounds } from "../../../src/app/bootstrap/simulation/player-movement.ts";
 
 const corpus = testCorpusRoot();
+const simulations: SharedSimulation[] = [];
+function track(simulation: SharedSimulation): SharedSimulation { simulations.push(simulation); return simulation; }
+function closeSimulations(): void { for (const simulation of simulations.splice(0)) simulation.close(); }
 for (const movement of ["q3", "q1", "q2"]) test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak4.pk3")))(
   `mounted retail navigation predicts selected ${movement} movement without actor writes`, async () => {
     const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map", "q3dm1",
@@ -19,8 +22,8 @@ for (const movement of ["q3", "q1", "q2"]) test.skipIf(!existsSync(resolve(corpu
     if (launch.kind !== "run") throw new Error("Expected retail launch options");
     const content = await loadApplicationContent(launch.options), identity = createIdentityOwner(`navigation-check-${movement}`);
     try {
-      const simulation = new SharedSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
-        mode: "deathmatch", skill: 3, seed: 7, maxClients: 4 });
+      const simulation = track(new SharedSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
+        mode: "deathmatch", skill: 3, seed: 7, maxClients: 4 }));
       const navigation = await createApplicationBotNavigation({ content, simulation });
       const { actor } = simulation.admitPlayer(identity.client(0, 1));
       const player = simulation.movementPlayer(actor);
@@ -84,7 +87,7 @@ for (const movement of ["q3", "q1", "q2"]) test.skipIf(!existsSync(resolve(corpu
         });
         expect(entity.r.currentOrigin).toEqual(origin);
       }
-    } finally { await content.close(); }
+    } finally { closeSimulations(); await content.close(); }
   }, 30000);
 
 test.skipIf(!existsSync(resolve(corpus, "q1/rerelease/mg3/pak0.pak")))("selected geometry provenance rejects inherited NAV for a different BSP", async () => {
@@ -102,7 +105,7 @@ test.skipIf(!existsSync(resolve(corpus, "q1/rerelease/mg3/pak0.pak")))("selected
       navigationContent: content.recipe.map.geometry.provenance.mount.identity.content });
     expect(prepared.asset).toBeNull();
     expect(prepared.map.digest).toBe(content.recipe.map.geometry.digest);
-  } finally { await content.close(); }
+  } finally { closeSimulations(); await content.close(); }
 }, 30000);
 
 for (const map of ["base1", "fact1"]) test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")))(
@@ -112,9 +115,9 @@ for (const map of ["base1", "fact1"]) test.skipIf(!existsSync(resolve(corpus, "q
     const content = await loadApplicationContent(launch.options);
     try {
       const identity = createIdentityOwner(`navigation-live-${map}`);
-      const simulation = new SharedSimulation({ identity, recipe: content.recipe,
+      const simulation = track(new SharedSimulation({ identity, recipe: content.recipe,
         world: content.world, mounts: content.mounts, mode: "singleplayer", skill: 1, seed: 7, maxClients: 1,
-        playerIdentity: client => ({ seat: client.slot, socialId: "" }) });
+        playerIdentity: client => ({ seat: client.slot, socialId: "" }) }));
       const navigation = await createApplicationBotNavigation({ content, simulation }), source = simulation.q2Source();
       if (source === null) throw new Error("Missing actual Q2 source");
       if (map === "base1") {
@@ -159,5 +162,5 @@ for (const map of ["base1", "fact1"]) test.skipIf(!existsSync(resolve(corpus, "q
         hurt.touch(hurt, source.game, { self: hurt.actor, other: victim.actor.id, plane: null, surface: null });
         expect(navigation.runtime.world.hazard(body.absoluteBounds)).toBe(false);
       }
-    } finally { await content.close(); }
+    } finally { closeSimulations(); await content.close(); }
   }, 30000);

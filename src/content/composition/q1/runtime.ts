@@ -4,21 +4,22 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { DamageDecision, ItemId } from "../../../contracts/gameplay.ts";
 import { Q1Foundation } from "../../q1/foundation/runtime.ts";
 import type { Q1Actor } from "../../q1/foundation/entity.ts";
-import { WEAPONS } from "../../q1/foundation/types.ts";
+import { WEAPONS, length, vsub } from "../../q1/foundation/types.ts";
 import type { Q1FoundationHost, Q1FoundationOptions } from "../../q1/foundation/types.ts";
 import { registerQ1Base, q1ClientNotice, q1Obituary, newQ1Travel, captureQ1Travel, decodeQ1Travel, admitQ1Travel, dropBackpack } from "../../q1/base/index.ts";
 import type { Q1Base, Q1ObituaryActor, Q1TravelState, Q1IntermissionResult } from "../../q1/base/index.ts";
 import type { Q1CharacterPresentation, Q1CharacterSourcePose } from "../../q1/base/player.ts";
 import { registerQ1MissionPack } from "../../q1/missionpacks/runtime.ts";
 import type { Q1MissionPackRuntime } from "../../q1/missionpacks/runtime.ts";
-import { Q1AddonContext, registerQ1CampaignAddons, registerCTF, registerQ1Horde, handleQ1AddonImpulse, frameQ1AddonPlayer } from "../../q1/addons/index.ts";
+import { registerQ3PickupHook } from "./q3-pickups.ts";
+import { Q1AddonContext, registerQ1CampaignAddons, registerCTF, registerQ1Horde, handleQ1AddonImpulse, isQ1AddonDeveloperImpulse, frameQ1AddonPlayer, restoreCoopWeapons } from "../../q1/addons/index.ts";
 import type { Q1Ctf, Q1Horde } from "../../q1/addons/index.ts";
 import type { Q1CtfServices } from "../../q1/addons/ctf/types.ts";
 import { newQ1CtfTravel, captureQ1CtfTravel, decodeQ1CtfTravel } from "../../q1/addons/ctf/travel.ts";
 import { newQ1AddonTravel, captureQ1AddonTravel, decodeQ1AddonTravel, admitQ1AddonTravel } from "../../q1/addons/travel.ts";
 import { mg3HammerBodyFrame, handleMg3ItemImpulse } from "../../q1/addons/items/index.ts";
 import { Q1SourceClients } from "./clients.ts";
-import { baseQ1Impulse, q1WeaponImpulse } from "./commands.ts";
+import { baseQ1Impulse, q1CtfWeaponCycle, q1WeaponImpulse } from "./commands.ts";
 import type { Q1Map } from "../../../formats/q1-map/index.ts";
 import type { Q1ClientAdmission, Q1CompositionServices, Q1SourceInput, Q1SourceSelection } from "./types.ts";
 
@@ -32,7 +33,9 @@ export class Q1SourceComposition {
   readonly ctf: Q1Ctf | null;
   readonly horde: Q1Horde | null;
   private readonly hordeAddon: Q1AddonContext | null;
+  private readonly pendingDisconnects: ActorId[] = [];
   constructor(readonly game: Q1Foundation, readonly selection: Q1SourceSelection, readonly services: Q1CompositionServices) {
+    registerQ3PickupHook(game);
     this.clients = new Q1SourceClients(game, selection.program, services);
     if (game.options.edition === "rerelease" && (selection.program === "id1" || selection.program === "hipnotic" || selection.program === "rogue")) {
       game.registerDamageSourceEffects("q1:coop-bots", { beforeQuad: (request, amount) => {
@@ -63,7 +66,7 @@ export class Q1SourceComposition {
         gamecfg: () => services.cvar("gamecfg"), teamColor: actor => this.clients.teamColor(actor),
         setTeamColor: (actor, color) => this.clients.colors(actor, color - 1, color - 1),
         addFrags: (actor, delta) => this.clients.addScore(actor, delta), frags: actor => this.clients.require(actor).frags,
-        disconnect: actor => this.disconnect(actor), playerFrame: actor => services.selectedPlayer(actor).frame, playerName: actor => this.clients.require(actor).name,
+        disconnect: actor => this.requestDisconnect(actor), playerFrame: actor => services.selectedPlayer(actor).frame, playerName: actor => this.clients.require(actor).name,
         cheatsAllowed: () => services.cvar("sv_cheats") !== 0, developerMessage: text => services.emit({ kind: "developer-message", text }), footsteps: () => services.cvar("footsteps") === 1,
       });
       this.addon = null; this.ctf = null; this.horde = null;
@@ -79,9 +82,9 @@ export class Q1SourceComposition {
       // on every Q1 program (including custom games). MG3 already registered
       // the MG1 monster roster; other programs pull the MG1 campaign addons
       // in alongside their own so horde squads and loot can spawn.
-      this.hordeAddon = selection.program === "mg3" ? new Q1AddonContext(this.base, "mg1", addonServices)
-        : registerQ1CampaignAddons(this.base, "mg1", addonServices);
-      this.horde = registerQ1Horde(this.hordeAddon, hordeServices);
+      const hordeAddon = this.hordeAddon = selection.program === "mg3" ? new Q1AddonContext(this.base, "mg1", addonServices)
+        : game.adjoin(() => registerQ1CampaignAddons(this.base, "mg1", addonServices));
+      this.horde = game.adjoin(() => registerQ1Horde(hordeAddon, hordeServices));
     }
     if (this.addon?.program === "mg3") {
       const addon = this.addon;
@@ -113,14 +116,14 @@ export class Q1SourceComposition {
       },
       consumeImpulse: actor => { clients.require(actor).impulse = 0; return undefined; },
       observer: actor => clients.require(actor).observer, setObserver: (actor, enabled) => clients.setObserver(actor, enabled),
-      respawn: (actor, spot) => this.respawnAt(actor, spot, this.newTravel()), disconnect: actor => this.disconnect(actor),
+      respawn: (actor, spot) => this.respawnAt(actor, spot, this.newTravel()), disconnect: actor => this.requestDisconnect(actor),
       colors: (actor, shirt, pants) => clients.colors(actor, shirt, pants), promptSupported: actor => services.promptSupported(actor),
       prompt: (actor, title, choices) => services.emit({ kind: "prompt", actor, title, choices }), clearPrompt: actor => services.emit({ kind: "clear-prompt", actor }),
       teleport: (actor, origin, angles, velocity, until) => services.teleport(actor, origin, angles, velocity, until),
       selectGrapple: actor => { services.selectWeapon(actor, "q1:ctf/weapon/grapple"); return undefined; },
       selectedWeapon: actor => services.selectedWeapon(actor), selectedAmmo: actor => services.selectedAmmo(actor),
       weaponChanged: (actor, acquired) => services.weaponChanged(actor, acquired), haste: actor => services.weaponChanged(actor, null),
-      status: (actor, status) => services.emit({ kind: "ctf-status", actor, status }), log: (actor, action) => services.emit({ kind: "source-log", actor, action }),
+      status: (actor, status) => services.emit({ kind: "ctf-status", actor, status }), log: (actor, action) => { this.logLine(`LOG:\t${action}\t${clients.get(actor)?.name ?? ""}\n`); return services.emit({ kind: "source-log", actor, action }); },
     };
   }
   private isMonster(actor: ActorId): boolean { const entity = this.game.entity(actor); return entity !== null && (entity.movementFlags & 32) !== 0; }
@@ -129,9 +132,10 @@ export class Q1SourceComposition {
     const result = this.base.levelRules.clientConnected(this.game.time, this.services.cvar("samelevel") !== 0); this.presentIntermission(result); return undefined;
   }
   /** The outer session has already initialized the selected character, source arsenal and travel. */
-  spawned(actor: ActorId, firstAdmission: boolean): undefined {
+  spawned(actor: ActorId, firstAdmission: boolean, spot: Q1Actor | null = null): undefined {
     const client = this.clients.require(actor); client.deathRecorded = false; client.impulse = 0; client.use = false; client.respawnRequestedAt = -1;
     if (!firstAdmission) { this.base.levelRules.resetPlayer(client.actor); this.horde?.restoreKeys(actor); }
+    if (spot !== null && this.game.sourceFogPush !== null && !this.game.sourceFogPush(actor, spot) && this.game.world !== null) this.game.sourceFogPush(actor, this.game.world);
     this.clients.spawned(actor); this.packs?.playerSpawned(actor); this.ctf?.spawnPlayer(actor, firstAdmission); return undefined;
   }
   userinfo(actor: ActorId, values: ReadonlyMap<string, string>): undefined { return this.clients.update(actor, values); }
@@ -143,9 +147,10 @@ export class Q1SourceComposition {
   }
   /** Called once after game.beginFrame and before source player prethink. */
   preFrame(elapsedSeconds: number): undefined {
+    this.flushDisconnects();
     this.addon?.frame(elapsedSeconds);
     if (this.hordeAddon !== null && this.hordeAddon !== this.addon) this.hordeAddon.frame(elapsedSeconds);
-    if (this.game.options.deathmatch !== 0) this.base.levelRules.checkLimits(this.game.time, [...this.clients.records.values()].map(client => client.frags), this.services.cvar("timelimit"), this.services.cvar("fraglimit"));
+    if (this.game.options.deathmatch !== 0 || this.game.options.coop) this.base.levelRules.checkLimits(this.game.time, [...this.clients.records.values()].map(client => client.frags), this.services.cvar("timelimit"), this.services.cvar("fraglimit"));
     return undefined;
   }
   /** Before game.playerFrame: source observer/team/rune prethink precedes environment and movement. */
@@ -158,7 +163,14 @@ export class Q1SourceComposition {
     const weapons = this.services.weaponServices === undefined ? this.game : this.services.weaponServices(actor), weaponPlayer = weapons?.player(actor) ?? null;
     if (client.impulse === 0 || weaponPlayer !== null && weapons !== null && weapons.time < weaponPlayer.attackFinished) return false;
     if (this.ctf?.impulse(actor)) return true;
+    if (this.ctf !== null && (client.impulse === 10 || client.impulse === 12) && weapons !== null && weaponPlayer !== null) {
+      const grapple: ItemId = "q1:ctf/weapon/grapple";
+      q1CtfWeaponCycle(weapons, weaponPlayer, this.services.selectedWeapon(actor), client.impulse === 12, grapple, (item, weapon) => weapon === null ? (this.services.selectWeapon(actor, item), true) : weapons.selectWeapon(weaponPlayer.actor, weapon));
+      client.impulse = 0; return true;
+    }
     if (this.packs?.impulse(actor, client.impulse)) { client.impulse = 0; return true; }
+    if (this.addon !== null && isQ1AddonDeveloperImpulse(this.addon.program, client.impulse) && this.services.cvar("sv_gate_dev_impulses") !== 0
+      && (this.game.options.deathmatch !== 0 || this.game.options.coop) && this.services.cvar("sv_cheats") === 0) { client.impulse = 0; return true; }
     if (this.addon !== null && handleMg3ItemImpulse(this.addon, actor, client.impulse, text => this.services.emit({ kind: "developer-message", text }))) { client.impulse = 0; return true; }
     if (this.addon !== null && handleQ1AddonImpulse(this.addon, actor, client.impulse)) { client.impulse = 0; return true; }
     if (weapons !== null && weaponPlayer !== null && q1WeaponImpulse(weapons, weaponPlayer, client.impulse)) { client.impulse = 0; return true; }
@@ -175,6 +187,9 @@ export class Q1SourceComposition {
   beforeReaction(actor: OwnedActor, decision: DamageDecision): undefined {
     const client = this.clients.get(actor.id);
     if (decision.reaction === "death" && (client !== null || this.game.entity(actor.id) !== null) && this.game.health(actor.id) < -99) this.game.host.combat.setHealth(actor, -99);
+    // Rogue combat.qc Killed: the buzzsaw, the Vengeance Sphere and the pendulum always gib.
+    const killer = decision.request.attack.attacker;
+    if (decision.reaction === "death" && this.packs?.pack === "rogue" && killer !== null && ["buzzsaw", "Vengeance", "pendulum"].includes(this.game.host.classname(killer))) this.game.host.combat.setHealth(actor, -99);
     if (client === null) {
       const entity = this.game.entity(actor.id), attacker = decision.request.attack.attacker;
       if (decision.reaction !== "death" || entity === null || entity.movement === "none" || entity.movement === "push") return undefined;
@@ -189,10 +204,10 @@ export class Q1SourceComposition {
     const obituaryInput: Parameters<typeof q1Obituary>[0] = { edition: this.game.options.edition, victim: this.obituaryActor(actor.id), attacker: attacker === null ? null : this.obituaryActor(attacker),
       telefragOwner: sourceAttacker?.owner == null ? null : this.obituaryActor(sourceAttacker.owner), teamplay: this.services.cvar("teamplay"),
       deathType: decision.request.attack.cause.kind === "q1" ? decision.request.attack.cause.deathType : decision.request.attack.cause.kind === "environment" && decision.request.attack.cause.hazard === "fall" ? "falling" : "",
-      random: () => this.game.host.random() };
+      random: () => this.game.host.random(), ...this.obituaryVariant() };
     const obituary = this.packs?.obituary(obituaryInput, decision.request.attack.inflictor) ?? q1Obituary(obituaryInput);
     if (obituary.message !== null) this.broadcast(obituary.message.text, obituary.message.arguments);
-    if (this.ctf !== null) this.ctf.death(actor.id, attacker);
+    if (this.ctf !== null) { this.ctf.death(actor.id, attacker); if (obituary.log !== undefined) this.logDeath(actor.id, obituary.log); }
     else {
       if (obituary.score !== null && this.clients.get(obituary.score.actor) !== null) this.clients.addScore(obituary.score.actor, obituary.score.delta);
       if (attacker !== null && this.clients.get(attacker) !== null) this.horde?.teammateKilled(attacker);
@@ -200,18 +215,40 @@ export class Q1SourceComposition {
     if (obituary.achievement !== null) this.game.host.emit({ kind: "achievement", player: obituary.achievement.actor, id: obituary.achievement.id });
     return this.packs?.playerDied(actor.id, attacker);
   }
+  /** log.qc dprint output, one tab-separated line per event. */
+  private logLine(text: string): undefined { return this.services.emit({ kind: "developer-message", text }); }
+  private logDeath(victim: ActorId, log: { readonly what: string; readonly versus: ActorId | null }): undefined {
+    const target = this.clients.get(victim); if (target === null) return undefined;
+    const other = log.versus === null ? null : this.clients.get(log.versus);
+    return this.logLine(`LOG:\tDEATH\t${target.name}\t${Math.trunc(target.frags)}\t${other === null ? "" : `${other.name}\t${Math.trunc(other.frags)}\t`}${log.what}\n`);
+  }
+  private obituaryVariant(): { readonly variant?: "mg" | "ctf" } {
+    if (this.ctf !== null) return { variant: "ctf" };
+    return this.addon?.program === "mg1" || this.addon?.program === "mg3" ? { variant: "mg" } : {};
+  }
   private obituaryActor(actor: ActorId): Q1ObituaryActor {
     const entity = this.game.entity(actor), client = this.clients.get(actor), player = this.game.player(actor), selected = client === null ? null : this.services.selectedPlayer(actor);
     const powers = player?.powerups;
     return { actor, name: client?.name ?? entity?.text("netname") ?? "", classname: client === null ? this.game.host.classname(actor) : "player", isPlayer: client !== null, isMonster: this.isMonster(actor),
       team: client === null ? entity?.number("team") ?? 0 : client.team, health: this.game.health(actor), waterType: selected?.waterType ?? "empty", waterLevel: selected?.waterLevel ?? entity?.waterLevel ?? 0,
       weapon: player?.weapon ?? null, quadExpires: Math.max(0, (powers?.get("quad") ?? 0) - this.game.time), invulnerableExpires: Math.max(0, (powers?.get("invulnerability") ?? 0) - this.game.time),
-      brush: entity?.solid === "bsp", killString: entity?.text("kill_string") ?? "" };
+      brush: entity?.solid === "bsp", killString: entity?.text("killstring") ?? "", aflag: entity?.number("aflag") ?? 0 };
   }
   private broadcast(text: string, args: readonly string[]): undefined { for (const actor of this.game.host.players()) this.game.message(actor, text, false, args); return undefined; }
   private notice(actor: ActorId, event: "connect" | "disconnect" | "suicide" | "exit"): undefined {
     const client = this.clients.require(actor), notice = q1ClientNotice(this.game.options.edition, event, client.name, client.frags);
+    if (this.ctf !== null && (event === "connect" || event === "disconnect")) this.logLine(`LOG:\t${event === "connect" ? "CONNECT" : "DISCONNECT"}\t${client.name}\n`);
     this.broadcast(notice.text, notice.arguments); if (notice.scoreDelta !== 0) this.clients.addScore(actor, notice.scoreDelta); return undefined;
+  }
+  /** QuakeC issued `stuffcmd disconnect`, which took effect after the current think; release only between frames. */
+  private requestDisconnect(actor: ActorId): undefined {
+    if (!this.pendingDisconnects.some(pending => sameActor(pending, actor))) this.pendingDisconnects.push(actor);
+    return undefined;
+  }
+  private flushDisconnects(): undefined {
+    const pending = this.pendingDisconnects.splice(0);
+    for (const actor of pending) if (this.clients.get(actor) !== null) this.disconnect(actor);
+    return undefined;
   }
   disconnect(actor: ActorId): undefined {
     const client = this.clients.require(actor); this.ctf?.disconnectPlayer(actor); this.packs?.playerDied(actor, null); this.notice(actor, "disconnect");
@@ -226,10 +263,23 @@ export class Q1SourceComposition {
     const client = this.clients.require(actor); if (client.respawnRequestedAt < 0) client.respawnRequestedAt = this.game.time;
     const spot = sourceSpot ?? this.selectSpawn(actor, this.game.time >= client.respawnRequestedAt + 5);
     if (spot === null) return undefined;
-    this.services.placePlayer(client.actor, spot, travel); return this.spawned(actor, false);
+    this.services.placePlayer(client.actor, spot, travel); this.spawned(actor, false, spot);
+    if (this.addon !== null && (this.addon.program === "mg1" || this.addon.program === "mg3")) restoreCoopWeapons(this.addon, actor, spot);
+    return undefined;
+  }
+  /** MG1 client.qc SelectSpawnPoint in Horde coop: the first checkpoint with no living player within 72 units, falling back to the ordinary rotation where the source returns no point. */
+  private hordeCoopSpawn(actor: ActorId): Q1Actor | null {
+    const others = this.game.host.players().filter(player => !sameActor(player, actor) && this.game.health(player) > 0);
+    for (const spot of this.game.entities.values()) {
+      if (spot.classname !== "info_player_coop" || !spot.activated) continue;
+      const origin = this.game.body(spot).origin;
+      if (!others.some(player => { const body = this.game.host.bodies.read(player); return body !== null && length(vsub(body.origin, origin)) < 72; })) return spot;
+    }
+    return null;
   }
   selectSpawn(actor: ActorId | null = null, force = false): Q1Actor | null {
     if (actor !== null && this.ctf !== null) return this.ctf.selectSpawn(actor);
+    if (actor !== null && this.game.options.coop && (this.horde?.manager ?? null) !== null) { const free = this.hordeCoopSpawn(actor); if (free !== null) return free; }
     if (actor !== null) { const point = this.packs?.selectSpawn(actor); if (point !== undefined) return point; }
     return this.base.spawnSelector.select(force);
   }
@@ -245,6 +295,7 @@ export class Q1SourceComposition {
   /** The selected inventory calls this for a Q1 source death drop exactly once. */
   dropInventory(actor: OwnedActor): Q1Actor | null {
     if (!this.game.options.coop && this.game.options.deathmatch === 0) return null;
+    if ((this.horde?.manager ?? null) !== null) return null;
     if (this.packs !== null) return this.packs.dropBackpack(actor);
     const body = this.game.host.bodies.read(actor.id); if (body === null) throw new Error("Q1 death drop has no shared body");
     return dropBackpack(this.game, body.origin, { weapon: WEAPONS.find(weapon => this.game.weaponItem(weapon) === this.services.selectedWeapon(actor.id)) ?? this.game.player(actor.id)?.weapon ?? null, shells: this.game.host.inventory.count(actor.id, "q1:ammo/shells"),
@@ -272,7 +323,11 @@ export class Q1SourceComposition {
   characterFrame(actor: ActorId, presentation: Q1CharacterPresentation): undefined { return this.packs?.characterFrame(actor, presentation); }
   suicide(actor: ActorId): undefined {
     if (this.ctf !== null) return this.ctf.suicide(actor);
-    this.notice(actor, "suicide"); return this.requestRespawn(actor);
+    if (this.packs?.suicide(actor) === false) return undefined;
+    this.notice(actor, "suicide");
+    // ClientKill in Horde runs PlayerDie; the post-death respawn request owns the restart logic.
+    if ((this.horde?.manager ?? null) !== null) { this.game.damage(actor, actor, actor, 100000, null, "direct", "suicide", "bypass"); return undefined; }
+    return this.requestRespawn(actor);
   }
 }
 

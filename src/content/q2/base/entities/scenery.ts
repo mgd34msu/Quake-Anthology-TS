@@ -202,7 +202,7 @@ export class Q2BaseScenery {
     entity.skin = 1; entity.effects = 0x20000;
     model(entity, game, "models/objects/dmspot/tris.md2", { min: { x: -32, y: -32, z: -24 }, max: { x: 32, y: 32, z: -16 } }, "box");
     game.host.emit({ kind: "sound", actor: entity.actor.id, origin: game.body(entity).origin,
-      path: "world/amb10.wav", channel: 0, volume: 1, attenuation: 3, reliable: false, loop: "start" });
+      path: "world/amb10.wav", channel: 0, volume: 1, attenuation: game.options.edition === "rerelease" ? 3 : 1, reliable: false, loop: "start" });
     const trigger = game.create("teleporter_trigger"); trigger.target = entity.target; trigger.owner = entity.actor.id; trigger.visible = false;
     game.move(trigger, { origin: game.body(entity).origin, bounds: { min: { x: -8, y: -8, z: 8 }, max: { x: 8, y: 8, z: 24 } } }, false);
     trigger.touch = this.teleporterTouch;

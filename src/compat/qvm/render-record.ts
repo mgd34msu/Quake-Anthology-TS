@@ -57,7 +57,6 @@ export function readQvmRefEntity(view: DataView): SourceRefEntityRecord {
 function readTextRow(view: DataView, offset: number): string {
   let row = "";
   for (let index = 0; index < 32; index++) row += String.fromCharCode(view.getUint8(offset + index));
-  if (!row.includes("\0")) throw new BinaryError("QVM refdef_t", offset, "render text row has no NUL within 32 bytes");
   return row;
 }
 

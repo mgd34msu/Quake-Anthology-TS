@@ -4,6 +4,7 @@ import { applyServerProfile, captureServerProfile, loadServerProfile, readServer
 import type { BoundServerSetting, ServerSettingId, ServerSettingStatus } from "../../settings/server/index.ts";
 import type { NativeUiController } from "../common/controller.ts";
 import { menuRow } from "../common/layout.ts";
+import { buttonControl, wrapWords } from "../common/controls.ts";
 import { settingControl } from "./index.ts";
 import type { SettingsMenus } from "./index.ts";
 import { registerMapRotationMenu } from "./rotation.ts";
@@ -17,20 +18,12 @@ function timing(status: ServerSettingStatus): string {
     : status.applyAt === "next-map" ? "next map" : "server restart";
   return status.pending ? `Pending: applies on ${when}` : status.applyAt === "live" ? "Applies during play" : `Changes apply on ${when}`;
 }
-function lines(text: string): readonly string[] {
-  const result: string[] = []; let line = "";
-  for (const word of text.split(/\s+/)) {
-    if (line.length + word.length > 60) { result.push(line); line = word; }
-    else line += `${line === "" ? "" : " "}${word}`;
-  }
-  if (line !== "") result.push(line); return result;
-}
+const lines = (text: string): readonly string[] => wrapWords(text, 60);
 export function registerServerSettingsMenu(controller: NativeUiController, host: HostServerSettingsUi): SettingsMenus {
   const rotation = registerMapRotationMenu(controller, host.bindings);
   const root = "menu:server:settings", detail = "menu:server:detail", profiles = "menu:server:profiles";
   let page = 0, selected: ServerSettingId | null = null, draft = "", error = "", profileName = "default", profileMessage = "", busy = false;
-  const button = (id: UiControlId, label: string, row: number, activate: () => void, enabled = true): UiControl => ({ id, kind: "button", label,
-    rect: menuRow(row), enabled, visible: true, activate: () => { activate(); return undefined; } });
+  const button = (id: UiControlId, label: string, row: number, activate: () => void, enabled = true): UiControl => buttonControl(id, label, menuRow(row), activate, enabled);
   const info = (id: string, label: string, row: number): UiControl => button(`ui:server:info-${id}`, label, row, () => undefined, false);
   const back = (): UiControl => button("ui:server:back", "Back", 11, () => controller.closeMenu());
   const binding = (): BoundServerSetting | undefined => host.bindings().find(candidate => candidate.definition.id === selected);

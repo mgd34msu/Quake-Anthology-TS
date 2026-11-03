@@ -49,7 +49,9 @@ export function observerFrame(state: CtfState, actor: ActorId): undefined {
   if (speed > maximum) projected = vscale(projected, maximum / speed);
   if (Math.abs(body.angles.x) === 30) projected = { ...projected, z: -projected.z };
   state.writeBody(actor, { velocity: vadd(projected, strafe) });
-  for (const entity of state.game.entities.values()) {
+  // findradius skips SOLID_NOT and chains the highest edict first.
+  for (const entity of [...state.game.entities.values()].reverse()) {
+    if (entity.solid === "none") continue;
     const target = state.game.body(entity), center = vadd(target.origin, vscale(vadd(target.bounds.min, target.bounds.max), 0.5));
     if (length(vsub(center, body.origin)) > 75) continue;
     if (entity.classname === "func_door") { throughDoor(state, actor, entity); break; }

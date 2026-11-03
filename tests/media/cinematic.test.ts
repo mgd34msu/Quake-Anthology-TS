@@ -1,3 +1,4 @@
+import { writeCapture } from "../support/capture.ts";
 import { RawAudioStream } from "../../src/audio/streams.ts";
 import { testCorpusRoot, corpusFile } from "../support/corpus.ts";
 
@@ -18,7 +19,6 @@ import { MaterialCinematic } from "../../src/media/material.ts";
 import { RoqDecoder } from "../../src/media/roq.ts";
 import { RoqPlayback } from "../../src/media/roq-playback.ts";
 import { openMediaFile } from "../../src/media/source.ts";
-import { cinematicTransition } from "../../src/media/transitions.ts";
 import type { CinematicAudio, CinematicEndReason, CinematicFrame, CinematicOptions } from "../../src/media/types.ts";
 
 function shortCin(sampleRate = 22051): Uint8Array {
@@ -89,19 +89,14 @@ test("CIN keeps integer frame and sample boundaries, palette colors, and source 
   playback.close();
 });
 
-test("fullscreen CIN pauses its clock and audio, targets a second seat, and completes its transition once", () => {
+test("fullscreen CIN pauses its clock and audio, targets a second seat, and completes once", () => {
   const identity = createIdentityOwner("media-smoke");
   const seat = identity.seat(1);
   const clock = { time: 0, sample(): number { return this.time; } };
-  const completed: CinematicEndReason[] = [], paused: boolean[] = [], commands: string[] = [];
-  const transition = cinematicTransition(seat, { kind: "q2-nextserver", serverCount: 7 }, {
-    sendClientCommand(target, command) { expect(target.equals(seat)).toBe(true); commands.push(command); },
-    appendCommand() { throw new Error("Unexpected Q3 command"); },
-    leaveCinematic(target) { expect(target.equals(seat)).toBe(true); },
-  });
+  const completed: CinematicEndReason[] = [], paused: boolean[] = [];
   const options: CinematicOptions = { clock, target: { kind: "seat", seat },
     onAudio: () => {}, onAudioReset: () => {}, onAudioPause: value => { paused.push(value); },
-    onComplete(reason) { completed.push(reason); transition(reason); } };
+    onComplete(reason) { completed.push(reason); } };
   const source = cinematicBytes("cin", shortCin());
   expect(cinematicDimensions(source)).toEqual({ width: 2, height: 1 });
   const playback = new CinematicPlayback(source, options);
@@ -121,7 +116,6 @@ test("fullscreen CIN pauses its clock and audio, targets a second seat, and comp
   playback.skip(); playback.skip();
   expect(paused).toEqual([true, false]);
   expect(completed).toEqual(["skipped"]);
-  expect(commands).toEqual(["nextserver 7\n"]);
   expect(fullscreen.close()?.kind).toBe("release-image");
 });
 
@@ -322,8 +316,8 @@ for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) te
         expect(provenance.resource.provenance.mount.identity.content).toBe(content.recipe.presentation.assets);
       }
       if (process.env["QUAKE_SCENE_CAPTURE"] === "1" && (time === 68 || time === 136)) {
-        await Bun.write(`.artifacts/tmp/world-video/${rendererKind}-${time}.png`, encodePng(640, 400, pixels));
-        await Bun.write(`.artifacts/tmp/world-video/${rendererKind}.json`, JSON.stringify({ source: content.recipe.presentation.assets, shader: "textures/proto2/mpteam1",
+        await writeCapture(`world-video/${rendererKind}-${time}.png`, encodePng(640, 400, pixels));
+        await writeCapture(`world-video/${rendererKind}.json`, JSON.stringify({ source: content.recipe.presentation.assets, shader: "textures/proto2/mpteam1",
           movie: "video/mpteam1.roq", camera, center, normal, times: [68, 136], decodedFrames }, null, 2));
       }
     }

@@ -26,6 +26,10 @@ export class QcWords {
     // Sequential stores match the interpreter, including deliberately overlapping words.
     for (let index = 0; index < count; index++) this.setInt(destination + index, from.int(source + index));
   }
+  /** OP_RETURN copies three words from any operand; id's globals continue past the table, so absent words read as zero. */
+  copyReturnWords(from: QcWords, source: number, destination: number, count: number): void {
+    for (let index = 0; index < count; index++) this.setInt(destination + index, source + index < from.length ? from.int(source + index) : 0);
+  }
 }
 export interface QcEntityLayout { readonly strideBytes: number; readonly variablesOffsetBytes: number; readonly fieldWords: number; }
 export class QcEntityMemory {
@@ -85,12 +89,14 @@ export class QcEntityMemory {
     this.bytes.set(bytes);
   }
 }
-interface EngineString { readonly name: string; readonly offset: number; readonly capacity: number; }
+interface EngineString { readonly name: string; offset: number; capacity: number; }
 /** A byte arena keeps string aliases live. QW engine buffers use the source's negative IDs. */
 export class QcStrings {
   private arena: Uint8Array;
   private used: number;
   private engines: EngineString[] = [];
+  private engineIndex = new Map<string, number>();
+  private interned = new Map<string, number>();
   constructor(programStrings: Uint8Array, readonly quakeworld: boolean) {
     this.arena = new Uint8Array(Math.max(4096, programStrings.length));
     this.arena.set(programStrings);
@@ -122,15 +128,27 @@ export class QcStrings {
     this.encode(offset, text.length + 1, text);
     return offset;
   }
+  /** Repeated values share one arena copy, so per-frame callers do not grow the arena. */
+  intern(text: string): number {
+    let offset = this.interned.get(text);
+    if (offset === undefined) { offset = this.allocate(text); this.interned.set(text, offset); }
+    return offset;
+  }
   setEngine(name: string, text: string, capacity = 128): number {
-    let index = this.engines.findIndex(entry => entry.name === name);
+    let index = this.engineIndex.get(name) ?? -1;
     let entry = this.engines[index];
+    if (entry !== undefined && text.length >= entry.capacity) {
+      // A longer value moves to a larger buffer; the old bytes stay valid for aliases taken earlier.
+      entry.capacity = Math.max(text.length + 1, entry.capacity * 2);
+      entry.offset = this.reserve(entry.capacity);
+    }
     if (entry === undefined) {
       if (!Number.isSafeInteger(capacity) || capacity < 1) throw new RangeError("Invalid engine string capacity");
       if (this.quakeworld && this.engines.length >= 1023) throw new QcProgramError("MAX_PRSTR");
       entry = { name, offset: this.reserve(capacity), capacity };
       index = this.engines.length;
       this.engines.push(entry);
+      this.engineIndex.set(name, index);
     }
     this.encode(entry.offset, entry.capacity, text);
     return this.quakeworld ? -index - 1 : entry.offset;
@@ -168,5 +186,7 @@ export class QcStrings {
     }
     if (reader.remaining !== 0) throw new QcProgramError("trailing string checkpoint bytes");
     this.arena = arena; this.used = arena.length; this.engines = entries;
+    this.engineIndex = new Map(entries.map((entry, index) => [entry.name, index]));
+    this.interned.clear();
   }
 }

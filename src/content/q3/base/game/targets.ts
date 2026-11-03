@@ -1,6 +1,6 @@
 import { SaveReader } from "../../../../persistence/value.ts";
 import { readModuleEntity } from "./save-module-values.ts";
-import { requireUseParticipant, useClient, useActor } from "./use-participant.ts";
+import { useClient, useActor } from "./use-participant.ts";
 import type { UseParticipantServices } from "./use-participant.ts";
 import type { UseParticipant } from "./state.ts";
 // Ported from id Software's code/game/g_target.c and the target_push section
@@ -89,8 +89,9 @@ function combatContext(runtime: TargetRuntime): CombatContext {
   return combat;
 }
 
-function requireActivator(_runtime: TargetRuntime, activator: UseParticipant | null): UseParticipant {
-  return requireUseParticipant(activator);
+/** A path_corner fires its targets with no activator; the QVM read a null client from low memory and carried on. */
+function requireActivator(_runtime: TargetRuntime, activator: UseParticipant | null): UseParticipant | null {
+  return activator;
 }
 
 function dispatchTargets(runtime: TargetRuntime, entity: GameEntity, activator: UseParticipant | null): void {
@@ -227,6 +228,7 @@ function useTargetSpeaker(entity: GameEntity, _other: UseParticipant | null, act
   }
   if ((entity.spawnflags & 8) !== 0) {
     const participant = requireActivator(runtime, activator);
+    if (participant === null) return;
     const native = participant instanceof GameEntity ? participant : null;
     if (native !== null) runtime.entities.addEvent(native, EntityEvent.EV_GENERAL_SOUND, entity.noiseIndex);
     else { if (runtime.participants === undefined) throw new Error("Shared target sound requires actor events"); runtime.participants.event(useActor(participant), EntityEvent.EV_GENERAL_SOUND, entity.noiseIndex); }
@@ -389,7 +391,9 @@ function spawnTargetTeleporter(entity: GameEntity, _variables: SpawnVariables, r
 
 function useTargetKill(_entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
   runtime: TargetRuntime): void {
-  damage(combatContext(runtime), requireActivator(runtime, activatorValue), null, null, null, null,
+  const victim = requireActivator(runtime, activatorValue);
+  if (victim === null) return;
+  damage(combatContext(runtime), victim, null, null, null, null,
     100_000, DamageFlags.NO_PROTECTION, MOD_TELEFRAG);
 }
 
@@ -431,10 +435,7 @@ function spawnTargetLocation(entity: GameEntity, _variables: SpawnVariables, run
 
 function useTargetRelay(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null,
   runtime: TargetRuntime): void {
-  if ((entity.spawnflags & 3) !== 0 && activator === null) {
-    throw new Error("Team-filtered target_relay requires an activator");
-  }
-  const player = activator === null ? null : useClient(requireActivator(runtime, activator), runtime.participants);
+  const player = useClient(activator, runtime.participants);
   if ((entity.spawnflags & 1) !== 0 && player !== null && player.client !== null &&
     player.client.sess.sessionTeam !== Team.TEAM_RED) return;
   if ((entity.spawnflags & 2) !== 0 && player !== null && player.client !== null &&

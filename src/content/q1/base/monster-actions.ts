@@ -6,8 +6,10 @@ import type { Q1Actor } from "../foundation/entity.ts";
 import { q1Creatures } from "./creatures.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import { length, normalize, vadd, vscale, vsub, ZERO } from "../foundation/types.ts";
+import { sourceItemStart } from "../foundation/pickups.ts";
 import type { BaseMonster } from "./monsters.ts";
-import { castLightning, createMissile, dropBackpack, launchLaser, launchOgreGrenade, launchSpike, launchVoreBall, launchZombieGrenade, spawnMeatSpray } from "./projectiles.ts";
+import { dogJumpTouch, gruntAction } from "./grunt.ts";
+import { castLightning, createMissile, dropBackpack, launchLaser, launchLaserAlt, launchOgreGrenade, launchSpike, launchVoreBall, launchZombieGrenade, spawnMeatSpray } from "./projectiles.ts";
 
 function meat(monster: BaseMonster, side: number): undefined {
   const axes = monster.makeVectors(), velocity = vscale(axes.right, side === 1 ? (monster.game.host.random() * 2 - 1) * 100 : side);
@@ -27,11 +29,15 @@ function jump(monster: BaseMonster, tar: boolean): undefined {
   entity.touch = game.named.touch(entity, `${monster.source?.callbackPrefix ?? "base"}:monster_jump_touch`); return game.link(entity);
 }
 export function monsterJumpTouch(monster: BaseMonster, other: ActorId): undefined {
+    if (monster.spec.species === "dog") return dogJumpTouch(monster, other);
     const { game, entity } = monster, tar = monster.spec.species === "tarbaby";
     if (game.health(entity.actor.id) <= 0) return undefined;
-    const damageable = game.host.combat.read(other)?.canTakeDamage ?? false;
-    if (damageable && (!tar || game.host.classname(other) !== entity.classname)) {
-      if (length(game.body(entity).velocity) > 400) { game.damage(other, entity.actor.id, entity.actor.id, (tar ? 10 : 40) + 10 * game.host.random()); if (tar) game.sound(entity, "blob/hit1.wav", "weapon"); }
+    const damageable = game.host.combat.read(other)?.canTakeDamage ?? false, gated = (monster.source?.jumpAttackGate === true || sourceItemStart.has(game)) && !tar;
+    if (damageable && (!tar || game.host.classname(other) !== entity.classname) && (!gated || monster.state.attackFinished < game.time)) {
+      if (length(game.body(entity).velocity) > 400) {
+        game.damage(other, entity.actor.id, entity.actor.id, (tar ? 10 : 40) + 10 * game.host.random()); if (tar) game.sound(entity, "blob/hit1.wav", "weapon");
+        if (gated) monster.state.attackFinished = game.time + 0.5;
+      }
     } else if (tar) game.sound(entity, "blob/land1.wav", "weapon");
     if (game.host.checkBottom(entity.actor.id)) {
       entity.touch = null; if (!tar) entity.movement = "step"; monster.nextFrame = tar ? "tbaby_jump1" : "demon1_jump11"; return monster.delay(0.1);
@@ -54,8 +60,9 @@ function hellKnightShot(monster: BaseMonster, offset: number): undefined {
   const { game, entity } = monster, target = monster.target; if (target === null) return undefined;
   const delta = vsub(target, monster.origin); const angle = { x: Math.atan2(delta.z, Math.hypot(delta.x, delta.y)) * 180 / Math.PI, y: Math.atan2(delta.y, delta.x) * 180 / Math.PI + offset * 6, z: 0 };
   const forward = game.makeVectors(angle).forward, body = game.body(entity);
-  const origin = vadd(vadd(monster.origin, vscale(vadd(body.bounds.min, body.bounds.max), 0.5)), vscale(forward, 20));
-  const direction = normalize(forward); launchSpike(game, entity.actor.id, origin, vscale({ ...direction, z: -direction.z + (game.host.random() - 0.5) * 0.1 }, 300), "knight");
+  const centre = vscale(vadd(body.bounds.min, body.bounds.max), 0.5), muzzle = entity.number("infected") !== 0 ? { ...centre, z: body.bounds.min.z + 28 } : centre;
+  const origin = vadd(vadd(monster.origin, muzzle), vscale(forward, 20));
+  const direction = normalize(forward); launchSpike(game, entity.actor.id, origin, vscale({ ...direction, z: -direction.z + (game.host.random() - 0.5) * 0.1 }, game.sourceBloodyNightmare?.() === true ? 500 : 300), "knight");
   return game.sound(entity, "hknight/attack1.wav", "weapon");
 }
 export function wizardFastFire(game: Q1EntityServices, timer: Q1Actor): undefined {
@@ -66,6 +73,15 @@ export function wizardFastFire(game: Q1EntityServices, timer: Q1Actor): undefine
     game.makeVectors(game.options.edition === "rerelease" ? { ...target.angles, x: -target.angles.x } : target.angles);
     const direction = normalize(vsub(vsub(target.origin, vscale(shot.right, 13)), origin));
     game.sound(timer, "wizard/wattack.wav", "weapon"); launchSpike(game, owner, origin, vscale(direction, 600), "wizard");
+    if (game.sourceBloodyNightmare?.() === true) {
+      const basis = game.basis;
+      for (let remaining = Math.floor(game.host.random() * 2 + 0.5); remaining > 0; remaining--) {
+        let side = 0.05 + game.host.random() * 0.05; if (game.host.random() > 0.5) side = -side;
+        let lift = 0.01 + game.host.random() * 0.01; if (game.host.random() > 0.5) lift = -lift;
+        const spread = normalize(vadd(vadd(vscale(direction, 0.9), vscale(basis.right, side)), vscale(basis.up, lift)));
+        launchSpike(game, owner, origin, vscale(spread, 600 - (5 * remaining + game.host.random() * 50)), "wizard2");
+      }
+    }
   }
   return game.remove(timer);
 }
@@ -96,6 +112,7 @@ const knightOffsets: ReadonlyMap<string, number> = new Map([
 
 export function monsterAction(monster: BaseMonster, name: string): undefined {
   const { game, entity, state } = monster;
+  if (gruntAction(monster, name)) return undefined;
   const knightOffset = knightOffsets.get(name); if (knightOffset !== undefined) return hellKnightShot(monster, knightOffset);
   if (name.startsWith("boss_idle") || name.startsWith("boss_missile")) {
     if (name === "boss_idle1" && monster.enemy !== null && game.health(monster.enemy) > 0) return monster.play("boss_missile1");
@@ -108,7 +125,13 @@ export function monsterAction(monster: BaseMonster, name: string): undefined {
     case "enf_atk6": case "enf_atk10": {
       const target = monster.target; if (target === null) return undefined; const axes = monster.makeVectors();
       game.effect("muzzleflash", monster.origin, entity.actor.id); game.sound(entity, "enforcer/enfire.wav", "weapon");
-      launchLaser(game, entity.actor.id, vadd(monster.origin, vadd(vscale(axes.forward, 30), vadd(vscale(axes.right, 8.5), { x: 0, y: 0, z: 16 }))), vsub(target, monster.origin)); return undefined;
+      const muzzle = vadd(monster.origin, vadd(vscale(axes.forward, 30), vadd(vscale(axes.right, 8.5), { x: 0, y: 0, z: 16 })));
+      launchLaser(game, entity.actor.id, muzzle, vsub(target, monster.origin));
+      if (game.sourceBloodyNightmare?.() === true) {
+        const side = entity.number("ammo_shells") !== 0 ? 0.05 : -0.05;
+        launchLaserAlt(game, entity.actor.id, muzzle, vadd(normalize(vsub(target, monster.origin)), vscale(axes.right, side))); entity.fields.set("ammo_shells", String(1 - entity.number("ammo_shells")));
+      }
+      return undefined;
     }
     case "enf_atk14": if (game.options.skill === 3 && !state.refired && monster.visible()) { state.refired = true; monster.nextFrame = "enf_atk1"; } return undefined;
     case "enf_die3": case "enf_fdie3": dropBackpack(game, monster.origin, { weapon: null, shells: 0, nails: 0, rockets: 0, cells: 5 }); return undefined;

@@ -222,7 +222,7 @@ test("power reservations reject ownership and unsupported primary stages before 
   world.authority.rebind(world.target, world.binding);
   const pending = world.authority.reserveProtection(world.target, "powered", power);
   world.actors.release(world.target);
-  expect(() => pending.bind(power)).toThrow(); pending.close(); world.actors.close();
+  expect(() => pending.bind(power)).toThrow("Stale or foreign actor authority"); pending.close(); world.actors.close();
 });
 
 test("whole armor writes validate both owners before changing either layer", () => {
@@ -292,7 +292,7 @@ test("powered writes preserve nested regular changes and stop pending stores aft
   world.authority.setPoweredProtection(world.target, { kind: "shield", cells: 6 });
   expect(world.authority.read(world.target.id)?.armor.regular).toEqual({ ...regular, points: 80 });
   retire = true;
-  expect(() => world.authority.setArmor(world.target, { regular: { ...regular, points: 50 }, powered: { kind: "shield", cells: 5 } })).toThrow();
+  expect(() => world.authority.setArmor(world.target, { regular: { ...regular, points: 50 }, powered: { kind: "shield", cells: 5 } })).toThrow("Stale or foreign actor authority");
   expect(world.primary().armor.regular).toEqual({ ...regular, points: 80 });
   world.actors.close();
 });

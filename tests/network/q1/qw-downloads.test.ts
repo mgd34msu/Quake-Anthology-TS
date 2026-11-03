@@ -45,7 +45,8 @@ test('QW noskins and demo restrictions avoid new transfers but retain installed 
 
 test('QW denial cancellation invalid paths and publication conflicts retain contained state', async () => {
   const f=fixture();try {
-    for(const path of ['../maps/a.bsp','/maps/a.bsp','maps/a.bsp;quit','skins/a.pcx'])await expect(f.receiver.request(path,'model')).rejects.toThrow();
+    const invalidPaths: readonly (readonly [string, string])[] = [['../maps/a.bsp','File path must be relative'],['/maps/a.bsp','File path must be relative'],['maps/a.bsp;quit','Invalid QuakeWorld download path'],['skins/a.pcx','Invalid QuakeWorld download path']];
+    for(const [path,message] of invalidPaths)await expect(f.receiver.request(path,'model')).rejects.toThrow(message);
     expect(await f.receiver.request('maps/a.bsp','model')).toBe('waiting');
     expect(await f.receiver.receive({kind:'missing'})).toBe('missing');
     await f.receiver.request('maps/a.bsp','model');await f.receiver.receive({kind:'data',percent:20,bytes:new Uint8Array([1])});f.receiver.close();
@@ -55,7 +56,7 @@ test('QW denial cancellation invalid paths and publication conflicts retain cont
     expect(await f.receiver.receive({kind:'data',percent:100,bytes:new Uint8Array([2])})).toBe('missing');
     expect(await Bun.file(join(f.gameRoot,'maps/a.bsp')).bytes()).toEqual(new Uint8Array([9]));expect(readdirSync(join(f.gameRoot,'maps'))).toEqual(['a.bsp']);
     await f.receiver.request('maps/b.bsp','model');expect(await f.receiver.receive({kind:'data',percent:100,bytes:new Uint8Array(11)})).toBe('missing');
-    await f.receiver.request('maps/c.bsp','model');await expect(f.receiver.receive({kind:'data',percent:101,bytes:new Uint8Array([1])})).rejects.toThrow();
+    await f.receiver.request('maps/c.bsp','model');await expect(f.receiver.receive({kind:'data',percent:101,bytes:new Uint8Array([1])})).rejects.toThrow("Invalid QuakeWorld download block");
     expect(readdirSync(join(f.gameRoot,'maps'))).toEqual(['a.bsp']);
   } finally {f.close();}
 });

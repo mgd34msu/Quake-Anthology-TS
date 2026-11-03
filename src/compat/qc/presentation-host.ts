@@ -17,6 +17,7 @@ import type { ContentId, ResolvedResourceReference } from "../../contracts/conte
 import type { Q1Event, Q1SoundChannel } from "../../content/q1/foundation/types.ts";
 import type { QcHostBuiltinName } from "./builtins.ts";
 import type { QcBuiltin } from "./machine.ts";
+import { encodeLocalizationKey, plainLocalizationText } from "../../text/localization-key.ts";
 import type { QcWorldHost } from "./world-host.ts";
 
 export type QcPresentationWorld = Pick<QcWorldHost, "host" | "actor"> & {
@@ -123,18 +124,27 @@ export function createQcPresentationBindings(world: QcPresentationWorld, service
     install(name, vm => { vm.returnFloat(0); });
   const qw = world.options.program.api.kind === "q1-quakeworld" ? services.qw : undefined;
   if (world.options.program.api.kind === "q1-quakeworld" && qw === undefined) throw new Error("QuakeWorld presentation requires routed message services");
-  const bprintBuiltin: QcBuiltin = vm => {
-    if (services.broadcastPrint !== undefined) return services.broadcastPrint(vm.varString(qw === undefined ? 0 : 1), qw === undefined ? 2 : Math.trunc(vm.argFloat(0)));
-    if (qw === undefined) { const text = vm.varString(0); services.print(text); if (services.printBroadcastsToClients !== true) services.nq?.route([{ kind: "print", text }], { kind: "broadcast", reliable: true }); }
+  /** ex_* prints pass `$key, arguments...`; the plain family concatenates every argument. */
+  const printText = (vm: Parameters<QcBuiltin>[0], first: number, keyed: boolean): string => {
+    if (!keyed || first + 1 >= vm.argc) return vm.varString(first);
+    const key = vm.argString(first);
+    if (!key.startsWith("$")) return vm.varString(first);
+    const args: string[] = [];
+    for (let index = first + 1; index < vm.argc; index++) args.push(vm.argString(index));
+    return encodeLocalizationKey(key, args);
+  };
+  const bprintBuiltin = (keyed: boolean): QcBuiltin => vm => {
+    if (services.broadcastPrint !== undefined) return services.broadcastPrint(printText(vm, qw === undefined ? 0 : 1, keyed), qw === undefined ? 2 : Math.trunc(vm.argFloat(0)));
+    if (qw === undefined) { const text = printText(vm, 0, keyed); services.print(plainLocalizationText(text)); if (services.printBroadcastsToClients !== true) services.nq?.route([{ kind: "print", text }], { kind: "broadcast", reliable: true }); }
     else {
-      const text = vm.varString(1); services.print(text);
+      const text = printText(vm, 1, keyed); services.print(plainLocalizationText(text));
       if (services.printBroadcastsToClients !== true) qw.route([{ message: { kind: "print", level: Math.trunc(vm.argFloat(0)), text }, actor: null }], { kind: "broadcast", reliable: true });
     }
   };
-  install("bprint", bprintBuiltin);
+  install("bprint", bprintBuiltin(false));
   // Rerelease gamecode prints through the named ex_* family; routing and
   // localization downstream are the same channels as the classic prints.
-  install("ex_bprint", bprintBuiltin);
+  install("ex_bprint", bprintBuiltin(true));
   install("localcmd", vm => { emit({ kind: "server-command", text: vm.argString(0) }); });
   install("makestatic", vm => {
     const words = vm.entities.fromReference(vm.argInt(0));
@@ -154,14 +164,17 @@ export function createQcPresentationBindings(world: QcPresentationWorld, service
   if (message !== undefined || qw !== undefined) {
     for (const name of ["sprint", "centerprint", "stuffcmd", "ex_sprint", "ex_centerprint"] satisfies readonly QcHostBuiltinName[]) install(name, vm => {
       const center = name === "centerprint" || name === "ex_centerprint";
-      const actor = world.actor(vm.entities.slot(vm.argInt(0))), text = vm.varString(qw !== undefined && name === "sprint" ? 2 : 1);
+      const actor = world.actor(vm.entities.slot(vm.argInt(0))), text = printText(vm, qw !== undefined && name === "sprint" ? 2 : 1, name === "ex_sprint" || name === "ex_centerprint");
       if (qw !== undefined) {
         if (!qw.client(actor.id)) { services.print(`tried to ${name} to a non-client\n`); return; }
         return qw.route([{ message: name === "sprint" || name === "ex_sprint" ? { kind: "print", level: name === "sprint" ? Math.trunc(vm.argFloat(1)) : 2, text }
           : center ? { kind: "center-print", text } : { kind: "stufftext", text }, actor: actor.id }], { kind: "client", actor: actor.id, reliable: true });
       }
       if (services.nq !== undefined) {
-        if (!services.nq.client(actor.id)) return vm.fail("Client message addressed a non-client");
+        if (!services.nq.client(actor.id)) {
+          if (name === "stuffcmd") return vm.fail("Client message addressed a non-client");
+          services.print(`tried to ${center ? "centerprint" : "sprint"} to a non-client\n`); return;
+        }
         return services.nq.route([{ kind: name === "sprint" || name === "ex_sprint" ? "print" : center ? "center-print" : "stufftext", text }], { kind: "client", actor: actor.id, reliable: true });
       }
       if (message === undefined) return vm.fail("Missing client message service");
@@ -268,7 +281,7 @@ export class QcBroadcastMessages {
   private signonBuffers = 1;
   private readonly qwDecoder = new QuakeWorldDecoder();
   private readonly routedBuffers = new Map<string, { readonly buffer: SizeBuf; readonly owners: Map<number, ActorId | null>; readonly destination: QcMessageDestination | null }>();
-  constructor(world: QcMessageWorld, private readonly emit: (effect: QcBroadcastEvent, recipient?: ActorId) => undefined, private readonly qw?: QcQuakeWorldMessageServices, private readonly nq?: QcNetQuakeMessageServices) {
+  constructor(world: QcMessageWorld, private readonly emit: (effect: QcBroadcastEvent, recipient?: ActorId) => undefined, private readonly qw?: QcQuakeWorldMessageServices, private readonly nq?: QcNetQuakeMessageServices, private readonly dropped?: (text: string) => undefined) {
     this.decoder = new NetQuakeDecoder({ kind: "q1-netquake", version: 15 }, nq?.messageDialect ?? "known-retail");
     const isQw = world.options.program.api.kind === "q1-quakeworld";
     if (isQw && qw === undefined) throw new Error("QuakeWorld messages require routed message services");
@@ -426,18 +439,25 @@ export class QcBroadcastMessages {
     return undefined;
   }
   bytes(): Uint8Array { return this.buffer.bytes(); }
+  /** A malformed or unsupported message is dropped and reported; it must not stay queued to fail every later flush. */
   flush(): undefined {
     if (this.qw !== undefined || this.nq !== undefined) {
       for (const [key, entry] of this.routedBuffers) {
-        if (entry.destination === null) continue;
-        // QW SV_SendClientMessages discards the entire overflowed broadcast datagram.
-        if (!entry.buffer.overflowed) this.routeBuffer(entry, entry.destination);
+        const destination = entry.destination;
+        if (destination === null) continue;
         this.routedBuffers.delete(key);
+        // QW SV_SendClientMessages discards the entire overflowed broadcast datagram.
+        if (!entry.buffer.overflowed) this.routeDropping(() => this.routeBuffer(entry, destination));
       }
       return undefined;
     }
-    this.emitNetQuakeEffects(this.decoder.decode(this.buffer.bytes()), this.owners, this.buffer.maxsize, false);
-    this.buffer.clear(); this.owners.clear(); return undefined;
+    const bytes = this.buffer.bytes(), owners = new Map(this.owners), maximum = this.buffer.maxsize;
+    this.buffer.clear(); this.owners.clear();
+    this.routeDropping(() => this.emitNetQuakeEffects(this.decoder.decode(bytes), owners, maximum, false));
+    return undefined;
+  }
+  private routeDropping(route: () => void): void {
+    try { route(); } catch (error) { this.dropped?.(`Dropped QC message: ${error instanceof Error ? error.message : String(error)}\n`); }
   }
   private emitNetQuakeEffects(messages: readonly NetQuakeMessage[], owners: ReadonlyMap<number, ActorId | null>, maximum: number, routed: boolean, recipient?: ActorId): void {
     const encoded = new SizeBuf(maximum);

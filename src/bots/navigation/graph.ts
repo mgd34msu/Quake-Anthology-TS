@@ -11,6 +11,13 @@ const aasModes: readonly TravelMode[] = ["unknown", "unknown", "walk", "crouch",
 const kexModes: readonly TravelMode[] = ["walk", "jump", "teleport", "drop", "jump-pad", "jump", "mover", "mover", "jump", "crouch", "ladder", "jump", "jump", "rocket-jump", "unknown"];
 export function aasTravelMode(type: number): TravelMode { return aasModes[type & 0xffffff] ?? "unknown"; }
 export function kexTravelMode(type: number): TravelMode { return kexModes[type] ?? "unknown"; }
+/** Source travel type numbers that code outside the mode tables has to name. */
+export const AAS_TRAVEL_BARRIERJUMP = 4;
+export const KEX_TRAVEL_BARRIER_JUMP = 5, KEX_TRAVEL_ELEVATOR = 6, KEX_TRAVEL_TRAIN = 7;
+/** AAS numbers barrier jumps 4 and jumps 5; the Kex NAV tables number them the other way round. */
+export function navigationEdgeIsBarrierJump(edge: Pick<NavigationEdge, "source" | "sourceTravelType">): boolean {
+  return edge.sourceTravelType === (edge.source.kind === "aas" ? AAS_TRAVEL_BARRIERJUMP : KEX_TRAVEL_BARRIER_JUMP);
+}
 /** Source travel flags preserve the unused bit between LADDER and WALKOFFLEDGE. */
 export function aasTravelFlag(type: number): number {
   const index = type & 0xffffff;

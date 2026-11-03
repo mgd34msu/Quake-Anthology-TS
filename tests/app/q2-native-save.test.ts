@@ -18,6 +18,6 @@ test("API2023 checkpoint retains native JSON and projections under exact module 
   expect(() => decodeQ2RereleaseNativeSave(checkpoint, { ...save, module: { ...save.module, digest: createContentDigest("34".repeat(32)) } })).toThrow("selected module");
   expect(() => decodeQ2RereleaseNativeSave({ ...checkpoint, schema: "q2:classic-native-original" }, save)).toThrow("provider");
   expect(() => encodeQ2RereleaseNativeSave({ ...save, server: { ...save.server, configstrings: [{ index: 1, value: "a" }, { index: 1, value: "b" }] } })).toThrow("Duplicate");
-  expect(() => encodeQ2RereleaseNativeSave({ ...save, game: { ...source, native: new TextEncoder().encode("broken") } })).toThrow();
+  expect(() => encodeQ2RereleaseNativeSave({ ...save, game: { ...source, native: new TextEncoder().encode("broken") } })).toThrow("JSON Parse error: Unexpected identifier \"broken\"");
   expect(() => encodeQ2RereleaseNativeSave({ ...save, visitedLevels: [{ version: 1, map: save.map, level: source, configstrings: [], portals: [] }] })).toThrow("visited");
 });

@@ -3,7 +3,7 @@ import type { InventoryEntry } from "../../../contracts/gameplay.ts";
 import type { OwnedActor } from "../../../contracts/identity.ts";
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import { weaponItem } from "../foundation/types.ts";
-import { admitQ1Travel, captureQ1Travel, newQ1Travel } from "../base/travel.ts";
+import { admitQ1Travel, captureQ1Travel, captureQ1TravelExtensions, newQ1Travel } from "../base/travel.ts";
 import type { Q1TravelState } from "../base/travel.ts";
 import { missionWeapons } from "./types.ts";
 import type { Q1MissionPack } from "./types.ts";
@@ -25,7 +25,7 @@ export function newMissionPackTravel(game: Q1EntityServices, pack: Q1MissionPack
     { ...base, inventory, armor: { ...base.armor, regular: { kind: "q1", points: 50, absorption: 0.3, item: "q1:armor/green" } } } : { ...base, inventory };
 }
 export function captureMissionPackTravel(game: Q1EntityServices, actor: OwnedActor, pack: Q1MissionPack): Q1TravelState {
-  if (game.health(actor.id) <= 0 || game.options.edition === "rerelease" && game.options.deathmatch !== 0 || pack === "rogue" && (game.options.teamplay ?? 0) >= 4) return newMissionPackTravel(game, pack);
+  if (game.health(actor.id) <= 0 || game.options.edition === "rerelease" && game.options.deathmatch !== 0 || pack === "rogue" && (game.options.teamplay ?? 0) >= 4) return { ...newMissionPackTravel(game, pack), extensions: captureQ1TravelExtensions(game, actor) };
   const player = game.player(actor.id);
   return captureQ1Travel(game, actor, player?.weapon ?? "shotgun", game.options.edition === "classic" ? 100 : player?.maxHealth ?? 100, { resetInDeathmatch: game.options.edition === "rerelease" });
 }

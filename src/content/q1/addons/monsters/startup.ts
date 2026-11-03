@@ -6,8 +6,9 @@ import type { BaseMonster } from "../../base/monsters.ts";
 import { vadd, vsub, yawFor } from "../../foundation/types.ts";
 import type { Q1AddonContext } from "../context.ts";
 import { callbackName } from "../../foundation/callbacks.ts";
+import { spawnTeledeath, spawnTeleportFog } from "../../foundation/spawns.ts";
 
-const small = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 40 } };
+const small = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
 const large = { min: { x: -32, y: -32, z: -24 }, max: { x: 32, y: 32, z: 64 } };
 const startNames = new WeakMap<Q1EntityServices, Set<string>>();
 function prefix(monster: BaseMonster): string { return monster.source?.callbackPrefix ?? "base"; }
@@ -36,9 +37,8 @@ export function startMg3Monster(monster: BaseMonster, context: Q1AddonContext): 
   }
   game.host.walkMove(entity.actor, 0, 0);
   if ((entity.spawnflags & 4) !== 0) {
-    const death = game.create("teledeath"); death.owner = entity.actor.id; death.solid = "trigger"; death.touch = game.named.touch(death, "tdeath_touch");
-    game.setBody(death, { origin: monster.origin, bounds: { min: vsub(bounds.min, { x: 1, y: 1, z: 1 }), max: vadd(bounds.max, { x: 1, y: 1, z: 1 }) } }); game.link(death);
-    game.schedule(death, 0.2, game.named.action(death, "SUB_Remove")); if ((entity.spawnflags & 16) !== 0) game.effect("teleport", monster.origin);
+    spawnTeledeath(game, monster.origin, entity.actor.id);
+    if ((entity.spawnflags & 16) !== 0) spawnTeleportFog(game, monster.origin);
   }
   entity.aimedDamage = true; entity.damageable = true; entity.idealYaw = game.body(entity).angles.y; entity.yawSpeed ||= 20;
   context.setVector(entity, "view_ofs", { x: 0, y: 0, z: 25 }); entity.use = game.named.use(entity, `${name}:monster_use`);
@@ -71,7 +71,7 @@ export function registerMg3MonsterStartup(game: Q1EntityServices, name: string, 
   let names = startNames.get(game); if (names === undefined) { names = new Set<string>(); startNames.set(game, names); } names.add(`${name}:start`);
   game.named.register(`${name}:start`, { use: (_game, entity, _other, activator) => { entity.activator = activator; return monster(entity).start(); } });
   game.named.register(`${name}:walk`, { use: (_game, entity) => {
-    const value = monster(entity); if (game.health(entity.actor.id) <= 0 || value.enemy !== null) { entity.use = null; return undefined; }
+    const value = monster(entity); if (!name.startsWith("mg1:") && (game.health(entity.actor.id) <= 0 || value.enemy !== null)) { entity.use = null; return undefined; }
     entity.use = game.named.use(entity, `${name}:monster_use`); value.state.pauseUntil = 0; return value.play(value.spec.walk);
   } });
   return undefined;

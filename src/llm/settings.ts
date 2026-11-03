@@ -3,7 +3,7 @@ import { requestChatCompletions, requestOpenAiResponses } from "./api.ts";
 import { requestCodex } from "./codex.ts";
 import { checkRequestAbort, withRequestAbort, type LlmRequestInput, type LlmRequestOptions, type TransportRequest } from "./request.ts";
 import { LlmHttpError, LlmSettingsError } from "./errors.ts";
-import { mkdir, open, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rm } from "node:fs/promises";
 import { renameSync } from "node:fs";
 import { resolve } from "node:path";
 import { checkAbort, loginSubscription, parseSubscription, record, refreshSubscription, type SubscriptionAuthOptions, type SubscriptionCredential } from "./auth.ts";
@@ -75,7 +75,7 @@ export class LlmSettingsService {
   private readonly auth: SubscriptionAuthOptions;
   private readonly requestOptions: LlmRequestOptions;
   private readonly requests = new Map<AbortController, Promise<unknown>>();
-  private refreshing: { readonly controller: AbortController; readonly promise: Promise<SubscriptionCredential>; users: number } | null = null;
+  private refreshing: { readonly controller: AbortController; readonly promise: Promise<SubscriptionCredential> } | null = null;
   private preferences: Preferences = parsePreferences(null);
   private chatgpt: ChatgptCredentials = parseChatgpt(null);
   private otherKey: string | null = null;
@@ -119,11 +119,25 @@ export class LlmSettingsService {
       catalogs: { "chatgpt-subscription": this.copyCatalog("chatgpt-subscription"), "chatgpt-api": this.copyCatalog("chatgpt-api"), "other-api": this.copyCatalog("other-api") }, providers, subscriptionAuth: { ...this.authState }, errors: Array.from(this.errors, ([file, message]) => ({ file, message })) };
   }
   private async load(name: string): Promise<string | null> {
-    try { return await readFile(resolve(this.baseDirectory, name), "utf8"); }
+    try {
+      const path = resolve(this.baseDirectory, name), text = await readFile(path, "utf8");
+      // Credentials copied in by older versions may be group- or world-readable.
+      await chmod(path, 0o600).catch(() => undefined);
+      return text;
+    }
     catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
       throw new LlmSettingsError(`Could not read ${name}.`);
     }
+  }
+  /** Explicit preference changes and credential removal replace a malformed file with defaults; saving a new credential still refuses to overwrite one. */
+  private async editablePreferences(): Promise<Preferences> {
+    const text = await this.load("llm.json");
+    try { return parsePreferences(text); } catch { return parsePreferences(null); }
+  }
+  private async editableCredentials(): Promise<ReturnType<typeof parseChatgpt>> {
+    const text = await this.load("chatgpt.key");
+    try { return parseChatgpt(text); } catch { return parseChatgpt(null); }
   }
   private async write(name: string, text: string, signal?: AbortSignal): Promise<void> {
     const target = resolve(this.baseDirectory, name), temporary = `${target}.${crypto.randomUUID()}.tmp`;
@@ -147,7 +161,7 @@ export class LlmSettingsService {
   selectProvider(selected: LlmProvider): Promise<void> {
     if (selected !== "chatgpt-subscription") this.cancelSignIn();
     return this.mutate(async () => {
-      const current = parsePreferences(await this.load("llm.json"));
+      const current = await this.editablePreferences();
       const next = { ...current, provider: provider(selected) };
       await this.write("llm.json", JSON.stringify(next) + "\n"); this.preferences = next;
       if (current.provider !== next.provider) this.session.invalidate();
@@ -166,7 +180,7 @@ export class LlmSettingsService {
   }
   setModel(selected: LlmProvider, value: string): Promise<void> {
     return this.mutate(async () => {
-      const name = model(value), current = parsePreferences(await this.load("llm.json"));
+      const name = model(value), current = await this.editablePreferences();
       if (this.catalogs[selected].status === "ready" && !this.catalogs[selected].models.some(item => item.id === name)) throw new LlmSettingsError("Choose a model from the loaded provider list.");
       const metadata = this.modelMetadata(selected, name), effort = current.reasoningEfforts[selected];
       // Only an explicit user choice is stored; never persist the provider's default as if chosen.
@@ -184,7 +198,7 @@ export class LlmSettingsService {
   }
   setReasoningEffort(selected: LlmProvider, value: string | null): Promise<void> {
     return this.mutate(async () => {
-      const effort = parseReasoningEffort(value), current = parsePreferences(await this.load("llm.json"));
+      const effort = parseReasoningEffort(value), current = await this.editablePreferences();
       const name = selected === "other-api" ? this.other.model : current.models[selected];
       if (effort !== null && !this.modelMetadata(selected, name)?.reasoningEfforts.includes(effort)) throw new LlmSettingsError("Choose a reasoning effort supported by the selected model.");
       const next = { ...current, reasoningEfforts: { ...current.reasoningEfforts, [selected]: effort } };
@@ -200,7 +214,7 @@ export class LlmSettingsService {
       await this.write("other.service", JSON.stringify(next) + "\n"); this.other = next;
       if (connectionChanged) this.invalidateCatalog("other-api");
       if (connectionChanged || modelChanged) {
-        const current = parsePreferences(await this.load("llm.json"));
+        const current = await this.editablePreferences();
         const metadata = this.modelMetadata("other-api", next.model), previousEffort = current.reasoningEfforts["other-api"];
         const effort = previousEffort !== null && metadata?.reasoningEfforts.includes(previousEffort) ? previousEffort : null;
         const preferences = { ...current, reasoningEfforts: { ...current.reasoningEfforts, "other-api": effort } };
@@ -236,7 +250,7 @@ export class LlmSettingsService {
       await this.mutate(async () => {
         if (this.catalogGenerations.get(selected) !== generation) return;
         checkRequestAbort(signal);
-        const current = parsePreferences(await this.load("llm.json"));
+        const current = await this.editablePreferences();
         const name = selected === "other-api" ? this.other.model : current.models[selected];
         const selectedModel = models.find(item => item.id === name) ?? (name === "" ? models.find(item => item.recommended) : undefined);
         const defaultModel = name === "" ? selectedModel : undefined;
@@ -279,7 +293,7 @@ export class LlmSettingsService {
         this.otherKey = null;
         this.errors.delete("other.key");
       } else {
-        const current = parseChatgpt(await this.load("chatgpt.key"));
+        const current = await this.editableCredentials();
         const next: ChatgptCredentials = selected === "chatgpt-api" ? { ...current, apiKey: null } : { ...current, subscription: null };
         await this.write("chatgpt.key", JSON.stringify(next) + "\n"); this.chatgpt = next;
       }
@@ -341,7 +355,9 @@ export class LlmSettingsService {
       return await this.freshSubscription(signal, rejectedAccessToken);
     }
     if (shared === null) {
+      // The token exchange outlives caller cancellation: the provider may already have rotated the refresh token, so the result must be saved.
       const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.requestOptions.timeoutMs ?? 120_000);
       const promise = (async () => {
         const before = await this.loadSubscription();
         checkRequestAbort(controller.signal);
@@ -358,13 +374,11 @@ export class LlmSettingsService {
           this.chatgpt = next;
           return refreshed;
         });
-      })().finally(() => { if (this.refreshing?.controller === controller) this.refreshing = null; });
-      shared = { controller, promise, users: 0 };
+      })().finally(() => { clearTimeout(timer); if (this.refreshing?.controller === controller) this.refreshing = null; });
+      shared = { controller, promise };
       this.refreshing = shared;
     }
-    shared.users++;
-    try { return await withRequestAbort(shared.promise, signal); }
-    finally { shared.users--; if (shared.users === 0) shared.controller.abort(); }
+    return await withRequestAbort(shared.promise, signal);
   }
   private runRequest<T>(run: (signal: AbortSignal) => Promise<T>, caller?: AbortSignal, timeoutMs = this.requestOptions.timeoutMs ?? 120_000): Promise<T> {
     if (caller?.aborted) return Promise.reject(new LlmSettingsError("LLM request cancelled."));

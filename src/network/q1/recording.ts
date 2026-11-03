@@ -13,7 +13,9 @@ export class NetQuakeRecordingState {
     for (const message of messages) {
       switch (message.kind) {
         case 'server-info': this.info = message; this.statics.length = 0; this.fields.clear(); break;
-        case 'static': case 'static-sound': this.statics.push(message); break;
+        case 'static': case 'static-sound':
+          if (this.statics.length >= 4096) throw new Error('Too many static entities');
+          this.statics.push(message); break;
         case 'baseline': this.fields.set(`baseline:${message.state.number}`, message); break;
         case 'name': case 'social': case 'player-info': case 'frags': case 'colors': case 'ping':
           this.fields.set(`${message.kind}:${message.slot}`, message); break;

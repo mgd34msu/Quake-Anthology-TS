@@ -23,8 +23,8 @@ try {
       const url = new URL(request.url);
       if (url.pathname !== "/auth/callback") return new Response("Not found", { status: 404 });
       if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
+      // A stray request must not cancel the sign-in; keep waiting for the real callback.
       if (url.searchParams.get("state") !== expectedState) {
-        port.postMessage({ kind: "state-mismatch" });
         return new Response("Sign-in failed. State mismatch.", { status: 400 });
       }
       const code = url.searchParams.get("code");

@@ -1,12 +1,11 @@
 // Download windows adapted from Quake III sv_client.c. GPL-2.0-or-later.
-import { closeSync, constants, fstatSync, linkSync, openSync, readSync, unlinkSync, writeSync } from "node:fs";
-import { openContainedParent } from "../../platform/files/contained.ts";
-export { containedFileParts as downloadPath } from "../../platform/files/contained.ts";
+import { closeSync, constants, fstatSync, linkSync, openSync, readFileSync, readSync, unlinkSync, writeSync } from "node:fs";
+import { openContainedParent } from "../../core/files/contained.ts";
+export { containedFileParts as downloadPath } from "../../core/files/contained.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { Hash } from "node:crypto";
 import type { ContentDigest } from "../../contracts/content.ts";
 import { createContentDigest } from "../../contracts/content.ts";
-import { isReadableStream } from "../common/value.ts";
 
 export interface DownloadSource {
   readonly byteLength: number;
@@ -53,8 +52,29 @@ export class DownloadSink {
   private count = 0;
   private ended = false;
   private inspecting = false;
+  private suspended = false;
+  /** Bytes already staged and hash-verified when the sink continues an interrupted download. */
+  readonly resumedFrom: number;
   private constructor(private readonly parent: number, private readonly descriptor: number, private readonly temporary: string,
-    private readonly target: string, readonly expected: DownloadExpectation | ProtocolDownloadExpectation, private readonly mode: DownloadWriteMode) {}
+    private readonly target: string, readonly expected: DownloadExpectation | ProtocolDownloadExpectation, private readonly mode: DownloadWriteMode,
+    private readonly resumable = false, seed: { readonly hash: Hash; readonly count: number } | null = null) {
+    if (seed !== null) { this.hash = seed.hash; this.count = seed.count; }
+    this.resumedFrom = this.count;
+  }
+  /**
+   * Stage under a stable `<name>.part` with a `.part.sha256` record so an interrupted transfer can continue.
+   * A partial file is reused only when its length and SHA-256 match the record; anything else is discarded.
+   */
+  static resumable(root: string, name: string, expected: ProtocolDownloadExpectation): DownloadSink {
+    if (!Number.isSafeInteger(expected.maximumBytes) || expected.maximumBytes < 0) throw new RangeError("Invalid download size");
+    const parent = openContainedParent(root, name, true), partial = `${parent.leaf}.part`;
+    try {
+      const reused = reopenPartial(parent.descriptor, partial, expected.maximumBytes);
+      if (reused !== null) return new DownloadSink(parent.descriptor, reused.descriptor, partial, parent.leaf, expected, { kind: "sequential" }, true, reused);
+      const descriptor = openSync(`/proc/self/fd/${parent.descriptor}/${partial}`, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      return new DownloadSink(parent.descriptor, descriptor, partial, parent.leaf, expected, { kind: "sequential" }, true);
+    } catch (error) { closeSync(parent.descriptor); throw error; }
+  }
   static create(root: string, name: string, expected: DownloadExpectation | ProtocolDownloadExpectation): DownloadSink {
     return DownloadSink.open(root, name, expected, { kind: "sequential" });
   }
@@ -154,82 +174,59 @@ export class DownloadSink {
     } catch (error) { this.close(); throw error; }
     finally { this.inspecting = false; closeSync(retained); }
   }
+  /** Keep the staged bytes and their hash record for a later resumable sink; other sinks are discarded. */
+  suspend(): void {
+    if (this.ended || this.inspecting || !this.resumable || this.count === 0) { this.close(); return; }
+    try {
+      const record = openSync(`/proc/self/fd/${this.parent}/${this.temporary}.sha256`, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600);
+      try { writeSync(record, `${this.count} ${this.hash.copy().digest("hex")}\n`); } finally { closeSync(record); }
+      this.suspended = true;
+    } finally { this.close(); }
+  }
   close(): void {
     if (this.ended) return;
     this.ended = true;
     try { closeSync(this.descriptor); }
-    finally { try { unlinkSync(`/proc/self/fd/${this.parent}/${this.temporary}`); } finally { closeSync(this.parent); } }
+    finally {
+      try {
+        if (!this.suspended) {
+          unlinkIfPresent(`/proc/self/fd/${this.parent}/${this.temporary}`);
+          if (this.resumable) unlinkIfPresent(`/proc/self/fd/${this.parent}/${this.temporary}.sha256`);
+        }
+      } finally { closeSync(this.parent); }
+    }
   }
 }
 
-export interface DownloadBlock { readonly index: number; readonly totalBytes: number | null; readonly bytes: Uint8Array; }
-export class DownloadWindow {
-  private readonly blocks = new Map<number, Uint8Array>();
-  private readOffset = 0;
-  private currentBlock = 0;
-  private clientBlock = 0;
-  private transmitBlock = 0;
-  private eof = false;
-  private ended = false;
-  private sendTime = 0;
-  constructor(readonly source: DownloadSource, readonly blockBytes = 2048, readonly windowBlocks = 8) {
-    if (!Number.isSafeInteger(blockBytes) || blockBytes < 1 || !Number.isSafeInteger(windowBlocks) || windowBlocks < 1) throw new RangeError("Invalid download window");
-  }
-  get closed(): boolean { return this.ended; }
-  packets(now: number, count: number): readonly DownloadBlock[] {
-    if (this.ended) throw new Error("Download window is closed");
-    while (this.currentBlock - this.clientBlock < this.windowBlocks && this.readOffset < this.source.byteLength) {
-      const bytes = this.source.read(this.readOffset, this.blockBytes);
-      if (bytes.length === 0) throw new Error("Unexpected download EOF");
-      this.blocks.set(this.currentBlock++, bytes); this.readOffset += bytes.length;
-    }
-    if (this.readOffset === this.source.byteLength && !this.eof && this.currentBlock - this.clientBlock < this.windowBlocks) {
-      this.blocks.set(this.currentBlock++, new Uint8Array(0)); this.eof = true;
-    }
-    const packets: DownloadBlock[] = [];
-    while (count-- > 0 && this.clientBlock !== this.currentBlock) {
-      if (this.transmitBlock === this.currentBlock) {
-        if (now - this.sendTime <= 1000) break;
-        this.transmitBlock = this.clientBlock;
-      }
-      const bytes = this.blocks.get(this.transmitBlock);
-      if (bytes === undefined) throw new Error("Download block was not retained");
-      packets.push({ index: this.transmitBlock, totalBytes: this.transmitBlock === 0 ? this.source.byteLength : null, bytes: bytes.slice() });
-      this.transmitBlock++; this.sendTime = now;
-    }
-    return packets;
-  }
-  acknowledge(block: number, now: number): "continue" | "complete" {
-    if (this.ended || block !== this.clientBlock || block >= this.transmitBlock) throw new Error("Broken download acknowledgement");
-    const bytes = this.blocks.get(block);
-    if (bytes === undefined) throw new Error("Missing download block");
-    this.blocks.delete(block);
-    if (bytes.length === 0) { this.close(); return "complete"; }
-    this.clientBlock++; this.sendTime = now; return "continue";
-  }
-  close(): void { if (!this.ended) { this.ended = true; this.blocks.clear(); this.source.close(); } }
+function unlinkIfPresent(path: string): void {
+  try { unlinkSync(path); } catch (error) { if (!isMissing(error)) throw error; }
 }
+function isMissing(error: unknown): boolean { return error instanceof Error && "code" in error && error.code === "ENOENT"; }
 
-export async function downloadHttp(url: URL, sink: DownloadSink, signal?: AbortSignal): Promise<ContentDigest> {
-  if (url.protocol !== "https:" && url.protocol !== "http:") throw new RangeError("Downloads require HTTP or HTTPS");
+/** Returns a descriptor positioned for appending, with the hash state of its verified prefix, or null after discarding a bad partial. */
+function reopenPartial(parent: number, partial: string, limit: number): { readonly descriptor: number; readonly hash: Hash; readonly count: number } | null {
+  const path = `/proc/self/fd/${parent}/${partial}`, record = `${path}.sha256`;
+  let descriptor: number;
+  try { descriptor = openSync(path, constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW); }
+  catch (error) { if (isMissing(error)) { unlinkIfPresent(record); return null; } throw error; }
   try {
-    const response = await fetch(url, { redirect: "error", ...(signal === undefined ? {} : { signal }) });
-    const body: unknown = response.body;
-    if (!response.ok || !isReadableStream(body)) throw new Error(`Download HTTP status ${response.status}`);
-    const reader = body.getReader();
-    try {
-      while (true) {
-        const result = await reader.read();
-        if (result.done) break;
-        if (!(result.value instanceof Uint8Array)) throw new TypeError("HTTP download supplied a non-byte chunk");
-        sink.append(result.value);
+    const info = fstatSync(descriptor);
+    let claimed: RegExpExecArray | null = null;
+    try { claimed = /^(\d{1,15}) ([0-9a-f]{64})\n?$/.exec(readFileSync(record, "utf8")); } catch (error) { if (!isMissing(error)) throw error; }
+    const hash = createHash("sha256");
+    let verified = claimed !== null && info.isFile() && info.size === Number(claimed[1]) && info.size > 0 && info.size <= limit;
+    if (verified) {
+      const chunk = new Uint8Array(64 * 1024);
+      for (let offset = 0; offset < info.size;) {
+        const count = readSync(descriptor, chunk, 0, Math.min(chunk.length, info.size - offset), offset);
+        if (count === 0) { verified = false; break; }
+        hash.update(chunk.subarray(0, count)); offset += count;
       }
-    } catch (error) { await reader.cancel(); throw error; }
-    finally { reader.releaseLock(); }
-    return sink.finish();
-  } catch (error) { sink.close(); throw error; }
-}
-
-export function verifyPureContent(required: readonly ContentDigest[], available: ReadonlySet<ContentDigest>): readonly ContentDigest[] {
-  return required.filter(digest => !available.has(digest));
+      verified &&= claimed !== null && hash.copy().digest("hex") === claimed[2];
+    }
+    if (verified) return { descriptor, hash, count: info.size };
+    closeSync(descriptor);
+    unlinkIfPresent(path); unlinkIfPresent(record);
+    return null;
+  } catch (error) { closeSync(descriptor); throw error; }
 }

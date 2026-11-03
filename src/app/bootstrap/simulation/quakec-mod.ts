@@ -4,7 +4,8 @@ import type { ModCallbackDeclaration } from "../../../contracts/mod-callbacks.ts
 import type { ModDescription } from "../../../contracts/mods.ts";
 import { modInstanceProvider } from "../../../contracts/mods.ts";
 import type { PreparedMod } from "../../../world/session/mods.ts";
-import { QcModProvider, validateQcMod } from "../../../compat/qc/mod-provider.ts";
+import { QcModProvider } from "../../../compat/qc/mod-provider.ts";
+import { validateQcMod } from "../../../compat/qc/mod-validation.ts";
 import { loadQcProgram } from "../../../compat/qc/program.ts";
 import { SourceRandom } from "./random.ts";
 import { prepareQuakeCResources } from "./quakec-source.ts";

@@ -8,6 +8,7 @@ import { SparseGuestMemory } from "../../../src/guest/core/memory.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, SourceActorSlots, quakeEdictLifetime, translatedBodyBounds } from "../../../src/world/actors/index.ts";
 import { GameplayAuthority, SharedInventoryTable, SharedTransitionCoordinator, absorbNativeArmor, createQ1CombatPolicy, createQ2CombatPolicy, createQ3CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
 import type { Q2CombatContext, Q3CombatContext } from "../../../src/world/gameplay/index.ts";
+import { inertAuthority } from "../../support/authority.ts";
 
 const emptyArmor: ArmorState = { regular: { kind: "none" }, powered: { kind: "none" } };
 const origin = { x: 0, y: 0, z: 0 };
@@ -32,7 +33,7 @@ function attack(target: ActorId, attacker: ActorId, sequence = 1, amount = 40): 
 function evaluate(actors: SessionActorRegistry, policy: CombatPolicy, request: DamageRequest, target: CombatState, attacker: CombatState): DamageDecision {
   const victim = actors.resolveOwned(request.target), source = request.attack.attacker === null ? null : actors.resolveOwned(request.attack.attacker);
   if (victim === null) throw new Error("Missing policy test actor");
-  const authority = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const authority = inertAuthority(actors, new ActorCallbackTable(actors));
   authority.create(victim, target);
   if (source !== null && source !== victim) authority.create(source, attacker);
   authority.register(policy);
@@ -81,7 +82,7 @@ describe("shared actor and gameplay authority", () => {
   test("restored damage admission preserves the existing authoritative store", () => {
     const actors = new SessionActorRegistry(createIdentityOwner("restored-admission"));
     const target = actors.allocate("q3:game", "q3:obelisk"), attacker = actors.allocate("q1:game", "q1:player");
-    const authority = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+    const authority = inertAuthority(actors, new ActorCallbackTable(actors));
     authority.register(createQ3CombatPolicy({ id: "q3:combat", context: () => q3Context, armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64", q2: { product: "classic", ctf: false, alive: true } })) }));
     authority.create(target, state(73)); authority.create(attacker, state());
     const requests: DamageRequest[] = [];
@@ -293,7 +294,7 @@ describe("shared actor and gameplay authority", () => {
     const restoredAddress = restoredMemory.pointer(address.byteOffset);
     if (restoredAddress === null) throw new Error("Fixture address is not null");
     expect(restoredMemory.borrow(restoredAddress, 32).getInt32(0, true)).toBe(-80);
-    expect(() => restoredMemory.borrow(address, 32)).toThrow();
+    expect(() => restoredMemory.borrow(address, 32)).toThrow("fixture:guest: write at 0x10000 (32 bytes): pointer belongs to another execution owner");
   });
 
   test("Q1 shared no-knockback suppresses momentum without changing armor or health", () => {
@@ -333,7 +334,7 @@ describe("shared actor and gameplay authority", () => {
     expect(evaluate(actors, q2, attack(target.id, attacker.id, 2, 5), state(100, shield), state()).feedback).toEqual({ kind: "q2", powerArmor: 3, armor: 2, blood: 0, knockback: 5 });
     const inventory = new SharedInventoryTable(actors);
     inventory.create(target, [{ item: "q2:cells", count: 10, capacity: 200 }]);
-    const authority = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+    const authority = inertAuthority(actors, new ActorCallbackTable(actors));
     authority.create(target, state(100, shield));
     authority.bindPowerArmorCells(target, { read: () => inventory.count(target.id, "q2:cells"), write: count => inventory.configure(target, { item: "q2:cells", count, capacity: 200 }) });
     authority.register(q2);
@@ -386,7 +387,7 @@ describe("shared actor and gameplay authority", () => {
     const callbacks = new ActorCallbackTable(actors);
     const target = actors.allocate("q1:game", "q1:player"), attacker = actors.allocate("q3:game", "q3:player");
     const steps: string[] = [];
-    const authority = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+    const authority = inertAuthority(actors, callbacks);
     authority.create(target, state(10)); authority.create(attacker, state(200));
     authority.register(createQ2CombatPolicy({ id: "q2:combat", context: () => q2Context,
       armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64" })), sourceEffects: {
@@ -412,7 +413,7 @@ describe("shared actor and gameplay authority", () => {
   test("Q1 empathy reenters after quad and reads the victim again before armor commits", () => {
     const actors = new SessionActorRegistry(createIdentityOwner("q1-effects")), callbacks = new ActorCallbackTable(actors);
     const target = actors.allocate("q1:game", "q1:player"), attacker = actors.allocate("q1:game", "q1:player");
-    const authority = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+    const authority = inertAuthority(actors, callbacks);
     authority.create(target, state(100, { regular: { kind: "q1", points: 100, absorption: 0.5, item: "q1:armor" }, powered: { kind: "none" } })); authority.create(attacker, state());
     const observed: number[] = [];
     const policy = createQ1CombatPolicy({ id: "q1:combat", context: request => ({ arithmetic: "binary32", quad: request.attack.sequence === 1, teamplay: 0, walk: false, momentumDirection: null }), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 1 })), sourceEffects: {
@@ -502,7 +503,7 @@ describe("shared actor and gameplay authority", () => {
     const travel = transitions.resolve(mode, [{ kind: "campaign-level", campaign: "q1:campaign", map: "q1:e1m2", spawnPoint: "", gates: [], cause: actor.id }]);
     transitions.commit(travel);
     expect(trips).toBe(1);
-    expect(() => transitions.commit(travel)).toThrow();
+    expect(() => transitions.commit(travel)).toThrow("Transition was not resolved here or was already committed");
   });
 });
 
@@ -571,8 +572,8 @@ test("native-only source reload resolves current historical actors without check
   expect(restored.referenceSaved(laterSaved, "current").equals(later.id)).toBe(true);
   expect(restored.referenceSaved(saved).equals(first.id)).toBe(false);
   expect(restored.isLive(restored.referenceSaved(laterSaved, "current"))).toBe(false);
-  expect(() => restored.referenceSaved({ slot: 100, generation: 0 }, "current")).toThrow();
-  expect(() => restored.referenceSaved({ slot: later.id.slot, generation: later.id.generation + 1 }, "current")).toThrow();
+  expect(() => restored.referenceSaved({ slot: 100, generation: 0 }, "current")).toThrow("Invalid current actor history reference");
+  expect(() => restored.referenceSaved({ slot: later.id.slot, generation: later.id.generation + 1 }, "current")).toThrow("Invalid current actor history reference");
   const reused = restored.allocate("q2:guest", "q2:reused-projectile");
   expect(restored.referenceSaved(laterSaved, "current").equals(reused.id)).toBe(false);
   expect(restored.referenceSaved({ slot: reused.id.slot, generation: reused.id.generation }, "current")).toBe(reused.id);
@@ -618,7 +619,7 @@ test("inventory count validates every borrowed entry and retains first-match sou
 
 test("regular armor mutations and powered protection keep independent state and one fuel reservoir", () => {
   const actors = new SessionActorRegistry(createIdentityOwner("independent armor"));
-  const authority = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const authority = inertAuthority(actors, new ActorCallbackTable(actors));
   authority.register(createQ1CombatPolicy({ id: "q1:combat", context: () => ({ arithmetic: "binary32", quad: false, teamplay: 0, walk: false, momentumDirection: null }),
     armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 1, q2: { product: "classic", ctf: false, alive: true } })) }));
   for (const regular of [
@@ -650,7 +651,7 @@ test("regular armor mutations and powered protection keep independent state and 
 
 test("source armor admission rejects unsupported power before changing a bound reservoir", () => {
   const actors = new SessionActorRegistry(createIdentityOwner("source armor admission")), target = actors.allocate("q1:game", "q1:player");
-  const authority = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const authority = inertAuthority(actors, new ActorCallbackTable(actors));
   const source = state(100, { regular: { kind: "q1", points: 100, absorption: 0.6, item: "q1:item_armor2" }, powered: { kind: "none" } });
   let cells = 40, sourceWrites = 0;
   authority.bind(target, { read: () => source, writeHealth: () => undefined, validateArmor: armor => {
@@ -665,7 +666,7 @@ test("source armor admission rejects unsupported power before changing a bound r
 
 test("captured source damage continuation stays with its exact actor binding through composition", () => {
   const actors = new SessionActorRegistry(createIdentityOwner("source-call-continuation")), a = actors.allocate("q2:game", "q2:a"), b = actors.allocate("q2:game", "q2:b");
-  const authority = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const authority = inertAuthority(actors, new ActorCallbackTable(actors));
   authority.create(a, state()); authority.create(b, state());
   const calls: string[] = [];
   const run = (label: string, request: DamageRequest) => { calls.push(label); return authority.runSourceDamage(request, () => ({ appliedDamage: 0, reaction: "none" })); };

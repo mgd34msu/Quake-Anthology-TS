@@ -8,7 +8,7 @@ export { createQcBuiltins, qcHostKindForProgram, qcHostRequirements } from "./bu
 export type { QcBuiltinRequirement, QcBuiltinServices, QcHostBuiltinName, QcHostKind } from "./builtins.ts";
 export { applyQcEntityPairs, applyQcGlobalPairs, parseQcValue, saveQcEntityPairs, saveQcGlobalPairs } from "./save.ts";
 export type { QcEntityParseResult, QcTextPair } from "./save.ts";
-export { QuakeCExecutor, createQcRawEntityTable } from "./executor.ts";
+export { createQcRawEntityTable } from "./executor.ts";
 export type { QcExecutorHost, QcHostSavedState } from "./executor.ts";
 export { classicQcEntityLayout, describeQcHost, loadMountedQcProgram, qcProgramSearchOrder } from "./profile.ts";
 export { createQcActorBindings, createQcSourceSlotStorage } from "./entity-host.ts";

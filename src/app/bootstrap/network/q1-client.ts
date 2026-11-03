@@ -105,18 +105,31 @@ export class Q1ClientNetwork implements ApplicationNetwork {
                 }
                 continue;
             }
-            const received = this.channel.receive(packet.payload, now);
-            this.lastReceived = now;
-            for (const reply of received.replies)
-                this.options.transport.send(this.peer, reply);
-            if (received.delivery === null)
+            let delivered: Uint8Array | null = null;
+            let messages: readonly NetQuakeMessage[] = [];
+            try {
+                const received = this.channel.receive(packet.payload, now);
+                this.lastReceived = now;
+                for (const reply of received.replies)
+                    this.options.transport.send(this.peer, reply);
+                if (received.delivery !== null) {
+                    delivered = received.delivery.payload;
+                    messages = this.decoder.decode(delivered);
+                    for (const message of messages)
+                        if (message.kind === 'server-info' && (message.maxClients < 1 || message.maxClients > 16))
+                            throw new Error('Native NetQuake requires 1–16 scoreboard slots');
+                }
+            }
+            catch (error) {
+                // A malformed server datagram ends this connection, not the process.
+                this.reject(error instanceof Error ? error.message : String(error));
+                return [];
+            }
+            if (delivered === null)
                 continue;
-            const messages = this.decoder.decode(received.delivery.payload);
             this.recordingState.observe(messages);
             for (const message of messages) {
                 if (message.kind === 'server-info') {
-                    if (message.maxClients < 1 || message.maxClients > 16)
-                        throw new Error('Native NetQuake requires 1–16 scoreboard slots');
                     this.signon.stage = 0;
                     this.movementMessages = 0;
                     this.state = 'loading';
@@ -124,7 +137,7 @@ export class Q1ClientNetwork implements ApplicationNetwork {
             }
             await this.options.host.receive(messages, now);
             for (const message of messages) if (message.kind === 'set-angle') this.viewAngles = message.angles;
-            await this.recordingSink?.append({ kind: 'q1', message: received.delivery.payload, viewAngles: this.viewAngles });
+            await this.recordingSink?.append({ kind: 'q1', message: delivered, viewAngles: this.viewAngles });
             for (const message of messages) {
                 if (message.kind === 'signon') {
                     const response = this.signon.receive(message.stage);

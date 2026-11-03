@@ -35,3 +35,13 @@ test("undecodable sound and music register as unavailable", async () => {
   expect(await bank.register("misc/bad.wav", "q1")).toBeNull();
   expect(await bank.openMusic("music/track02.ogg")).toBeNull();
 });
+
+test("PLATFORM-003 a stereo sound effect registers as unavailable", async () => {
+  const content = createContentId({ family: "q1", edition: "test", package: "sound", revision: "2" });
+  const data = new Uint8Array(400), wav = new DataView(new ArrayBuffer(44 + data.length)), text = (offset: number, value: string): void => { for (let i = 0; i < value.length; i++) wav.setUint8(offset + i, value.charCodeAt(i)); };
+  text(0, "RIFF"); wav.setUint32(4, 36 + data.length, true); text(8, "WAVE"); text(12, "fmt "); wav.setUint32(16, 16, true); wav.setUint16(20, 1, true);
+  wav.setUint16(22, 2, true); wav.setUint32(24, 11025, true); wav.setUint32(28, 11025 * 4, true); wav.setUint16(32, 4, true); wav.setUint16(34, 16, true);
+  text(36, "data"); wav.setUint32(40, data.length, true);
+  const bank = new SoundBank(new MemoryMounts(content, new Map([["sound/misc/stereo.wav", new Uint8Array(wav.buffer)]])));
+  expect(await bank.register("misc/stereo.wav", "q3")).toBeNull();
+});

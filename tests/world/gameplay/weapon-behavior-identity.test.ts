@@ -40,6 +40,6 @@ test("a save cannot replace a native entrypoint or calling convention", () => {
     abi: { kind: "linux-x86-64", image: "elf64", pointerBytes: 8, call: "system-v-x86-64" } } };
   expect(sameWeaponBehavior(loaded, changedAbi)).toBe(false);
   expect(() => restored(changedAbi, loaded)).toThrow("callback ABI differs");
-  expect(() => restored({ ...loaded, fire: { ...fire, kind: "native-guest", address: 0x12345678n } }, loaded)).toThrow();
+  expect(() => restored({ ...loaded, fire: { ...fire, kind: "native-guest", address: 0x12345678n } }, loaded)).toThrow("behavior.fire.kind: expected native-artifact");
   expect(() => restored({ ...loaded, activate: fire }, loaded)).toThrow("unexpected activation callback");
 });

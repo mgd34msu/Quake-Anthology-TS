@@ -2,12 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { OwnedActor } from "../../../../src/contracts/identity.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../../../src/world/gameplay/index.ts";
 import { Q2EntityServices } from "../../../../src/content/q2/foundation/entity-services.ts";
 import { Q2Foundation } from "../../../../src/content/q2/foundation/runtime.ts";
 import type { Q2FoundationHost, Q2GameOptions } from "../../../../src/content/q2/foundation/host.ts";
+import { q2PlayerSpawns } from "../../../../src/content/q2/base/player/spawns.ts";
 import { createQ2TargetModule } from "../../../../src/content/q2/foundation/targets.ts";
 import { encodeQ2FoundationCheckpoint, decodeQ2FoundationCheckpoint } from "../../../../src/persistence/q2-foundation.ts";
+import { literal } from "../../../support/literal.ts";
+import { inertAuthority } from "../../../support/authority.ts";
 
 const zero = { x: 0, y: 0, z: 0 };
 const options: Q2GameOptions = { edition: "classic", mapName: "foreign-map", skill: 1, mode: "singleplayer", deathmatchFlags: 0,
@@ -16,7 +19,7 @@ const options: Q2GameOptions = { edition: "classic", mapName: "foreign-map", ski
 function sharedHost(actors = new SessionActorRegistry(createIdentityOwner("q2-entity-services"))) {
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const callbacks = new ActorCallbackTable(actors), inventory = new SharedInventoryTable(actors);
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   const scheduled = new Map<OwnedActor, number>();
   let now = 0;
   const host: Q2FoundationHost = { actors, bodies, callbacks, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5,
@@ -39,6 +42,20 @@ function sharedHost(actors = new SessionActorRegistry(createIdentityOwner("q2-en
 }
 
 describe("Q2 reusable entity services", () => {
+  test("classic coop spawn fixups use named think callbacks that survive a checkpoint after firing", () => {
+    for (const [mapName, classname] of literal([["jail2", "info_player_coop"], ["security", "info_player_start"]])) {
+      const { host, advance } = sharedHost();
+      const services = new Q2EntityServices(host, { ...options, mapName, mode: "coop" }, [q2PlayerSpawns]);
+      const actor = host.actors.allocateAtSource("q2:map", 3, "q2:authored");
+      host.bodies.create(actor, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
+      const spot = services.attach(actor, { classname, ordinal: 3, values: new Map() });
+      expect(q2PlayerSpawns.spawn(spot, services)).toBe(true);
+      expect(spot.think).not.toBeNull();
+      advance(0.2);
+      expect(() => services.capture()).not.toThrow();
+    }
+  });
+
   test("attachment preserves shared identity, body and combat without running spawn", () => {
     const { host } = sharedHost(), module = createQ2TargetModule();
     const services = new Q2EntityServices(host, options, [module]);

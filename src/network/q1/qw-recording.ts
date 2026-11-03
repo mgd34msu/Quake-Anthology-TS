@@ -70,14 +70,18 @@ export class QuakeWorldRecordingState {
     for (const message of messages) {
       switch (message.kind) {
         case 'server-data': this.fields.clear(); this.rows.length = 0; this.statics.length = 0; break;
-        case 'static': case 'static-sound': this.statics.push(message); break;
+        case 'static': case 'static-sound':
+          if (this.statics.length >= 4096) throw new Error('Too many static entities');
+          this.statics.push(message); break;
         case 'baseline': this.setField(FIELD_BASELINE, message.state.number, message); break;
         case 'light-style': this.setField(FIELD_LIGHT_STYLE, message.index, message); break;
         case 'stat': this.setField(FIELD_STAT, message.index, message); break;
         case 'userinfo':
           this.deleteSetInfo(message.slot);
           this.setField(FIELD_USERINFO, message.slot, message); break;
-        case 'set-info': this.setField(FIELD_SET_INFO, this.pairId(message.slot, message.key), message); break;
+        case 'set-info':
+          if (message.key.length > 63 || message.value.length > 511 || this.pairSlots.length >= 4096) throw new Error('QuakeWorld info exceeds its limits');
+          this.setField(FIELD_SET_INFO, this.pairId(message.slot, message.key), message); break;
         case 'server-info': this.setField(FIELD_SERVER_INFO, this.keys.intern(message.key), message); break;
         case 'frags': this.setField(FIELD_FRAGS, message.slot, message); break;
         case 'ping': this.setField(FIELD_PING, message.slot, message); break;

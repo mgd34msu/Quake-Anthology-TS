@@ -55,6 +55,8 @@ export interface Q1MovementOptions {
   readonly jumpAuthority?: "selected-movement" | "source-gamecode";
   /** Original C writes roll during fixangle; the donor fixes the stuck-roll bug. */
   readonly fixAngleRoll?: "source" | "preserve";
+  /** QuakeC WaterMove's `velocity -= 0.8 * waterlevel * frametime * velocity`, for sessions whose player prethink is not QuakeC bytecode. */
+  readonly sourceWaterDrag?: boolean;
   readonly hooks?: Q1MovementHooks;
 }
 

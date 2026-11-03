@@ -64,8 +64,8 @@ test('bidirectional controls survive deterministic loss duplication and reversal
 
 test('bounds foreign tokens malformed and conflicting fragments empty messages and retry failure', () => {
   const a = new UnifiedChannel(token, { ...limits, queuedReliableMessages: 1, maximumTransmissions: 2 }), b = new UnifiedChannel(token, limits);
-  expect(() => a.queueReliable(bytes(4097))).toThrow(); expect(() => a.queueFrame(bytes(1), 1)).toThrow();
-  a.queueReliable(bytes(40)); expect(() => a.queueReliable(bytes(0))).toThrow();
+  expect(() => a.queueReliable(bytes(4097))).toThrow(/Frame depends on an unqueued reliable message|Unified message exceeds channel capacity/); expect(() => a.queueFrame(bytes(1), 1)).toThrow(/Frame depends on an unqueued reliable message|Unified message exceeds channel capacity/);
+  a.queueReliable(bytes(40)); expect(() => a.queueReliable(bytes(0))).toThrow("Unified reliable queue overflow");
   const first = a.flush(0)[0]; if (first === undefined) throw new Error('Missing packet');
   const decoded = decodeUnifiedPacket(first); if (decoded === null || decoded.kind === 'ack') throw new Error('Invalid packet');
   expect(b.receive(encodeUnifiedPacket({ ...decoded, token: 'f'.repeat(32) }), 0)).toEqual([]);

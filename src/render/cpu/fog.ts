@@ -3,8 +3,7 @@
  * Copyright (C) 2010-2014 QuakeSpasm developers. GPL-2.0-or-later. */
 import type { Mat4 } from "../../contracts/math.ts";
 import type { Q2FogOperation, Rect } from "../../contracts/render.ts";
-import { globalFogAmount, heightFogAmount, heightFogDirZ, heightFogExtinction, heightFogFraction,
-  q1FogColor } from "../../materials/legacy-fog.ts";
+import { globalFogAmount, heightFogAmount, heightFogDirZ, heightFogExtinction, heightFogFraction } from "../../materials/legacy-fog.ts";
 import type { Q1Fog } from "../../materials/legacy-fog.ts";
 import { byte, clamp } from "./triangle-kernel.ts";
 import type { Framebuffer } from "./triangle-kernel.ts";
@@ -22,18 +21,23 @@ export function applyQ1DepthFog(frame: Framebuffer, viewport: Rect, projection: 
   if (output === "classic-indexed" || fog.density <= 0) return;
   if (projection[2] !== 0 || projection[6] !== 0 || projection[3] !== 0 || projection[7] !== 0)
     throw new Error("Q1 fog requires a projection whose depth is independent of eye X/Y");
-  const sky = clamp(skyFraction), pixels = frame.pixels;
+  const sky = clamp(skyFraction), pixels = frame.pixels, scaledDensity = fog.density / 64;
+  const fogRed = fog.color.x, fogGreen = fog.color.y, fogBlue = fog.color.z;
+  // Neighbouring pixels usually share a depth, so the exp and depth inversion run once per run of equal values.
+  let lastDepth = Number.NaN, lastAmount = 0;
   for (let y = Math.max(0, viewport.y); y < Math.min(frame.height, viewport.y + viewport.height); y++) {
     for (let x = Math.max(0, viewport.x); x < Math.min(frame.width, viewport.x + viewport.width); x++) {
       const index = (y - frame.originY) * frame.stride + x - frame.originX, depth = frame.depth[index], offset = index * 4;
       const red = pixels[offset], green = pixels[offset + 1], blue = pixels[offset + 2];
       if (depth === undefined || red === undefined || green === undefined || blue === undefined)
         throw new RangeError("Q1 fog rectangle lies outside its framebuffer storage");
-      const color = { x: red / 255, y: green / 255, z: blue / 255 };
-      const result = depth === clearDepth ? { x: color.x + (fog.color.x - color.x) * sky,
-        y: color.y + (fog.color.y - color.y) * sky, z: color.z + (fog.color.z - color.z) * sky }
-        : q1FogColor(color, fog, eyeDepthFromWindowDepth(projection, depth));
-      pixels[offset] = byte(result.x); pixels[offset + 1] = byte(result.y); pixels[offset + 2] = byte(result.z);
+      let amount = sky;
+      if (depth !== clearDepth) {
+        if (depth !== lastDepth) { lastAmount = globalFogAmount(scaledDensity, eyeDepthFromWindowDepth(projection, depth)); lastDepth = depth; }
+        amount = lastAmount;
+      }
+      const r = red / 255, g = green / 255, b = blue / 255;
+      pixels[offset] = byte(r + (fogRed - r) * amount); pixels[offset + 1] = byte(g + (fogGreen - g) * amount); pixels[offset + 2] = byte(b + (fogBlue - b) * amount);
     }
   }
 }

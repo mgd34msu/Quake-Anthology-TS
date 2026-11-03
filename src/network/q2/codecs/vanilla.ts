@@ -247,7 +247,7 @@ export function createVanillaContext(net_message: SizeBuf) {
         else if (bits & U_SKIN16)
             to.skinnum = MSG_ReadShort(net_message);
         if ((bits & (U_EFFECTS8 | U_EFFECTS16)) === (U_EFFECTS8 | U_EFFECTS16))
-            to.effects = MSG_ReadLong(net_message);
+            to.effects = MSG_ReadLong(net_message) >>> 0;
         else if (bits & U_EFFECTS8)
             to.effects = MSG_ReadByte(net_message);
         else if (bits & U_EFFECTS16)

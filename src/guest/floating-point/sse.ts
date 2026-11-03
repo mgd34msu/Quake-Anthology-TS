@@ -2,6 +2,8 @@
 import type { GuestRegister } from "../core/contracts.ts";
 import type { NumericExecutionContext, NumericExecutionResult, NumericOperand } from "./contracts.ts";
 import { NumericFault } from "./contracts.ts";
+import { loadF32LE, loadF64LE, storeF32LE, storeF64LE } from "../../foundation/binary.ts";
+import { fastArithmetic, fastResult } from "./fast-arithmetic.ts";
 import { executeRawSse, prepareRawSse } from "./raw-sse.ts";
 import {
   arithmetic, compareBinary, convertBinary, decodeBinary, decodeBinary32, denormalOperand, encodeBinary, formatFor, fromInteger,
@@ -11,19 +13,14 @@ import type { BinaryResult, BinaryValue } from "./binary.ts";
 
 class UnsupportedSse extends Error {}
 const registerNames: readonly GuestRegister[] = ["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"];
-const registerViews = new WeakMap<Uint8Array, Uint8Array[]>();
 function generalRegister(index: number): GuestRegister {
   const name = registerNames[index];
   if (name === undefined) throw new UnsupportedSse("Invalid general register index");
   return name;
 }
 function xmm(context: NumericExecutionContext, index: number): Uint8Array {
-  const registers = context.state.simd.xmm;
-  if (!Number.isInteger(index) || index < 0 || (index + 1) * 16 > registers.length) throw new UnsupportedSse("Invalid XMM register index");
-  let views = registerViews.get(registers);
-  if (views === undefined) { views = []; registerViews.set(registers, views); }
-  let view = views[index];
-  if (view === undefined) { view = registers.subarray(index * 16, index * 16 + 16); views[index] = view; }
+  const view = context.state.simd.scratch.registers[index];
+  if (!Number.isInteger(index) || view === undefined) throw new UnsupportedSse("Invalid XMM register index");
   return view;
 }
 function operand(context: NumericExecutionContext): NumericOperand {
@@ -82,12 +79,62 @@ function integerSource(context: NumericExecutionContext, width: 32 | 64): bigint
   return BigInt.asIntN(width, source.kind === "register" ? context.state.registers.read(generalRegister(source.index), width) : readBits(context.memory.copy(source.address, width / 8)));
 }
 
+const minimumNormal32 = 1.1754943508222875e-38;
+function normal32(value: number): boolean { return Number.isFinite(value) && (value === 0 || Math.abs(value) >= minimumNormal32); }
+const fastSource = new Uint8Array(16);
+const fastLanes = new Float64Array(4);
+
+/**
+ * ADD, SUB, MUL and DIV on binary32 or binary64 lanes in round-to-nearest. The double result of two binary32 operands rounds to the
+ * correct binary32 value; binary64 uses the error-free terms from fast-arithmetic.ts for the inexact flag. Anything else (NaN,
+ * infinity, subnormal or out-of-window operands or results, overflow, division by zero, directed rounding) returns false before
+ * any state changes, for the exact path to handle. No per-call allocation.
+ */
+function fastBinary(context: NumericExecutionContext, opcode: number, scalar: boolean, width: 32 | 64, destination: Uint8Array): boolean {
+  if (((context.state.simd.mxcsr >> 13) & 3) !== 0) return false;
+  const bytes = width / 8, laneCount = scalar ? 1 : 16 / bytes;
+  const source = operand(context);
+  let right: Uint8Array;
+  if (source.kind === "register") right = xmm(context, source.index);
+  else {
+    if (!scalar) aligned(context);
+    context.memory.copyInto(source.address, fastSource, 0, scalar ? bytes : 16);
+    right = fastSource;
+  }
+  const operation = opcode === 0x58 ? 0 : opcode === 0x59 ? 1 : opcode === 0x5c ? 2 : 3;
+  let flags = 0;
+  for (let index = 0; index < laneCount; index++) {
+    const offset = index * bytes;
+    const a = width === 32 ? loadF32LE(destination, offset) : loadF64LE(destination, offset);
+    const b = width === 32 ? loadF32LE(right, offset) : loadF64LE(right, offset);
+    if (width === 32 && (!normal32(a) || !normal32(b))) return false;
+    if (!fastArithmetic(operation, a, b)) return false;
+    let result = fastResult.value, exact = fastResult.error === 0;
+    if (width === 32) {
+      const rounded = Math.fround(result);
+      exact = exact && rounded === result;
+      result = rounded;
+      if (!normal32(result) || (result === 0 && a !== 0 && b !== 0 && operation !== 0 && operation !== 2)) return false;
+      if (result === 0 && (operation === 0 || operation === 2) && !exact) return false;
+    }
+    if (!exact) flags |= precision;
+    fastLanes[index] = result;
+  }
+  signal(context, flags);
+  for (let index = 0; index < laneCount; index++) {
+    if (width === 32) storeF32LE(destination, index * 4, fastLanes[index] ?? 0);
+    else storeF64LE(destination, index * 8, fastLanes[index] ?? 0);
+  }
+  return true;
+}
+
 function floating(context: NumericExecutionContext, opcode: number): void {
   const instruction = context.instruction;
   const scalar = instruction.prefix === "f2" || instruction.prefix === "f3";
   const width = instruction.prefix === "66" || instruction.prefix === "f2" ? 64 : 32;
   const count = scalar ? 1 : 128 / width;
   const destination = xmm(context, instruction.registerIndex);
+  if ((opcode === 0x58 || opcode === 0x59 || opcode === 0x5c || opcode === 0x5e) && fastBinary(context, opcode, scalar, width, destination)) return;
   const leftBytes = destination.slice();
   const rightBytes = load(context, scalar ? width / 8 : 16);
   const output = destination.slice();

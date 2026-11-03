@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { LoopbackHub } from '../../../src/network/common/loopback.ts';
+import { LoopbackHub } from '../../support/loopback.ts';
 import { Q2ServerNetwork } from '../../../src/app/bootstrap/network/q2.ts';
 import type { Q2ApplicationServerHost } from '../../../src/app/bootstrap/network/types.ts';
 import { q2OutOfBand, readQ2OutOfBand } from '../../../src/network/q2/handshake.ts';

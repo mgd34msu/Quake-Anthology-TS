@@ -1,3 +1,4 @@
+import { writeCapture } from "../../support/capture.ts";
 import { expect, test } from "bun:test";
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -114,6 +115,6 @@ test.skipIf(process.env["QUAKE_VIEWWEAPON_RENDER"] !== "1")("actual Q1 weapon on
     for (const axis of ["x", "y", "z"] satisfies readonly ("x" | "y" | "z")[]) expect(gun?.origin[axis]).toBeCloseTo(presentation.camera().origin[axis], 5);
     expect(gun?.angles).toEqual(view.angles);
     console.log(JSON.stringify({ crossWeapon: "q1", view, camera: presentation.camera().origin, gun: gun?.origin }));
-    await Bun.write("/tmp/q2-viewweapon-q1-selected-cpu.png", encodePng(320, 240, app.readPixels()));
+    await writeCapture("q2-viewweapon-q1-selected-cpu.png", encodePng(320, 240, app.readPixels()));
   } finally { await app.close(); }
 }, 60000);

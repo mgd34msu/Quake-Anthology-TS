@@ -72,7 +72,10 @@ export class CpuImages {
           const copy = (level: DepthImageLevel): DepthImageLevel => {
             if (level.pixels.length !== level.width * level.height || level.width < 1 || level.height < 1)
               throw new RangeError("Invalid CPU depth image dimensions");
-            return { width: level.width, height: level.height, pixels: level.pixels.slice() };
+            // Shared memory lets row workers see atlas updates made after their first registration.
+            const pixels = new Float32Array(new SharedArrayBuffer(level.pixels.byteLength));
+            pixels.set(level.pixels);
+            return { width: level.width, height: level.height, pixels };
           };
           const [base, ...levels] = operation.content.levels;
           this.depths.set(image.ordinal, [copy(base), ...levels.map(copy)]);

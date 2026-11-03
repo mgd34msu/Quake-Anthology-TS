@@ -1,10 +1,67 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import type { GuestCallResult, GuestStorage } from "../../../contracts/execution.ts";
+import type { GuestAddress, GuestCallResult, GuestStorage } from "../../../contracts/execution.ts";
 import { argument, count, fillBytes, integer, moveBytes, pointer, readPointer, readString, readUnsigned, requiredPointer, stringBytes, stringLength, writePointer, writeUnsigned } from "../common/memory.ts";
 import type { WindowsServiceHost } from "./contracts.ts";
 import { UnsupportedWindowsImport } from "./contracts.ts";
 import { installWindowsFormat } from "../common/format/services.ts";
 import { float32Bits, float32FromBits } from "../../../foundation/binary.ts";
+
+/**
+ * The UCRT qsort (misc/qsort.cpp): median-of-three quicksort that hands runs of at most eight elements to a selection sort, so the
+ * order of equal keys matches the original CRT. Positions are element indices; `compare` and `swap` act on guest memory.
+ */
+export function ucrtQuickSort(length: number, compare: (left: number, right: number) => number, swap: (left: number, right: number) => void): void {
+  if (length < 2) return;
+  const lowStack: number[] = [], highStack: number[] = [];
+  let low = 0, high = length - 1;
+  for (;;) {
+    const size = high - low + 1;
+    if (size <= 8) {
+      while (high > low) {
+        let max = low;
+        for (let position = low + 1; position <= high; position++) if (compare(position, max) > 0) max = position;
+        swap(max, high);
+        high--;
+      }
+    } else {
+      let mid = low + (size >> 1);
+      if (compare(low, mid) > 0) swap(low, mid);
+      if (compare(low, high) > 0) swap(low, high);
+      if (compare(mid, high) > 0) swap(mid, high);
+      let loguy = low, higuy = high;
+      for (;;) {
+        if (mid > loguy) { do loguy++; while (loguy < mid && compare(loguy, mid) <= 0); }
+        if (mid <= loguy) { do loguy++; while (loguy <= high && compare(loguy, mid) <= 0); }
+        do higuy--; while (higuy > mid && compare(higuy, mid) > 0);
+        if (higuy < loguy) break;
+        swap(loguy, higuy);
+        if (mid === higuy) mid = loguy;
+      }
+      higuy++;
+      if (mid < higuy) { do higuy--; while (higuy > mid && compare(higuy, mid) === 0); }
+      if (mid >= higuy) { do higuy--; while (higuy > low && compare(higuy, mid) === 0); }
+      if (higuy - low >= high - loguy) {
+        if (low < higuy) { lowStack.push(low); highStack.push(higuy); }
+        if (loguy < high) { low = loguy; continue; }
+      } else {
+        if (loguy < high) { lowStack.push(loguy); highStack.push(high); }
+        if (low < higuy) { high = higuy; continue; }
+      }
+    }
+    const nextLow = lowStack.pop(), nextHigh = highStack.pop();
+    if (nextLow === undefined || nextHigh === undefined) return;
+    low = nextLow; high = nextHigh;
+  }
+}
+
+const stringScratch: Uint8Array[] = [new Uint8Array(512), new Uint8Array(512)];
+/** Reads bytes into one of two retained comparison buffers; the result is valid until the next call with the same slot. */
+function loadString(memory: WindowsServiceHost["memory"], address: GuestAddress, length: number, slot: 0 | 1): Uint8Array {
+  let buffer = stringScratch[slot];
+  if (buffer === undefined || buffer.length < length) { buffer = new Uint8Array(Math.max(length, (buffer?.length ?? 256) * 2)); stringScratch[slot] = buffer; }
+  memory.copyInto(address, buffer, 0, length);
+  return buffer;
+}
 
 export function installCrt(host: WindowsServiceHost): void {
   const memory = host.memory, width = memory.pointerBytes;
@@ -15,29 +72,39 @@ export function installCrt(host: WindowsServiceHost): void {
   }
   const zero = (): GuestCallResult => ({ kind: "int32", value: 0 });
   const done = (): GuestCallResult => ({ kind: "void" });
-  service("heap", "malloc", [host.pointerStorage], "pointer", (_context, args) => ({ kind: "pointer", value: host.allocate(count(args, 0)) }));
+  service("heap", "malloc", [host.pointerStorage], "pointer", (_context, args) => { const size = count(args, 0); host.chargeBytes(size); return { kind: "pointer", value: host.allocate(size) }; });
   service("heap", "calloc", [host.pointerStorage, host.pointerStorage], "pointer", (_context, args) => {
-    const size = integer(args, 0) * integer(args, 1); return { kind: "pointer", value: size > 0x10000000n ? null : host.allocate(Number(size)) };
+    const size = integer(args, 0) * integer(args, 1); host.chargeBytes(size > 0x10000000n ? 0x10000000 : Number(size)); return { kind: "pointer", value: size > 0x10000000n ? null : host.allocate(Number(size)) };
   });
   service("heap", "free", ["pointer"], "void", (_context, args) => { if (!host.free(pointer(args, 0))) throw new Error("CRT free of invalid guest allocation"); return done(); });
   service("heap", "_callnewh", [host.pointerStorage], "int32", () => zero());
   for (const name of ["memcpy", "memmove"]) service("vcruntime", name, ["pointer", "pointer", host.pointerStorage], "pointer", (_context, args) => {
-    const size = count(args, 2), destination = pointer(args, 0); if (size > 0) moveBytes(memory, requiredPointer(args, 0), requiredPointer(args, 1), size); return { kind: "pointer", value: destination };
+    const size = count(args, 2), destination = pointer(args, 0); host.chargeBytes(size); if (size > 0) moveBytes(memory, requiredPointer(args, 0), requiredPointer(args, 1), size); return { kind: "pointer", value: destination };
   });
   service("vcruntime", "memset", ["pointer", "int32", host.pointerStorage], "pointer", (_context, args) => {
-    const size = count(args, 2), destination = pointer(args, 0); if (size > 0) fillBytes(memory, requiredPointer(args, 0), size, Number(integer(args, 1)) & 255); return { kind: "pointer", value: destination };
+    const size = count(args, 2), destination = pointer(args, 0); host.chargeBytes(size); if (size > 0) fillBytes(memory, requiredPointer(args, 0), size, Number(integer(args, 1)) & 255); return { kind: "pointer", value: destination };
   });
   service("vcruntime", "memcmp", ["pointer", "pointer", host.pointerStorage], "int32", (_context, args) => {
-    const size = count(args, 2); if (size === 0) return zero(); const left = memory.copy(requiredPointer(args, 0), size), right = memory.copy(requiredPointer(args, 1), size);
+    const size = count(args, 2); host.chargeBytes(size); if (size === 0) return zero(); const left = memory.copy(requiredPointer(args, 0), size), right = memory.copy(requiredPointer(args, 1), size);
     for (let i = 0; i < size; i++) { const a = left[i] ?? 0, b = right[i] ?? 0; if (a !== b) return { kind: "int32", value: a - b }; } return zero();
   });
   service("vcruntime", "memchr", ["pointer", "int32", host.pointerStorage], "pointer", (_context, args) => {
-    const size = count(args, 2); if (size === 0) return { kind: "pointer", value: null }; const address = requiredPointer(args, 0);
+    const size = count(args, 2); host.chargeBytes(size); if (size === 0) return { kind: "pointer", value: null }; const address = requiredPointer(args, 0);
     const index = memory.copy(address, size).indexOf(Number(integer(args, 1)) & 255); return { kind: "pointer", value: index < 0 ? null : memory.offset(address, BigInt(index)) };
   });
-  service("string", "strlen", ["pointer"], host.pointerStorage, (_context, args) => { const value = stringLength(memory, requiredPointer(args, 0)); return host.pointerStorage === "uint64" ? { kind: "uint64", value: BigInt(value) } : { kind: "uint32", value }; });
+  service("string", "strlen", ["pointer"], host.pointerStorage, (_context, args) => { const value = stringLength(memory, requiredPointer(args, 0)); host.chargeBytes(value); return host.pointerStorage === "uint64" ? { kind: "uint64", value: BigInt(value) } : { kind: "uint32", value }; });
   for (const name of ["strcmp", "strncmp"]) service("string", name, name === "strcmp" ? ["pointer", "pointer"] : ["pointer", "pointer", host.pointerStorage], "int32", (_context, args) => {
     const left = requiredPointer(args, 0), right = requiredPointer(args, 1), maximum = name === "strcmp" ? 1048576 : count(args, 2);
+    if (name === "strcmp") {
+      // Whole-string reads use the memory's own terminator search instead of one checked access per byte.
+      const firstLength = stringLength(memory, left), secondLength = stringLength(memory, right);
+      const shared = Math.min(firstLength, secondLength);
+      host.chargeBytes(shared);
+      // The terminator is compared too, so one byte beyond the shorter string is read.
+      const first = loadString(memory, left, shared + 1, 0), second = loadString(memory, right, shared + 1, 1);
+      for (let i = 0; i <= shared; i++) { const a = first[i] ?? 0, b = second[i] ?? 0; if (a !== b) return { kind: "int32", value: a - b }; }
+      return zero();
+    }
     for (let i = 0; i < maximum; i++) { const a = Number(readUnsigned(memory, memory.offset(left, BigInt(i)), 1)), b = Number(readUnsigned(memory, memory.offset(right, BigInt(i)), 1));
       if (a !== b) return { kind: "int32", value: a - b }; if (a === 0) return zero(); } return zero();
   });
@@ -105,21 +172,15 @@ export function installCrt(host: WindowsServiceHost): void {
       if (result.kind !== "int32") throw new TypeError("qsort comparator must return int"); return result.value;
     };
     const swap = (left: number, right: number): void => { const value = memory.copy(at(left), size); memory.write(at(left), memory.copy(at(right), size)); memory.write(at(right), value); };
-    const sift = (start: number, end: number): void => {
-      let root = start;
-      while (root * 2 + 1 < end) {
-        let child = root * 2 + 1; if (child + 1 < end && compare(child, child + 1) < 0) child++;
-        if (compare(root, child) >= 0) return; swap(root, child); root = child;
-      }
-    };
-    for (let start = Math.floor(length / 2) - 1; start >= 0; start--) sift(start, length);
-    for (let end = length - 1; end > 0; end--) { swap(0, end); sift(0, end); }
+    ucrtQuickSort(length, compare, swap);
     return done();
   });
 }
 
 function installMath(host: WindowsServiceHost, service: (family: string, name: string, parameters: readonly GuestStorage[], result: GuestStorage | "void", invoke: Parameters<WindowsServiceHost["service"]>[4]) => void): void {
   const real = (args: Parameters<Parameters<WindowsServiceHost["service"]>[4]>[1], index: number): number => { const value = argument(args, index); if (value.kind !== "float32" && value.kind !== "float64") throw new TypeError("CRT floating argument required"); return value.value; };
+  // Known divergence: these round a double result to binary32, so results can differ in the last bit from the UCRT's
+  // libm. They are stable for a given JavaScript engine.
   const unary: readonly (readonly [string, (value: number) => number])[] = [["acosf", Math.acos], ["sinf", Math.sin], ["ceilf", Math.ceil], ["cosf", Math.cos], ["truncf", Math.trunc], ["log2f", Math.log2], ["floorf", Math.floor], ["sqrtf", Math.sqrt], ["tanf", Math.tan]];
   for (const [name, fn] of unary) service("math", name, ["float32"], "float32", (_context, args) => ({ kind: "float32", value: Math.fround(fn(real(args, 0))) }));
   for (const [name, fn] of [["atan2f", Math.atan2], ["fmodf", (a: number, b: number) => a % b]] satisfies readonly (readonly [string, (a: number, b: number) => number])[]) service("math", name, ["float32", "float32"], "float32", (_context, args) => ({ kind: "float32", value: Math.fround(fn(real(args, 0), real(args, 1))) }));

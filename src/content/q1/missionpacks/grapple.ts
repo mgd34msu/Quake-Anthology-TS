@@ -20,8 +20,19 @@ export class RogueGrapple {
     game.named.register("rogue:grapple-anchor", { touch: (_runtime, hook, other) => this.anchor(hook, other) });
     game.named.register("rogue:grapple-track", { action: (_runtime, hook) => this.track(hook) });
   }
+  /** Live hooks by owner. A checkpoint restores into a fresh provider, so the first non-empty entity table is scanned once. */
+  private readonly hooks = new Map<string, Q1Actor>();
+  private indexed = false;
   private hook(owner: ActorId): Q1Actor | null {
-    return [...this.game.entities.values()].find(entity => entity.classname === "hook" && entity.owner !== null && sameActor(entity.owner, owner)) ?? null;
+    if (!this.indexed) {
+      if (this.game.entities.size === 0) return null;
+      for (const entity of this.game.entities.values()) if (entity.classname === "hook" && entity.owner !== null) this.hooks.set(`${entity.owner.slot}:${entity.owner.generation}`, entity);
+      this.indexed = true;
+    }
+    const key = `${owner.slot}:${owner.generation}`, hook = this.hooks.get(key);
+    if (hook === undefined) return null;
+    if (this.game.live(hook)) return hook;
+    this.hooks.delete(key); return null;
   }
   private presentation(player: Q1PlayerState, punch = 0): undefined {
     this.game.weaponPunch(player, punch); return this.game.host.emit({ kind: "weapon", player: player.actor.id, weapon: "rogue:grapple", viewModel: "progs/v_grpple.mdl", frame: player.weaponFrame, punch });
@@ -32,7 +43,7 @@ export class RogueGrapple {
     const body = game.host.bodies.read(player.actor.id); if (body === null) return false;
     const forward = game.makeVectors(player.viewAngles).forward, hook = game.create("hook");
     hook.owner = player.actor.id; hook.movement = "flymissile"; hook.solid = "bbox"; hook.model = "progs/hook.mdl"; hook.frame = 1; hook.projectileWeapon = "rogue:grapple";
-    hook.touch = game.named.touch(hook, "rogue:grapple-anchor");
+    hook.touch = game.named.touch(hook, "rogue:grapple-anchor"); this.hooks.set(`${player.actor.id.slot}:${player.actor.id.generation}`, hook);
     game.setBounds(hook, POINT); game.setBody(hook, { origin: vadd(vadd(body.origin, vscale(forward, 16)), { x: 0, y: 0, z: 16 }), velocity: vscale(forward, 800), angles: velocityAngles(forward) }); game.link(hook);
     game.schedule(hook, 2, game.named.action(hook, "rogue:grapple-reset")); game.sound(player.actor, "weapons/chain1.wav", "weapon");
     player.weaponFrame = 1; player.weaponAnimationAt = game.time; player.continuousFiring = false; this.presentation(player, -2); return true;

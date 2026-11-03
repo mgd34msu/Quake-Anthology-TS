@@ -42,14 +42,19 @@ Call of the Machine, Quake II 64) without changing the campaign's own program.
 
 Under **Match**, **Match rules** offers more than the standard game:
 
-- **Horde** runs in every game: authored monster waves on Quake horde maps,
-  campaign monster waves in Quake II, and escalating bot waves in Quake III.
+- **Horde** runs in every game. Quake plays authored monster waves on Quake horde
+  maps; Quake III plays escalating bot waves on any map. On a Quake II world run by
+  the built-in TypeScript game the launcher refuses Horde unless the map carries an
+  authored `horde_manager` and monster spawn points. Worlds run by an original game DLL
+  skip that check. Horde needs single player or cooperative mode.
 - **Tag** (Rogue's token deathmatch) runs on any deathmatch map in any game;
   the token spawns at a deathmatch spawn point when the map has none.
-- **Capture the Flag** runs natively in Quake II and Quake III on maps with
-  authored flags; Quake uses the Threewave Capture the Flag product.
-- **DeathBall** and **Loki's Minions CTF** are Quake II modes and need their
-  authored Quake II maps.
+- **Capture the Flag** and **Loki's Minions CTF** run in every game as modes of their own.
+  Maps with authored flags use them; on any other map with deathmatch spawns the flag
+  bases are synthesized from the farthest deathmatch spawns.
+- **DeathBall** runs in every game. A Quake II world needs its authored DeathBall entities
+  (`dm_dball_*`). On a Quake or Quake III world the ball and goals are synthesized from
+  deathmatch spawns.
 
 Launcher presets with those mode names pick a suitable authored map for you.
 
@@ -69,7 +74,7 @@ This example uses QuakeWorld movement and Q3 Ranger in classic Q1:
 ```
 
 Explicit menu selections and saved selections retain their chosen source. Classic
-presets must keep classic behavior; see the [project's fidelity requirement](../README.md).
+presets must keep classic behavior; see the [project's fidelity requirement](../README.md#quake-anthology).
 
 ## Enable independent mods
 

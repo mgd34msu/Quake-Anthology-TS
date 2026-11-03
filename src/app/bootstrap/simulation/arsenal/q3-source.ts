@@ -42,7 +42,7 @@ import { TrajectoryType } from "../../../../content/q3/base/shared/trajectory.ts
 import { useQ3Holdable } from "../../../../content/q3/team-arena/client-events.ts";
 import { captureQ3Graph, prepareQ3Graph, restoreQ3Graph } from "../../../../content/q3/base/game/save-state.ts";
 import { readQ3Graph } from "../../../../content/q3/base/game/save-reader.ts";
-import { q3GrappleVelocity } from "../../../../content/q3/base/game/grapple.ts";
+import { q3GrappleVelocity } from "../../../../movement/q3/grapple.ts";
 import { qvmAngleVectors } from "../../../../core/math.ts";
 import { MoveFlags } from "../../../../movement/q3/constants.ts";
 import { savedActorId, readSavedActor } from "../../../../persistence/save-image.ts";
@@ -114,6 +114,9 @@ export type Q3SelectedEquipmentState = Pick<Q3ArsenalRuntimeState, "maxHealth" |
 
 
 const zero = { x: 0, y: 0, z: 0 };
+function sameVector(a: Vec3, b: Vec3): boolean { return a.x === b.x && a.y === b.y && a.z === b.z; }
+/** Inputs of the last client presentation configstring written for a slot; the string is rebuilt only when one changes. */
+interface PresentedClient { userinfo: string; team: number; maxHealth: number; wins: number; losses: number; teamLeader: number; gameType: number }
 function clientEffects(client: GameClient): Q3SelectedClientEffects {
   return { teleportBit: client.ps.eFlags & 4, viewAngles: { ...client.ps.viewangles }, deltaAngles: { ...client.ps.deltaAngles }, pmFlags: client.ps.pmFlags,
     pmTime: client.ps.pmTime, invulnerabilityTime: client.invulnerabilityTime,
@@ -137,6 +140,7 @@ export class Q3SelectedSource {
   readonly random: GameRandom;
   private readonly projected = new Map<OwnedActor, number>();
   private readonly clientEffects = new Map<OwnedActor, Q3SelectedClientEffects>();
+  private readonly presented: (PresentedClient | undefined)[] = [];
   private depth = 0;
   private readonly executing = new Set<OwnedActor>();
   private readonly published = new Map<OwnedActor, { readonly event: number; readonly time: number }>();
@@ -199,7 +203,8 @@ export class Q3SelectedSource {
     this.unobserve = host.actors.onRelease(actor => {
       this.executing.delete(actor); this.published.delete(actor); this.clientEffects.delete(actor);
       const slot = this.projected.get(actor); this.projected.delete(actor);
-      if (slot !== undefined) { if (slot < this.host.maxClients) { this.returnPersistent(this.pool.at(slot)); this.host.configstrings.set(544 + slot, ""); } this.records.release(this.pool.at(slot)); }
+      if (slot !== undefined) { if (slot < this.host.maxClients) { this.returnPersistent(this.pool.at(slot)); this.host.configstrings.set(544 + slot, ""); }
+        this.presented[slot] = undefined; this.records.release(this.pool.at(slot)); }
       return undefined;
     });
     if (restored !== undefined) this.restore(restored);
@@ -285,8 +290,9 @@ export class Q3SelectedSource {
   }
   private refresh(entity: GameEntity): void {
     const body = this.host.bodies.read(entity.actor.id); if (body === null) throw new Error("Selected Q3 projected body was removed");
-    entity.s.pos = { type: TrajectoryType.TR_STATIONARY, time: 0, duration: 0, base: { ...body.origin }, delta: zero };
-    entity.s.apos = { type: TrajectoryType.TR_STATIONARY, time: 0, duration: 0, base: { ...body.angles }, delta: zero };
+    const { pos, apos } = entity.s;
+    if (pos.type !== TrajectoryType.TR_STATIONARY || !sameVector(pos.base, body.origin)) entity.s.pos = { type: TrajectoryType.TR_STATIONARY, time: 0, duration: 0, base: { ...body.origin }, delta: zero };
+    if (apos.type !== TrajectoryType.TR_STATIONARY || !sameVector(apos.base, body.angles)) entity.s.apos = { type: TrajectoryType.TR_STATIONARY, time: 0, duration: 0, base: { ...body.angles }, delta: zero };
     const client = entity.client, pose = this.host.player(entity.actor.id);
     if (client === null || pose === null) return;
     this.publishClient(entity, client);
@@ -294,8 +300,13 @@ export class Q3SelectedSource {
     client.pers.maxHealth = pose.maxHealth; client.ps.persistant.set(PersistentIndex.PERS_TEAM, pose.team);
     client.ps.stats.set(statSchema(this.host.product).maxHealth, pose.maxHealth);
     client.ps.powerups.set(Powerup.PW_QUAD, pose.quadUntil); client.ps.powerups.set(Powerup.PW_HASTE, pose.hasteUntil);
-    client.pers.netname = cleanClientName(clientInfoValue(this.host.userinfo(entity.actor.id), "name"));
-    this.host.configstrings.set(544 + entity.slot, clientPresentationConfig(client, this.host.userinfo(entity.actor.id), this.host.gameType(), null));
+    const userinfo = this.host.userinfo(entity.actor.id), gameType = this.host.gameType(), shown = this.presented[entity.slot];
+    if (shown === undefined || shown.userinfo !== userinfo || shown.team !== client.sess.sessionTeam || shown.maxHealth !== client.pers.maxHealth || shown.wins !== client.sess.wins
+      || shown.losses !== client.sess.losses || shown.teamLeader !== client.sess.teamLeader || shown.gameType !== gameType) {
+      client.pers.netname = cleanClientName(clientInfoValue(userinfo, "name"));
+      this.host.configstrings.set(544 + entity.slot, clientPresentationConfig(client, userinfo, gameType, null));
+      this.presented[entity.slot] = { userinfo, team: client.sess.sessionTeam, maxHealth: client.pers.maxHealth, wins: client.sess.wins, losses: client.sess.losses, teamLeader: client.sess.teamLeader, gameType };
+    }
     this.clientEffects.set(entity.actor, clientEffects(client));
   }
   private player(actor: OwnedActor): GameEntity {
@@ -586,7 +597,7 @@ export class Q3SelectedSource {
     for (const record of this.records.captureOwnership()) if (record.actor !== null && !record.borrowed && this.host.actors.isLive(record.actor.id))
       try { this.host.actors.release(record.actor); } catch (error) { errors.push(error); }
     for (const dispose of [() => this.missiles.close(), () => this.records.close(), this.unobserve]) try { dispose(); } catch (error) { errors.push(error); }
-    this.projected.clear(); this.executing.clear(); this.published.clear(); this.clientEffects.clear();
+    this.projected.clear(); this.executing.clear(); this.published.clear(); this.clientEffects.clear(); this.presented.length = 0;
     if (errors.length !== 0) throw new AggregateError(errors, "Selected Q3 source close failed");
   }
 }

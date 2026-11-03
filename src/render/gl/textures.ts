@@ -14,6 +14,15 @@ interface Texture {
   readonly content: RenderImage;
   readonly levels: readonly { readonly width: number; readonly height: number }[];
 }
+/** After upload only the format, palette and translation are read again, so level pixels are not kept on the JS heap. */
+function withoutPixels(content: RenderImage): RenderImage {
+  if (content.kind === "depth32f") {
+    const [first, ...rest] = content.levels, hollow = (level: DepthImageLevel): DepthImageLevel => ({ width: level.width, height: level.height, pixels: new Float32Array(0) });
+    return { ...content, levels: [hollow(first), ...rest.map(hollow)] };
+  }
+  const [first, ...rest] = content.levels, hollow = (level: ImageLevel): ImageLevel => ({ width: level.width, height: level.height, pixels: new Uint8Array(0) });
+  return { ...content, levels: [hollow(first), ...rest.map(hollow)] };
+}
 const filters: Record<TextureFilter, readonly [number, number]> = {
   nearest: [0x2600, 0x2600], linear: [0x2601, 0x2601],
   "nearest-mipmap-nearest": [0x2700, 0x2600], "linear-mipmap-nearest": [0x2701, 0x2601],
@@ -134,7 +143,7 @@ export class GlTextures {
           }
           const error = gl.glGetError();
           if (error !== 0) throw new Error(`OpenGL texture upload failed: 0x${error.toString(16)}`);
-          this.images.set(operation.image.ordinal, { handle, name, content,
+          this.images.set(operation.image.ordinal, { handle, name, content: withoutPixels(content),
             width: first.width, height: first.height,
             mipmap: operation.sampling.filter !== "nearest" && operation.sampling.filter !== "linear",
             levels: levels.map(({ width, height }) => ({ width, height })) });

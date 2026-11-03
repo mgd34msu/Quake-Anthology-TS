@@ -1,9 +1,9 @@
 import { decodePng } from "../../src/formats/images/png.ts";
-import { testCorpusRoot } from "../support/corpus.ts";
-import { expect, test } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../support/corpus.ts";
+import { expect } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 import { StartupMenu } from "../../src/app/bootstrap/startup-menu.ts";
 import { StartupSelectionModel } from "../../src/app/bootstrap/startup-selection.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
@@ -18,7 +18,9 @@ import { SceneImageRegistry } from "../../src/render/scene/resources.ts";
 import { SceneFrameBuilder } from "../../src/render/commands/frame.ts";
 import { CpuRenderTarget, SoftwareRenderer } from "../../src/render/cpu/index.ts";
 import { encodePng } from "../../src/formats/images/png.ts";
+import { pickEnemiesChoice } from "../support/startup-picker.ts";
 import { loadNativeUiArt } from "../../src/ui/common/index.ts";
+const test = corpusTest("q2/baseq2/pak0.pak", "q3a/baseq3/pak0.pk3");
 
 test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults and retained overrides", async () => {
   const corpusRoot = testCorpusRoot(), catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
@@ -155,53 +157,7 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     key(KeyCode.Escape);
     expect(menu.controller.activeMenu).toBe("menu:startup:main");
     click(100, 130); click(100, 232);
-    const dropdownPick = (choiceId: string): void => {
-      const row = model.rows().find(candidate => candidate.id === "enemies");
-      const choices = row?.choices ?? [], target = choices.find(option => option.id === choiceId);
-      if (row === undefined || target === undefined) throw new Error(`Missing enemies choice ${choiceId}`);
-      const current = choices.find(option => option.id === row.value);
-      const editions = new Set(choices.flatMap(option => option.edition === undefined ? [] : [option.edition]));
-      let edition: "classic" | "rerelease" | null = editions.size > 1 ? current?.edition ?? "classic" : null;
-      const visible = edition === null ? 8 : 7, itemsTop = edition === null ? 138 : 164;
-      const collapsed = new Set(choices.flatMap(option => option.group === undefined || option.group === current?.group ? [] : [option.group]));
-      const entriesOf = (): ({ readonly kind: "header"; readonly group: string } | { readonly kind: "choice"; readonly id: string })[] => {
-        // The picker shows one unified list: edition variants of a title collapse to one entry.
-        const shown: (typeof choices)[number][] = [], seen = new Map<string, (typeof choices)[number]>();
-        for (const option of choices) {
-          if (option.edition === undefined) { shown.push(option); continue; }
-          const key = `${option.group ?? ""}|${option.label}`, existing = seen.get(key);
-          if (existing === undefined) { seen.set(key, option); shown.push(option); }
-          else if (edition !== null && option.edition === edition) { shown[shown.indexOf(existing)] = option; seen.set(key, option); }
-        }
-        const entries: ({ kind: "header"; group: string } | { kind: "choice"; id: string })[] = shown.filter(option => option.group === undefined).map(option => ({ kind: "choice", id: option.id }));
-        for (const group of [...new Set(shown.flatMap(option => option.group === undefined ? [] : [option.group]))]) {
-          entries.push({ kind: "header", group });
-          if (!collapsed.has(group)) for (const option of shown) if (option.group === group) entries.push({ kind: "choice", id: option.id });
-        }
-        return entries;
-      };
-      let entries = entriesOf();
-      const selectedIndex = Math.max(0, entries.findIndex(entry => entry.kind === "choice" && entry.id === row.value));
-      // The picker opens at the selection's category header when the selection fits below it.
-      let headerIndex = -1;
-      for (let index = selectedIndex - 1; index >= 0; index--) if (entries[index]?.kind === "header") { headerIndex = index; break; }
-      const anchored = headerIndex >= 0 && selectedIndex - headerIndex < visible ? headerIndex : selectedIndex;
-      let scroll = Math.max(0, Math.min(anchored, Math.max(0, entries.length - visible)));
-      const scrollTo = (index: number): void => {
-        while (index - scroll > visible - 1) { wheel(true); scroll++; }
-        while (index - scroll < 0) { wheel(false); scroll--; }
-      };
-      const clickEntry = (index: number): void => { scrollTo(index); click(360, itemsTop + (index - scroll) * 27 + 12); };
-      if (target.edition !== undefined && edition !== null && target.edition !== edition) {
-        click(target.edition === "classic" ? 388 : 516, 147);
-        edition = target.edition; scroll = 0; entries = entriesOf();
-      }
-      if (target.group !== undefined && collapsed.has(target.group)) {
-        clickEntry(entries.findIndex(entry => entry.kind === "header" && entry.group === target.group));
-        collapsed.delete(target.group); entries = entriesOf();
-      }
-      clickEntry(entries.findIndex(entry => entry.kind === "choice" && entry.id === choiceId));
-    };
+    const dropdownPick = (choiceId: string): void => pickEnemiesChoice(model, { click, wheel }, choiceId);
     focusControl("ui:startup:enemies"); key(KeyCode.Enter);
     await capture("roster-combat-source-presets");
     dropdownPick("q1:monsters/classic/id1");

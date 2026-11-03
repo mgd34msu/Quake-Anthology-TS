@@ -65,7 +65,7 @@ test('source grapple cable and looping sound retain client-owned actor identitie
 
 test('unified frame reconstructs mixed presentation identities and local resources without server paths',async()=>{
   const bytes=encodeUnifiedFrame(frame),text=new TextDecoder().decode(inflateRawSync(bytes));
-  expect(new SaveReader(decodeCheckpointValue(inflateRawSync(bytes))).field('version').integer()).toBe(9);
+  expect(new SaveReader(decodeCheckpointValue(inflateRawSync(bytes))).field('version').integer()).toBe(10);
   expect(text.includes('/server-private')).toBe(false);expect(text.includes('local-model')).toBe(false);
   const result=await decodeUnifiedFrame(bytes,context),snapshot=result.output.snapshot;
   expect(snapshot.session).toBe(client.session);expect(result.player.actor.equals(client.actor(4,2))).toBe(true);expect(result.player.actor.equals(id)).toBe(false);
@@ -78,6 +78,15 @@ test('unified frame reconstructs mixed presentation identities and local resourc
   expect(result.models[0]?.indexedSkin?.pixels).toEqual(new Uint8Array([7,8]));expect(result.characters[0]?.animation).toEqual(frame.characters[0]?.animation);
   expect(result.player.ui).toEqual(frame.player.ui);expect(result.player.view).toEqual(frame.player.view);expect(result.worldText).toEqual(frame.worldText);
   expect(result.output.events[0]?.audience.kind).toBe('client');expect(result.epoch).toBe(3);expect(result.acknowledgedInput).toBe(9);
+});
+test('unified frame version 10 carries the event fields version 9 dropped and version 9 bytes still decode',async()=>{
+  const v10=new SaveReader(decodeCheckpointValue(inflateRawSync(encodeUnifiedFrame(frame)))),value=v10.value as Record<string,unknown>;
+  const old=deflateRawSync(encodeCheckpointValue({...value,version:9}));
+  const result=await decodeUnifiedFrame(old,context);
+  expect(result.epoch).toBe(3);expect(result.output.events[0]?.audience.kind).toBe('client');
+  const sound={kind:'q2' as const,event:{kind:'sound' as const,actor:id,origin,path:'misc/x.wav',channel:1,volume:1,attenuation:1,reliable:false,loop:'once' as const,local:true},sequence:1,content:'q1:registered:id1:1' as const,seconds:1};
+  const decoded=decodeUnifiedPresentationEvents(encodeUnifiedPresentationEvents([sound]),context);
+  expect(decoded[0]).toMatchObject({kind:'q2',event:{kind:'sound',path:'misc/x.wav',local:true}});
 });
 test('unified frame rejects mismatched local resource and unsafe server path',async()=>{
   await expect(decodeUnifiedFrame(encodeUnifiedFrame(frame),{...context,resource:async()=>({...localResource,byteLength:43})})).rejects.toThrow('differs');

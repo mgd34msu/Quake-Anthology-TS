@@ -6,6 +6,7 @@ import { prepareRawSse } from "../floating-point/raw-sse.ts";
 import type { NumericInstruction } from "../floating-point/contracts.ts";
 import { alu, resultFlags } from "../x86/arithmetic.ts";
 import type { AluOperation, ShiftOperation } from "../x86/arithmetic.ts";
+import { virtualCpuid } from "../core/cpuid.ts";
 import { canonicalAddress, guestAddress, readMemory, writeMemory, X64DecodeCursor, X64ProcessorFault, X64Unsupported } from "./decoder.ts";
 import type { X64DecodedInstruction, X64Operand } from "./decoder.ts";
 import { executeX64Plan, makeX64Plan, x64Advance as advance, x64Lock } from "./plan.ts";
@@ -42,6 +43,8 @@ interface ManagedBlock {
   readonly unchanged: () => boolean;
   readonly afterStore: () => boolean;
 }
+/** Sized for the retail x64 gamex64 image (about 2.8 MB of code); exhaustion is counted in `decodeCacheClears`. */
+const decodeCacheLimit = 262144;
 const arithmetic: readonly AluOperation[] = ["add", "or", "adc", "sbb", "and", "sub", "xor", "cmp"];
 const shifts: readonly ShiftOperation[] = ["rol", "ror", "rcl", "rcr", "shl", "shr", "shl", "sar"];
 
@@ -51,6 +54,7 @@ export class X64Cpu implements GuestCpu {
   readonly memory: MappedGuestMemory;
   readonly #isHostCall: (address: GuestAddress) => boolean;
   readonly #instructions = new Map<bigint, CachedInstruction>();
+  #decodeCacheClears = 0;
   readonly #callbacks: GuestCallbackTable | null;
   readonly #blocksAllowed: boolean;
   readonly #managedMemory: SparseGuestMemory | null;
@@ -70,6 +74,9 @@ export class X64Cpu implements GuestCpu {
     this.#blocksAllowed = options.isHostCall === undefined;
     this.#isHostCall = options.isHostCall ?? (options.callbacks === undefined ? () => false : address => options.callbacks?.enter(address) === true);
   }
+
+  /** Times the decode cache reached its limit and was discarded with every block hanging off it. */
+  get decodeCacheClears(): number { return this.#decodeCacheClears; }
 
   run(options: RunOptions): GuestExecutionStop {
     if (!Number.isSafeInteger(options.instructionBudget) || options.instructionBudget < 0) throw new RangeError("Instruction budget must be a nonnegative safe integer");
@@ -124,16 +131,7 @@ export class X64Cpu implements GuestCpu {
           cursor = retainedCursor;
           flow = this.#execute(cursor);
           nextIP = cursor.nextIP;
-          if (decoded === null) {
-            const prepared = cursor.cache();
-            if (this.#instructions.size >= 32768) this.#instructions.clear();
-            if (prepared === null || cursor.start !== start) this.#instructions.delete(start);
-            else {
-              const integer = cursor.plan === null ? null : prepareX64IntegerPlan(cursor.plan);
-              this.#instructions.set(start, { start, decoded: prepared, plan: cursor.plan, integer,
-                block: null, managedBlock: null, unhookedRevision: undefined });
-            }
-          }
+          if (decoded === null) this.#admit(cursor, start);
         }
         this.state.instructionPointer = flow.kind === "branch" ? flow.target : nextIP;
         if (block !== null) {
@@ -232,16 +230,7 @@ export class X64Cpu implements GuestCpu {
           cursor = retainedCursor;
           flow = this.#execute(cursor);
           nextIP = cursor.nextIP;
-          if (decoded === null) {
-            const prepared = cursor.cache();
-            if (this.#instructions.size >= 32768) this.#instructions.clear();
-            if (prepared === null || cursor.start !== start) this.#instructions.delete(start);
-            else {
-              const integer = cursor.plan === null ? null : prepareX64IntegerPlan(cursor.plan);
-              this.#instructions.set(start, { start, decoded: prepared, plan: cursor.plan, integer,
-                block: null, managedBlock: null, unhookedRevision: undefined });
-            }
-          }
+          if (decoded === null) this.#admit(cursor, start);
         }
         state.instructionPointer = flow.kind === "branch" ? flow.target : nextIP;
         if (block !== null) {
@@ -266,6 +255,17 @@ export class X64Cpu implements GuestCpu {
     const address = this.#evidenceAddress(state.instructionPointer);
     if (options.returnAddress?.byteOffset === address.byteOffset) return { kind: "return", instructions: options.instructionBudget, address };
     return { kind: "budget", instructions: options.instructionBudget };
+  }
+
+  #admit(cursor: X64DecodeCursor, start: bigint): void {
+    const prepared = cursor.cache();
+    if (this.#instructions.size >= decodeCacheLimit) { this.#instructions.clear(); this.#decodeCacheClears++; }
+    if (prepared === null || cursor.start !== start) this.#instructions.delete(start);
+    else {
+      const integer = cursor.plan === null ? null : prepareX64IntegerPlan(cursor.plan);
+      this.#instructions.set(start, { start, decoded: prepared, plan: cursor.plan, integer,
+        block: null, managedBlock: null, unhookedRevision: undefined });
+    }
   }
 
   #managedBlock(first: CachedInstruction, revision: symbol | null, memory: SparseGuestMemory): ManagedBlock | null {
@@ -648,20 +648,7 @@ export class X64Cpu implements GuestCpu {
       case 0x0b: throw new X64ProcessorFault(6, "UD2 invalid opcode");
       case 0xa2: {
         this.#lock(cursor, null, false);
-        // Virtual CPU feature enumeration, independent of the machine running Bun.
-        // CPUID register/feature encoding: Intel SDM Vol. 2A; Microsoft __cpuid docs.
-        const leaf = this.state.registers.read("rax", 32);
-        let eax = 0n, ebx = 0n, ecx = 0n, edx = 0n;
-        if (leaf === 0n) {
-          eax = 7n;
-          // EBX, EDX, ECX spell "QuakeTSguest".
-          ebx = 0x6b617551n; edx = 0x67535465n; ecx = 0x74736575n;
-        } else if (leaf === 1n) {
-          eax = 0x600n; ebx = 0x10000n;
-          // x87, CMPXCHG8B, CMOV, SSE, SSE2. No AVX, XSAVE, RDRAND or TSC.
-          edx = 0x06008101n;
-        } else if (leaf === 0x80000000n) eax = 0x80000001n;
-        else if (leaf === 0x80000001n) { ecx = 1n; edx = 0x20000000n; }
+        const { eax, ebx, ecx, edx } = virtualCpuid(this.state.registers.read("rax", 32), false);
         this.state.registers.write("rax", 32, eax); this.state.registers.write("rbx", 32, ebx);
         this.state.registers.write("rcx", 32, ecx); this.state.registers.write("rdx", 32, edx);
         return advance;
@@ -771,7 +758,7 @@ export class X64Cpu implements GuestCpu {
 
   #numeric(cursor: X64DecodeCursor, secondaryOpcode: number | null): undefined {
     this.#lock(cursor, null, false);
-    const decoded = cursor.opcode === 0x9b ? null : cursor.decodeModRM(cursor.width);
+    const decoded = cursor.opcode === 0x9b || secondaryOpcode === 0x77 ? null : cursor.decodeModRM(cursor.width);
     if (secondaryOpcode !== null && decoded !== null) {
       const operation = prepareRawSse(secondaryOpcode, cursor.numericPrefix, decoded.registerIndex);
       if (operation !== null) {

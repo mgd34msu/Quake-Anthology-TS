@@ -64,10 +64,39 @@ for (const dialect of ["q2-rerelease", "q3"] satisfies readonly CommandDialect[]
     const { commands, input } = fixture(dialect, "q1-netquake");
     commands.append("impulse 0x9\n"); commands.execute();
     expect(input.sample(20, 20).impulse).toBe(9);
+    // PLATFORM-004: an invalid value is printed and ignored instead of ending the frame loop.
+    const printed: string[] = [];
+    commands.bindOutput(text => { printed.push(text); });
     for (const text of ["9tail", "9.5", "-1", "256"]) {
       commands.append(`impulse ${text}\n`);
-      expect(() => commands.execute()).toThrow("Input impulse must fit a byte");
+      expect(() => commands.execute()).not.toThrow();
     }
+    expect(printed).toEqual(Array.from({ length: 4 }, () => "Input impulse must fit a byte\n"));
+    expect(input.sample(30, 20).impulse).toBe(0);
+    commands.append("+attack 1 abc\n");
+    expect(() => commands.execute()).not.toThrow();
     expect(() => input.setImpulse(256)).toThrow("Input impulse must fit a byte");
   });
 }
+
+import { KeyCode } from "../../src/core/key-codes.ts";
+test("PLATFORM-011 fractional wheel events accumulate to whole presses", () => {
+  const { commands, input, owner } = fixture("q1-netquake");
+  const seat = owner.seat(0);
+  input.bind({ input: { kind: "key", code: KeyCode.MouseWheelUp }, target: { kind: "command", text: "impulse 7" } });
+  for (let index = 0; index < 8; index++) input.input({ seat, timeMilliseconds: 10 + index, kind: "mouse-wheel", delta: { x: 0, y: 0.125 } });
+  commands.execute();
+  expect(input.sample(20, 20).impulse).toBe(7);
+  for (let index = 0; index < 7; index++) input.input({ seat, timeMilliseconds: 30 + index, kind: "mouse-wheel", delta: { x: 0, y: 0.125 } });
+  commands.execute();
+  expect(input.sample(40, 20).impulse).toBe(0);
+});
+
+test("UI-007 releasing a controller device tells the UI to drop its held sticks", () => {
+  const owner = createIdentityOwner("release-device"), seat = owner.seat(0);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const commands = new CommandBuffer({ dialect: "q3", context }), events: string[] = [];
+  const input = new SeatInput({ seat, dialect: "q3", context, commands, uiEvent: event => { if (event.kind === "controller-axis") events.push(`${event.device}:${event.axis}:${event.value}`); return false; } });
+  input.releaseDevice(4, 100);
+  expect(events).toEqual(["4:left-x:0", "4:left-y:0"]);
+});

@@ -484,8 +484,12 @@ export function writeNetQuakeEntity(sb: SizeBuf, profile: Q1ProtocolIdentity, st
     u.sendinterval = state.lerpFinishSeconds !== 0;
     u.lerpfinish = state.lerpFinishSeconds - serverTimeSeconds;
     u.baseline = wireEntity(baseline);
-    createNetQuakeCodec(profile, new MessageReader(new Uint8Array(0))).writeEntityUpdate(sb, state.number, u, protocolFlags(profile));
+    let codec = writeCodecs.get(profile);
+    if (codec === undefined) { codec = createNetQuakeCodec(profile, new MessageReader(new Uint8Array(0))); writeCodecs.set(profile, codec); }
+    codec.writeEntityUpdate(sb, state.number, u, protocolFlags(profile));
 }
+// Entity writes never read, so one codec per profile serves every entity of every frame.
+const writeCodecs = new WeakMap<Q1ProtocolIdentity, ReturnType<typeof createNetQuakeCodec>>();
 export function writeNetQuakeClientData(sb: SizeBuf, profile: Q1ProtocolIdentity, data: Q1ClientData, weaponAlpha = 0, standardQuake = true): void {
     const c = new ClientdataT();
     c.viewheight = data.viewHeight;

@@ -7,7 +7,7 @@ movement, characters, weapons, monsters, maps, and equipment across games
 while each selected source keeps its own behavior.
 
 **Version 1.2.6** is available from
-[GitHub Releases](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.2.6)
+[GitHub Releases](https://github.com/mgd34msu/quake-anthology-ts/releases/tag/v1.2.6)
 as a Linux x64 executable. See the [release notes](docs/releases/1.2.6.md).
 
 Game data is **not** included. You need your own legally obtained copies of
@@ -27,7 +27,7 @@ You need a 64-bit Linux system with these native libraries installed
 - libtheoradec (OGV video cutscenes)
 
 Download `quake-anthology-1.2.6-linux-x64.tar.gz` from the
-[release page](https://github.com/mgd34msu/Quake-Anthology-TS/releases/tag/v1.2.6),
+[release page](https://github.com/mgd34msu/quake-anthology-ts/releases/tag/v1.2.6),
 extract it anywhere, and run the executable:
 
 ```sh
@@ -61,7 +61,7 @@ too, below any local copies.
 ### GOG, original media, or any other layout
 
 Pass `--content-root` once, pointing at a folder that contains your games
-in any of these shapes — all work:
+in a layout like this one:
 
 ```text
 games/                  <- --content-root games
@@ -124,10 +124,14 @@ Command-line launches work too:
 ./quake-typescript --game q2-classic-baseq2 --map-game q3-baseq3 --map q3dm17 \
   --movement q2 --character q2 --mode deathmatch
 
-# Dedicated server, no window
+# Dedicated server, no window, listening for Quake clients on UDP 26000
 ./quake-typescript --content-root /path/to/games --game q1-classic-id1 \
-  --map e1m1 --mode deathmatch --dedicated
+  --map e1m1 --mode deathmatch --dedicated --listen 26000
 ```
+
+`--dedicated` alone runs a headless world with no listener, which nothing can
+join. Add `--listen PORT` (the game's native protocol), `--listen-q2 PORT` or
+`--listen-unified PORT`. See the [server guide](docs/server-guide.md).
 
 `--renderer` selects `gl` (default) or the `cpu` software renderer;
 `--gamma 0.5…3` adjusts brightness. Run with `--help` for every option,
@@ -158,7 +162,10 @@ needs the native libraries and your game data. See
 [setup and build instructions](docs/getting-started.md).
 
 Checks for a change: `bun run typecheck`, `bun run policy`, and
-`bun test` (some tests need game data via `QTS_TEST_CORPUS`).
+`bun run test:unit` (no game data needed; data-dependent tests skip). `bun run test:corpus` runs them against
+the data in `QTS_TEST_CORPUS` and fails a guard whose file is missing; `bun run test:gl` adds the native window and
+renderer tests (`SDL_VIDEODRIVER=offscreen` by default). Every `bun test` run points `HOME` at a throwaway directory.
+Tests that render screenshots or write JSON evidence only do so when `QTS_TEST_CAPTURE_DIR` names a directory.
 
 ## Documentation
 
@@ -168,8 +175,11 @@ Checks for a change: `bun run typecheck`, `bun run policy`, and
 - [Playing and selections](docs/playing.md)
 - [Mod compatibility](docs/mod-compatibility.md)
 - [Console and LLM](docs/console-and-llm.md)
-- [Functional targets and acceptance status](docs/functional-targets/status.md)
-- [Architecture contracts](docs/contracts.md)
+- [Project status](docs/status.md) and [changelog](CHANGELOG.md)
+- [Architecture overview](docs/architecture.md) and [contracts](docs/contracts.md)
+- [Server guide](docs/server-guide.md), [troubleshooting](docs/troubleshooting.md)
+- [Save format](docs/save-format.md), [network protocols](docs/protocol.md)
+- [Contributing](CONTRIBUTING.md), [release process](docs/release-process.md), [security policy](SECURITY.md)
 
 ## License
 

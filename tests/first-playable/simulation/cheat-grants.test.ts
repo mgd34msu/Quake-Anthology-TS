@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
@@ -10,6 +10,7 @@ import { CommandBuffer } from "../../../src/core/commands/index.ts";
 import { registerQ1ClientCommands } from "../../../src/app/bootstrap/q1-client-commands.ts";
 import { EngineSession } from "../../../src/world/session/session.ts";
 import { createQ1ApplicationServerHost } from "../../../src/app/bootstrap/simulation/network-q1.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q2/baseq2/pak0.pak", "q2/rerelease/baseq2/pak0.pak", "q3a/baseq3/pak0.pk3");
 
 const cases: readonly { readonly game: string; readonly map: string; readonly foreign: boolean }[] = [
   { game: "q1-classic-id1", map: "e1m1", foreign: false },

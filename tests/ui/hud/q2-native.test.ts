@@ -102,7 +102,8 @@ test("rerelease table scratch is scoped to the HUD owner and shared between auth
   expect(ops).toContainEqual({ kind: "font-text", x: 287, y: 7, text: "Level", alternate: true });
   expect(ops).toContainEqual({ kind: "font-text", x: 356, y: 16, text: "12", alternate: false });
   expect(q2LayoutOperations("xv 160 yt 0 draw_table", source, 640, 480, undefined, env)).toEqual(ops);
-  expect(environment().table?.rows).toEqual([]);
+  expect(env.table?.rows.length).toBeGreaterThan(0); // the scratch table lives in the owner environment that drew it
+  expect(q2LayoutOperations("xv 160 yt 0 draw_table", source, 640, 480, undefined, environment()).some(operation => operation.kind === "font-text" && operation.text === "Level")).toBe(false);
   expect(() => q2LayoutOperations("start_table 6", source, 320, 240, undefined, env)).toThrow("source limits");
 });
 
@@ -192,5 +193,21 @@ test("inventory-only metadata preserves native ammunition with either original H
       .toEqual(q2LayoutOperations(layout, snapshot, 320, 240, undefined, environment()));
     expect(q2LayoutOperations(layout, snapshot, 320, 240, arsenal, environment()))
       .toContainEqual({ kind: "picture", x: 0, y: 0, name: "a_shells" });
+  }
+});
+
+import { ApplicationQ2NativeHud } from "../../../src/app/bootstrap/q2-native-hud.ts";
+import type { ProviderReference } from "../../../src/contracts/content.ts";
+import type { UiDrawContext } from "../../../src/contracts/ui.ts";
+
+test("UI-002 a server layout outside source limits skips the HUD frame instead of throwing", () => {
+  const hud = new ApplicationQ2NativeHud();
+  const owner = createIdentityOwner("native-hud-limits"), area = { x: 0, y: 0, width: 320, height: 240 };
+  const provider = { provider: "q2:official", content: "q2:rerelease:baseq2:retail" } satisfies ProviderReference;
+  const context: UiDrawContext = { binding: { seat: owner.seat(0), client: owner.client(0, 0), viewport: area, safeArea: area, hudScale: 1,
+    presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: provider.content, hud: provider, effects: provider, audio: provider } }, timeMilliseconds: 0 };
+  for (const layout of ["pic 999", "client 0 0 9999 0 0 0", "endif", `pic ${"x".repeat(5000)}`]) {
+    const commands = hud.commands({ ...frame(), layout }, context, 1, () => "", "layout-overlay");
+    expect(commands.map(command => command.kind)).toEqual(["clip", "clip"]);
   }
 });

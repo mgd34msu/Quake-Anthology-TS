@@ -1,5 +1,8 @@
-import { expect, spyOn, test } from 'bun:test';
-import { resolve } from 'node:path';
+import { expect, spyOn } from "bun:test";
+import { glTest as test } from "../../support/gl.ts";
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { Application } from '../../../src/app/bootstrap/application.ts';
 import { RemoteApplication } from '../../../src/app/bootstrap/remote-application.ts';
 import { Q3ServerConnection } from '../../../src/network/q3/server.ts';
@@ -7,7 +10,9 @@ import { Q3ClientNetwork } from '../../../src/app/bootstrap/network/q3-client.ts
 import { Q3RemotePresentation } from '../../../src/app/bootstrap/network/remote-q3.ts';
 import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
 import { encodePng } from '../../../src/formats/images/png.ts';
-const output=process.env["FRAME_TIME_PROOF"] ?? import.meta.dir;
+// Evidence is written only when FRAME_TIME_PROOF names a directory; the user roots always live in a fresh temporary one.
+const proof=process.env["FRAME_TIME_PROOF"];
+const output=proof ?? mkdtempSync(join(tmpdir(),"frame-time-remote-"));
 function readRemoteTime(remote: Q3RemotePresentation) {
   const output = remote.output;
   if (output === null) throw new Error("Remote fixture has no active output");
@@ -81,7 +86,7 @@ test('actual Q3 UDP peer retains wall transport and scaled client command clocks
     expect(snapshots.mock.calls.length).toBe(sent);expect(polls.mock.calls.length).toBeGreaterThan(polled);
     expect(remote.clientCommands?.cvars.variableValue('timescale')).toBe(2);
     samples.push({kind:'frozen-server',sourceSeconds:frozen,deadline,polls:polls.mock.calls.length-polled,retainedClientScale:remote.clientCommands?.cvars.variableValue('timescale')});
-    const capture=remote.captureNextFrame();await exchange();await Bun.write(resolve(output,'remote-frozen.png'),encodePng(320,240,await capture));
+    const capture=remote.captureNextFrame();await exchange();const frozenImage=encodePng(320,240,await capture);if(proof!==undefined)await Bun.write(resolve(output,'remote-frozen.png'),frozenImage);
     const frozenHighwater=connection.lastUserCommand.serverTime;
     authority.host.cvars.set('timescale','1',true);authority.host.cvars.set('com_cameraMode','0',true);
     for(let i=0;i<30&&remote.clientCommands?.cvars.variableValue('timescale')!==1;i++)await exchange();
@@ -96,5 +101,5 @@ test('actual Q3 UDP peer retains wall transport and scaled client command clocks
     remote.input({seat:local.seat.id,kind:'key',code:115,down:false,repeat:false,timeMilliseconds:performance.now()});
     expect(peer.simulation.playerView(admitted.actor).origin).not.toEqual(resumedPosition);
     expect(remote.networkPhase).toBe('active');completed=true;
-  }finally{await client?.close();await server?.close();polls.mockRestore();submits.mockRestore();snapshots.mockRestore();await Bun.write(resolve(output,'remote.json'),JSON.stringify({completed,wallMilliseconds:performance.now()-opened,samples,prints},null,2));}
+  }finally{await client?.close();await server?.close();polls.mockRestore();submits.mockRestore();snapshots.mockRestore();if(proof!==undefined)await Bun.write(resolve(output,'remote.json'),JSON.stringify({completed,wallMilliseconds:performance.now()-opened,samples,prints},null,2));else rmSync(output,{recursive:true,force:true});}
 },150000);

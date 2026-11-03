@@ -76,7 +76,6 @@ export interface Md3Model {
 
 export interface DecodedMd3Model extends Md3Model {
   readonly source: string;
-  readonly bytes: Uint8Array;
   readonly byteLength: number;
 }
 
@@ -287,7 +286,7 @@ export function parseMd3(data: Uint8Array, source = "<md3>"): DecodedMd3Model {
   if (surfaceOffset !== modelEnd) {
     fail(source, surfaceOffset, `surface chain ends at ${surfaceOffset}, model ends at ${modelEnd}`);
   }
-  return { source, bytes: data.slice(0, modelEnd), byteLength: modelEnd, name, flags, skinCount, frames, tags, surfaces };
+  return { source, byteLength: modelEnd, name, flags, skinCount, frames, tags, surfaces };
 }
 
 function frameAt(surface: Md3Surface, index: number, name: string): readonly Md3Vertex[] {

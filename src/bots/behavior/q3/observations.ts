@@ -31,7 +31,7 @@ export interface AasEntityInfo extends BotEntityUpdate {
   readonly updateInterval: number;
 }
 
-function emptyInfo(number: number): AasEntityInfo {
+export function emptyInfo(number: number): AasEntityInfo {
   const zero = { x: 0, y: 0, z: 0 };
   return { valid: false, number, type: 0, flags: 0, origin: zero, angles: zero, oldOrigin: zero,
     mins: zero, maxs: zero, lastVisibleOrigin: zero, lastUpdateTime: 0, updateInterval: 0,

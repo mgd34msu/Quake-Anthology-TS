@@ -11,7 +11,6 @@ export const ARMOR_PROTECTION = 0.66;
 export const MAX_ITEMS = 256;
 export const EVENT_VALID_MSEC = 300;
 export const EV_EVENT_BIT1 = 0x100;
-export const EV_EVENT_BIT2 = 0x200;
 export const EV_EVENT_BITS = 0x300;
 
 export enum GameType {

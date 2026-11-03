@@ -13,7 +13,8 @@ export function registerAddonLights(context: Q1AddonContext): undefined {
   const { game } = context, prefix = `${context.program}:light:`;
   game.registerSpawn("dynamiclight", (_game, entity) => game.options.coop && (entity.spawnflags & 1) !== 0 ? game.remove(entity) : undefined);
   game.named.register(prefix + "ramp_tick", { action: (_game, entity) => {
-    const owner = game.entity(entity.owner); if (owner === null) throw new Error("target_lightramp lost its light");
+    // Only target_lightramp_init objerrors on a missing light; a light killed later is read as a freed edict, so the ramp just stops.
+    const owner = game.entity(entity.owner); if (owner === null) return context.removeFrameTick(entity);
     const state = entity.number("ramp.state"), delta = Math.fround(context.frameTime * entity.delay);
     const fraction = Math.fround(entity.number("cnt") + (state === 3 ? -delta : state === 1 ? delta : 0));
     game.host.emit({ kind: "lightstyle", style: owner.number("style"), pattern: addonLightStyle(fraction, (entity.spawnflags & 1) !== 0) });

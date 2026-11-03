@@ -130,7 +130,7 @@ export class ClientHud {
     const registry = this.tools.media.weaponRegistry, graphics = this.tools.media.graphics, stats = statSchema(ps.product);
     icons.drawTeamBackground({ x: 0, y: 420, width: 640, height: 60 }, f(0.33), ps.persistant.get(PersistentIndex.PERS_TEAM));
     const weapon = state.entityAt(ps.clientNum).currentState.weapon;
-    const ammoModel = registry.weapon(weapon).ammoModel;
+    const ammoModel = registry.weaponOrEmpty(weapon).ammoModel;
     if (this.host.weaponHud === undefined && weapon !== 0 && ammoModel.kind !== "default") icons.draw3DModel({ x: 100, y: 432, width: ICON, height: ICON },
       ammoModel, null, vec3(70, 0, 0), vec3(0, f(90 + f(20 * f(Math.sin(f(f(state.time) / 1000))))), 0));
     this.drawStatusBarHead(285);

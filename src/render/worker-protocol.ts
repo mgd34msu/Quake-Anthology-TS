@@ -104,7 +104,10 @@ export class WireEncoder {
   acknowledge(token: unknown): ImageResourceOperation {
     const id = integer(token), operation = this.acknowledgments.get(id);
     if (operation === undefined) throw new Error("Unknown renderer image acknowledgment");
-    this.acknowledgments.delete(id); return operation;
+    this.acknowledgments.delete(id);
+    // Ordinals are never reused, so a released image's handle can go once the release is acknowledged.
+    if (operation.kind === "release-image") this.images.delete(operation.image.ordinal);
+    return operation;
   }
   image(image: RendererImage): unknown {
     if (image.owner.identity !== this.owner.identity || image.owner.session !== this.owner.session || image.owner.generation !== this.owner.generation) throw new Error("Image belongs to another renderer lifetime");
@@ -127,24 +130,25 @@ export class WireEncoder {
   imageOperation(operation: ImageResourceOperation): unknown {
     return deferred(() => {
       const image = operation.kind === "texture-mode" ? null : this.image(operation.image);
-      let retained: ImageResourceOperation;
+      // The wire form is a private copy so later frontend writes cannot reach a queued message. The acknowledgment keeps the operation itself:
+      // the host journal shares the frontend's image content instead of holding another copy of every texture.
+      let wire: ImageResourceOperation;
       switch (operation.kind) {
-        case "texture-mode": retained = { ...operation }; break;
-        case "release-image": retained = { ...operation }; break;
-        case "update-image": retained = { ...operation, content: snapshot(operation.content) }; break;
+        case "texture-mode": case "release-image": wire = { ...operation }; break;
+        case "update-image": wire = { ...operation, content: snapshot(operation.content) }; break;
         case "create-image": {
           const content: RenderImage = operation.content.kind === "indexed8"
             ? { ...snapshot({ ...operation.content, palette: { colors: operation.content.palette.colors, source: null } }), palette: { colors: operation.content.palette.colors.slice(), source: operation.content.palette.source } }
             : snapshot(operation.content);
-          retained = { ...operation, content, sampling: snapshot(operation.sampling) }; break;
+          wire = { ...operation, content, sampling: snapshot(operation.sampling) }; break;
         }
       }
       const acknowledgment = this.nextAcknowledgment++;
-      this.acknowledgments.set(acknowledgment, retained);
-      if (retained.kind === "texture-mode") return { ...retained, acknowledgment };
-      if (retained.kind !== "create-image") return { ...retained, image, acknowledgment };
-      const content = retained.content.kind === "indexed8" ? { ...retained.content, palette: { colors: retained.content.palette.colors } } : retained.content;
-      return { ...retained, image, content, acknowledgment };
+      this.acknowledgments.set(acknowledgment, operation);
+      if (wire.kind === "texture-mode") return { ...wire, acknowledgment };
+      if (wire.kind !== "create-image") return { ...wire, image, acknowledgment };
+      const content = wire.content.kind === "indexed8" ? { ...wire.content, palette: { colors: wire.content.palette.colors } } : wire.content;
+      return { ...wire, image, content, acknowledgment };
     });
   }
   batch(batch: DrawBatch): unknown {
@@ -168,6 +172,7 @@ export class WireEncoder {
     return deferred(() => {
       switch (command.kind) {
         case "view": return { kind: command.kind, view: { viewport: snapshot(command.view.viewport), clear: snapshot(command.view.clear), clipPlane: snapshot(command.view.clipPlane),
+          ...(command.view.viewProjection === undefined ? {} : { viewProjection: [...command.view.viewProjection] }),
           beforeView: command.view.beforeView.map(operation => this.operation(operation)), operations: command.view.operations.map(operation => this.operation(operation)) } };
         case "image-resource": return { kind: command.kind, operation: this.imageOperation(command.operation) };
         case "stretch-pic": return snapshot({ ...command, image: this.image(command.image) });
@@ -250,7 +255,11 @@ export class WireDecoder {
     const p = record(value);
     switch (p["kind"]) {
       case "texture-mode": return { kind: "texture-mode", filter: filter(p["filter"]) };
-      case "release-image": return { kind: "release-image", image: this.image(p["image"]) };
+      case "release-image": {
+        const image = this.image(p["image"]);
+        this.images.delete(image.ordinal);
+        return { kind: "release-image", image };
+      }
       case "update-image": return { kind: "update-image", image: this.image(p["image"]), level: integer(p["level"]), content: this.level(p["content"]) };
       case "create-image": { const sampling = record(p["sampling"]); return { kind: "create-image", image: this.image(p["image"]), content: this.content(p["content"]), sampling: { wrap: choice(sampling["wrap"], ["repeat", "clamp"]), filter: filter(sampling["filter"]) } }; }
       default: throw new TypeError("Invalid renderer resource operation");
@@ -272,7 +281,7 @@ export class WireDecoder {
     const p = record(value), primitive = p["primitive"] === "lines" ? { primitive: "lines", lineWidth: number(p["lineWidth"]) } satisfies Pick<Extract<DrawBatch, { primitive: "lines" }>, "primitive" | "lineWidth">
       : { primitive: choice(p["primitive"], ["triangles"]) };
     const common = { ...primitive, indices: list(p["indices"]).map(integer), texture: this.binding(p["texture"]), state: state(p["state"]), lighting: this.lighting(p["lighting"]),
-      ...(p["fog"] === undefined ? {} : { fog: fog(p["fog"]) }), ...(p["textureEffect"] === undefined ? {} : { textureEffect: choice(p["textureEffect"], ["luminance-alpha"]) }) };
+      ...(p["space"] === undefined ? {} : { space: choice(p["space"], ["clip", "world"]) }), ...(p["fog"] === undefined ? {} : { fog: fog(p["fog"]) }), ...(p["textureEffect"] === undefined ? {} : { textureEffect: choice(p["textureEffect"], ["luminance-alpha"]) }) };
     if (p["texturing"] === "single") return { ...common, texturing: "single", vertices: list(p["vertices"]).map(vertex) };
     if (p["texturing"] !== "pair") throw new TypeError("Invalid renderer texturing");
     const second = record(p["secondTexture"]);
@@ -313,7 +322,8 @@ export class WireDecoder {
   }
   viewState(value: unknown): RenderViewState {
     const p = record(value), clear = p["clear"] === null ? null : record(p["clear"]);
-    return { viewport: rect(p["viewport"]), clipPlane: p["clipPlane"] === null ? null : vec4(p["clipPlane"]), clear: clear === null ? null : { depth: number(clear["depth"]), color: clear["color"] === null ? null : vec4(clear["color"]), stencil: boolean(clear["stencil"]) } };
+    return { viewport: rect(p["viewport"]), clipPlane: p["clipPlane"] === null ? null : vec4(p["clipPlane"]), clear: clear === null ? null : { depth: number(clear["depth"]), color: clear["color"] === null ? null : vec4(clear["color"]), stencil: boolean(clear["stencil"]) },
+      ...(p["viewProjection"] === undefined ? {} : { viewProjection: matrix(p["viewProjection"]) }) };
   }
   command(value: unknown): ExecutionCommand {
     const p = record(value);
@@ -329,6 +339,7 @@ export class WireDecoder {
           get viewport() { return decoder.viewState(view).viewport; },
           get clear() { return decoder.viewState(view).clear; },
           get clipPlane() { return decoder.viewState(view).clipPlane; },
+          ...(view["viewProjection"] === undefined ? {} : { viewProjection: matrix(view["viewProjection"]) }),
           beforeView: this.operations(view["beforeView"]), operations: this.operations(view["operations"]),
         } };
       }

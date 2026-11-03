@@ -85,7 +85,9 @@ This option does not relocate the sibling saves and settings directories.
 
 Startup scripts such as `config.cfg` and `autoexec.cfg` load from selected
 content. Existing personal configs can therefore affect a launch. LLM credentials
-and preferences use [separate executable-directory rules](console-and-llm.md#credential-and-preference-files).
+and preferences live in the shared `settings` folder next to the writable content root
+(`~/.local/share/quake-typescript/settings/`); see
+[credential and preference files](console-and-llm.md#credential-and-preference-files).
 
 QVM components write to `.mods/PRODUCT/COMPONENT_ID/` under the user-content root.
 Each name is URL-encoded. Their reads, scripts, and file lists see that component's

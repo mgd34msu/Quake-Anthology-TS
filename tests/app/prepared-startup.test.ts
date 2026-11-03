@@ -44,6 +44,9 @@ test("direct local-world startup owns quake.rc demos without replacing its selec
       expect(printed.join("")).not.toContain("Unknown command"); expect(forwarded).toEqual([]);
       if (dedicated) {
         prepared.commands.executeNow("demos\nplaydemo demo1\nstopdemo\n"); expect(forwarded).toEqual([]);
+        // A dedicated console line must never throw into the run loop.
+        expect(() => prepared.commands.executeNow("demomap foo")).not.toThrow();
+        expect(printed.join("")).toContain("Demo playback is not available on a dedicated server.");
       } else {
         expect(printed.join("")).toContain("3 demo(s) in loop");
         expect(() => prepared.commands.executeNow("demos")).toThrow("Demo playback (demo2) requires the graphical launcher");
@@ -220,8 +223,8 @@ test("startup world action retains following wait and cvars in original buffer",
   const routing = new ApplicationConsoleRouting({ fallback: prepared.fallback, sourceDialect: () => "q2-classic",
     server: () => ({ cvars: nextSource, sharedNames: ["skill"] }), seat: () => cvars, input: () => mouse.cvars });
   const nextCommands = prepared.commands;
-  expect(nextCommands).toBe(prepared.commands);
   prepared.adopt(routing, () => undefined, { source: nextSource, movement: prepared.movement, fallback: prepared.fallback, scripts: prepared.scripts, read: async () => undefined });
+  expect(prepared.commands).toBe(nextCommands); // adopting a new server keeps the command table
   await prepared.advanceFrame();
   expect(source.variableValue("skill")).toBe(0); expect(prepared.pending).toBe(true);
   await prepared.advanceFrame();
@@ -423,6 +426,7 @@ test("prepared output follows two real seat consoles through adoption and retire
   expect(currentConsoles[0]?.buffer.dump()).not.toContain("second-only");
   expect(oldConsoles[1]?.buffer.dump()).not.toContain("second-only");
   expect(startup).toEqual([]); expect(registryHost).toEqual([]);
+  expect(seen.length).toBeGreaterThan(1);
   for (const source of seen.slice(1)) expect(source).toEqual(nested);
   source.set("locked", "4"); expect(registryHost.join("")).toContain("locked is read only"); registryHost.length = 0;
   releaseHelp(); current();
@@ -675,4 +679,25 @@ test("authored binding reset restores mounted defaults for only the confirmed se
   expect(primary.input.bindings).toEqual(before);
   expect(secondary.allBindingsChosen).toBe(true);
   menus.dispose(); spy.mockRestore();
+});
+
+test("script reads from an inactive seat never reach the content reader", async () => {
+  const id = createIdentityOwner("inactive-seat-script"), context: CommandContext = { session: id.session, origin: { kind: "server-console" } };
+  const source = new CvarRegistry({ dialect: "q2-classic", context });
+  const makeSeat = (index: number) => {
+    const seatContext: CommandContext = { session: id.session, origin: { kind: "local-seat", seat: id.seat(index), client: id.client(index, 0) } };
+    return { id: id.seat(index), context: seatContext, cvars: new CvarRegistry({ dialect: "q2-classic", context: seatContext }),
+      mouse: new MouseSettings(new CvarRegistry({ dialect: "q2-classic", context: seatContext })), profile: null, archive: [], mouseArchive: [] };
+  };
+  const active = makeSeat(0), inactive = makeSeat(1);
+  let reads = 0;
+  const scripts = new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: async () => { reads++; return new TextEncoder().encode("echo hi\n"); } });
+  const prepared = new PreparedStartup(source, new CvarRegistry({ dialect: "q2-classic", context }), scripts, {
+    dialect: "q2-classic", movementDialect: "q2-classic", shared: null, sharedNames: [], seats: [active, inactive], print: () => {}, forward: () => undefined,
+  });
+  prepared.setActiveSeats([active.id]);
+  expect(await prepared.readScript("autoexec.cfg", inactive.context)).toBeUndefined();
+  expect(reads).toBe(0);
+  expect(await prepared.readScript("autoexec.cfg", active.context)).toBe("echo hi\n");
+  expect(reads).toBe(1);
 });

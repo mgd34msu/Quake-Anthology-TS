@@ -5,6 +5,7 @@ import type { PackMonsterDefinition } from "./types.ts";
 import type { MissionMonster } from "./runtime.ts";
 import { frames } from "./tables/lavaman.ts";
 import { dropToFloor, missile } from "./helpers.ts";
+import { spriteExplosion } from "../../base/projectiles.ts";
 import { velocityAngles } from "../types.ts";
 
 function checkAttack(monster: MissionMonster): boolean {
@@ -60,8 +61,7 @@ export const lavamanDefinition: PackMonsterDefinition = {
       if (game.health(other) !== 0) game.damage(other, entity.actor.id, entity.owner, game.host.classname(other) === "monster_shambler" ? 20 : 40);
       game.radiusDamage(entity.actor.id, entity.owner, 40, other, null);
       game.setBody(entity, { origin: vsub(body.origin, vscale(normalize(body.velocity), 8)) });
-      game.effect("explosion", game.body(entity).origin); game.effect("explosion", game.body(entity).origin);
-      return game.remove(entity);
+      return spriteExplosion(game, entity);
     } },
   },
   actions: {

@@ -63,7 +63,7 @@ test("settings service primes one process session, reuses it across requests, an
     const body: unknown = init.body;
     if (typeof body !== "string") throw new Error("Expected request body");
     bodies.push(body);
-    const answer = body.includes("READY only") ? "READY" : body.includes('"text":"second"') ? "second answer" : "first answer";
+    const answer = body.includes("READY only") ? "READY" : body.includes('Current request:\\nsecond') ? "second answer" : "first answer";
     return stream(data({ type: "response.output_text.delta", delta: answer }) + data({ type: "response.completed", response: { status: "completed" } }));
   } } });
   await service.saveApiKey("chatgpt-api", "api-secret");
@@ -138,6 +138,15 @@ test("truncated, malformed, incomplete and tool completion responses cannot beco
   }
 });
 
+test("a tool call or refusal delta is rejected by name even when the stream otherwise completes with stop", async () => {
+  const credential = { apiKey: "test-key", baseUrl: "https://example.test/v1" };
+  const stopped = (delta: Record<string, unknown>): string => data({ choices: [{ index: 0, delta: { content: "quit", ...delta }, finish_reason: "stop" }] }) + "data: [DONE]\n\n";
+  await expect(requestChatCompletions(input(), credential, async () => stream(stopped({ tool_calls: [{ index: 0, function: { name: "x" } }] })))).rejects.toThrow("unsupported tool call");
+  await expect(requestChatCompletions(input(), credential, async () => stream(stopped({ function_call: { name: "x" } })))).rejects.toThrow("unsupported tool call");
+  await expect(requestChatCompletions(input(), credential, async () => stream(stopped({ refusal: "no" })))).rejects.toThrow("declined the request");
+  expect(await requestChatCompletions(input(), credential, async () => stream(stopped({ refusal: "" })))).toBe("quit");
+});
+
 test("request timeout covers an open SSE body and cancels its reader", async () => {
   let cancelled = false;
   const { service } = await fixture({ request: { timeoutMs: 10, fetch: async () => new Response(new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } }), { headers: { "content-type": "text/event-stream" } }) } });
@@ -199,6 +208,18 @@ test("cancelling one refresh waiter leaves the other request running", async () 
   await new Promise<void>(resolve => setTimeout(resolve, 5));
   controller.abort(); await expect(first).rejects.toThrow("cancelled"); release.resolve();
   expect(await second).toBe("answer"); expect(refreshes).toBe(1);
+});
+
+test("PLATFORM-005 cancelling the only request during a refresh still persists the rotated token", async () => {
+  const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const { service, directory } = await fixture({ auth: { fetch: async () => { started.resolve(); await release.promise; return refreshed(); } }, request: { fetch: async () => codex() } });
+  await seedSubscription(directory, 1); await service.setModel("chatgpt-subscription", "model");
+  const controller = new AbortController();
+  const only = service.request({ prompt: "first", instructions: "answer", signal: controller.signal });
+  await started.promise; controller.abort();
+  await expect(only).rejects.toThrow("cancelled");
+  release.resolve(); await new Promise<void>(resolve => setTimeout(resolve, 20));
+  expect(await readFile(join(directory, "chatgpt.key"), "utf8")).toContain("new-refresh");
 });
 
 test("service close aborts a refresh and prevents late credential persistence", async () => {

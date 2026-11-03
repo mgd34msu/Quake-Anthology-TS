@@ -1,5 +1,5 @@
 import { beforeAll, expect, test } from "bun:test";
-import { testCorpusRoot } from "../../../support/corpus.ts";
+import { corpusFile } from "../../../support/corpus.ts";
 
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -13,15 +13,17 @@ import { BotScriptSources } from "../../../../src/bots/behavior/library/script-s
 import { WeaponAi, WeaponLoadResult } from "../../../../src/bots/behavior/library/weapons.ts";
 import { WeightConfigStore } from "../../../../src/bots/behavior/library/weights.ts";
 import { loadItemConfig } from "../../../../src/bots/behavior/library/goals.ts";
-import { ScriptGlobalDefines } from "../../../../src/ui/common/legacy/script/preprocessor.ts";
+import { ScriptGlobalDefines } from "../../../../src/content/legacy-script/preprocessor.ts";
 
-const root = process.env["Q3_DATA"] ?? `${testCorpusRoot()}/q3a`;
-const available = existsSync(join(root, "baseq3/pak0.pk3")) && existsSync(join(root, "missionpack/pak0.pk3"));
+const root = corpusFile("q3a");
+const available = existsSync(join(root, "baseq3/pak0.pk3"));
+const hasMissionPack = available && existsSync(join(root, "missionpack/pak0.pk3"));
 const products = new Map<string, BotAssetFiles>();
 
 beforeAll(async () => {
   if (!available) return;
   for (const product of ["baseq3", "missionpack"]) {
+    if (product === "missionpack" && !hasMissionPack) continue;
     const files = new BotAssetFiles();
     for (const directory of product === "missionpack" ? ["baseq3", "missionpack"] : ["baseq3"]) {
       for (const archiveName of readdirSync(join(root, directory)).filter(name => name.endsWith(".pk3")).sort()) {

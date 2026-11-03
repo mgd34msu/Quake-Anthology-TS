@@ -116,7 +116,7 @@ export class ClientDemoRecording {
     try { await this.stop(); } finally { if (this.currentServer !== null) await this.stopServer(); }
   }
   private async open(name: string | undefined, seed: DemoRecordingSeed): Promise<DemoRecording> {
-    if (name !== undefined) return DemoRecording.open(this.host.root(), name, seed);
+    if (name !== undefined) return DemoRecording.open(this.host.root(), name, seed, true);
     for (let index = 0; index < 10000; index++) {
       try { return await DemoRecording.open(this.host.root(), `demo${String(index).padStart(4, '0')}`, seed); }
       catch (error) { if (!(error instanceof Error) || !('code' in error) || error.code !== 'EEXIST') throw error; }
@@ -132,7 +132,7 @@ export class ClientDemoRecording {
       const root = this.host.root();
       await this.finish();
       const recording = await DemoRecording.open(root, name, { identity: seed.identity,
-        packets: [{ kind: 'qw', record: { kind: 'sequences', seconds: 0, outgoing: 0, incoming: 0 } }] });
+        packets: [{ kind: 'qw', record: { kind: 'sequences', seconds: 0, outgoing: 0, incoming: 0 } }] }, true);
       try { this.current = { recording, detach: await this.host.reconnectRecording(source, this.sink(recording)) }; }
       catch (error) { await recording.abort(); throw error; }
       this.host.print(`Recording ${recording.path}\n`);

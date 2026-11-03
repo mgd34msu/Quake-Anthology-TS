@@ -1,7 +1,7 @@
 // Adapted from the reference port and id Software Quake. GPL-2.0-or-later.
 import { AXES } from "../wire-types.ts";
 import type { MessageReader } from "../message.ts";
-import { MSG_WriteByte, MSG_WriteCoordFlags, MSG_WriteAngleFlags, MSG_WriteLong, MSG_WriteShort, type SizeBuf, } from "../message.ts";
+import { PacketError, MSG_WriteByte, MSG_WriteCoordFlags, MSG_WriteAngleFlags, MSG_WriteLong, MSG_WriteShort, type SizeBuf, } from "../message.ts";
 import type { Vec3 } from "../wire-types.ts";
 import type { EntityStateT } from "../wire-types.ts";
 import { Sys_Error } from "../wire-types.ts";
@@ -206,6 +206,8 @@ export function createQw29Codec(reader: MessageReader): QwProtocolCodec {
             }
             out.bits = bits;
             out.ext = ext;
+            if (number > QW29_MAX_ENTITY_NUMBER)
+                throw new PacketError('QW29 entity number exceeds its limit', reader.offset);
             out.number = number;
             out.remove = (bits & U_REMOVE) !== 0;
         },

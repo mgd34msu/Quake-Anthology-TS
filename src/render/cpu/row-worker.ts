@@ -42,6 +42,20 @@ function sample(value: unknown): Sample {
   return { r: num(value["r"]), g: num(value["g"]), b: num(value["b"]), a: num(value["a"]) };
 }
 
+function decodeLevel(level: unknown): TextureStorage {
+  if (!record(level)) throw new Error("Invalid row worker texture level");
+  const wirePixels = level["pixels"];
+  if (!(wirePixels instanceof Uint8Array)) throw new Error("Invalid row worker texture pixels");
+  const pixels = new Uint8Array(wirePixels);
+  const levelFormat = str(level["internalFormat"]);
+  if (levelFormat !== "rgba8" && levelFormat !== "rgb8") throw new Error("Invalid row worker level format");
+  const uniform = level["uniform"] === null ? null : sample(level["uniform"]);
+  if (num(level["componentMaximum"]) !== 255) throw new Error("Invalid row worker component maximum");
+  return { width: int(level["width"]), height: int(level["height"]), pixels,
+    data: new DataView(pixels.buffer, pixels.byteOffset, pixels.byteLength),
+    internalFormat: levelFormat, hasAlpha: bool(level["hasAlpha"]), componentMaximum: 255, uniform };
+}
+
 function decodeTexture(value: unknown): BoundTexture {
   if (!record(value)) throw new Error("Invalid row worker texture");
   const kind = str(value["kind"]);
@@ -58,18 +72,10 @@ function decodeTexture(value: unknown): BoundTexture {
   if (wrap !== "repeat" && wrap !== "clamp") throw new Error("Invalid row worker texture wrap");
   const mipmapping = str(value["mipmapping"]);
   if (mipmapping !== "none" && mipmapping !== "nearest" && mipmapping !== "linear") throw new Error("Invalid row worker mipmapping");
-  const levels: TextureStorage[] = list(value["levels"]).map(level => {
-    if (!record(level)) throw new Error("Invalid row worker texture level");
-    const wirePixels = level["pixels"];
-    if (!(wirePixels instanceof Uint8Array)) throw new Error("Invalid row worker texture pixels");
-    const pixels = new Uint8Array(wirePixels);
-    const levelFormat = str(level["internalFormat"]);
-    if (levelFormat !== "rgba8" && levelFormat !== "rgb8") throw new Error("Invalid row worker level format");
-    const uniform = level["uniform"] === null ? null : sample(level["uniform"]);
-    if (num(level["componentMaximum"]) !== 255) throw new Error("Invalid row worker component maximum");
-    return { width: int(level["width"]), height: int(level["height"]), pixels,
-      data: new DataView(pixels.buffer, pixels.byteOffset, pixels.byteLength),
-      internalFormat: levelFormat, hasAlpha: bool(level["hasAlpha"]), componentMaximum: 255, uniform };
+  const levels: TextureStorage[] = list(value["levels"]).map(id => {
+    const found = levelStore.get(int(id));
+    if (found === undefined) throw new Error(`Row worker missing texture level ${String(id)}`);
+    return found;
   });
   const first = levels[0];
   if (first === undefined) throw new Error("Row worker texture has no levels");
@@ -102,7 +108,9 @@ const framebuffer: Framebuffer = { width, height, pixels: new Uint8Array(colorBu
   depth: new Float64Array(depthBuffer), stencil: stencilBuffer === null ? null : new Uint32Array(stencilBuffer),
   originX: 0, originY: 0, stride: width };
 const textures = new Map<number, BoundTexture>();
+const levelStore = new Map<number, TextureStorage>();
 const lightings = new Map<number, BatchLighting>();
+const lightingBases = new Map<number, { readonly worldPositions: unknown; readonly normals: unknown }>();
 const depths = new Map<number, DepthImageLevel>();
 const registries: RowDecodeRegistries = {
   texture: id => {
@@ -138,13 +146,31 @@ if (parentPort === null) throw new Error("Row worker requires a parent port");
 parentPort.on("message", (value: unknown) => {
   try {
     if (!record(value) || value["kind"] !== "job") throw new Error("Invalid row worker job");
+    // Registrations cover one job. Keeping them would retain a texture copy per dispatched batch.
+    textures.clear(); lightings.clear(); lightingBases.clear();
+    for (const id of list(value["evictLevels"])) levelStore.delete(int(id));
+    for (const entry of list(value["levels"])) {
+      if (!record(entry)) throw new Error("Invalid row worker level registration");
+      levelStore.set(int(entry["id"]), decodeLevel(entry["level"]));
+    }
     for (const entry of list(value["textures"])) {
       if (!record(entry)) throw new Error("Invalid row worker texture registration");
       textures.set(int(entry["id"]), decodeTexture(entry["texture"]));
     }
+    for (const entry of list(value["lightingBases"])) {
+      if (!record(entry)) throw new Error("Invalid row worker lighting base");
+      lightingBases.set(int(entry["id"]), { worldPositions: entry["worldPositions"], normals: entry["normals"] });
+    }
     for (const entry of list(value["lightings"])) {
       if (!record(entry) || !isBatchLighting(entry["parameters"])) throw new Error("Invalid row worker lighting registration");
-      lightings.set(int(entry["id"]), entry["parameters"]);
+      const parameters: unknown = entry["parameters"];
+      if (record(parameters) && typeof parameters["baseId"] === "number" && parameters["baseId"] >= 0) {
+        const base = lightingBases.get(parameters["baseId"]);
+        if (base === undefined) throw new Error("Row worker missing lighting base");
+        const resolved = { ...parameters, worldPositions: base.worldPositions, normals: base.normals };
+        if (!isBatchLighting(resolved)) throw new Error("Invalid row worker lighting registration");
+        lightings.set(int(entry["id"]), resolved);
+      } else lightings.set(int(entry["id"]), entry["parameters"]);
     }
     for (const entry of list(value["depths"])) {
       if (!record(entry)) throw new Error("Invalid row worker depth registration");

@@ -16,7 +16,7 @@ export const Q2_CTF_GRAPPLE: Q2WeaponDefinition = {
   viewModel: "models/weapons/grapple/tris.md2", worldModel: "", playerModel: 12,
   activateLast: 5, fireLast: 9, idleLast: 31, deactivateLast: 36, pauses: [10, 18, 27], fires: [6], repeating: false,
 };
-export const Q2_RERELEASE_CTF_GRAPPLE: Q2WeaponDefinition = { ...Q2_CTF_GRAPPLE, fireLast: 10 };
+export const Q2_RERELEASE_CTF_GRAPPLE: Q2WeaponDefinition = { ...Q2_CTF_GRAPPLE, fireLast: 10, noHaste: true };
 export const LMCTF_GRAPPLE: Q2WeaponDefinition = {
   name: "lmctf:hook", item: "q2:weapon_hook", classname: "weapon_hook", ammo: null, quantity: 0, warning: 0,
   viewModel: "models/weapons/v_hook/tris.md2", worldModel: "models/objects/debris2/tris.md2", playerModel: 11,

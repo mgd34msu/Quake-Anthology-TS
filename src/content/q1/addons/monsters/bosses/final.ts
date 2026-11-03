@@ -1,5 +1,6 @@
 /* quakec_mg3/monsters/boss_final.qc. Copyright (C) 1996-2026 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../../contracts/identity.ts";
+import { mg3MonsterActivator } from "../startup.ts";
 import { sameActor } from "../../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../../contracts/math.ts";
 import type { Q1Actor } from "../../../foundation/entity.ts";
@@ -44,6 +45,7 @@ export class Q1FinalBoss extends BaseMonster {
     game.totalMonsters++; context.services.emit({ kind: "monster-count", count: game.totalMonsters });
     context.setNumber(entity, "frags", 0); entity.use = game.named.use(entity, `${prefix}:boss_awake`); return undefined;
   }
+  override use(activator: ActorId | null): undefined { return super.use(mg3MonsterActivator(this.game, activator)); }
   override awake(activator: ActorId | null): undefined {
     const { game, entity } = this;
     entity.solid = "slidebox"; entity.movement = "step"; entity.damageable = true; entity.aimedDamage = true; entity.model = "progs/boss.mdl";
@@ -64,8 +66,8 @@ export class Q1FinalBoss extends BaseMonster {
     }
     return (this.enemy === null ? 0 : game.health(this.enemy)) > 0 ? this.face() : undefined;
   }
-  override pain(_attacker: ActorId | null, _damage: number): undefined {
-    const { game, entity, context } = this;
+  override pain(attacker: ActorId | null, _damage: number): undefined {
+    this.retaliate(attacker); const { game, entity, context } = this;
     if (this.state.attackFinished > game.time || this.state.painFinished > game.time || entity.number("boss_immune") !== 0) return undefined;
     let event = "", frags = entity.number("frags");
     if (frags === 0) { event = "boss_final_shocka1"; frags = 1; }
@@ -199,7 +201,7 @@ export function bossTeleport(context: Q1AddonContext, variant: boolean): undefin
   for (const player of game.host.players()) {
     const point = points.find(entity => entity.wait === 0); if (point === undefined) { context.services.emit({ kind: "developer-message", text: "ERROR: Could not find valid teleport destination!\n" }); break; }
     point.wait = 1; const origin = game.body(point).origin, angles = point.vector("mangle"), entity = game.entity(player), state = game.player(player);
-    if (entity !== null) entity.movementFlags &= ~1;
+    if (entity !== null) entity.movementFlags &= ~512;
     if (state !== null) state.viewAngles = angles;
     const owned = game.host.actors.resolveOwned(player), body = game.host.bodies.read(player);
     if (owned !== null && body !== null) { game.host.bodies.write(owned, { ...body, origin, angles, ground: null, velocity: { x: 0, y: 0, z: 300 } }); game.host.bodies.link(owned); }

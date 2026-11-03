@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { testCorpusRoot } from "../../support/corpus.ts";
-import { callFunction } from "../../support/reflect.ts";
 
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from "node:fs/promises";
@@ -79,7 +78,7 @@ describe("installed content catalog", () => {
         products: [{ ...base, requiredContentArchives: [], requiredPrograms: [], mapWitness: null }] });
       const product = catalog.require(base.id);
       expect(new TextDecoder().decode(await catalog.read(product.id, "game.cfg"))).toBe("set g_gametype 4\n");
-      await expect(catalog.read(product.id, "missing.cfg")).rejects.toThrow();
+      await expect(catalog.read(product.id, "missing.cfg")).rejects.toThrow("Resource not found: missing.cfg");
       expect(new TextDecoder().decode(await catalog.read(product.id, "game.cfg"))).toBe("set g_gametype 4\n");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
@@ -179,7 +178,7 @@ describe("installed content catalog", () => {
   test("family-by-role cross-check accepts runtime-layer match providers on foreign worlds", () => {
     const native = preset("q1:rerelease:mg1:installed");
     const catalog = { product: (id: string) => ({ expectation: { family: String(id).split(":")[0] } }) };
-    const validate = (launch: ReturnType<typeof selectLaunch>): void => { callFunction(validateLaunchRoles, undefined, launch, catalog); };
+    const validate = (launch: ReturnType<typeof selectLaunch>): void => { validateLaunchRoles(launch, catalog); };
     const valid = selectLaunch({ ...presetChoice(native.id), match: { kind: "selected", value: { provider: "q1:horde", content: native.map.entities.content } } }, native);
     expect(() => validate(valid)).not.toThrow();
     // DeathBall, LMCTF, and Tag run on any world through the runtime match

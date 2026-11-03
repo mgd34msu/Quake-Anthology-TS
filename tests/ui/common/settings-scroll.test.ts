@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { UiDrawContext } from "../../../src/contracts/ui.ts";
-import { KeyCode } from "../../../src/input/key-codes.ts";
+import { KeyCode } from "../../../src/core/key-codes.ts";
 import { NativeUiController, defaultUiSkin } from "../../../src/ui/common/index.ts";
 import { registerSettingsMenus } from "../../../src/ui/settings/index.ts";
 import type { SettingBinding } from "../../../src/ui/settings/index.ts";

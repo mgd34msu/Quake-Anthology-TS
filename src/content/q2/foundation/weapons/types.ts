@@ -28,6 +28,8 @@ export interface Q2WeaponDefinition {
   readonly pauses: readonly number[];
   readonly fires: readonly number[];
   readonly repeating: boolean;
+  /** IF_NO_HASTE: Dualfire and the Haste tech do not speed the firing frames. */
+  readonly noHaste?: boolean;
 }
 export interface Q2BaseWeaponDefinition extends Q2WeaponDefinition { readonly name: Q2BaseWeaponName; }
 
@@ -111,7 +113,6 @@ export class Q2WeaponState {
   constructor(weapon: Q2WeaponName | null = "blaster") { this.weapon = weapon; }
 }
 
-export interface Q2NoiseRecord { readonly actor: ActorId; readonly origin: Vec3; readonly time: number; readonly secondary: boolean; }
 export interface Q2GrenadeAdjustment { readonly right: number; readonly up: number; readonly gravity: number; }
 
 export const MOD = {

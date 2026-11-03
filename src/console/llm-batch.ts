@@ -2,7 +2,11 @@ import type { CommandContext } from "../contracts/common.ts";
 import { asciiFold, tokenizeCommand, type CommandBuffer } from "../core/commands/index.ts";
 import { queryConsoleEntries } from "./discovery.ts";
 
-const indirect = new Set(["llm_ask", "llm_exec", "llm_cancel", "exec", "vstr", "alias", "bind", "stuffcmds", "cmd", "wait"]);
+// Scripting, session-ending, networking and file-writing commands, plus cvars whose values the engine runs as commands later.
+const indirect = new Set(["llm_ask", "llm_exec", "llm_cancel", "exec", "vstr", "alias", "bind", "unbind", "unbindall", "stuffcmds", "cmd", "wait",
+  "quit", "exit", "connect", "reconnect", "disconnect", "rcon", "say", "say_team", "tell", "condump", "writeconfig", "screenshot", "screenshotjpeg", "levelshot",
+  "record", "demo", "playdemo", "timedemo", "download", "load", "save", "loadgame", "savegame", "map", "devmap", "changelevel", "startserver", "kill", "killserver",
+  "nextmap", "nextdemo", "nextserver", "nextlevel"]);
 const maxText = 4096;
 
 function lines(text: string, commands: CommandBuffer): readonly string[] {
@@ -48,7 +52,10 @@ export function validateLlmBatch(text: string, commands: CommandBuffer, source: 
         }
         if (commands.findCvar(tokens.argv[0] ?? "", source) === undefined) throw new Error(`Unknown command or setting ${JSON.stringify(tokens.argv[0])}. Use find or help, then retry.`);
       }
-      if (["set", "seta", "setu", "sets", "reset", "toggle", "inc", "dec"].includes(name) && commands.findCvar(tokens.argv[1] ?? "", source) === undefined) throw new Error(`${name} requires an existing console setting.`);
+      if (["set", "seta", "setu", "sets", "reset", "toggle", "inc", "dec"].includes(name)) {
+        if (commands.findCvar(tokens.argv[1] ?? "", source) === undefined) throw new Error(`${name} requires an existing console setting.`);
+        if (indirect.has(asciiFold(tokens.argv[1] ?? ""))) throw new Error(`${tokens.argv[1]} cannot be changed by llm_exec because its value runs as a command.`);
+      }
       result.push(line); bytes += line.length + 1;
       if (result.length > 32 || bytes > maxText || bytes >= commands.maximumBufferLength) throw new Error("Expanded response exceeds 32 commands or the engine buffer limit (at most 4096 characters).");
     }
@@ -78,7 +85,9 @@ function catalogDocumentation(ranked: ReturnType<typeof rankedCatalog>["ranked"]
 }
 
 export function llmConsoleCatalog(commands: CommandBuffer, source: CommandContext, prompt: string, mode: "ask" | "exec" = "ask"): string {
-  const { entries, ranked } = rankedCatalog(commands, source, prompt, mode);
+  const { entries: all, ranked } = rankedCatalog(commands, source, prompt, mode);
+  // Mod-chosen names are untrusted prompt text; only command-name characters are listed.
+  const entries = all.filter(entry => /^[A-Za-z0-9_+\-.:]{1,64}$/.test(entry.name));
   const names = entries.map(entry => `${entry.kind}:${entry.name}`).join(", ");
   if (names.length > 48000) throw new Error("The command catalog is too large for an LLM request.");
   const documentation = catalogDocumentation(ranked);

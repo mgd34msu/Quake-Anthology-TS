@@ -51,6 +51,14 @@ function add(output: Float64Array, input: Float64Array | Int16Array, gain: numbe
     }
 }
 /** One output device; each listener owns a shared voice core and acoustic state. */
+const actorSessionNumbers = new WeakMap<object, number>();
+let nextActorSessionNumber = 0;
+/** Remote seats can bring actors from different sessions, whose slots and generations overlap. */
+function actorEntityKey(actor: ActorId, owner: ProviderId | undefined): string {
+    let session = actorSessionNumbers.get(actor.session);
+    if (session === undefined) { session = nextActorSessionNumber++; actorSessionNumbers.set(actor.session, session); }
+    return `${session}:${actor.slot}:${actor.generation}:${owner === undefined ? "" : String(owner)}`;
+}
 export class UnifiedAudio {
     readonly sampleRate: number;
     private nextVoiceId = 0;
@@ -74,7 +82,10 @@ export class UnifiedAudio {
     }
     private readonly seats: SeatAudio[] = [];
     private readonly roundMixers: { readonly seat: SeatId; readonly mixer: AudioMixer }[] = [];
-    private readonly actors: { readonly actor: ActorId; readonly owner: ProviderId | undefined }[] = [];
+    /** Entity numbers are positions here plus one. A retired entry leaves a hole that the next new actor reuses. */
+    private readonly actors: ({ readonly actor: ActorId; readonly owner: ProviderId | undefined } | null)[] = [];
+    private readonly actorEntities = new Map<string, number>();
+    private readonly freeActorEntities: number[] = [];
     private readonly actorAliases = new Map<number, number[]>();
     private dopplerEnabled = true;
     private readonly positions = new Map<number, Vec3>();
@@ -138,15 +149,20 @@ export class UnifiedAudio {
         return key;
     }
     private entity(actor: ActorId, owner?: ProviderId): number {
-        const index = this.actors.findIndex(candidate => candidate.actor.equals(actor) && candidate.owner === owner);
-        if (index >= 0)
-            return index + 1;
+        const key = actorEntityKey(actor, owner), known = this.actorEntities.get(key);
+        if (known !== undefined)
+            return known;
         const original = owner === undefined ? null : this.entity(actor);
         const maximum = this.options.maxActors ?? 65536;
-        if (this.actors.length + 1 >= maximum)
-            throw new RangeError("Audio actor capacity exhausted");
-        this.actors.push({ actor, owner });
-        const entity = this.actors.length;
+        let entity = this.freeActorEntities.pop();
+        if (entity === undefined) {
+            if (this.actors.length + 1 >= maximum)
+                throw new RangeError("Audio actor capacity exhausted");
+            this.actors.push(null);
+            entity = this.actors.length;
+        }
+        this.actors[entity - 1] = { actor, owner };
+        this.actorEntities.set(key, entity);
         if (original === null) this.actorAliases.set(entity, [entity]);
         if (original !== null) {
             const aliases = this.actorAliases.get(original) ?? [];
@@ -158,6 +174,25 @@ export class UnifiedAudio {
             }
         }
         return entity;
+    }
+    /** Actors spawn with new generations for the whole life of a world, so entries leave once nothing can still hear them. */
+    retireAbsentActors(live: readonly ActorId[]): void {
+        this.check();
+        const kept = new Set(live.map(actor => actorEntityKey(actor, undefined)));
+        for (const state of this.seats) if (state.listener.actor !== null) kept.add(actorEntityKey(state.listener.actor, undefined));
+        for (const [index, entry] of this.actors.entries()) {
+            if (entry === null || entry.owner !== undefined || kept.has(actorEntityKey(entry.actor, undefined))) continue;
+            const entities = this.actorAliases.get(index + 1) ?? [index + 1];
+            if (this.seats.some(state => [...state.loops.values()].some(loop => loop.actor.equals(entry.actor)) || entities.some(entity => state.mixer.entityActive(entity)))) continue;
+            for (const entity of entities) {
+                const retired = this.actors[entity - 1];
+                if (retired !== null && retired !== undefined) this.actorEntities.delete(actorEntityKey(retired.actor, retired.owner));
+                this.actors[entity - 1] = null;
+                this.positions.delete(entity);
+                this.freeActorEntities.push(entity);
+            }
+            this.actorAliases.delete(index + 1);
+        }
     }
     private seat(id: SeatId): SeatAudio {
         const seat = this.seats.find(value => value.listener.seat.equals(id));
@@ -343,7 +378,7 @@ export class UnifiedAudio {
     releaseQ3SeatOwner(seat: SeatId, owner: ProviderId): void {
         this.clearQ3SeatLoops(seat, true, owner);
         const state = this.seat(seat);
-        for (const [index, entry] of this.actors.entries()) if (entry.owner === owner) state.mixer.stopEntity(index + 1);
+        for (const [index, entry] of this.actors.entries()) if (entry?.owner === owner) state.mixer.stopEntity(index + 1);
     }
     addStaticSound(seat: SeatId, sound: SoundAsset, origin: Vec3, volume: number, attenuation: number, key = 0): boolean { return this.seat(seat).mixer.addStaticSound(sound.pcm, origin, volume, attenuation, key); }
     removeStaticSound(seat: SeatId, key: number): void { this.seat(seat).mixer.removeStaticSound(key); }
@@ -518,6 +553,14 @@ export class UnifiedAudio {
             return { samples, sampleRate: this.sampleRate, channels: 2, sourceSample, resetStream: false };
         }));
     }
+    private nextRemovalCheck = 0;
+    private outputRemoved(device: SdlAudioDevice): boolean {
+        if (device.deviceName === null) return false;
+        const now = performance.now();
+        if (now < this.nextRemovalCheck) return false;
+        this.nextRemovalCheck = now + 1000;
+        return device.removed;
+    }
     /** Cover recent frame times plus SDL's block consumption and scheduling jitter. */
     pump(aheadFrames?: number, measuredWorkMilliseconds = 0): number {
         this.check();
@@ -526,6 +569,12 @@ export class UnifiedAudio {
             throw new Error("Audio output is not open");
         if (this.paused)
             return 0;
+        if (this.outputRemoved(device)) {
+            // SDL_AUDIODEVICEREMOVED: fall back to the system default, or stay detached until snd_restart succeeds.
+            try { this.selectOutput(null, this.format, true); }
+            catch { this.detachOutput(); }
+            return 0;
+        }
         if (!Number.isFinite(measuredWorkMilliseconds) || measuredWorkMilliseconds < 0) throw new RangeError("Invalid measured audio frame work");
         const workFrames = Math.ceil(measuredWorkMilliseconds * device.sampleRate / 1000);
         const initialFill = this.outputHandoffPending || !this.outputStarted && device.state === "paused" && device.queuedFrames === 0;
@@ -546,10 +595,14 @@ export class UnifiedAudio {
         this.queuedPcm = this.queuedPcm.subarray(this.queuedPcm.length - device.queuedFrames * 2);
         const frames = Math.max(0, target - device.queuedFrames);
         if (frames > 0) {
-            const samples = this.mixOutput(frames), queued = new Int16Array(this.queuedPcm.length + samples.length);
-            queued.set(this.queuedPcm); queued.set(samples, this.queuedPcm.length);
+            const samples = this.mixOutput(frames), previous = this.queuedPcm;
             device.queue(encodeOutputPcm(samples, this.format));
-            this.queuedPcm = queued.slice(queued.length - device.queuedFrames * 2);
+            // Copy only the retained tail of old plus new samples, in one allocation.
+            const keep = Math.min(previous.length + samples.length, device.queuedFrames * 2), queued = new Int16Array(keep);
+            const fromNew = Math.min(keep, samples.length);
+            queued.set(samples.subarray(samples.length - fromNew), keep - fromNew);
+            if (keep > fromNew) queued.set(previous.subarray(previous.length - (keep - fromNew)), 0);
+            this.queuedPcm = queued;
         }
         device.resume();
         this.outputStarted = true;
@@ -587,6 +640,8 @@ export class UnifiedAudio {
         }
         this.seats.length = 0;
         this.actors.length = 0;
+        this.actorEntities.clear();
+        this.freeActorEntities.length = 0;
         this.actorAliases.clear();
         this.positions.clear();
         this.previousPumpFrame = null;

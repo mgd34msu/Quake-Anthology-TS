@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusTest, testCorpusRoot } from "../../support/corpus.ts";
 
 import { resolve } from "node:path";
 import { expect, test } from "bun:test";
@@ -10,8 +10,8 @@ import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { readRecipe } from "../../../src/persistence/recipe.ts";
 import { SaveReader } from "../../../src/persistence/value.ts";
 
-test("selected creature definitions resolve edition assets and clocks without replacing the map or arsenal", async () => {
-  const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
+corpusTest("q1/id1/pak0.pak", "q2/baseq2/pak0.pak", "q1/rerelease/id1/pak0.pak", "q2/rerelease/baseq2/pak0.pak")("selected creature definitions resolve edition assets and clocks without replacing the map or arsenal", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: testCorpusRoot(), discoverMods: false });
   for (const edition of ["classic", "rerelease"]) {
     for (const family of ["q1", "q2"]) {
       const command = parseApplicationCommand(["--game", family === "q1" ? "q2-classic-baseq2" : "q1-classic-id1", "--map", family === "q1" ? "base1" : "e1m1"]);

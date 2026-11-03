@@ -53,6 +53,8 @@ export class SimulationEvents extends PresentationState {
     const admitted = this.emitted.append({ sequence: this.sequence, time: this.now(), payload,
       audience: client === null ? { kind: "world" } : { kind: "client", client } });
     if (admitted === 0) {
+      // Sounds and transient effects are unreliable output; a full queue drops them as the original servers drop overflowing datagrams.
+      if (payload.kind === "sound" || payload.kind === "message" && (payload.event.kind === "sound" || payload.event.kind === "q1-particle" || payload.event.kind === "q2-muzzle-flash")) return undefined;
       throw new Error(`Simulation event capacity exhausted (${SIMULATION_EVENT_CAPACITY} undrained events); publish output before admitting more`);
     }
     this.sequence++;

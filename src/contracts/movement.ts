@@ -100,6 +100,8 @@ export interface Q3MovementProfile extends MovementProfileFields {
   readonly product: "baseq3" | "missionpack";
   readonly fixedMilliseconds: number | null;
   readonly noFootsteps: boolean;
+  /** Unified-engine option, off by default as in id's pmove: SURF_LADDER surfaces climb with the Quake II ladder model. */
+  readonly ladders?: boolean;
 }
 export type MovementProfile = Q1MovementProfile | QwMovementProfile | Q2MovementProfile | Q2RereleaseMovementProfile | Q3MovementProfile;
 

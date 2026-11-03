@@ -83,3 +83,18 @@ test("font boundary failures and fractional scanline coverage stay explicit", ()
     const glyph = rasterizeContours([[{ x: 0, y: 0 }, { x: 0.5, y: 0 }, { x: 0.5, y: 1 }, { x: 0, y: 1 }]], 1, 1);
     expect(glyph.coverage).toEqual(new Uint8Array([128]));
 });
+
+test("hostile glyph metrics and failing glyph tables are bounded", () => {
+    const hostile: ParsedFontT = {
+        unitsPerEm: 16, numGlyphs: 2, ascent: 8000, descent: 0, lineGap: 0, outlineFormat: "glyf",
+        cmapLookup: codepoint => codepoint === 0x41 ? 1 : codepoint === 0x42 ? 2 : 0,
+        advanceWidth: () => 8000,
+        contours: gid => { if (gid === 2) throw new RangeError("hostile glyph"); return []; },
+        kerning: () => 0, colorLayers: () => null, paletteColor: () => null,
+    };
+    const glyph = rasterizeGlyph(hostile, 1, 32);
+    expect(glyph.width).toBeLessThanOrEqual(128);
+    expect(glyph.height).toBeLessThanOrEqual(128);
+    const atlas = buildFontAtlas(hostile, [0x41, 0x42], 32);
+    expect(atlas.glyphs.size).toBe(1);
+});

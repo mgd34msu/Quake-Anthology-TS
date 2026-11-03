@@ -12,9 +12,10 @@ import { CommandBuffer } from "../../../src/core/commands/index.ts";
 import { CvarRegistry } from "../../../src/core/cvars/index.ts";
 import { ActorCallbackTable, SessionActorRegistry } from "../../../src/world/actors/index.ts";
 import { SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/body.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
 import { ModCommands } from "../../../src/world/session/mod-commands.ts";
 import { ResourceScope } from "../../../src/world/session/resources.ts";
+import { inertAuthority } from "../../support/authority.ts";
 
 const operations: readonly (readonly [QvmOpcode, number?])[] = [
   [QvmOpcode.OP_ENTER, 8], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 8],
@@ -49,7 +50,7 @@ function fixture(initialize: readonly QvmModSourceCall[]) {
   commands.register("record", command => { expect(command.dialect).toBe("q3"); expect(command.source.producer?.module.id).toBe(modInstanceProvider(selection)); seen.push(command.argsText); });
   const callbacks = new ActorCallbackTable(actors), services = { commands: mods, actors, callbacks,
     bodies: new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined }),
-    combat: new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined }),
+    combat: inertAuthority(actors, callbacks),
     inventory: new SharedInventoryTable(actors), seed: 1, time: () => ({ kind: "seconds", value: 1 } satisfies import("../../../src/contracts/time.ts").SourceTime) };
   const declaration: QvmModCallbackDeclaration = { version: 1, runtime: "qvm", program: { path: "vm/qagame.qvm", digest: digestBytes(program) },
     abiProfile: "q3-modern", actorRecords: [], entityRecord: null, initialize, callbacks: [] };

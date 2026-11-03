@@ -2,7 +2,8 @@ import { BoundedQueue } from '../../../foundation/bounded-queue.ts';
 import { EventRing, type EventCursor } from '../../../foundation/event-ring.ts';
 import type { ClientId } from '../../../contracts/identity.ts';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
-import { addressKey } from '../../../network/common/endpoint.ts';
+import { addressKey, isPrivateNetworkAddress, sameAddress } from '../../../network/common/endpoint.ts';
+import { ConnectionlessGate } from '../../../network/services/admin.ts';
 import type { NetworkAddress } from '../../../network/common/endpoint.ts';
 import type { WireSelection } from '../../../network/common/session.ts';
 import { NetQuakeChannel } from '../../../network/q1/channels.ts';
@@ -15,6 +16,9 @@ import { EntityStateT } from '../../../network/q1/wire-types.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase } from './types.ts';
 import type { Q1ApplicationGameState, Q1ApplicationMessage, Q1ApplicationPlayer, Q1ApplicationServerHost, Q1ServerNetworkOptions } from './q1-types.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
+const MAX_PEERS_PER_ADDRESS = 4;
+// NetQuake connect has no challenge, so a peer that never answers is dropped quickly instead of retransmitting for the full timeout.
+const UNANSWERED_TIMEOUT_MILLISECONDS = 10000;
 interface Peer<TAddress extends NetworkAddress> {
     readonly remote: TAddress;
     player: Q1ApplicationPlayer;
@@ -23,6 +27,7 @@ interface Peer<TAddress extends NetworkAddress> {
     state: Q1ApplicationGameState;
     readonly reliable: EventRing<Uint8Array>;
     lastReceived: number;
+    heard: boolean;
     sequence: number;
     readonly pings: BoundedQueue<number>;
 }
@@ -30,6 +35,7 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
     readonly role = 'server';
     get wire(): WireSelection { return { kind: 'source', protocol: this.host.protocol }; }
     private ended = false;
+    private readonly gate = new ConnectionlessGate();
     private host: Q1ApplicationServerHost;
     private codec: ReturnType<typeof createNetQuakeCodec>;
     private readonly peers = new Map<string, Peer<TAddress>>();
@@ -101,9 +107,11 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
                     this.host.print(packet.error.message);
                 continue;
             }
+            if (this.options.trustedNetworksOnly === true && !isPrivateNetworkAddress(packet.from)) continue;
             if (this.host.rejects?.(packet.from)) continue;
             try {
                 if (packet.payload.length >= 4 && new DataView(packet.payload.buffer, packet.payload.byteOffset).getUint32(0) >>> 16 === 0x8000) {
+                    if (!this.gate.allow(packet.from, now)) continue;
                     const response = answerNetQuakeControl(packet.payload, packet.from, now, {
                         serverInfo: () => ({ kind: 'server-info', address: addressKey(this.address), name: 'Quake', map: this.host.mapName, players: this.peers.size, maxPlayers: this.host.maxClients, version: 3 }),
                         playerInfo: () => null, nextRule: () => null,
@@ -112,11 +120,13 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
                                 return { kind: 'rejected', reason: 'NetQuake control requires an IP port' };
                             if (this.peers.has(addressKey(packet.from)))
                                 return { kind: 'accepted', port: this.address.port };
+                            if ([...this.peers.values()].filter(peer => sameAddress(peer.remote, packet.from, false)).length >= MAX_PEERS_PER_ADDRESS)
+                                return { kind: 'rejected', reason: 'Too many connections from this address' };
                             const admitted = this.host.admit(packet.from);
                             if (admitted.kind === 'rejected')
                                 return admitted;
                             try {
-                                const peer: Peer<TAddress> = { remote: packet.from, player: admitted.player, channel: new NetQuakeChannel(this.codec.maxMsglen), stage: 1, state: this.host.gameState(admitted.player), reliable: new EventRing<Uint8Array>(4096), lastReceived: now, sequence: 0, pings: new BoundedQueue<number>(16) };
+                                const peer: Peer<TAddress> = { remote: packet.from, player: admitted.player, channel: new NetQuakeChannel(this.codec.maxMsglen), stage: 1, state: this.host.gameState(admitted.player), reliable: new EventRing<Uint8Array>(4096), lastReceived: now, heard: false, sequence: 0, pings: new BoundedQueue<number>(16) };
                                 this.start(peer);
                                 this.peers.set(addressKey(packet.from), peer);
                             }
@@ -136,6 +146,7 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
                     continue;
                 const result = peer.channel.receive(packet.payload, now);
                 peer.lastReceived = now;
+                peer.heard = true;
                 for (const reply of result.replies)
                     this.options.transport.send(peer.remote, reply);
                 if (result.delivery !== null)
@@ -161,6 +172,10 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
             }
         }
         for (const peer of this.peers.values()) {
+            if (!peer.heard && now - peer.lastReceived > UNANSWERED_TIMEOUT_MILLISECONDS) {
+                this.disconnectClient(peer.player.client, 'Connection was not answered');
+                continue;
+            }
             if (now - peer.lastReceived > (this.options.timeoutMilliseconds ?? 65000)) {
                 this.disconnectClient(peer.player.client, 'Connection timed out');
                 continue;
@@ -203,8 +218,9 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
             writeNetQuakeMessage(buffer, this.host.protocol, { kind: 'time', seconds: frame.seconds });
             for (const message of frame.messages)
                 writeNetQuakeMessage(buffer, this.host.protocol, message);
+            const encoded = new SizeBuf(128);
             for (const state of frame.entities) {
-                const encoded = new SizeBuf(128);
+                encoded.clear();
                 writeNetQuakeEntity(encoded, this.host.protocol, state, peer.state.baselines.get(state.number) ?? entityState(state.number, new EntityStateT()), frame.seconds);
                 if (buffer.cursize + encoded.cursize > maxDatagram)
                     break;

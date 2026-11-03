@@ -19,11 +19,10 @@ export class StampSet {
 
   /** Starts a new query. Epoch wrap re-zeroes the marks once. */
   begin(): void {
-    this.currentEpoch++;
-    if (this.currentEpoch === 0) {
+    if (this.currentEpoch >= 0xffffffff) {
       this.marks.fill(0);
       this.currentEpoch = 1;
-    }
+    } else this.currentEpoch++;
   }
 
   test(index: number): boolean {

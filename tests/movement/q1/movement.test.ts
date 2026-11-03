@@ -342,6 +342,7 @@ for (const fixture of fixtures) test.skipIf(!existsSync(resolve(root, fixture.pa
   expect(wall.fraction).toBeLessThan(1);
   for (let index = 0; index < 200; index++) step(320, 0);
   expect(current.state.origin.x).toBeLessThanOrEqual(wallOrigin.x - 8 - shape.bounds.max.x + 0.1);
+  expect(current.state.origin.x).toBeGreaterThan(wallOrigin.x - 8 - shape.bounds.max.x - 1); // flight reaches the wall, not just stays short of it
   expect(current.state.spectator).toBe(0);
 });
 
@@ -362,4 +363,15 @@ test.skipIf(!existsSync(resolve(root, q1.path)))("weapon source continuation ret
     weaponStep: step => ({ arsenal: step.arsenal, animation: step.animation, effects: [], continuation: { kind: "actor-removed" } }),
     animationStep: step => { animated = true; return { animation: step.animation, effects: [] }; } });
   expect(removed.status).toBe("actor-removed"); expect(animated).toBe(false);
+});
+
+test.skipIf(!existsSync(resolve(root, q1.path)))("NetQuake water drag slows a wading player but not a noclipping one", async () => {
+  const { moveNetQuake } = await import("../../../src/movement/q1/netquake.ts");
+  const loaded = await fixtureScene(q1), host = services(loaded.scene), base = input(loaded.origin);
+  const speed = (moveType: number, drag: boolean): number => {
+    const result = moveNetQuake({ ...base, state: { ...base.state, moveType, waterLevel: 1, velocity: { x: 200, y: 0, z: 0 } } }, host, drag ? { sourceWaterDrag: true } : {});
+    if (result.status !== "active") throw new Error("Unexpected removal"); return result.state.velocity.x;
+  };
+  expect(speed(Q1_MOVE_WALK, true)).toBeLessThan(speed(Q1_MOVE_WALK, false));
+  expect(speed(8, true)).toBe(speed(8, false));
 });

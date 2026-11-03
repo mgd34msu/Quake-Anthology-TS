@@ -31,3 +31,14 @@ export function initializeQ3ClientCvars(cvars: CvarRegistry, identity: { readonl
   cvars.register("cl_serverStatusResendTime", "750", 0);
   cvars.register("sv_master1", "master.quake3arena.com", 0);
 }
+
+/** CL_SystemInfoChanged: every pair is set as a server-set cvar, except the client's own downloads switch, names the caller skips, and archived cvars (the player's own settings). */
+export function applyServerSystemInfo(cvars: CvarRegistry, info: string, skip: (name: string) => boolean): void {
+  const fields = info.split("\\");
+  for (let index = fields[0] === "" ? 1 : 0; index + 1 < fields.length; index += 2) {
+    const name = fields[index], value = fields[index + 1];
+    if (name === undefined || name.length === 0 || value === undefined || name.toLowerCase() === "cl_allowdownload" || skip(name)) continue;
+    if (((cvars.find(name)?.flags ?? 0) & CvarFlag.Archive) !== 0) continue;
+    cvars.set(name, value, true);
+  }
+}

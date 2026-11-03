@@ -26,7 +26,7 @@ export class Id1ProjectileAttacks {
   private readonly radiusFunction: number;
   private readonly lightningFunction: number;
   private readonly launchSpikeFunction: number;
-  constructor(private readonly source: Pick<QcWorldHostOptions, 'program' | 'entities' | 'actors' | 'slots'>,
+  constructor(private readonly source: Pick<QcWorldHostOptions, 'program' | 'entities' | 'actors' | 'slots'> & Partial<Pick<QcWorldHostOptions, 'foreignActor'>>,
     private readonly machine: () => QcMachine) {
     const p = source.program, qw = p.digest === 'sha256:ff51cb5e77360d72b93487d89198dcf94629b92f8bae100fc6ea48a6c12a7830';
     if (id1ProgramBinding(p).attribution === 'native') {
@@ -66,7 +66,7 @@ export class Id1ProjectileAttacks {
     const vm = this.machine(); if (vm.program !== this.source.program || vm.entities !== this.source.entities) throw new QcProgramError('Projectile observer belongs to another VM'); return vm;
   }
   private actor(reference: number): ActorId {
-    const actor = this.source.slots.at(this.source.entities.slot(reference));
+    const slot = this.source.entities.slot(reference), actor = this.source.slots.at(slot) ?? this.source.foreignActor?.(slot) ?? null;
     if (actor === null || !this.source.actors.isLive(actor.id)) throw new QcProgramError('Projectile references a free actor'); return actor.id;
   }
   compose(inner: QcFunctionBoundary): QcFunctionBoundary {

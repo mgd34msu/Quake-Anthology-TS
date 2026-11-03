@@ -3,7 +3,7 @@ import { StampSet } from "../../../foundation/stamp.ts";
  * Arbitrary shapes use derived BSP cells or authored BSPX BRUSHLIST.
  * Copyright (C) 1996 Id Software, Inc. GPL-2.0-or-later. */
 import type { Axis, Bounds, Plane, Vec3 } from "../../../contracts/math.ts";
-import type { BspChild, LeafQueryResult, PointContentsQuery, Q1Hull, Q1WorldGeometry, SceneQueries, TracePolicy, TraceQuery, TraceResult } from "../../../contracts/scene.ts";
+import type { BspChild, LeafQueryResult, PointContentsQuery, Q1BrushListModel, Q1Hull, Q1WorldGeometry, SceneQueries, TracePolicy, TraceQuery, TraceResult } from "../../../contracts/scene.ts";
 import { angleVectors } from "../../../core/math.ts";
 import { createNumericOperations } from "../../../core/numeric.ts";
 import { q1SurfaceKind } from "../../../materials/legacy.ts";
@@ -54,6 +54,8 @@ export class Q1Collision implements SceneQueries {
   private clipFaceCount = 0;
   private clipVertexCount = 0;
   private readonly leafStamps: StampSet;
+  private readonly brushCells = new WeakMap<object, ConvexCell | null>();
+  private readonly authoredByModel = new Map<number, Q1BrushListModel | null>();
   constructor(readonly geometry: Q1WorldGeometry, options: Q1CollisionOptions = {}) {
     this.leafStamps = new StampSet(geometry.leaves.length);
     this.solidSpace = new Q1SolidSpace(geometry);
@@ -67,7 +69,7 @@ export class Q1Collision implements SceneQueries {
   /** The inverse native-hull construction retains clip-only evidence, with
    * native-sized concavities conservatively closed when compilation lost them. */
   geometryCoverage(model = 0): { readonly arbitraryShapes: "bspx-brushes" | "drawing-bsp-cells"; readonly clipOnly: "brushes" | "derived-native-clipspace" } {
-    const brushes = this.geometry.brushList?.find(entry => entry.model === model);
+    const brushes = this.authoredBrushes(model);
     return brushes === undefined ? { arbitraryShapes: "drawing-bsp-cells", clipOnly: "derived-native-clipspace" } : { arbitraryShapes: "bspx-brushes", clipOnly: "brushes" };
   }
   private surfaceFlags(model: number, point: Vec3, plane: Plane): number | undefined {
@@ -107,10 +109,10 @@ export class Q1Collision implements SceneQueries {
     if (query.shape.kind === "point") hullIndex = 0;
     if (query.policy.kind === "q1") {
       if (query.policy.hull !== null) hullIndex = query.policy.hull;
-      else if (query.shape.kind === "box") {
-        const size = dimensions(bounds);
-        const index = Q1_HULL_BOUNDS.findIndex(hull => equal(dimensions(hull), size));
-        if (index >= 0) hullIndex = index;
+      else if (query.shape.kind === "box" && query.policy.derived !== true) {
+        // SV_HullForEntity chooses by width alone; the hull's own mins then offset the origin.
+        const width = bounds.max.x - bounds.min.x;
+        hullIndex = width < 3 ? 0 : width <= 32 ? 1 : 2;
       }
     }
     if (hullIndex !== null) {
@@ -142,7 +144,7 @@ export class Q1Collision implements SceneQueries {
       const interval = shape.kind === "box" ? sweepBoxCell(solid.cell, centerStart, centerEnd, shape, Q1_DISTANCE_EPSILON) : sweepCapsuleCell(solid.cell, centerStart, centerEnd, shape, Q1_DISTANCE_EPSILON);
       if (interval !== null) intervals.push({ ...interval, contents: solid.contents });
     }
-    if (this.geometry.brushList?.some(entry => entry.model === model) !== true && this.blocks(-2, query.policy)) {
+    if (this.authoredBrushes(model) === undefined && this.blocks(-2, query.policy)) {
       const drawingCount = intervals.length;
       let first = 1;
       for (const interval of intervals) first = Math.min(first, interval.enter);
@@ -175,16 +177,28 @@ export class Q1Collision implements SceneQueries {
       inOpen: environment.inOpen, inWater: environment.inWater, sourcePlane: { normal: transformed.normal, distance: plane.distance },
       contact: fraction < 1 ? { kind: "plane", plane: transformed } : { kind: "none" }, hit: fraction < 1 || startSolid ? { kind: "world", model } : { kind: "none" }, contents };
   }
+  private authoredBrushes(model: number): Q1BrushListModel | undefined {
+    let authored = this.authoredByModel.get(model);
+    if (authored === undefined) { authored = this.geometry.brushList?.find(entry => entry.model === model) ?? null; this.authoredByModel.set(model, authored); }
+    return authored ?? undefined;
+  }
   private *cells(envelope: Bounds, model: number, policy: TracePolicy): Generator<{ cell: ConvexCell; contents: number }, void, undefined> {
-    const authored = this.geometry.brushList?.find(entry => entry.model === model);
+    const authored = this.authoredBrushes(model);
     if (authored === undefined) {
       yield* this.solidSpace.cells(envelope, model, contents => this.blocks(contents, policy));
       return;
     }
     for (const brush of authored.brushes) {
       if (!this.blocks(brush.contents, policy)) continue;
-      let cell: ConvexCell | null = boxCell(brush.bounds);
-      for (const plane of brush.planes) { cell = clipCell(cell, plane); if (cell === null) break; }
+      const box = brush.bounds;
+      if (box.max.x < envelope.min.x || box.min.x > envelope.max.x || box.max.y < envelope.min.y || box.min.y > envelope.max.y
+        || box.max.z < envelope.min.z || box.min.z > envelope.max.z) continue;
+      let cell = this.brushCells.get(brush);
+      if (cell === undefined) {
+        cell = boxCell(brush.bounds);
+        for (const plane of brush.planes) { cell = clipCell(cell, plane); if (cell === null) break; }
+        this.brushCells.set(brush, cell);
+      }
       if (cell !== null) yield { cell, contents: brush.contents };
     }
   }
@@ -253,6 +267,7 @@ export class Q1Collision implements SceneQueries {
   boxLeaves(bounds: Bounds, limit: number): LeafQueryResult {
     const root = this.geometry.models[0]?.headnodes[0];
     if (root === undefined) throw new RangeError("Missing Quake world root");
+    const center = scale(add(bounds.min, bounds.max), 0.5), extents = scale(sub(bounds.max, bounds.min), 0.5);
     const leaves: number[] = [], seen = this.leafStamps; seen.begin();
     let topnode: number | null = null, overflow = false;
     const stack: BspChild[] = [root < 0 ? { kind: "leaf", index: -1 - root } : { kind: "node", index: root }];
@@ -266,7 +281,6 @@ export class Q1Collision implements SceneQueries {
       }
       const node = this.geometry.nodes[child.index], plane = node === undefined ? undefined : this.geometry.planes[node.plane];
       if (node === undefined || plane === undefined) throw new RangeError("Invalid Quake leaf query node");
-      const center = scale(add(bounds.min, bounds.max), 0.5), extents = scale(sub(bounds.max, bounds.min), 0.5);
       const d = dot(center, plane.normal) - plane.distance, r = Math.abs(plane.normal.x) * extents.x + Math.abs(plane.normal.y) * extents.y + Math.abs(plane.normal.z) * extents.z;
       if (d >= r) stack.push(node.children[0]);
       else if (d < -r) stack.push(node.children[1]);

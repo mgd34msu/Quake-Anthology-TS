@@ -446,6 +446,9 @@ export class GlRenderer implements RendererBackend {
             if (![...positionValues(position), texCoord.x, texCoord.y].every(finite32)) throw new RangeError("OpenGL sky vertices must be finite");
         }
         this.identityMatrices();
+        // Sky boxes are opaque; do not inherit blend or alpha test from the previous batch.
+        gl.glDisable(0xbe2);
+        this.alphaTest = "none";
         this.program.use(null, this.alphaTest);
         this.selectTexture(0);
         this.textures.bind({ kind: "bind-image", image: operation.image });
@@ -461,7 +464,8 @@ export class GlRenderer implements RendererBackend {
         return;
       }
       case "shadow-volume": case "shadow-finish": {
-        if (this.stencilBits < 4) throw new Error("OpenGL stencil shadows require at least four stencil bits");
+        // RB_ShadowTessEnd and RB_ShadowFinish draw nothing without a stencil buffer.
+        if (this.stencilBits < 4) return;
         for (const position of operation.positions)
           if (!positionValues(position).every(finite32)) throw new RangeError("OpenGL shadow positions must be finite");
         const positions = operation.kind === "shadow-finish" ? operation.positions : operation.indices.map(index => {

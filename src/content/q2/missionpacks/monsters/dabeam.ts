@@ -3,7 +3,6 @@ import type { ActorId } from "../../../../contracts/identity.ts";
 import { angleVectorsRule } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import { add, normalize, scale, subtract, zero } from "../../foundation/fields.ts";
-import { freeQ2Entity } from "../../foundation/callbacks.ts";
 import type { Q2Entity, Q2GameServices, Q2Think } from "../../foundation/host.ts";
 import { traceGroundActor } from "../../foundation/monsters/ai.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
@@ -31,10 +30,15 @@ const beamHit: Q2Think = (entity, game) => {
     ignore = actor; start = trace.end;
   }
   game.host.emit({ kind: "beam", actor: entity.actor.id, start: origin, end: endpoint, width: 2, color: entity.skin, visible: true });
-  return game.schedule(entity, 0.1, freeQ2Entity);
+  entity.pos2 = endpoint;
+  return game.schedule(entity, 0.1, freeBeam);
+};
+const freeBeam: Q2Think = (entity, game) => {
+  game.host.emit({ kind: "beam", actor: entity.actor.id, start: game.body(entity).origin, end: entity.pos2, width: 2, color: entity.skin, visible: false });
+  return game.remove(entity);
 };
 
-export const monsterDabeamCallbacks: Q2CallbackDefinitions = { think: { dabeam_hit: beamHit, G_FreeEdict: freeQ2Entity } };
+export const monsterDabeamCallbacks: Q2CallbackDefinitions = { think: { dabeam_hit: beamHit, dabeam_free: freeBeam } };
 
 export function monsterDabeam(owner: Q2Entity, game: Q2GameServices, target: ActorId | null, origin: Vec3, angles: Vec3, damage: number, medic: boolean): Q2Entity {
   game.sourceCallbacks.register(monsterDabeamCallbacks);

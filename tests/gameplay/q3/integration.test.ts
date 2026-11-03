@@ -26,7 +26,7 @@ import { Weapon, PersistentIndex, statSchema } from "../../../src/content/q3/bas
 import { parseQ3Bsp, adaptQ3Bsp } from "../../../src/formats/q3-map/index.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 
-const archivePath = resolve(process.env["Q3_DATA_PATH"] ?? corpusFile("q3a"), "baseq3/pak0.pk3");
+const archivePath = resolve(corpusFile("q3a"), "baseq3/pak0.pk3");
 const clock: ClockProfile = { kind: "q3", serverFrameMilliseconds: 100, fixedMovementMilliseconds: null, maximumCommandMilliseconds: 200 };
 
 function sourceRecipe(byteLength: number): ExecutableRecipe {
@@ -92,6 +92,7 @@ test.skipIf(!existsSync(archivePath))("retail Q3 map, selected player admission,
       return { serverTime: command.serverTimeMilliseconds, angles: { x: command.angleWords[0], y: command.angleWords[1], z: command.angleWords[2] }, buttons: command.buttons,
         weapon: command.weapon, forwardmove: command.forwardMove, rightmove: command.rightMove, upmove: command.upMove }; },
     moveClient: () => { throw new Error("Admission must retain the existing command time until the next selected movement command"); },
+    selectSpawnWeapon: () => undefined,
     spawnPlayer: (entity, pose) => {
       const body = physics.bodies.read(entity.actor.id); if (body === null) throw new Error("Selected character body missing");
       physics.bodies.write(entity.actor, { ...body, origin: pose.origin, angles: pose.angles });

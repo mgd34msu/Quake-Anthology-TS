@@ -7,8 +7,6 @@ import { gzipSync } from "node:zlib";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { testCorpusRoot } from "../../support/corpus.ts";
-import { homedir } from "node:os";
-import { nightdiveAddonDirectories } from "../../../src/content/roots.ts";
 
 function lengthString(value: string): Uint8Array {
   const bytes = new TextEncoder().encode(value), out = new Uint8Array(4 + bytes.length);
@@ -40,7 +38,7 @@ test.skipIf(!existsSync(join(testCorpusRoot(), "q2/rerelease/baseq2/pak0.pak")))
   try {
     const path = join(root, "save0.pak.gz");
     await writeFile(path, gzipSync(pakWith([
-      ["server.ssv", kexServerSave("Transition", "base1", "baseq2")],
+      ["server.ssv", kexServerSave("Transition", "base2", "baseq2")],
       ["game.ssv", new TextEncoder().encode(JSON.stringify({ clients: [{}], game: { autosaved: true, maxclients: 1, maxentities: 8192 }, save_version: 1 }))],
     ])));
     const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q2-rerelease-baseq2", "--map", "base1",
@@ -52,7 +50,8 @@ test.skipIf(!existsSync(join(testCorpusRoot(), "q2/rerelease/baseq2/pak0.pak")))
       const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
       for (let index = 0; index < 10; index++) await app.step(50);
       expect(app.simulation.playerUi(local.actor).health).toBeGreaterThan(0);
-      expect(app.simulation.recipe.map.geometry.requestedPath).toContain("base1");
+      // The launch map is base1, so only a load that honors the save lands on base2.
+      expect(app.simulation.recipe.map.geometry.requestedPath).toContain("base2");
     } finally { await app.close(); }
   } finally { await rm(root, { recursive: true, force: true }); }
 }, 180000);
@@ -73,20 +72,4 @@ test.skipIf(!existsSync(join(testCorpusRoot(), "q2/rerelease/baseq2/pak0.pak")))
       await expect(app.loadGame(path)).rejects.toThrow("cannot be restored");
     } finally { await app.close(); }
   } finally { await rm(root, { recursive: true, force: true }); }
-}, 180000);
-
-const realQ2Root = nightdiveAddonDirectories(homedir()).find(root => root.family === "q2")?.root;
-const realQ2SavePath = realQ2Root === undefined ? "" : join(realQ2Root, "baseq2/save/save0.pak.gz");
-test.skipIf(realQ2Root === undefined || !existsSync(realQ2SavePath) || !existsSync(join(testCorpusRoot(), "q2/rerelease/baseq2/pak0.pak")))("the installed steam q2 save loads on its recorded map", async () => {
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q2-rerelease-baseq2", "--map", "base1",
-    "--movement", "q2", "--character", "q2", "--mode", "singleplayer", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240"]);
-  if (parsed.kind !== "run") throw new Error("Missing launch");
-  const app = await Application.open(parsed.options, { print: () => undefined });
-  try {
-    await app.loadGame(realQ2SavePath);
-    const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
-    for (let index = 0; index < 10; index++) await app.step(50);
-    expect(app.simulation.playerUi(local.actor).health).toBeGreaterThan(0);
-    expect(app.simulation.recipe.map.geometry.requestedPath).toContain("rboss");
-  } finally { await app.close(); }
 }, 180000);

@@ -1,5 +1,6 @@
+import { storedZip as zip } from "../../support/pk3.ts";
 import { expect, test } from "bun:test";
-import { readdirSync, readlinkSync } from "node:fs";
+import { existsSync, readdirSync, readlinkSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import type { ArchiveMount, ResolvedMountPlan } from "../../../src/contracts/con
 import { digestFile, openMountPlan } from "../../../src/content/mounts/index.ts";
 import { QvmFiles, qvmFileSyscall } from "../../../src/compat/qvm/file-syscalls.ts";
 import { QvmGameImport, QvmUiImport } from "../../../src/compat/qvm/abi.ts";
-import { UserFileStore } from "../../../src/platform/files/writable.ts";
+import { UserFileStore } from "../../../src/core/files/writable.ts";
 import { QvmMemory } from "../../../src/compat/qvm/memory.ts";
 import type { QvmHostCall } from "../../../src/compat/qvm/syscalls.ts";
 import { createQvmSystemCall, rejectQvmSyscall } from "../../../src/compat/qvm/syscalls.ts";
@@ -23,6 +24,8 @@ function gameCalls(guest: QvmMemory, files: QvmFiles) {
   };
 }
 
+// Open-descriptor accounting reads Linux procfs; other hosts skip the descriptor assertions.
+function expectDescriptors(root: string, count: number): void { if (existsSync("/proc/self/fd")) expect(descriptorsWithin(root)).toBe(count); }
 function descriptorsWithin(root: string): number {
   return readdirSync("/proc/self/fd").filter(name => {
     try { return readlinkSync(`/proc/self/fd/${name}`).startsWith(`${root}/`); }
@@ -30,28 +33,6 @@ function descriptorsWithin(root: string): number {
   }).length;
 }
 
-function zip(entries: readonly (readonly [string, string])[]): Uint8Array {
-  const locals: Uint8Array[] = [], directory: Uint8Array[] = [];
-  let offset = 0;
-  for (const [path, text] of entries) {
-    const name = new TextEncoder().encode(path), data = new TextEncoder().encode(text), crc = Bun.hash.crc32(data);
-    const local = new Uint8Array(30 + name.length + data.length), a = new DataView(local.buffer);
-    a.setUint32(0, 0x04034b50, true); a.setUint16(4, 20, true); a.setUint32(14, crc, true);
-    a.setUint32(18, data.length, true); a.setUint32(22, data.length, true); a.setUint16(26, name.length, true);
-    local.set(name, 30); local.set(data, 30 + name.length); locals.push(local);
-    const central = new Uint8Array(46 + name.length), b = new DataView(central.buffer);
-    b.setUint32(0, 0x02014b50, true); b.setUint16(4, 20, true); b.setUint16(6, 20, true); b.setUint32(16, crc, true);
-    b.setUint32(20, data.length, true); b.setUint32(24, data.length, true); b.setUint16(28, name.length, true); b.setUint32(42, offset, true);
-    central.set(name, 46); directory.push(central); offset += local.length;
-  }
-  const directoryLength = directory.reduce((sum, bytes) => sum + bytes.length, 0), result = new Uint8Array(offset + directoryLength + 22);
-  let position = 0;
-  for (const bytes of [...locals, ...directory]) { result.set(bytes, position); position += bytes.length; }
-  const end = new DataView(result.buffer, position);
-  end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true);
-  end.setUint32(12, directoryLength, true); end.setUint32(16, offset, true);
-  return result;
-}
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "qvm-files-"));
@@ -131,7 +112,9 @@ test("listing keeps native order, depth, deduplication, pure filtering and byte 
     expect(await qvmFileSyscall(f.call(QvmUiImport.UI_FS_GETFILELIST, [128, 192, 512, 13]), f.files)).toBe(0);
     expect(await qvmFileSyscall(f.call(QvmUiImport.UI_FS_GETFILELIST, [128, 192, 512, 14]), f.files)).toBe(1);
     expect(f.guest.readString(512)).toBe("first.arena");
-    await expect(f.files.list("$modlist", "")).rejects.toThrow("catalog owner");
+    expect(await f.files.list("$modlist", "")).toEqual([]);
+    f.guest.writeString(128, "$modlist", 64); f.guest.writeString(192, "", 64);
+    expect(await qvmFileSyscall(f.call(QvmUiImport.UI_FS_GETFILELIST, [128, 192, 512, 64]), f.files)).toBe(0);
     await expect(f.mounts.listFiles("../escape", "")).rejects.toThrow("Invalid relative");
     await symlink("/etc", join(f.root, "outside"));
     await expect(f.mounts.listFiles("outside", "")).rejects.toThrow("escapes root");
@@ -186,13 +169,18 @@ test("guest write, append and append-sync use scoped descriptors and mounted rea
     const truncated = f.guest.view(256, 4).getInt32(0, true); files.close(truncated);
     expect((await mounted.open("profiles/test.cfg"))?.bytes.length).toBe(0);
     expect(() => files.openWrite("../escape", "write", () => {})).toThrow("relative and stay inside its storage directory");
+    for (const name of ["pak9.pk3", "vm/cgame.QVM", "q3key", "baseq3/q3config.cfg", "game.dll", "lib.so"]) {
+      const published: number[] = [];
+      expect(files.openWrite(name, "write", slot => { published.push(slot); })).toBe(-1);
+      expect(published).toEqual([0]);
+    }
     await symlink(f.root, join(userRoot, "outside"));
-    expect(() => files.openWrite("outside/retail-overwrite", "write", () => {})).toThrow();
+    expect(() => files.openWrite("outside/retail-overwrite", "write", () => {})).toThrow("ENOTDIR: not a directory, open");
     expect(open(3)).toBe(0);
     const retired = f.guest.view(256, 4).getInt32(0, true);
-    expect(descriptorsWithin(userRoot)).toBe(1);
+    expectDescriptors(userRoot, 1);
     files.closeAll();
-    expect(descriptorsWithin(userRoot)).toBe(0);
+    expectDescriptors(userRoot, 0);
     expect(() => files.write(retired, Uint8Array.of(1))).toThrow("closed");
     expect(() => files.closeAll()).not.toThrow();
   } finally { files.closeAll(); mounted.close(); await f.close(); }
@@ -203,7 +191,7 @@ test("writable publication failure closes its descriptor without retaining a gue
   const files = new QvmFiles({ mounts: f.mounts, writable: new UserFileStore(join(f.root, "user")), assertCurrent: () => undefined });
   try {
     expect(() => files.openWrite("test.cfg", "write", () => { throw new Error("Publication cancelled"); })).toThrow("Publication cancelled");
-    expect(descriptorsWithin(join(f.root, "user"))).toBe(0);
+    expectDescriptors(join(f.root, "user"), 0);
     const handles: number[] = [];
     expect(files.openWrite("test.cfg", "append-sync", slot => { handles.push(slot); })).toBe(0);
     expect(handles).toEqual([1]);
@@ -251,7 +239,7 @@ test("qagame writes use the injected private owner and mounted readback", async 
     expect(call(QvmGameImport.G_FS_SEEK, [slot, 1, 2])).toBe(0); f.guest.bytes[512] = 90;
     expect(call(QvmGameImport.G_FS_WRITE, [512, 1, slot])).toBe(0);
     expect(call(QvmGameImport.G_FS_FCLOSE_FILE, [slot])).toBe(0);
-    expect(descriptorsWithin(root)).toBe(0);
+    expectDescriptors(root, 0);
     expect(await call(QvmGameImport.G_FS_FOPEN_FILE, [128, 256, 0])).toBe(3);
     expect(mounts.openedResources.at(-1)?.provenance.mount.identity.id).toBe(user.identity.id);
     expect(call(QvmGameImport.G_FS_READ, [512, 3, f.guest.view(256, 4).getInt32(0, true)])).toBe(0);

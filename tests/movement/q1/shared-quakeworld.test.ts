@@ -7,7 +7,7 @@ import { CommandBuffer } from "../../../src/core/commands/index.ts";
 import { createNumericOperations, Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 import { SeatInput, registerInputCommands } from "../../../src/input/seat.ts";
 import { InputCommandBuilder } from "../../../src/input/user-command.ts";
-import { KeyCode } from "../../../src/input/key-codes.ts";
+import { KeyCode } from "../../../src/core/key-codes.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { decodeQ2Map } from "../../../src/formats/q2-map/index.ts";
 import { parseEntities } from "../../../src/core/common-parse.ts";

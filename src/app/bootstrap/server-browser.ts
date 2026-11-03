@@ -77,20 +77,41 @@ export class StartupServerBrowser {
     // Text that is not JSON at all behaves like the absent saved list;
     // parsed lists still face their validation below.
     const isJsonText = (text: string): boolean => { try { const value: unknown = JSON.parse(text); return value !== undefined; } catch { return false; } };
+    // An optional list or cache that fails validation is skipped and reported; it must not stop the launch.
+    const skipped: string[] = [];
+    const tolerate = (name: string, load: () => void): void => {
+      try { load(); } catch (error) { skipped.push(`${name}: ${error instanceof Error ? error.message : String(error)}`); }
+    };
     try {
-      for (const protocol of protocols) { const saved = await config.loadText(`servers-${protocol}`); if (saved !== null && isJsonText(saved)) { if (saved.length > 65536) throw new Error("Saved server list is too large"); result.browser(protocol).restoreFavorites(saved); for (const address of result.browser(protocol).favoriteAddresses()) browserAddress(address); } }
+      for (const protocol of protocols) {
+        const name = `servers-${protocol}`, saved = await config.loadText(name);
+        if (saved !== null && isJsonText(saved)) tolerate(name, () => {
+          if (saved.length > 65536) throw new Error("Saved server list is too large");
+          const core = result.browser(protocol);
+          core.restoreFavorites(saved);
+          try { for (const address of core.favoriteAddresses()) browserAddress(address); }
+          catch (error) {
+            // Do not keep a half-valid list: an address the browser cannot use would fail every later row read.
+            for (const address of core.favoriteAddresses()) core.removeFavorite(address);
+            throw error;
+          }
+        });
+      }
       for (const protocol of protocols) {
         const master = await config.loadText(`servers-master-${protocol}`);
         if (master !== null && master.trim().length <= 2048) result.masterAddresses.set(protocol, master.trim());
-        const saved = await config.loadText(`servers-direct-${protocol}`);
+        const name = `servers-direct-${protocol}`, saved = await config.loadText(name);
         if (saved === null || !isJsonText(saved)) continue;
-        const servers = readDirectServers(saved);
-        result.directServers.set(protocol, servers);
-        for (const server of servers) result.browser(protocol).add(server.address, "direct");
-        const last = servers[0];
-        if (last !== undefined) result.addresses.set(protocol, last.remote);
+        tolerate(name, () => {
+          const servers = readDirectServers(saved);
+          result.directServers.set(protocol, servers);
+          for (const server of servers) result.browser(protocol).add(server.address, "direct");
+          const last = servers[0];
+          if (last !== undefined) result.addresses.set(protocol, last.remote);
+        });
       }
-      await result.loadQ3Cache();
+      try { await result.loadQ3Cache(); } catch (error) { skipped.push(`servers-cache-q3: ${error instanceof Error ? error.message : String(error)}`); }
+      if (skipped.length !== 0) result.status = `Ignored invalid saved server data (${skipped.join("; ")})`;
       return result;
     } catch (error) { transport.close(); throw error; }
   }
@@ -136,6 +157,19 @@ export class StartupServerBrowser {
     if (entries.length >= (source === 2 ? 8192 : 128)) throw new Error("Q3 browser list is full");
     core.add(address, q3Sources[source]);
     this.listGenerations.set(source, (this.listGenerations.get(source) ?? 0) + 1);
+  }
+  /** Adds a master packet's addresses with one pass over the list, up to the source's capacity; returns those newly added. */
+  private addQ3Many(source: Q3BrowserSource, addresses: readonly NetworkAddress[]): NetworkAddress[] {
+    this.assertOpen();
+    const core = this.browser("q3"), known = new Set(core.list().filter(entry => entry.sources.includes(q3Sources[source])).map(entry => addressKey(entry.address)));
+    const limit = source === 2 ? 8192 : 128, added: NetworkAddress[] = [];
+    for (const address of addresses) {
+      if (known.size >= limit) break;
+      if (address.kind !== "ipv4" || address.port === 0 || known.has(addressKey(address))) continue;
+      core.add(address, q3Sources[source]); known.add(addressKey(address)); added.push(address);
+    }
+    if (added.length > 0) this.listGenerations.set(source, (this.listGenerations.get(source) ?? 0) + 1);
+    return added;
   }
   removeQ3(source: Q3BrowserSource, address: NetworkAddress): void {
     this.assertOpen(); this.browser("q3").removeSource(address, q3Sources[source]);
@@ -232,10 +266,12 @@ export class StartupServerBrowser {
     const timeout = setTimeout(() => controller.abort(), 4000);
     try {
       if (/^https?:\/\//i.test(remote)) {
-        const names = await fetchServerMasterList(remote, controller.signal), addresses: NetworkAddress[] = [];
+        let skipped = 0;
+        const names = await fetchServerMasterList(remote, controller.signal, count => { skipped += count; }), addresses: NetworkAddress[] = [];
         for (let offset = 0; offset < names.length; offset += 16) {
-          const batch = await Promise.all(names.slice(offset, offset + 16).map(name => resolveAddress(name, ports[protocol], 4)));
-          this.assertGeneration(generation); controller.signal.throwIfAborted(); addresses.push(...batch);
+          const batch = await Promise.allSettled(names.slice(offset, offset + 16).map(name => resolveAddress(name, ports[protocol], 4)));
+          this.assertGeneration(generation); controller.signal.throwIfAborted();
+          for (const result of batch) { if (result.status === "fulfilled") addresses.push(result.value); else skipped++; }
         }
         const core = this.browser(protocol);
         for (const address of addresses) {
@@ -243,7 +279,7 @@ export class StartupServerBrowser {
           if (protocol === "q3") this.addQ3(2, address); else core.add(address, "master");
           this.queueStatus(protocol, address);
         }
-        this.status = `Found ${addresses.length} servers; querying status`;
+        this.status = `Found ${addresses.length} servers; querying status${skipped === 0 ? "" : ` (${skipped} skipped)`}`;
       } else if (protocol === "q2") {
         const address = await resolveAddress(directServerText(remote.replace(/^udp:\/\//, "")), 27900, 4);
         this.assertGeneration(generation); controller.signal.throwIfAborted();
@@ -259,9 +295,19 @@ export class StartupServerBrowser {
   get emptyMessage(): string {
     return this.browser().list().length === 0 ? "No servers yet. Enter an address or find LAN." : "No servers match these filters.";
   }
+  private rowsCache: { readonly protocol: BrowserProtocol; readonly inputs: string; readonly source: readonly BrowserEntry[]; readonly rows: readonly BrowserEntry[] } | null = null;
+  /** The menu asks several times per frame; entries are replaced, never edited, so identity of each one validates the cache. */
   rows(): readonly BrowserEntry[] {
+    const source = this.browser().list(), inputs = `${this.filter}\0${this.favoritesOnly}\0${this.sortOrder}\0${this.hideEmpty}\0${this.hideFull}`;
+    const cached = this.rowsCache;
+    if (cached !== null && cached.protocol === this.protocol && cached.inputs === inputs && cached.source.length === source.length && cached.source.every((entry, index) => entry === source[index])) return cached.rows;
+    const rows = this.computeRows(source);
+    this.rowsCache = { protocol: this.protocol, inputs, source, rows };
+    return rows;
+  }
+  private computeRows(entries: readonly BrowserEntry[]): readonly BrowserEntry[] {
     const search = this.filter.trim().toLowerCase();
-    return this.browser().list().filter(entry => (!this.favoritesOnly || entry.sources.includes("favorite"))
+    return entries.filter(entry => (!this.favoritesOnly || entry.sources.includes("favorite"))
       && (entry.status === null || entry.status.maxPlayers <= 0 || (!this.hideEmpty || entry.status.players > 0) && (!this.hideFull || entry.status.players < entry.status.maxPlayers))
       && `${entry.status?.name ?? ""} ${entry.status?.map ?? ""} ${entry.status?.rules.get("gamedir") ?? entry.status?.rules.get("game") ?? ""} ${entry.status?.playerDetails.map(player => player.name.replace(/\^[0-9]/g, "")).join(" ") ?? ""} ${browserAddress(entry.address)}`.toLowerCase().includes(search))
       .sort((a, b) => {
@@ -338,14 +384,18 @@ export class StartupServerBrowser {
   }
   async connection(): Promise<BrowserConnection> {
     const protocol = this.protocol, remote = directServerText(this.address.trim());
+    const resolved: { address: NetworkAddress | null } = { address: null };
     await this.persist(async () => {
       const generation = this.generation;
       const address = await resolveAddress(remote, ports[protocol], 4);
       this.assertGeneration(generation, true);
       await this.rememberDirect(protocol, { remote, address });
       this.assertGeneration(generation, true);
+      resolved.address = address;
     });
-    const selected = this.browser(protocol).list().find(entry => browserAddress(entry.address) === remote);
+    // The entry is found by the resolved address, since `remote` may be a hostname.
+    const targetKey = resolved.address === null ? null : addressKey(resolved.address);
+    const selected = this.browser(protocol).list().find(entry => targetKey === null ? browserAddress(entry.address) === remote : addressKey(entry.address) === targetKey);
     const wire = selected?.status?.wire;
     return { protocol, remote, ...(protocol === "q2" && wire?.kind === "source" && wire.protocol.kind === "q2-kex" ? { q2Protocol: wire.protocol } : {}) };
   }
@@ -383,11 +433,7 @@ export class StartupServerBrowser {
       if (master !== null && master.address !== null && addressKey(master.address) === addressKey(event.from)) {
         try {
           const packet = decodeQ3MasterPacket(event.payload);
-          for (const address of packet.addresses) {
-            if (this.q3List(master.source).addresses.length >= (master.source === 2 ? 8192 : 128)) break;
-            this.addQ3(master.source, address);
-            this.queueStatus("q3", address);
-          }
+          for (const address of this.addQ3Many(master.source, packet.addresses)) this.queueStatus("q3", address);
           this.master = packet.complete ? null : { ...master, received: true };
           continue;
         } catch { /* A queried master may also answer a direct server query. */ }
@@ -408,8 +454,17 @@ export class StartupServerBrowser {
           if (!Number.isSafeInteger(status.players) || !Number.isSafeInteger(status.maxPlayers) || status.players < 0 || status.maxPlayers < 0
             || status.players > 1024 || status.maxPlayers > 1024 || status.name.length > 1024 || status.map.length > 1024) continue;
           const clean = (text: string): string => text.replace(/[\x00-\x1f\x7f]/g, " ");
+          // The UI rebuilds these rules as one info string that cannot exceed 1023 bytes, so extra rules are dropped here.
+          const rules = new Map<string, string>();
+          let ruleBytes = 0;
+          for (const [key, value] of status.rules) {
+            ruleBytes += key.length + value.length + 2;
+            if (ruleBytes > 1000) break;
+            rules.set(key, value);
+          }
           const core = this.browser(protocol), wasLan = core.entry(event.from)?.sources.includes("lan") === true;
-          if (core.receive(event.from, { ...status, name: clean(status.name), map: clean(status.map) }, decoded.challenge, performance.now())) {
+          if (core.receive(event.from, { ...status, rules, name: clean(status.name), map: clean(status.map),
+            playerDetails: status.playerDetails.slice(0, 1024).map(player => player.name.length > 1024 ? { ...player, name: player.name.slice(0, 1024) } : player) }, decoded.challenge, performance.now())) {
             this.status = "Server updated";
             if (protocol === "q3" && !wasLan && core.entry(event.from)?.sources.includes("lan")) this.listGenerations.set(0, (this.listGenerations.get(0) ?? 0) + 1);
           }

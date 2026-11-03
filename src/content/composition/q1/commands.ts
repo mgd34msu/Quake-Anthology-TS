@@ -32,6 +32,19 @@ export function q1WeaponImpulse(game: Q1EntityServices, player: Q1PlayerState, i
   }
   return false;
 }
+/** ThreeWave CTF CycleWeaponCommand: the hook sits between the axe and the shotgun. */
+export function q1CtfWeaponCycle(game: Q1EntityServices, player: Q1PlayerState, selected: ItemId | null, reverse: boolean, grapple: ItemId, select: (item: ItemId, weapon: Q1BaseWeapon | null) => boolean): boolean {
+  const order: readonly (readonly [ItemId, Q1BaseWeapon | null])[] = [[game.weaponItem("axe"), "axe"], [grapple, null], ...WEAPONS.filter(weapon => weapon !== "axe").map(weapon => [game.weaponItem(weapon), weapon] as const)];
+  const current = Math.max(0, order.findIndex(([item]) => item === selected));
+  for (let step = 1; step <= order.length; step++) {
+    const entry = order[(current + (reverse ? -step : step) + order.length * 2) % order.length];
+    if (entry === undefined) continue;
+    const [item, weapon] = entry;
+    if (game.host.inventory.count(player.actor.id, item) === 0 || weapon !== null && !ammunition(game, player, weapon)) continue;
+    if (select(item, weapon)) return true;
+  }
+  return true;
+}
 export function baseQ1Impulse(source: Q1SourceComposition, player: Q1PlayerState, impulse: number): boolean {
   const { game, services, selection } = source;
   if (impulse === 11) { source.base.campaign.writeFlags(Math.fround(source.base.campaign.readFlags() * 2 + 1)); return true; }

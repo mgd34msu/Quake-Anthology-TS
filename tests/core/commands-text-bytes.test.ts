@@ -3,6 +3,7 @@ import type { CommandContext, CommandDialect } from "../../src/contracts/common.
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CommandBuffer, tokenizeCommand } from "../../src/core/commands/index.ts";
 import { CvarRegistry } from "../../src/core/cvars/index.ts";
+import { literal } from "../support/literal.ts";
 
 const dialects: readonly CommandDialect[] = ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease", "q3"];
 for (const dialect of dialects) test(`${dialect} console echo preserves unquoted high bytes and native byte limits`, () => {
@@ -48,5 +49,25 @@ for (const dialect of dialects) test(`${dialect} console echo preserves unquoted
   printed.length = 0;
   commands.append("echo é Ü ä ñ gyp\n", remote); commands.execute();
   expect(printed.join("")).toBe("gyp \n");
-  expect(() => commands.append("echo \u0100\n", context)).toThrow("source bytes");
+  printed.length = 0;
+  commands.append("echo \u0100\n", context); commands.execute();
+  expect(printed.join("")).toContain("source bytes");
+  expect(commands.pendingText).toBe("");
+});
+
+for (const dialect of literal(["q1-netquake", "q1-quakeworld", "q2-classic", "q3"])) test(`${dialect} oversize tokens and self-expanding input end without throwing`, () => {
+  const owner = createIdentityOwner(`overflow-${dialect}`);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat: owner.seat(0), client: owner.client(0, 0) } };
+  const printed: string[] = [];
+  const cvars = new CvarRegistry({ dialect, context });
+  const commands = new CommandBuffer({ dialect, context, cvars, print: text => printed.push(text) });
+  commands.append(`echo ${"x".repeat(1500)}\necho after\n`, context);
+  expect(() => commands.execute()).not.toThrow();
+  expect(printed.join("")).toContain("after");
+  printed.length = 0;
+  if (dialect === "q3") { cvars.register("loop", "vstr loop", 0); commands.append("vstr loop\n", context); }
+  else commands.append('alias loop "loop"\nloop\n', context);
+  expect(() => commands.execute()).not.toThrow();
+  if (dialect !== "q2-classic") expect(printed.join("")).toMatch(/dispatch budget|overflowed/);
+  expect(commands.pendingText).toBe("");
 });

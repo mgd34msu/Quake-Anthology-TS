@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
@@ -17,6 +17,7 @@ import { nativeProviderTiming } from "../../../src/content/catalog/timing.ts";
 import type { ProviderTiming } from "../../../src/contracts/content.ts";
 import { CommandBuffer } from "../../../src/core/commands/index.ts";
 import { registerQ1ClientCommands } from "../../../src/app/bootstrap/q1-client-commands.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q2/baseq2/pak0.pak", "q2/rerelease/baseq2/pak0.pak", "q3a/baseq3/pak0.pk3");
 
 const corpus = testCorpusRoot();
 const movements: readonly { readonly catalog: string; readonly provider: ProviderId }[] = [

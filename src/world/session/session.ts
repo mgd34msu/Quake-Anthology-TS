@@ -2,7 +2,6 @@
 import type { ClientId, IdentityOwner, SeatId, SessionId } from "../../contracts/identity.ts";
 import type { RendererBackend, RenderFrame } from "../../contracts/render.ts";
 import type { InputBatch, SeatPresentation, Simulation, SimulationEvent, SimulationOutput, SimulationProgress, WorldSnapshot } from "../../contracts/session.ts";
-import { ProviderRuntimeState } from "./clocks.ts";
 import { ResourceScope } from "./resources.ts";
 import type { SessionResource } from "./resources.ts";
 
@@ -17,7 +16,6 @@ function closeAll(resources: readonly SessionResource[], message: string): undef
 
 export class WorldLifetime implements SessionResource {
   readonly resources = new ResourceScope("World resources");
-  readonly providers = new ProviderRuntimeState();
   private closed = false;
 
   constructor(readonly simulation: Simulation) {}
@@ -27,7 +25,7 @@ export class WorldLifetime implements SessionResource {
   close(): undefined {
     if (this.closed) return undefined;
     this.closed = true;
-    return closeAll([this.simulation, this.resources, this.providers], "World shutdown failed");
+    return closeAll([this.simulation, this.resources], "World shutdown failed");
   }
 }
 

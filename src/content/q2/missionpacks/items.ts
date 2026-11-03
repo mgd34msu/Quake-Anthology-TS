@@ -4,6 +4,7 @@ import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
 import type { Q2Edition, Q2Entity, Q2GameServices, Q2SpawnModule } from "../foundation/host.ts";
 import type { Q2ItemDefinition, Q2ItemModule } from "../foundation/items.ts";
+import { q2RereleaseAmmoLimits } from "../foundation/rerelease-ammo.ts";
 import type { Q2WeaponInput, Q2Weapons } from "../foundation/weapons/index.ts";
 import { restoreQ2Actor } from "../foundation/checkpoint.ts";
 import type { Q2MissionPack, Q2MissionPackPlayerEffect } from "./types.ts";
@@ -38,12 +39,23 @@ const names: ReadonlyMap<string, { readonly name: string; readonly icon: string 
   ["proxlauncher", { name: "Prox Launcher", icon: "w_proxlaunch" }],
 ]);
 
+function rereleaseCapacity(item: Q2ItemDefinition, edition: Q2Edition): Q2ItemDefinition {
+  const limits = edition === "rerelease" && item.kind === "ammo" ? q2RereleaseAmmoLimits[item.classname] : undefined;
+  return limits === undefined || item.kind !== "ammo" ? item : { ...item, capacity: limits.capacity };
+}
+
+/** Ceiling a Bandolier (or the Ammo Pack when `full`) raises a mission pack ammo to; `classic` is the original DLL's value. */
+export function q2MissionAmmoPackCapacity(classname: string, full: boolean, edition: Q2Edition, classic: number): number {
+  const limits = edition === "rerelease" ? q2RereleaseAmmoLimits[classname] : undefined;
+  return (limits === undefined ? undefined : full ? limits.pack : limits.bandolier) ?? classic;
+}
+
 export function q2MissionWeaponDisplayName(name: string): string | null {
   return names.get(name)?.name ?? [...xatrixAmmo, ...rogueAmmo].find(item => item.classname === `ammo_${name}`)?.name ?? null;
 }
 
-export function q2MissionWeaponInventory(pack: Q2MissionPack): readonly { readonly item: ItemId; readonly capacity: number }[] {
-  const ammo = pack === "xatrix" ? xatrixAmmo : rogueAmmo;
+export function q2MissionWeaponInventory(pack: Q2MissionPack, edition: Q2Edition = "classic"): readonly { readonly item: ItemId; readonly capacity: number }[] {
+  const ammo = (pack === "xatrix" ? xatrixAmmo : rogueAmmo).map(item => rereleaseCapacity(item, edition));
   const weapons = pack === "xatrix" ? xatrixWeaponDefinitions : rogueWeaponDefinitions;
   return [...ammo.flatMap(item => item.kind === "ammo" ? [{ item: `q2:${item.classname}` satisfies ItemId, capacity: item.capacity }] : []),
     ...weapons.filter(weapon => weapon.item !== weapon.ammo).map(weapon => ({ item: weapon.item, capacity: 1 }))];
@@ -110,7 +122,12 @@ export class Q2MissionPackItems implements Q2SpawnModule {
   }
 
   register(items: Q2ItemModule, weapons: Q2Weapons, pack: Q2MissionPack, projectiles: Q2MissionPackProjectiles, spheres: Q2MissionPackSpheres, doppleganger: Q2MissionPackDoppleganger, edition: Q2Edition = "classic"): undefined {
-    for (const item of pack === "xatrix" ? xatrixAmmo : rogueAmmo) items.register(item.kind === "ammo" && item.classname === "ammo_trap" && edition === "rerelease" ? { ...item, infiniteAmmoQuantity: null } : item);
+    const rereleaseQuantity: Readonly<Record<string, number>> = { ammo_tesla: 3, ammo_disruptor: 3 };
+    for (const item of pack === "xatrix" ? xatrixAmmo : rogueAmmo) {
+      const quantity = edition === "rerelease" ? rereleaseQuantity[item.classname] : undefined, sized = rereleaseCapacity(item, edition);
+      items.register(sized.kind === "ammo" && sized.classname === "ammo_trap" && edition === "rerelease" ? { ...sized, infiniteAmmoQuantity: null }
+        : sized.kind === "ammo" && quantity !== undefined ? { ...sized, quantity } : sized);
+    }
     for (const definition of pack === "xatrix" ? xatrixWeaponDefinitions : rogueWeaponDefinitions) {
       const visual = names.get(definition.name);
       if (visual !== undefined) items.register({ kind: "weapon", classname: definition.classname, model: definition.worldModel,
@@ -186,10 +203,11 @@ export class Q2MissionPackItems implements Q2SpawnModule {
   reset(actor: ActorId): undefined { this.powers.delete(actor); return undefined; }
 
   ammoPack(player: OwnedActor, game: Q2GameServices, full: boolean, pack: Q2MissionPack): undefined {
+    const edition = game.options.edition, ceiling = (classname: string, classic: number): number => q2MissionAmmoPackCapacity(classname, full, edition, classic);
     const changes: readonly { readonly item: ItemId; readonly capacity: number; readonly give: number }[] = pack === "xatrix"
-      ? [{ item: "q2:ammo_magslug", capacity: full ? 100 : 75, give: full ? 10 : 0 }]
-      : [{ item: "q2:ammo_flechettes", capacity: full ? 200 : 250, give: full ? 50 : 0 },
-        { item: "q2:ammo_disruptor", capacity: full ? 200 : 150, give: full ? 15 : 0 }];
+      ? [{ item: "q2:ammo_magslug", capacity: ceiling("ammo_magslug", full ? 100 : 75), give: full ? 10 : 0 }]
+      : [{ item: "q2:ammo_flechettes", capacity: ceiling("ammo_flechettes", full ? 200 : 250), give: full ? 50 : 0 },
+        { item: "q2:ammo_disruptor", capacity: ceiling("ammo_disruptor", full ? 200 : 150), give: full ? 15 : 0 }];
     for (const change of changes) {
       const current = game.host.inventory.entries(player.id).find(entry => entry.item === change.item);
       game.host.inventory.configure(player, { item: change.item, count: current?.count ?? 0, capacity: Math.max(current?.capacity ?? 0, change.capacity) });

@@ -19,7 +19,7 @@ import { BinaryWriter } from '../../src/core/binary/index.ts';
 import { QvmOpcode } from '../../src/compat/qvm/image.ts';
 import { QvmGameExport, QvmGameImport } from '../../src/compat/qvm/abi.ts';
 import { resolveQvmArtifact } from '../../src/compat/qvm/artifacts.ts';
-import { UserFileStore } from '../../src/platform/files/writable.ts';
+import { UserFileStore } from '../../src/core/files/writable.ts';
 import { Q3QvmServerGame } from '../../src/app/bootstrap/simulation/q3/guest-runtime.ts';
 import type { Q3GuestOutput, Q3GuestRuntimeOptions } from '../../src/app/bootstrap/simulation/q3/guest-runtime.ts';
 import { Q3ServerState } from '../../src/app/bootstrap/simulation/q3/server-state.ts';
@@ -108,7 +108,7 @@ test.skipIf(!existsSync(archivePath))('guest composition awaits mounted open and
     await f.game.begin(admission.player, command); expect(f.game.game.module.memory.view(512, 24).getInt32(0, true)).toBe(1456);
     f.game.game.module.memory.view(404, 4).setInt32(0, 99, true);
     await f.game.think(admission.player, command); expect(f.game.game.module.memory.view(404, 4).getInt32(0, true)).toBe(0);
-    const pending = f.game.command(admission.player, ['kick', '0']); expect(() => f.game.checkpoint()).toThrow(); await expect(f.game.runFrame(1500)).rejects.toThrow('active external operation');
+    const pending = f.game.command(admission.player, ['kick', '0']); expect(() => f.game.checkpoint()).toThrow(/Q3 guest already has an active external operation|QVM checkpoints require a completed source call/); await expect(f.game.runFrame(1500)).rejects.toThrow('active external operation');
     gate.resolve(); await pending;
     expect(f.printed).toEqual(['disconnected']); expect(f.game.players()).toEqual([]); expect(f.state.getUserinfo(0)).toBeUndefined();
     expect(f.game.game.module.memory.view(400, 4).getInt32(0, true)).toBe(2);

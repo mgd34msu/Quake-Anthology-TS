@@ -4,7 +4,7 @@ import type { Q3ApplicationPlayer, Q3ApplicationServerHost, Q3NetworkRoundRestar
 import type { SimulationOutput, WorldSnapshot } from "../../../src/contracts/session.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { createContentId } from "../../../src/contracts/content.ts";
-import { LoopbackHub } from "../../../src/network/common/loopback.ts";
+import { LoopbackHub } from "../../support/loopback.ts";
 import { Q3ClientConnection } from "../../../src/network/q3/client.ts";
 import { encodeConnect } from "../../../src/network/q3/connectionless.ts";
 import type { WireUserCommand } from "../../../src/network/q3/message.ts";

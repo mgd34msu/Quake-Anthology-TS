@@ -1,4 +1,6 @@
+import { writeCapture } from "../../support/capture.ts";
 import { expect, test } from 'bun:test';
+import { rendererBackends } from "../../support/gl.ts";
 import { createIdentityOwner } from '../../../src/contracts/identity.ts';
 import type { UiDrawContext } from '../../../src/contracts/ui.ts';
 import { defaultUiSkin } from '../../../src/ui/common/skin.ts';
@@ -38,7 +40,7 @@ for (const [width, height] of [[320, 120], [1280, 360]]) test(`status text and p
   }
 });
 
-for (const backend of ['cpu', 'gl']) for (const [width, height] of [[320, 240], [1280, 720]]) {
+for (const backend of rendererBackends) for (const [width, height] of [[320, 240], [1280, 720]]) {
   test.skipIf(process.env['QUAKE_HUD_READABILITY_APP'] !== '1')(`actual ${backend} status capture ${width}x${height}`, async () => {
     if (width === undefined || height === undefined) throw new Error('Missing capture size');
     const { mkdtemp, rm } = await import('node:fs/promises'), { join } = await import('node:path'), { tmpdir } = await import('node:os');
@@ -55,7 +57,7 @@ for (const backend of ['cpu', 'gl']) for (const [width, height] of [[320, 240], 
         for (let frame = 0; frame < 1; frame++) await app.step(25);
         const capture = app.captureNextFrame(); await app.step(25); const rgba = await capture;
         expect(rgba.byteLength).toBe(width * height * 4);
-        await Bun.write(`/tmp/hud-readability-${backend}-${width}.png`, encodePng(width, height, rgba));
+        await writeCapture(`hud-readability-${backend}-${width}.png`, encodePng(width, height, rgba));
       } finally { await app.close(); }
     } finally { await rm(userRoot, { recursive: true, force: true }); }
   }, 30000);

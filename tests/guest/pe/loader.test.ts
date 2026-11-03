@@ -23,8 +23,8 @@ for (const width of [4, 8]) {
     expect(memory.readPointer(memory.offset(image.base, 0x3010n))?.byteOffset).toBe(base + 0x1050n);
     expect(memory.copy(memory.offset(image.base, 0x3200n), 0x200).every(value => value === 0)).toBe(true);
     expect(memory.fetch(memory.offset(image.base, 0x1010n), 1)).toEqual(new Uint8Array([0xc3]));
-    expect(() => memory.write(memory.offset(image.base, 0x1010n), new Uint8Array([0x90]))).toThrow();
-    expect(() => memory.fetch(memory.offset(image.base, 0x3000n), 1)).toThrow();
+    expect(() => memory.write(memory.offset(image.base, 0x1010n), new Uint8Array([0x90]))).toThrow("permits read-execute");
+    expect(() => memory.fetch(memory.offset(image.base, 0x3000n), 1)).toThrow("permits read-write");
     expect(memory.copy(memory.offset(image.base, 0x400n), 4)).toEqual(new Uint8Array(4));
     expect(image.tls?.initialized).toEqual(new Uint8Array([9, 8, 7, 6]));
     expect(image.tls?.zeroFillBytes).toBe(12);
@@ -66,7 +66,7 @@ for (const width of [4, 8]) {
     expect(memory.readPointer(iat)?.byteOffset).toBe(target.byteOffset);
     expect(memory.readPointer(memory.offset(iat, BigInt(width)))?.byteOffset).toBe(target.byteOffset);
     expect(memory.mappings()).toEqual(mappings);
-    expect(() => memory.write(iat, new Uint8Array(width))).toThrow();
+    expect(() => memory.write(iat, new Uint8Array(width))).toThrow("permits read");
   });
 }
 
@@ -121,4 +121,13 @@ test("truncated, overlapping and unsupported input fails before mapping guest me
   }
   expect(() => parsePe(peFixture(8).subarray(0, 0x1100))).toThrow(PeError);
   expect(() => mapPeImage({ bytes: peFixture(8), memory: new SparseGuestMemory({ module, pointerBytes: 4 }) })).toThrow("pointer width");
+});
+
+test("PE32 load configuration may be larger than its legacy 64-byte directory size", () => {
+  const bytes = peFixture(4);
+  new DataView(bytes.buffer).setUint32(0x98 + 96 + 10 * 8 + 4, 64, true);
+  const memory = new SparseGuestMemory({ module, pointerBytes: 4 });
+  const image = mapPeImage({ bytes, memory, base: 0x10120000n });
+  expect(image.loadConfiguration?.bytes.length).toBe(92);
+  expect(image.loadConfiguration?.guardFlags).toBe(0x100);
 });

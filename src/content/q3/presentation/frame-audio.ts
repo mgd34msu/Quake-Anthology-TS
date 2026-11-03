@@ -18,7 +18,7 @@ export class ClientFrameAudio {
     const state = this.state;
     state.soundBuffer[state.soundBufferIn] = sound;
     state.soundBufferIn = (state.soundBufferIn + 1) % 20;
-    if (state.soundBufferIn === state.soundBufferOut) state.soundBufferOut++;
+    if (state.soundBufferIn === state.soundBufferOut) state.soundBufferOut = (state.soundBufferOut + 1) % 20;
   }
 
   playBufferedSounds(): void {

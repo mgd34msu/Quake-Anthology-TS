@@ -58,6 +58,7 @@ function Loc_Parse(format: string): LocParseResult {
             const argStart = argRover;
             argRover++;
             if (at(argRover) && at(argRover) === "{") {
+                argRover++;
                 continue;
             }
             if (args.length === MAX_LOC_ARGS) {
@@ -108,6 +109,10 @@ function Loc_Parse(format: string): LocParseResult {
         args.sort((a, b) => a.start - b.start);
     }
     return { ok: true, arguments: args };
+}
+/** "{{" is the literal brace; arguments never start there. */
+function unescapeBraces(text: string): string {
+    return text.includes("{{") ? text.replaceAll("{{", "{") : text;
 }
 function Loc_HasArguments(base: string): boolean {
     const len = base.length;
@@ -200,17 +205,21 @@ function comParseToken(state: TokenState, size: number, flags: number): string {
         }
     }
     do {
+        let consumed = false;
         if (c === 0x5c && (flags & PARSE_FLAG_ESCAPE) !== 0) {
+            state.index++;
             const esc = parseEscapeSequence(state);
             if (esc === null)
                 break;
             c = esc;
+            consumed = true;
         }
         if (len + 1 < size) {
             result += String.fromCharCode(c);
         }
         len++;
-        state.index++;
+        if (!consumed)
+            state.index++;
         c = cc(state.data, state.index);
     } while (c > 32 && c !== 0x3d);
     return strlcpy(result, size);
@@ -257,8 +266,10 @@ function Loc_ParseInto(bytes: Uint8Array, opts: LocReloadOptions, sink: LocEntry
                 platformTags.push(stripPlatformTag(equals));
             equals = comParseToken(state, MAX_STRING_CHARS, PARSE_FLAG_NONE);
         }
-        if (equals !== "=")
+        if (equals !== "=") {
+            opts.log?.warn(`loc parse error (${key}): expected "=", rest of file ignored`);
             break;
+        }
         const format = comParseToken(state, MAX_LOC_FORMAT, PARSE_FLAG_ESCAPE);
         const parsed = Loc_Parse(format);
         if (!parsed.ok) {
@@ -341,7 +352,7 @@ localizeSource(base: string, allow_in_place: boolean, args: readonly string[] | 
         return strlcpy(workingBase, output_length);
     }
     if (str.arguments.length === 0) {
-        return strlcpy(str.format, output_length);
+        return strlcpy(unescapeBraces(str.format), output_length);
     }
     for (const arg of str.arguments) {
         if (arg.argIndex >= num_args) {
@@ -357,19 +368,19 @@ localizeSource(base: string, allow_in_place: boolean, args: readonly string[] | 
     }
     const argList: readonly string[] = args ?? [];
     let arg = str.arguments[0];
-    if (arg === undefined) return strlcpy(str.format, output_length);
-    let output = strnlcpy(str.format, arg.start, output_length);
+    if (arg === undefined) return strlcpy(unescapeBraces(str.format), output_length);
+    let output = strnlcpy(unescapeBraces(str.format.slice(0, arg.start)), arg.start, output_length);
     for (let i = 0; i < str.arguments.length - 1; i++) {
         const localizedArg = this.localizeSource(argList[arg.argIndex] ?? "", false, null, 0, MAX_STRING_CHARS, log);
         output = strlcat(output, localizedArg, output_length);
         const nextArg = str.arguments[i + 1];
         if (nextArg === undefined) throw new RangeError("Missing localization argument record");
-        output = strnlcat(output, str.format.slice(arg.end), nextArg.start - arg.end, output_length);
+        output = strnlcat(output, unescapeBraces(str.format.slice(arg.end, nextArg.start)), nextArg.start - arg.end, output_length);
         arg = nextArg;
     }
     const lastLocalizedArg = this.localizeSource(argList[arg.argIndex] ?? "", false, null, 0, MAX_STRING_CHARS, log);
     output = strlcat(output, lastLocalizedArg, output_length);
-    return strlcat(output, str.format.slice(arg.end), output_length);
+    return strlcat(output, unescapeBraces(str.format.slice(arg.end)), output_length);
 }
 clear(): void {
     this.locTable.clear();

@@ -1,5 +1,5 @@
-import { expect, spyOn, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect, spyOn } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -11,6 +11,7 @@ import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { ServerEntityFlags } from "../../../src/content/q3/base/shared/entity-shared.ts";
 import { EngineSession } from "../../../src/world/session/session.ts";
 import { MAX_RELIABLE_COMMANDS } from "../../../src/network/q3/reliable.ts";
+const test = corpusTest("q3a/missionpack/pak0.pk3");
 
 test("six Team Arena slots retain bot resources and reconnect once after round settling", async () => {
   const launch = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--game", "q3-missionpack", "--map", "mpteam1", "--movement", "q3", "--character", "q3", "--dedicated", "--mode", "deathmatch"]);
@@ -107,7 +108,8 @@ test("six Team Arena slots retain bot resources and reconnect once after round s
         expect(bots.frame(simulation.timeSeconds * 1000, 100)).toEqual([]);
         simulation.step({ elapsedMilliseconds: 100, commands: [] });
         simulation.completeSourceRoundSettlement();
-        expect(simulation.timeSeconds).toBe(0.4);
+        // 0.3 s are the three settle frames of the first human admission (sv_init.c), then three settle steps and one more.
+        expect(simulation.timeSeconds).toBe(0.7);
         bots.resumeRoundBots();
         expect(bots.director.checkpointOrchestration().sequences).toEqual([]);
         expect(connect).toHaveBeenCalledTimes(5);

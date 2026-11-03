@@ -169,6 +169,7 @@ export class NativeRenderer {
       backend = await openBackend(window, this.owner, this.gamma, worker, this.images, journal, this.captures,
         error => { if (this.current === backend) this.captures.fail(error); });
       previousJournal.replay(backend);
+      this.images.invalidateBackend();
       if (!(backend instanceof WorkerRenderer)) {
         // Serial backend calls have no transport acknowledgment; retain the same successful journal.
         previousJournal.replay({ applyImageResource: operation => { journal.record(operation); return undefined; } });
@@ -253,6 +254,7 @@ export class NativeRenderer {
     const replacement = new SoftwareRenderer(width, height, this.owner);
     replacement.setOutputGamma(this.gamma);
     try { this.journal.replay(replacement); } catch (error) { replacement.close(); throw error; }
+    this.images.invalidateBackend();
     this.current.close(); this.current = replacement; this.executor.replaceBackend(replacement);
   }
   private swap(ids: readonly number[]): void {

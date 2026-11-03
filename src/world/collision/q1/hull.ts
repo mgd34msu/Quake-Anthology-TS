@@ -2,7 +2,7 @@
  * Copyright (C) 1996 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds, Plane, Vec3 } from "../../../contracts/math.ts";
 import type { NumericOperations, NumericProfile } from "../../../contracts/numeric.ts";
-import type { Q1ClipChild, Q1Hull, Q1WorldGeometry } from "../../../contracts/scene.ts";
+import type { Q1ClipChild, Q1ClipNode, Q1Hull, Q1WorldGeometry } from "../../../contracts/scene.ts";
 import { createNumericOperations } from "../../../core/numeric.ts";
 
 export const Q1_CONTENTS_EMPTY = -1;
@@ -19,19 +19,30 @@ export interface Q1HullTrace {
   inOpen: boolean; inWater: boolean; plane: Plane; contents: number;
 }
 
+const drawingByGeometry = new WeakMap<Q1WorldGeometry, readonly Q1ClipNode[]>();
+/** Every model indexes the same drawing nodes, so one table serves them all. */
+function drawingNodes(map: Q1WorldGeometry): readonly Q1ClipNode[] {
+  let drawing = drawingByGeometry.get(map);
+  if (drawing === undefined) {
+    drawing = map.nodes.map(node => {
+      const convert = (child: typeof node.children[number]): Q1ClipChild => {
+        if (child.kind === "node") return { kind: "clipnode", index: child.index };
+        const leaf = map.leaves[child.index];
+        if (leaf === undefined) throw new RangeError("Unknown Quake hull-zero leaf");
+        return { kind: "contents", value: leaf.contents };
+      };
+      const children: readonly [Q1ClipChild, Q1ClipChild] = [convert(node.children[0]), convert(node.children[1])];
+      return { plane: node.plane, children };
+    });
+    drawingByGeometry.set(map, drawing);
+  }
+  return drawing;
+}
+
 export function createQ1Hulls(map: Q1WorldGeometry, modelIndex = 0): readonly Q1Hull[] {
   const model = map.models[modelIndex];
   if (model === undefined) throw new RangeError(`Unknown Quake model ${modelIndex}`);
-  const drawing = map.nodes.map(node => {
-    const convert = (child: typeof node.children[number]): Q1ClipChild => {
-      if (child.kind === "node") return { kind: "clipnode", index: child.index };
-      const leaf = map.leaves[child.index];
-      if (leaf === undefined) throw new RangeError("Unknown Quake hull-zero leaf");
-      return { kind: "contents", value: leaf.contents };
-    };
-    const children: readonly [Q1ClipChild, Q1ClipChild] = [convert(node.children[0]), convert(node.children[1])];
-    return { plane: node.plane, children };
-  });
+  const drawing = drawingNodes(map);
   return Q1_HULL_BOUNDS.map((clipBounds, index) => {
     let firstClipnode = model.headnodes[index];
     if (firstClipnode === undefined) throw new RangeError(`Missing Quake hull ${index}`);

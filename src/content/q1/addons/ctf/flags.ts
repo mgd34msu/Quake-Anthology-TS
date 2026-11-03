@@ -41,7 +41,7 @@ export function touchFlag(state: CtfState, flag: Q1Actor, actor: ActorId): undef
           if (state.number(player, "lastReturned") + 4 > game.time) { state.announce("$qc_ks_assist", player); state.services.addScore(player, 1); }
           if (state.number(player, "lastFraggedCarrier") + 6 > game.time) { state.announce("$qc_ks_assist_carrier", player); state.services.addScore(player, 2); }
         } else state.set(player, "lastHurtCarrier", -5);
-        game.message(player, state.lastTeam(player) === team ? "$qc_ctf_team_captured" : "$qc_ctf_your_captured");
+        const last = state.lastTeam(player); if (last === team) game.message(player, "$qc_ctf_team_captured"); else if (last === opposite(team)) game.message(player, "$qc_ctf_your_captured");
       }
       for (const color of [team, opposite(team)]) { const home = state.flag(color); if (home !== null) returnFlag(state, home, false); }
     } else {
@@ -54,7 +54,7 @@ export function touchFlag(state: CtfState, flag: Q1Actor, actor: ActorId): undef
   game.message(actor, "$qc_ctf_have_flag"); game.sound(state.owner(actor), "misc/flagtk.wav", "item");
   state.grant(actor, own === "red" ? "q1:key/gold" : "q1:key/silver", 1); state.set(actor, "flagSince", game.time);
   flag.count = 1; flag.movement = "noclip"; flag.solid = "none"; flag.owner = actor; game.link(flag);
-  for (const player of game.host.players()) if (!sameActor(player, actor)) game.message(player, state.team(player) === team ? "$qc_ctf_your_has" : "$qc_ctf_your_taken");
+  for (const player of game.host.players()) if (!sameActor(player, actor)) { const side = state.team(player); if (side === team) game.message(player, "$qc_ctf_your_has"); else if (side === opposite(team)) game.message(player, "$qc_ctf_your_taken"); }
   return state.update();
 }
 

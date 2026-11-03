@@ -19,7 +19,7 @@ function copyAddress(address: Q3Address): Q3Address {
     case "ipx": return { ...address, node: [...address.node] };
   }
 }
-function addressText(address: Q3Address): string {
+export function addressText(address: Q3Address): string {
   switch (address.kind) {
     case "loopback": return "loopback";
     case "ipv4": return `${address.host.join(".")}:${address.port}`;
@@ -31,6 +31,10 @@ export function q3IsLanAddress(address: Q3Address): boolean {
     || (address.host[0] === 192 && address.host[1] === 168)
     || (address.host[0] === 172 && address.host[1] >= 16 && address.host[1] <= 31);
 }
+/** SV_UserinfoChanged keeps the transport address in the userinfo, because the banning code and rate rules read it. */
+export function q3PeerUserinfo(info: string, address: Q3Address, print: (text: string) => void): string {
+  return infoSet(info, "ip", address.kind === "loopback" ? "localhost" : addressText(address), print);
+}
 export function q3InfoValue(info: string, key: string): string {
   if (info.length >= 8192) throw new CommonError("drop", "Info_ValueForKey: oversize infostring");
   const fields = sourceCommandText(info).split("\\");
@@ -39,7 +43,7 @@ export function q3InfoValue(info: string, key: string): string {
   }
   return "";
 }
-function infoSet(info: string, key: string, value: string, print: (text: string) => void): string {
+export function infoSet(info: string, key: string, value: string, print: (text: string) => void): string {
   return setInfoValue(info, key, value, { dialect: "q3", maximumLength: 1024, target: "client-userinfo", serverHighCharacters: false, print });
 }
 export type Q3ClientAdmissionResult = { readonly kind: "handled" }
@@ -78,10 +82,11 @@ export class Q3ClientAdmission {
       const packet = decodeConnectionless(bytes, "client");
       switch (packet.command.toLowerCase()) {
         case "challengeresponse":
-          if (this.phase === "connecting") {
+          // The original lets a proxy on the same host answer from another port, but never another host.
+          if (this.phase === "connecting" && this.address !== null && sameAddress(from, this.address, false)) {
             this.challenge = nativeAtoi(packet.arguments[0] ?? ""); this.phase = "challenging";
             this.connectPacketCount = 0; this.connectTime = -99999;
-            this.address = copyAddress(from); // Original Q3 permits a proxy to hand off the challenge.
+            this.address = copyAddress(from);
           }
           return { kind: "handled" };
         case "connectresponse":

@@ -3,6 +3,7 @@ import { throwGib } from "../../../base/projectiles.ts";
 import type { Q1Actor } from "../../../foundation/entity.ts";
 import { vadd } from "../../../foundation/types.ts";
 import type { Q1AddonContext } from "../../context.ts";
+import { qcCos } from "../../qc-math.ts";
 
 export function registerSacrifice(context: Q1AddonContext): undefined {
   const { game } = context;
@@ -11,12 +12,12 @@ export function registerSacrifice(context: Q1AddonContext): undefined {
     for (const model of ["gib1", "gib2", "gib3"]) throwGib(game, game.body(entity).origin, model, -10);
     game.sound(entity, game.host.random() < 0.5 ? "player/gib.wav" : "player/udeath.wav", "voice", 0); game.useTargets(entity, entity.activator); return game.remove(entity);
   };
-  game.named.register("mg3:sacrifice_gib", { use: (_game, entity, _other, activator) => { entity.activator = activator; return gib(entity); }, die: (_game, entity) => gib(entity) });
+  game.named.register("mg3:sacrifice_gib", { use: (_game, entity, _other, activator) => { entity.activator = activator; return gib(entity); }, die: (_game, entity, attacker) => { entity.activator = attacker; game.useTargets(entity, attacker); return gib(entity); } });
   game.named.register("mg3:sacrifice_animate", { action: (_game, entity) => {
     entity.count++; if (entity.count > 75) entity.count = 5; entity.frame = entity.count; return game.schedule(entity, 0.1, game.named.action(entity, "mg3:sacrifice_animate"));
   } });
   game.named.register("mg3:sacrifice_think", { action: (_game, entity) => {
-    entity.count = Math.fround(entity.count + 0.1); game.setOrigin(entity, vadd(entity.vector("dest"), { x: 0, y: 0, z: Math.cos(entity.count * 90) * 16 }));
+    entity.count = Math.fround(entity.count + 0.1); game.setOrigin(entity, vadd(entity.vector("dest"), { x: 0, y: 0, z: qcCos(entity.count * 90) * 16 }));
     game.setBody(entity, { angles: vadd(game.body(entity).angles, { x: 0, y: 3.6, z: 0 }) }); return game.schedule(entity, 0.1, game.named.action(entity, "mg3:sacrifice_think"));
   } });
   game.registerSpawn("misc_sacrifice", (_game, entity) => {

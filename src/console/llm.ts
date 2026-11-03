@@ -8,13 +8,6 @@ export interface LlmCommandRequester {
   prime?(instructions: string): Promise<void>;
 }
 
-/** Start the requester's process-lifetime session with this console's live catalog. */
-export function primeLlmConsoleSession(commands: CommandBuffer, requester: LlmCommandRequester | undefined, source: CommandContext = commands.context): Promise<void> {
-  if (requester?.prime === undefined) return Promise.resolve();
-  try { return requester.prime(llmSessionInstructions(commands, source)); }
-  catch { return Promise.resolve(); }
-}
-
 export function registerLlmCommands(commands: CommandBuffer, print: (text: string, source: CommandContext) => void, requester?: LlmCommandRequester): () => void {
   const registered: string[] = [];
   const pending = new Map<string, AbortController>();
@@ -81,7 +74,6 @@ export function registerLlmCommands(commands: CommandBuffer, print: (text: strin
       return undefined;
     }, definition)) registered.push(definition.name);
   }
-  if (requester !== undefined && registered.length !== 0) void primeLlmConsoleSession(commands, requester).catch(() => undefined);
   return () => {
     disposed = true;
     for (const controller of pending.values()) controller.abort();

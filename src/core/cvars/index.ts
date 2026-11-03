@@ -1,4 +1,4 @@
-import { SaveReader } from "../../persistence/value.ts";
+import { SaveReader } from "../save-value.ts";
 /* Instance-owned registries adapted from the reference port;
  * family behavior follows Quake/QW cvar.c and Quake II qcommon/cvar.c.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
@@ -531,6 +531,9 @@ export class CvarRegistry {
     return this.set(name, value);
   }
 
+  /** QuakeWorld's `localinfo` store: server-side keys that never reach clients. */
+  readonly localInfo = new Map<string, string>();
+
   setCommandFlags(name: string, value: string, kind: "archive" | "userinfo" | "serverinfo"): void {
     this.mutationRevision++;
     const alias = this.aliases.get(this.key(name));
@@ -735,7 +738,9 @@ export class CvarRegistry {
     const commands: string[] = [];
     for (const state of this.archiveStates(include)) {
       const prefix = this.dialect === "q3" || this.consoleVariables.has(this.key(state.name)) || isQ2(this.dialect) && (state.flags & Q2CvarFlag.Custom) !== 0 ? "seta " : isQ2(this.dialect) ? "set " : "";
-      commands.push(`${prefix}${state.name} "${this.archiveValue(state)}"`);
+      // This file runs as a script at the next launch and servers can force values, so nothing may end the quoted token or line.
+      if (/[\s";]/.test(state.name)) continue;
+      commands.push(`${prefix}${state.name} "${this.archiveValue(state).replace(/["\r\n]/g, "")}"`);
     }
     return Object.freeze(commands);
   }

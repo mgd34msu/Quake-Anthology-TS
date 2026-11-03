@@ -1,14 +1,13 @@
 import { expect, test } from "bun:test";
-import { homedir } from "node:os";
 
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { copperAvailable, copperProgramPath, testCorpusRoot } from "../../support/corpus.ts";
 
 import type { ModActorField, ModCallbackDeclaration, ModSourceCall } from "../../../src/contracts/mod-callbacks.ts";
 import type { ModClientApplication, ModClientEvent, ModClientServices } from "../../../src/world/session/mod-clients.ts";
 import type { UserCommand } from "../../../src/contracts/protocol.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
 import { ModClientApplications } from "../../../src/world/session/mod-client-applications.ts";
 import { QcModProvider } from "../../../src/compat/qc/mod-provider.ts";
 import { loadQcProgram } from "../../../src/compat/qc/program.ts";
@@ -17,8 +16,9 @@ import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { SourceRandom } from "../../../src/app/bootstrap/simulation/random.ts";
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
+import { inertAuthority } from "../../support/authority.ts";
 
-const copper = `${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`;
+const copper = copperProgramPath();
 const zero = { x: 0, y: 0, z: 0 };
 const globals = [
   { name: "self", value: { kind: "input", name: "self" } },
@@ -26,7 +26,7 @@ const globals = [
   { name: "frametime", value: { kind: "input", name: "elapsed" } },
 ] satisfies ModSourceCall["globals"];
 
-test.skipIf(!await Bun.file(copper).exists())("original Copper applied callbacks use effective input and retain private continuation in a Q2 world", async () => {
+test.skipIf(!copperAvailable())("original Copper applied callbacks use effective input and retain private continuation in a Q2 world", async () => {
   const options = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--game", "q2-classic-baseq2", "--map", "base1"]);
   if (options.kind !== "run") throw new Error("Missing destination");
   const content = await loadApplicationContent(options.options), scene = createSceneQueries(content.world);
@@ -48,7 +48,7 @@ test.skipIf(!await Bun.file(copper).exists())("original Copper applied callbacks
     const lifecycle = new Set<(event: ModClientEvent) => undefined>();
     const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
     bodies.create(player, { origin: zero, angles: zero, velocity: { x: 100, y: 0, z: 0 }, bounds: { min: zero, max: zero }, ground: world.id });
-    const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+    const combat = inertAuthority(actors, callbacks);
     combat.create(player, { health, mass: 200, canTakeDamage: true, invulnerable: false, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, team: null });
     const applications = new ModClientApplications(identity => actors.isLive(identity.actor) && identity.actor.equals(currentPlayer.id) && identity.client.equals(currentClient));
     const port: ModClientServices = { maximum: 1, clients: () => [{ client: currentClient, actor: currentPlayer.id }],
@@ -126,9 +126,13 @@ test.skipIf(!await Bun.file(copper).exists())("original Copper applied callbacks
       } });
       const removed = corpse.applications.begin(corpse.input(3200, corpse.command));
       const retiring = corpse.applications.begin(corpse.input(3250, nestedCommand));
-      expect(() => corpse.applications.finish(retiring)).toThrow("expired actor projection");
+      // The first body write releases the actor mid-callback. A freed edict still reads as plain words (id behaviour), so the callback completes; the released actor must stay released and unwritten afterwards.
+      expect(() => corpse.applications.finish(retiring)).not.toThrow();
+      expect(corpse.actors.isLive(corpse.player.id)).toBe(false);
+      const bodyAfterRelease = current;
       corpse.applications.finish(removed);
-      expect(corpse.source.checkpoint()).toBeDefined();
+      expect(current).toBe(bodyAfterRelease);
+      const settled = corpse.source.checkpoint(); corpse.source.restore(settled); expect(corpse.source.checkpoint()).toEqual(settled);
     } finally { corpse.close(); }
     const disconnected = make("PlayerHealthTick", 151);
     try {
@@ -140,7 +144,7 @@ test.skipIf(!await Bun.file(copper).exists())("original Copper applied callbacks
       disconnected.applications.release(disconnected.player.id); disconnected.applications.finish(pending);
       disconnected.notify("admitted");
       expect(disconnected.value("impulse")).toBe(0);
-      expect(disconnected.source.checkpoint()).toBeDefined();
+      const idle = disconnected.source.checkpoint(); disconnected.source.restore(idle); expect(disconnected.source.checkpoint()).toEqual(idle);
     } finally { disconnected.close(); }
   } finally { await content.close(); }
 });

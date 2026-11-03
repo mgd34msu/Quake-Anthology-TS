@@ -12,6 +12,11 @@ import { readArmor, readInventoryEntry } from '../../../persistence/save-image.t
 
 export function wireActor(actor: ActorId) { return { slot: actor.slot, generation: actor.generation }; }
 export function actor(r: SaveReader, identity: UnifiedIdentityDecoder): ActorId { return identity.actor(r.field('slot').integer(0), r.field('generation').integer(0)); }
+export function nonNegative(r: SaveReader): number { const value = r.finite(); return value >= 0 ? value : r.fail('expected a non-negative number'); }
+export function positive(r: SaveReader): number { const value = r.finite(); return value > 0 ? value : r.fail('expected a positive number'); }
+export function finiteVectors(r: SaveReader, vectors: readonly Vec3[]): void {
+  for (const v of vectors) if (![v.x, v.y, v.z].every(Number.isFinite)) r.fail('nonfinite source player vector');
+}
 export function vector(r: SaveReader): Vec3 { return { x: r.field('x').finite(), y: r.field('y').finite(), z: r.field('z').finite() }; }
 export function color(r: SaveReader): Vec4 { return { ...vector(r), w: r.field('w').finite() }; }
 export function axis(r: SaveReader): Axis { const values = r.list(vector); const [a,b,c] = values; if (values.length !== 3 || a === undefined || b === undefined || c === undefined) return r.fail('expected three axes'); return [a,b,c]; }
@@ -51,7 +56,7 @@ export function readModel(r: SaveReader, identity: UnifiedIdentityDecoder): Simu
   const backLerp=optional(r,'backLerp',v=>v.finite()),skinPath=optional(r,'skinPath',v=>v.nullable(s=>s.string()));
   const indexedSkin=optional(r,'indexedSkin',v=>{const width=v.field('width').integer(1),height=v.field('height').integer(1),pixels=v.field('pixels').bytes();if(pixels.length!==width*height)return v.fail('indexed skin length differs');return {name:v.field('name').string(),width,height,pixels};});
   const playerColors=optional(r,'playerColors',v=>({top:v.field('top').integer(),bottom:v.field('bottom').integer()}));
-  const previousOrigin=optional(r,'previousOrigin',vector),modelBeam=optional(r,'modelBeam',v=>({segmentLength:v.field('segmentLength').finite()})),alpha=optional(r,'alpha',v=>v.finite());
+  const previousOrigin=optional(r,'previousOrigin',vector),modelBeam=optional(r,'modelBeam',v=>({segmentLength:nonNegative(v.field('segmentLength'))})),alpha=optional(r,'alpha',v=>v.finite());
   const shaderBeam=optional(r,'shaderBeam',v=>({path:v.field('path').string(),end:vector(v.field('end')),width:v.field('width').integer(1)}));
   const modelAttachments=optional(r,'modelAttachments',v=>v.list(entry=>({path:entry.field('path').string(),tag:entry.field('tag').string()})));
   const modelAnchor=optional(r,'modelAnchor',v=>({path:v.field('path').string(),tag:v.field('tag').string(),offset:vector(v.field('offset')),fovOffset:{above:v.field('fovOffset').field('above').integer(1),scale:v.field('fovOffset').field('scale').finite()}}));
@@ -71,7 +76,7 @@ export function readCharacterView(r: SaveReader, identity: UnifiedIdentityDecode
 }
 export function readWorldText(r: SaveReader): WorldText {
   const o=r.field('orientation'),kind=o.field('kind').choice('billboard','fixed'),distanceCullFactor=optional(r,'distanceCullFactor',v=>v.finite());
-  return {content:readContentId(r.field('content')),text:r.field('text').string(),origin:vector(r.field('origin')),color:color(r.field('color')),cellSize:r.field('cellSize').finite(),orientation:kind==='billboard'?{kind}:{kind,angles:vector(o.field('angles'))},depthTest:r.field('depthTest').boolean(),font:r.field('font').choice('classic','selected'),...(distanceCullFactor===undefined?{}:{distanceCullFactor})};
+  return {content:readContentId(r.field('content')),text:r.field('text').string(),origin:vector(r.field('origin')),color:color(r.field('color')),cellSize:positive(r.field('cellSize')),orientation:kind==='billboard'?{kind}:{kind,angles:vector(o.field('angles'))},depthTest:r.field('depthTest').boolean(),font:r.field('font').choice('classic','selected'),...(distanceCullFactor===undefined?{}:{distanceCullFactor})};
 }
 
 export function readNativeCameraView(r: SaveReader): import("../../../world/session/mod-client-presentation.ts").NativeModCameraView {

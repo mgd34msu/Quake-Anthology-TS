@@ -109,7 +109,12 @@ export class SkyBuilder {
 
   initializeCloudCoordinates(height: number): void {
     if (!Number.isFinite(Math.fround(height))) throw new RangeError("sky cloud height must be finite float32");
-    this.cloudCoords = Array.from({ length: 6 }, (_, face) => Array.from({ length: 81 }, (_, index) => cloudTexCoord(face, (index % 9 - 4) / 4, (Math.floor(index / 9) - 4) / 4, height)));
+    // The source leaves NaN here as a visual glitch; texture coordinates must stay finite for upload.
+    const finite = (value: number): number => Number.isFinite(value) ? value : 0;
+    this.cloudCoords = Array.from({ length: 6 }, (_, face) => Array.from({ length: 81 }, (_, index) => {
+      const coordinate = cloudTexCoord(face, (index % 9 - 4) / 4, (Math.floor(index / 9) - 4) / 4, height);
+      return { x: finite(coordinate.x), y: finite(coordinate.y) };
+    }));
   }
 
   clip(meshes: readonly DeformGeometry[], origin: Vec3): void {

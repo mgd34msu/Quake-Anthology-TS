@@ -1,5 +1,5 @@
 import { KexMdns } from './discovery.ts';
-import { addressKey, sameAddress } from '../../common/endpoint.ts';
+import { addressKey, isPrivateNetworkAddress, sameAddress } from '../../common/endpoint.ts';
 import type { NetworkAddress } from '../../common/endpoint.ts';
 import { PacketQueue } from '../../common/transport.ts';
 import type { DatagramTransport, ReceiveEvent } from '../../common/transport.ts';
@@ -7,7 +7,7 @@ import { KexChannel } from './channel.ts';
 import { KexReader, KexWriter, kexText, readKexText, writeKexPacket } from './packet.ts';
 export const KEX_LAN_PORT = 5069;
 export type KexLanOptions<TAddress extends NetworkAddress> =
-    | { readonly role: 'host'; readonly maxPlayers: number; readonly localPlayers: number; readonly name: string }
+    | { readonly role: 'host'; readonly maxPlayers: number; readonly localPlayers: number; readonly name: string; readonly trustedNetworksOnly?: boolean }
     | { readonly role: 'client'; readonly server: TAddress; readonly localPlayers: number };
 interface Peer<TAddress extends NetworkAddress> { readonly address: TAddress; readonly channel: KexChannel; readonly players: bigint[]; }
 export interface KexLobbyPlayer { readonly id: bigint; readonly attributes: ReadonlyMap<string, string>; }
@@ -88,11 +88,13 @@ export class KexLanTransport<TAddress extends NetworkAddress> implements Datagra
             if (event.kind !== 'packet') { this.queue.push(event); continue; }
             try {
                 if (this.options.role === 'client' && !sameAddress(event.from, this.options.server)) continue;
+                if (this.options.role === 'host' && this.options.trustedNetworksOnly === true && !isPrivateNetworkAddress(event.from)) continue;
                 // Unknown endpoints may only enter through an unsequenced lobby query/join.
                 let peer = this.peers.get(addressKey(event.from));
                 if (peer === undefined) {
                     if (event.payload.length < 3 || (event.payload[1] ?? 0) % 16 !== 0 || (event.payload[2] !== 128 && event.payload[2] !== 129)) continue;
                     if (this.peers.size >= 256) continue;
+                    if ([...this.peers.values()].filter(other => sameAddress(other.address, event.from, false)).length >= 8) continue;
                     peer = this.peer(event.from);
                 }
                 const message = peer.channel.receive(event.payload, this.clock);

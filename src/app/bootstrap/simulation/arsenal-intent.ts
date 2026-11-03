@@ -13,8 +13,8 @@ export function resolveQ3ArsenalControls(arsenal: ArsenalState, intent: ArsenalI
     requestedWeapon = arsenal.state.sourceWeapon;
     if (intent.weapon !== null) {
       const weapon = Q3_WEAPON_ITEMS.find(value => value.item === intent.weapon);
-      if (weapon === undefined || product === "baseq3" && weapon.weapon > 10) throw new Error("Weapon does not belong to the selected Q3 product");
-      requestedWeapon = weapon.weapon;
+      // Peers choose this string; a weapon outside the product is no request.
+      if (weapon !== undefined && (product !== "baseq3" || weapon.weapon <= 10)) requestedWeapon = weapon.weapon;
     }
   }
   return { attack: (command.buttons & 1) !== 0,

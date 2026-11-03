@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
-import { homedir } from "node:os";
 
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { copperAvailable, copperProgramPath, testCorpusRoot, corpusFile } from "../../support/corpus.ts";
 
 import type { ActorId, ClientId } from "../../../src/contracts/identity.ts";
 import type { FrameContext } from "../../../src/contracts/time.ts";
@@ -12,7 +11,7 @@ import type { NetworkEvent } from "../../../src/contracts/protocol.ts";
 import { encodeUnifiedPresentationEvents, decodeUnifiedPresentationEvents } from "../../../src/app/bootstrap/network/unified-event-codec.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { prepareQuakeCResources } from "../../../src/app/bootstrap/simulation/quakec-source.ts";
@@ -23,8 +22,9 @@ import { loadQcProgram } from "../../../src/compat/qc/program.ts";
 import { QcModClientBindings } from "../../../src/compat/qc/mod-clients.ts";
 import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
 import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
+import { inertAuthority } from "../../support/authority.ts";
 
-const copper = `${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`;
+const copper = copperProgramPath();
 const selfGlobal = [{ name: "self", value: { kind: "input", name: "self" } }] satisfies ModSourceCall["globals"];
 const inputs = (actor: ActorId) => new Map<ModCallbackInput, ModRuntimeValue>([["self", { kind: "actor", value: actor }]]);
 function clients() {
@@ -40,7 +40,7 @@ function clients() {
   } };
 }
 
-test.skipIf(!await Bun.file(copper).exists())("original Copper client callbacks reserve edicts and retain private state and targeted stuffcmd through save", async () => {
+test.skipIf(!copperAvailable())("original Copper client callbacks reserve edicts and retain private state and targeted stuffcmd through save", async () => {
   const options = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--game", "q2-classic-baseq2", "--map", "base1"]);
   if (options.kind !== "run") throw new Error("Missing destination");
   const content = await loadApplicationContent(options.options), program = loadQcProgram(await Bun.file(copper).bytes());
@@ -59,7 +59,7 @@ test.skipIf(!await Bun.file(copper).exists())("original Copper client callbacks 
     const port = clients(), callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
     const messages: { actor: ActorId | null; event: NetworkEvent }[] = [], prints: string[] = [], rng = new SourceRandom(17);
     const source = new QcModProvider(program, { id: "mod:qc-clients", artifactPath: "progs.dat", digest: program.digest, revision: "original-client-witness" }, declaration,
-      { actors, callbacks, bodies, clients: port.services, combat: new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined }),
+      { actors, callbacks, bodies, clients: port.services, combat: inertAuthority(actors, callbacks),
         inventory: new SharedInventoryTable(actors), time: () => ({ kind: "seconds", value: 3 }), seed: 17,
         engine: { scene: createSceneQueries(content.world), world: () => world, print: text => { prints.push(text); return undefined; },
           events: { emit: () => undefined, registerResource: () => undefined }, message: (event, actor) => { messages.push({ actor, event }); return undefined; },
@@ -105,7 +105,7 @@ test.skipIf(!await Bun.file(copper).exists())("original Copper client callbacks 
     restored.source.restore(image);
     expect(restored.prints).toEqual([]); expect(restored.source.machine.globals.float(restored.source.machine.globalOffset("clients"))).toBe(2);
     expect(restored.source.machine.entities.at(1).float(version)).toBe(77);
-    restored.port.notify("userinfo", newB); expect(restored.messages.every(message => message.actor?.equals(restoredSecond))).toBe(true);
+    restored.port.notify("userinfo", newB); expect(restored.messages.length).toBeGreaterThan(0); expect(restored.messages.every(message => message.actor?.equals(restoredSecond))).toBe(true);
     restored.port.notify("disconnecting", newA); restored.port.entries.delete(newA);
     expect(restored.source.machine.globals.float(restored.source.machine.globalOffset("clients"))).toBe(1);
     const oldOwner = restoredActors.resolveOwned(restoredFirst); if (oldOwner === null) throw new Error("Missing restored actor"); restoredActors.release(oldOwner);
@@ -147,7 +147,7 @@ test("QC client frame thinks precede calls and retirement stops the old actor's 
   binding.close(); expect(binding.frame(1, frame)).toBe(false);
 });
 
-const quakeworld = `${testCorpusRoot()}/q1/qw/qwprogs.dat`;
+const quakeworld = corpusFile("q1/qw/qwprogs.dat");
 test.skipIf(!await Bun.file(quakeworld).exists())("original QuakeWorld clients, media and shotgun aim use destination identities and collision", async () => {
   const program = loadQcProgram(await Bun.file(quakeworld).bytes()); expect(program.api.kind).toBe("q1-quakeworld");
   const occupied = new Set<number>(), actorFields: ModActorField[] = [];
@@ -184,7 +184,7 @@ test.skipIf(!await Bun.file(quakeworld).exists())("original QuakeWorld clients, 
   const a = ids.client(7, 2), b = ids.client(3, 4), messages: { actor: ActorId | null; event: NetworkEvent }[] = [], rng = new SourceRandom(17);
   port.entries.set(a, { actor: first.id, info: "\\name\\Alice\\team\\red" }); port.entries.set(b, { actor: second.id, info: "\\name\\Bob\\team\\red" });
   const source = new QcModProvider(program, { id: "mod:qw-clients", artifactPath: "qwprogs.dat", digest: program.digest, revision: "original-qw-client-witness" }, declaration,
-    { actors, callbacks, bodies, clients: port.services, combat: new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined }),
+    { actors, callbacks, bodies, clients: port.services, combat: inertAuthority(actors, callbacks),
       inventory: new SharedInventoryTable(actors), seed: 17, time: () => ({ kind: "seconds", value: 3 }),
       engine: { scene, world: () => world.id, print: () => undefined,
         clients: { maximum: 8, visibility: scene, at: () => { throw new Error("No checkclient in this witness"); } },

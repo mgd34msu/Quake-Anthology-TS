@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../support/corpus.ts";
+import { expect } from "bun:test";
+import { corpusTest, corpusFile } from "../support/corpus.ts";
 
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,6 +14,8 @@ import { openInitialConfigurationContent } from "../../src/app/bootstrap/configu
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { q3MapLaunch } from "../../src/app/bootstrap/q3-map-command.ts";
 import { readTeamArenaCampaign } from "../../src/app/bootstrap/team-arena-skirmish.ts";
+import { literal } from "../support/literal.ts";
+const test = corpusTest("q3a/baseq3/pak0.pk3", "q3a/missionpack/pak0.pk3");
 
 function catalog(root: string): InstalledCatalog {
   const products: CatalogProduct[] = expectedProducts.filter(product => ["q3-baseq3", "q3-missionpack", "q3-demota"].includes(product.id)).map(expectation => ({
@@ -24,7 +26,7 @@ function catalog(root: string): InstalledCatalog {
   return new InstalledCatalog(root, products, [], 0);
 }
 async function retailId(): Promise<Uint8Array> {
-  const archive = await openArchive(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`, "pk3");
+  const archive = await openArchive(corpusFile("q3a/baseq3/pak0.pk3"), "pk3");
   try {
     const entry = archive.findEntries("productid.txt")[0]; if (entry === undefined) throw new Error("Missing retail product identification");
     return await archive.readEntry(entry);
@@ -76,18 +78,19 @@ test("Q3 operator map semantics retain donor single-player and cheat branches", 
   expect(() => q3MapLaunch({ kind: "prerelease-demo", teamArenaUi: "retail" }, "devmap", 0)).toThrow("Unknown Q3 map command");
 });
 
-test("prepared Q3 command owner registers retail aliases and rejects prerelease aliases", async () => {
+test("prepared Q3 command owner registers the operator aliases for retail and the Team Arena demo and drops them for the prerelease demo", async () => {
   const { PreparedStartup } = await import("../../src/app/bootstrap/prepared-startup.ts");
   const { ConsoleScriptFiles } = await import("../../src/app/bootstrap/config-scripts.ts");
   const { ConfigStore } = await import("../../src/settings/config.ts");
   const { CvarRegistry } = await import("../../src/core/cvars/index.ts");
   const { createIdentityOwner } = await import("../../src/contracts/identity.ts");
-  for (const demo of [false, true]) {
-    const identity = createIdentityOwner(`policy-${demo}`), context = { session: identity.session, origin: { kind: "server-console" } } satisfies import("../../src/contracts/common.ts").CommandContext;
+  for (const kind of literal(["retail", "prerelease-ta-demo", "prerelease-demo"])) {
+    const demo = kind === "prerelease-demo";
+    const identity = createIdentityOwner(`policy-${kind}`), context = { session: identity.session, origin: { kind: "server-console" } } satisfies import("../../src/contracts/common.ts").CommandContext;
     const source = new CvarRegistry({ dialect: "q3", context }), forwarded: string[] = [];
     const scripts = new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: undefined });
-    const policy = demo ? { kind: "prerelease-demo", teamArenaUi: "retail" } satisfies import("../../src/core/q3-product-policy.ts").Q3ProductPolicy
-      : { kind: "prerelease-ta-demo" } satisfies import("../../src/core/q3-product-policy.ts").Q3ProductPolicy;
+    const policy = kind === "prerelease-demo" ? { kind, teamArenaUi: "retail" } satisfies import("../../src/core/q3-product-policy.ts").Q3ProductPolicy
+      : { kind } satisfies import("../../src/core/q3-product-policy.ts").Q3ProductPolicy;
     const prepared = new PreparedStartup(source, source, scripts, { dialect: "q3", movementDialect: "q3", q3Policy: policy,
       seats: [], shared: null, sharedNames: [], print: () => {}, forward: name => { forwarded.push(name); return undefined; } });
     prepared.commands.executeNow("devmap q3dm1"); prepared.commands.executeNow("spmap q3dm0"); prepared.commands.executeNow("map q3dm2");

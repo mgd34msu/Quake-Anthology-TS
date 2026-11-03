@@ -6,7 +6,7 @@ import { vadd, vscale, vectors } from "../../foundation/types.ts";
 import { spawnPickup, touchQ1Pickup } from "../../foundation/pickups.ts";
 import type { Q1AddonContext } from "../context.ts";
 import { BLOODY_NIGHTMARE_ACTIVE, BLOODY_NIGHTMARE_DISCOVERED, BLOODY_NIGHTMARE_NEWGAME } from "../campaign.ts";
-import { finishMg3Pickup, MG3_ITEM_PREFIX, MG3_SPAWNED_ITEM, startMg3Item } from "./common.ts";
+import { finishMg3Pickup, MG3_ITEM_PREFIX, MG3_SPAWNED_ITEM, ringEffect, startMg3Item } from "./common.ts";
 
 export const MG3_BLOODY_SHOTGUN = 1;
 export const MG3_BLOODY_SUPER_SHOTGUN = 2;
@@ -69,11 +69,7 @@ export function registerMg3Pickups(context: Q1AddonContext): undefined {
     game.setBounds(entity, { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } });
     if (entity.number("height") === 0) context.setNumber(entity, "height", height);
     entity.touch = game.named.touch(entity, (entity.spawnflags & 1) !== 0 && entity.target !== "" ? "teleport_touch" : MG3_ITEM_PREFIX + "ring_touch");
-    if ((entity.spawnflags & MG3_SPAWNED_ITEM) === 0 && entity.count === 0) {
-      entity.count = 1; const origin = vadd(game.body(entity).origin, { x: 0, y: 0, z: 8 });
-      game.host.emit({ kind: "ambient", origin, path: "ambience/hum1.wav", volume: 0.7, attenuation: 3 });
-      const particles = game.create("particle_tele"); context.setNumber(particles, "distance", 48); game.setOrigin(particles, origin); game.spawnEntity(particles);
-    }
+    if ((entity.spawnflags & MG3_SPAWNED_ITEM) === 0) ringEffect(context, entity, 8);
     return startMg3Item(context, entity);
   });
   game.named.register(MG3_ITEM_PREFIX + "shard_touch", { touch: (_game, entity, other) => {

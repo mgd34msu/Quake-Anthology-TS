@@ -12,7 +12,7 @@ import {
   type ScriptDiagnostic,
   type ScriptToken,
   type SourceLocation,
-} from "../../../ui/common/legacy/script/lexer.ts";
+} from "../../../content/legacy-script/lexer.ts";
 import { float32ToBits } from "../../../core/numeric.ts";
 
 const SOURCE_INT_MIN = -32_768;

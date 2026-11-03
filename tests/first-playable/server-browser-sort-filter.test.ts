@@ -1,8 +1,7 @@
 import { decodePng } from "../../src/formats/images/png.ts";
-import { testCorpusRoot } from "../support/corpus.ts";
-import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { testCorpusRoot, corpusTest } from "../support/corpus.ts";
+import { expect } from "bun:test";
+import { mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { StartupServerBrowser, browserAddress } from "../../src/app/bootstrap/server-browser.ts";
 import type { BrowserProtocol, BrowserSortOrder } from "../../src/app/bootstrap/server-browser.ts";
@@ -16,7 +15,7 @@ import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { UiDrawContext } from "../../src/contracts/ui.ts";
 import type { ProviderReference } from "../../src/contracts/content.ts";
 import { ConfigStore } from "../../src/settings/config.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 import { UdpTransport } from "../../src/network/common/transport.ts";
 import { encodeNetQuakeControl } from "../../src/network/q1/handshake.ts";
 import { q2OutOfBand } from "../../src/network/q2/handshake.ts";
@@ -28,6 +27,9 @@ import { SceneFrameBuilder } from "../../src/render/commands/frame.ts";
 import { CpuRenderTarget, SoftwareRenderer } from "../../src/render/cpu/index.ts";
 import { encodePng } from "../../src/formats/images/png.ts";
 import { loadNativeUiArt } from "../../src/ui/common/index.ts";
+import { trackedTempDirectories } from "../support/temp-directories.ts";
+const test = corpusTest("q2/baseq2/pak0.pak");
+const tempDirectory = trackedTempDirectories();
 
 const servers = [
   { name: "Alpha Arena", map: "zbase", players: 0, maxPlayers: 8 },
@@ -60,7 +62,7 @@ async function populate(browser: StartupServerBrowser, peers: readonly UdpTransp
 }
 
 test("ordinary shared browser controls sort and filter received Q1/Q2/Q3 servers and render offscreen", async () => {
-  const directory = await mkdtemp(resolve(tmpdir(), "quake-browser-sorting-")), config = new ConfigStore(directory);
+  const directory = await tempDirectory("quake-browser-sorting-"), config = new ConfigStore(directory);
   const browser = await StartupServerBrowser.open(config), peers: UdpTransport[] = [];
   const corpusRoot = testCorpusRoot(), catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
   const command = parseApplicationCommand(["--content-root", corpusRoot]);

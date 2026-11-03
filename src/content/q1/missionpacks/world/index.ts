@@ -12,6 +12,7 @@ import { registerHipnoticMisc, earthquakeAfterPhysics } from "./hipnotic-misc.ts
 import { registerHipnoticParticles } from "./hipnotic-particles.ts";
 import { registerHipnoticSpawn } from "./hipnotic-spawn.ts";
 import { registerHipnoticHazards } from "./hipnotic-hazards.ts";
+import { registerHipnoticBulletHoles } from "./hipnotic-holes.ts";
 import { RogueRunes } from "./rogue-runes.ts";
 import { registerRogueMisc } from "./rogue-misc.ts";
 import { registerRogueTime, crashTimeMachine } from "./rogue-time.ts";
@@ -46,13 +47,14 @@ export class Q1MissionpackWorld {
     registerMissionShooters(game, pack);
     registerMissionCampaign(game, pack, hooks);
     if (pack === "hipnotic") {
-      registerHipnoticTriggers(game); registerHipnoticTrain(game); registerHipnoticRotation(game); registerHipnoticMisc(game); registerHipnoticParticles(game); registerHipnoticSpawn(game, hooks); registerHipnoticHazards(game); this.runes = null; this.teams = null; this.tag = null;
+      registerHipnoticTriggers(game); registerHipnoticTrain(game); registerHipnoticRotation(game); registerHipnoticMisc(game); registerHipnoticParticles(game); registerHipnoticSpawn(game, hooks); registerHipnoticHazards(game); registerHipnoticBulletHoles(game); this.runes = null; this.teams = null; this.tag = null;
     } else { registerRogueMisc(game); registerRogueTime(game); registerRogueEnding(game); registerRoguePendulum(game); registerRoguePlats(game); registerRogueHazards(game); this.runes = new RogueRunes(game, hooks.gamecfg ?? (() => 0)); this.teams = new RogueTeams(game, hooks); this.tag = new RogueTag(game, hooks); }
   }
   afterPhysics(actor: ActorId, _seconds: number): undefined { if (this.pack === "hipnotic") return earthquakeAfterPhysics(this.game, actor); if (this.game.world?.number("rogue:earthquake_active") === 1) rogueEarthquake(this.game, actor, this.game.world.number("rogue:earthquake_intensity")); this.teams?.frame(actor); this.runes?.frame(actor); return startRogueEnding(this.game, actor, this.hooks); }
   playerSpawned(actor: ActorId): undefined { return this.teams?.playerSpawned(actor); }
   dropCarriedFlag(actor: ActorId): undefined { return this.teams?.dropCarriedFlag(actor); }
   impulse(actor: ActorId, impulse: number): boolean { return this.teams?.impulse(actor, impulse) ?? false; }
+  suicide(actor: ActorId): boolean { return this.teams?.suicide(actor) ?? true; }
   savedTeam(actor: ActorId): number { return this.teams?.team(actor) ?? 0; }
   selectSpawn(actor: ActorId): Q1Actor | undefined { return this.teams?.selectSpawn(actor); }
   tagScore(victim: ActorId, attacker: ActorId): number { return this.tag?.score(victim, attacker) ?? 1; }

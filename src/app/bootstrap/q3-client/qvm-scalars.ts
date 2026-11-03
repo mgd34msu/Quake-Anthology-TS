@@ -7,7 +7,7 @@ import { QvmCgameImport, QvmUiImport } from '../../../compat/qvm/abi.ts';
 import type { QvmHostCall, QvmHostResult } from '../../../compat/qvm/syscalls.ts';
 import { qvmDisplaySyscall } from "./qvm-display.ts";
 import { keynumToString } from '../../../input/keys.ts';
-import { KeyCode } from '../../../input/key-codes.ts';
+import { KeyCode } from '../../../core/key-codes.ts';
 import { readSdlClipboard } from '../../../platform/sdl.ts';
 import type { NativeRenderer } from '../renderer.ts';
 import type { LocalInput } from '../input.ts';

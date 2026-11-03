@@ -66,7 +66,7 @@ test("real Q1, Q2 rerelease and Q3 archive sounds decode and mix", async () => {
         }
     }
 });
-test("seat sound routing, channel replacement and pause preserve mixer time", () => {
+test("seat sound routing, stopSound and pause preserve mixer time", () => {
     const seat0 = identity.seat(0), seat1 = identity.seat(1), actor0 = identity.actor(1, 0), actor1 = identity.actor(2, 0);
     using audio = new UnifiedAudio({ sampleRate: 22050, milliseconds: () => 100, random: () => 0 });
     audio.setListeners([{ seat: seat0, actor: actor0, origin, axis, gain: 1, underwater: false }, { seat: seat1, actor: actor1, origin, axis, gain: 0, underwater: false }]);
@@ -81,6 +81,22 @@ test("seat sound routing, channel replacement and pause preserve mixer time", ()
     expect(audio.mix(32).every(value => value === 0)).toBe(true);
     audio.play({ family: "q1", sound: asset, actor: actor1, origin: { kind: "local" }, audience: { kind: "seat", seat: seat1 }, channel: 1, volume: 1, attenuation: 1 });
     expect(audio.mix(32).every(value => value === 0)).toBe(true);
+});
+test("a second sound on an occupied actor channel replaces the first", () => {
+    const seat = identity.seat(0), actor = identity.actor(1, 0);
+    const loud: SoundAsset = { resource: "resource:audio-smoke-loud", name: "sound/loud", pcm: { ...tone, samples: new Int16Array(2048).fill(24000) } };
+    const play = (audio: UnifiedAudio, sound: SoundAsset): void => {
+        audio.play({ family: "q1", sound, actor, origin: { kind: "local" }, audience: { kind: "seat", seat }, channel: 1, volume: 1, attenuation: 1 });
+    };
+    const configure = (audio: UnifiedAudio): void => audio.setListeners([{ seat, actor, origin, axis, gain: 1, underwater: false }]);
+    using replaced = new UnifiedAudio({ sampleRate: 22050, milliseconds: () => 100, random: () => 0 });
+    using fresh = new UnifiedAudio({ sampleRate: 22050, milliseconds: () => 100, random: () => 0 });
+    configure(replaced); configure(fresh);
+    play(replaced, asset); play(replaced, loud);
+    play(fresh, loud);
+    const after = replaced.mix(64), expected = fresh.mix(64);
+    expect(expected.some(value => value !== 0)).toBe(true);
+    expect(after).toEqual(expected);
 });
 test("raw PCM is continuous over chunk boundaries and a paused stream keeps samples", () => {
     const stream = new RawAudioStream(48000);
@@ -104,19 +120,26 @@ test("music changes intro to loop and keeps pause position", () => {
     expect(player.sourcePosition).toBe(position);
     player.close();
 });
-test("Q2 environment data selects presets and the owned DSP produces a tail", async () => {
+test("Q2 environment data resolves every referenced preset and the owned DSP produces a tail for each", async () => {
     const archive = await openArchive(corpusFile("q2/rerelease/baseq2/pak0.pak"));
     try {
         const entry = archive.entries.find(value => value.path === "sound/default.environments");
         if (entry === undefined)
             throw new Error("No environments data");
-        const environments = parseEnvironments(new TextDecoder().decode(await archive.readEntry(entry)));
+        const warnings: string[] = [];
+        const environments = parseEnvironments(new TextDecoder().decode(await archive.readEntry(entry)), message => warnings.push(message));
         expect(environments.length).toBe(8);
-        const dsp = new StereoReverb(22050), samples = new Float64Array(22050 * 2);
-        samples[0] = 32767;
-        samples[1] = 32767;
-        dsp.process(samples, reverbPreset(5));
-        expect(samples.subarray(1000).some(value => Math.abs(value) > 0.01)).toBe(true);
+        expect(warnings).toEqual([]);
+        const presets = new Set(environments.flatMap(environment => environment.reverbs.map(reverb => reverb.presetIndex)));
+        expect(presets.size).toBeGreaterThan(1);
+        for (const index of presets) {
+            const dsp = new StereoReverb(22050), samples = new Float64Array(22050 * 2);
+            samples[0] = 32767;
+            samples[1] = 32767;
+            dsp.process(samples, reverbPreset(index));
+            const tail = Math.max(...samples.subarray(1000).map(Math.abs));
+            expect(tail).toBeGreaterThan(0.01);
+        }
     }
     finally {
         archive.close();
@@ -427,17 +450,21 @@ test("Doppler singularities and arbitrarily large finite rates have bounded samp
     ];
     for (const entry of cases) for (const value of [12000, -12000]) {
         const mixer = new AudioMixer(1000, () => 0);
-        const sound: PcmSound = { sampleRate: 1000, channels: 1, frameCount: 2048, loopStart: null, samples: new Int16Array(2048).fill(value) };
+        const backing = new Int16Array(2048).fill(value);
         let reads = 0;
-        mixer.bindSoundMemory({ frameCount: pcm => pcm.frameCount, hasData: () => true, touch: () => undefined,
-            sample: (pcm, index) => { reads++; const sample = pcm.samples[index]; if (sample === undefined) throw new Error("Read beyond prepared PCM"); return sample; } });
+        const samples = new Proxy(backing, { get(target, key) {
+            if (typeof key !== "string" || !/^\d+$/.test(key)) return target[key as keyof Int16Array];
+            reads++;
+            return target[Number(key)];
+        } });
+        const sound: PcmSound = { sampleRate: 1000, channels: 1, frameCount: 2048, loopStart: null, samples };
         mixer.setListener(1, origin, axis);
         mixer.updateLoopingSound(sound, { entity: 2, origin: { x: entry.distance, y: 0, z: 0 }, velocity: { x: entry.velocity, y: 0, z: 0 }, frameNumber: 1 });
         mixer.setListener(1, origin, axis);
         const output = mixer.mix(32);
         expect(reads).toBeGreaterThan(0);
         expect(reads).toBeLessThanOrEqual(entry.maximumReads);
-        expect(output.every(sample => Number.isFinite(sample) && Math.sign(sample) === Math.sign(value))).toBe(true);
+        expect(output.every(sample => Math.sign(sample) === Math.sign(value))).toBe(true);
         expect(mixer.sampleClock).toBe(32);
         const before = reads;
         expect(mixer.mix(32).every(sample => Math.sign(sample) === Math.sign(value))).toBe(true);
@@ -556,4 +583,14 @@ test.skipIf(process.env["SDL_AUDIODRIVER"] !== "dummy")("output selection preser
     expect(audio.mix(32)).toEqual(reference.mix(32));
     expect(audio.sampleClock).toBe(clock + 32);
     audio.stopAll(); expect(audio.pendingOutput.length).toBe(0);
+});
+
+test("PLATFORM-010 the mixer caps voices and refuses or steals instead of growing without bound", () => {
+  const mixer = new AudioMixer(11025, () => 0, 96, 1);
+  const sound: PcmSound = { samples: new Int16Array(11025 * 10), channels: 1, sampleRate: 11025, frameCount: 11025 * 10, loopStart: null };
+  let accepted = 0;
+  for (let index = 0; index < 1000; index++) if (mixer.startQ1Sound(sound, { entity: index + 1, origin: { kind: "local" }, volume: 1, attenuation: 0 }, { kind: "auto" }, () => 0)) accepted++;
+  expect(accepted).toBe(1000);
+  expect(mixer.mix(735).length).toBeGreaterThan(0);
+  expect(mixer["voices"].length).toBeLessThanOrEqual(128);
 });

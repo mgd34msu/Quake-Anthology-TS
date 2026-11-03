@@ -20,7 +20,7 @@ test("component tokens resume their exact declared stream and keep other instanc
   const empty = new QvmEntityTokens("");
   empty.restoreSaveState(undefined);
   expect(empty.entityToken()).toEqual({ token: "", ended: true });
-  expect(() => new QvmEntityTokens(text).restoreSaveState(undefined)).toThrow();
+  expect(() => new QvmEntityTokens(text).restoreSaveState(undefined)).toThrow("qvm.entityTokens: expected a record");
 });
 
 test("shared token trap consumes complete tokens even when the source output buffer truncates", () => {
@@ -48,5 +48,5 @@ test("resolved QVM component declarations retain entity text with empty legacy d
     if (resolved.runtime !== "qvm") throw new Error("Expected QVM component");
     expect(resolved.spawnEntities).toBe(spawnEntities ?? null);
   }
-  expect(() => parse({ ...declaration, spawnEntities: 3 })).toThrow();
+  expect(() => parse({ ...declaration, spawnEntities: 3 })).toThrow("save.spawnEntities: expected a string");
 });

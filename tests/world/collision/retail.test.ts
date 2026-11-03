@@ -16,7 +16,7 @@ import { decodeQ2Map } from '../../../src/formats/q2-map/index.ts';
 import { decodeQ3World } from '../../../src/formats/q3-map/index.ts';
 import { createSceneQueries } from '../../../src/world/collision/index.ts';
 import { Q2Collision } from '../../../src/world/collision/q2.ts';
-import { createSourceQ3Collision } from '../../../src/world/collision/q3/index.ts';
+import { createQ3Collision } from '../../../src/world/collision/q3/index.ts';
 import { generatePatchCollide, tracePatch } from '../../../src/world/collision/q3/patch.ts';
 
 const numeric: NumericProfile = { id: 'test:f32', arithmetic: { kind: 'binary32', round: 'each-operation' }, scalarStorage: 'binary32', floatToInt: 'checked-c-truncation', integerOverflow: 'wrap32' };
@@ -110,7 +110,7 @@ for (const fixture of fixtures) {
    expect(scene.clusterVisible(cluster, cluster, 'pvs')).toBe(true);
    expect(scene.boxLeaves({ min: start, max: start }, 1024).leaves).toContain(leaf);
    if (world.kind === 'q3-bsp') {
-    const source = createSourceQ3Collision(bytes, fixture.map);
+    const source = createQ3Collision(world);
     const policy = policies[2]; if (policy === undefined) throw new Error('Missing Q3 policy');
     const query = { start, end, shape: { kind: 'point' }, target: { kind: 'world' }, policy, numeric, passActor: null } satisfies Parameters<typeof scene.trace>[0];
     expect(source.trace(query)).toEqual(scene.trace(query));

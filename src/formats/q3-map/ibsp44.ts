@@ -27,6 +27,7 @@ export function normalizeQ3Bsp(data: Uint8Array, source: string): Uint8Array {
   const planes = records(1, 20), nodes = records(2, 36), leaves = records(3, 48);
   const leafSurfaces = records(4, 4), leafBrushes = records(5, 4), models = records(6, 48);
   const brushes = records(7, 12), sides = records(8, 8), surfaces = records(12, 164), fogs = records(13, 68);
+  const vertexLumpLength = Math.floor(section(11).length / 44);
   const originalIndices = records(14, 4).map(record => int(record, 0));
   const indices = [...originalIndices];
   const sideNames = new Map<number, Uint8Array>();
@@ -69,6 +70,7 @@ export function normalizeQ3Bsp(data: Uint8Array, source: string): Uint8Array {
     const type = patchWidth > 0 && patchHeight > 0 ? 2 : indexCount > 0 ? 3 : 1;
     if (type === 1) {
       if (vertexCount < 3) fail(0, "IBSP44 polygon has fewer than three vertices");
+      range(int(surface, 72), vertexCount, vertexLumpLength);
       firstIndex = indices.length;
       for (let i = 1; i < vertexCount - 1; i++) indices.push(0, i, i + 1);
       indexCount = indices.length - firstIndex;
@@ -81,6 +83,9 @@ export function normalizeQ3Bsp(data: Uint8Array, source: string): Uint8Array {
     writer.i32(patchWidth); writer.i32(patchHeight);
     return writer.finish();
   });
+  // Each model owns its own subtree, so the walks together stay near the node count; overlap beyond that is a crafted file.
+  let walked = 0;
+  const walkBudget = 4 * (nodes.length + leaves.length + leafSurfaces.length + leafBrushes.length) + 65536;
   const modelRecords = models.map(model => {
     const surfaceIds = new Set<number>(), brushIds = new Set<number>(), visited = new Set<number>();
     const pending = [int(model, 36)];
@@ -89,12 +94,15 @@ export function normalizeQ3Bsp(data: Uint8Array, source: string): Uint8Array {
       if (nodeId === undefined) break;
       if (visited.has(nodeId)) continue;
       visited.add(nodeId);
+      if (++walked > walkBudget) fail(0, "IBSP44 model node walks overlap excessively");
       if (nodeId >= 0) {
         const node = at(nodes, nodeId); pending.push(int(node, 4), int(node, 8)); continue;
       }
       const leaf = at(leaves, -nodeId - 1);
       const firstSurface = int(leaf, 32), surfaceCount = int(leaf, 36), firstBrush = int(leaf, 40), brushCount = int(leaf, 44);
       range(firstSurface, surfaceCount, leafSurfaces.length); range(firstBrush, brushCount, leafBrushes.length);
+      walked += surfaceCount + brushCount;
+      if (walked > walkBudget) fail(0, "IBSP44 model node walks overlap excessively");
       for (let i = firstSurface; i < firstSurface + surfaceCount; i++) surfaceIds.add(int(at(leafSurfaces, i), 0));
       for (let i = firstBrush; i < firstBrush + brushCount; i++) brushIds.add(int(at(leafBrushes, i), 0));
     }

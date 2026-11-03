@@ -5,19 +5,12 @@
  */
 import type { QvmMemory } from "./memory.ts";
 
-function rejectOverlap(destination: Uint8Array, source: Uint8Array): void {
-  if (destination.byteLength !== 0 && source.byteLength !== 0
-    && destination.byteOffset < source.byteOffset + source.byteLength
-    && source.byteOffset < destination.byteOffset + destination.byteLength) {
-    throw new RangeError("Overlapping QVM memcpy/strncpy ranges are unsupported");
-  }
-}
-
 /**
  * All roles share these trap numbers and return zero from memset/memcpy.
  * The typed strncpy profile returns the original signed destination word.
  * Source returns a host pointer cast to int; its address bits are not reproduced.
- * Undefined overlapping copies and negative counts reject before mutation.
+ * Overlapping copies behave as memmove, as they do on the shipped C runtime, and a self-copy writes nothing.
+ * Negative counts reject before mutation.
  */
 export function qvmMemorySyscall(_role: "game" | "cgame" | "ui", words: DataView, memory: QvmMemory): number | null {
   const trap = words.getInt32(0, true);
@@ -33,16 +26,14 @@ export function qvmMemorySyscall(_role: "game" | "cgame" | "ui", words: DataView
   }
   if (trap === 101) {
     const source = memory.span(sourceWord, count);
-    rejectOverlap(destination, source);
-    memory.writeBytes(offset, source);
+    if (destination.byteOffset !== source.byteOffset) memory.writeBytes(offset, source);
     return 0;
   }
   const source = memory.pointer(sourceWord);
   if (source === null) throw new RangeError("QVM strncpy requires a nonnull source pointer");
   const terminator = source.subarray(0, count).indexOf(0);
   const copiedLength = terminator < 0 ? count : terminator;
-  const consumed = memory.span(sourceWord, terminator < 0 ? count : terminator + 1);
-  rejectOverlap(destination, consumed);
+  memory.span(sourceWord, terminator < 0 ? count : terminator + 1);
   memory.writeBytes(offset, source.subarray(0, copiedLength));
   memory.fillBytes(offset + copiedLength, count - copiedLength, 0);
   return destinationWord;

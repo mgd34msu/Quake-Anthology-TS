@@ -154,7 +154,10 @@ export class QwRemotePresentation implements QwApplicationClientHost {
                 case 'entity-gravity': if (this.variables !== null) this.variables = { ...this.variables, entityGravity: message.value }; break;
                 case 'userinfo': this.scoreboardInfo(message.slot, new Map(quakeWorldInfo(message.value)), translated); break;
                 case 'set-info': {
-                    const info = new Map(this.userinfos.get(message.slot)); info.set(message.key, message.value);
+                    const info = new Map(this.userinfos.get(message.slot));
+                    // Native info strings are at most 512 bytes; bound keys and values so a flood stays linear.
+                    if (message.key.length > 63 || message.value.length > 511 || !info.has(message.key) && info.size >= 64) throw new Error('QuakeWorld set-info exceeds its limits');
+                    info.set(message.key, message.value);
                     this.scoreboardInfo(message.slot, info, translated); break;
                 }
                 case 'print': translated.push({ kind: 'print', text: message.text }); break;

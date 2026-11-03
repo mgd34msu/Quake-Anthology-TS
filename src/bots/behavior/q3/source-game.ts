@@ -53,6 +53,10 @@ export function q3BotGame(source: Q3SourceRuntime, insertConsoleCommand: (text: 
         state.inventory[BotInventory.ARMOR] = state.curPs.stats.get(statSchema(state.product).armor);
         updateQ3BotItemInventory(state);
       } },
+    observable: number => {
+      const entity = source.pool.at(number);
+      return entity.inuse && source.world.linkState(number)?.linked === true && (entity.r.svFlags & ServerEntityFlags.NOCLIENT) === 0;
+    },
     entity: number => {
       const entity = source.pool.at(number), client = entity.client;
       const observedState = entity.s.copy(), playerState = client?.ps.copy() ?? null;

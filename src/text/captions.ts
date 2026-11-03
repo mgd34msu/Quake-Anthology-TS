@@ -53,22 +53,32 @@ function timestamp(value: string): number {
   return ((hours * 60 + minutes) * 60 + seconds) * 1000 + milliseconds;
 }
 /** SRT and WebVTT sidecars retain cue ordering, Unicode, line breaks and overlap. */
-export function parseSubtitleText(text: string, namespace: string): readonly CaptionCue[] {
+export function parseSubtitleText(text: string, namespace: string, skipped?: (reason: string) => void): readonly CaptionCue[] {
   const blocks = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split(/\n[ \t]*\n/), cues: CaptionCue[] = [];
   for (const block of blocks) {
-    const lines = block.split("\n");
-    const timingIndex = lines.findIndex(line => line.includes("-->"));
-    if (timingIndex < 0) continue;
-    const timing = lines[timingIndex];
-    if (timing === undefined) continue;
-    const match = /^\s*(\S+)\s+-->\s+(\S+)/.exec(timing);
-    if (match === null || match[1] === undefined || match[2] === undefined) throw new Error("Invalid subtitle cue timing");
-    const startMilliseconds = timestamp(match[1]), end = timestamp(match[2]);
-    const text = lines.slice(timingIndex + 1).join("\n").trimEnd();
-    const voice = /^<v\s+([^>]+)>([\s\S]*?)(?:<\/v>)?$/.exec(text);
-    const cue: CaptionCue = { id: `${namespace}:${cues.length}`, kind: "subtitle", startMilliseconds,
-      durationMilliseconds: end - startMilliseconds, text: voice?.[2] ?? text, speaker: voice?.[1] ?? null, arguments: [] };
-    validateCue(cue); cues.push(cue);
+    try {
+      const cue = parseBlock(block, namespace, cues.length);
+      if (cue !== null) cues.push(cue);
+    } catch (error) {
+      if (skipped === undefined || !(error instanceof Error)) throw error;
+      skipped(`${namespace}: skipped invalid subtitle cue (${error.message})`);
+    }
   }
   return cues;
+}
+function parseBlock(block: string, namespace: string, index: number): CaptionCue | null {
+  const lines = block.split("\n");
+  const timingIndex = lines.findIndex(line => line.includes("-->"));
+  if (timingIndex < 0) return null;
+  const timing = lines[timingIndex];
+  if (timing === undefined) return null;
+  const match = /^\s*(\S+)\s+-->\s+(\S+)/.exec(timing);
+  if (match === null || match[1] === undefined || match[2] === undefined) throw new Error("Invalid subtitle cue timing");
+  const startMilliseconds = timestamp(match[1]), end = timestamp(match[2]);
+  const text = lines.slice(timingIndex + 1).join("\n").trimEnd();
+  const voice = /^<v\s+([^>]+)>([\s\S]*?)(?:<\/v>)?$/.exec(text);
+  const cue: CaptionCue = { id: `${namespace}:${index}`, kind: "subtitle", startMilliseconds,
+    durationMilliseconds: end - startMilliseconds, text: voice?.[2] ?? text, speaker: voice?.[1] ?? null, arguments: [] };
+  validateCue(cue);
+  return cue;
 }

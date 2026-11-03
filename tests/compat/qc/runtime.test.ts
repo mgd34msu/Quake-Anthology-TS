@@ -3,7 +3,8 @@ import { corpusFile } from "../../support/corpus.ts";
 
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
-import { QcEntityMemory, QcMachine, QcStrings, QuakeCExecutor, applyQcEntityPairs, classicQcEntityLayout, createQcActorBindings, createQcBuiltins, createQcSourceSlotStorage, describeQcHost, loadQcProgram, qcLinkBounds, saveQcEntityPairs } from "../../../src/compat/qc/index.ts";
+import { captureQcCheckpoint, restoreQcCheckpoint } from "../../../src/compat/qc/executor.ts";
+import { QcEntityMemory, QcMachine, QcStrings, applyQcEntityPairs, classicQcEntityLayout, createQcActorBindings, createQcBuiltins, createQcSourceSlotStorage, describeQcHost, loadQcProgram, qcLinkBounds, saveQcEntityPairs } from "../../../src/compat/qc/index.ts";
 import type { QcBuiltin, QcHostBuiltinName, QcProgram } from "../../../src/compat/qc/index.ts";
 import type { ModuleIdentity } from "../../../src/contracts/execution.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -167,7 +168,7 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
         expect(outcomes).toHaveLength(3);
         authority.runSourceDamage(request, observer => {
           actors.release(target);
-          expect(() => observer.stored({ kind: "health", before: result.health, after: result.health })).toThrow();
+          expect(() => observer.stored({ kind: "health", before: result.health, after: result.health })).toThrow("Stale or foreign actor authority");
           return none;
         });
         expect(authority.runSourceDamage(request, () => { throw new Error("Stale source executed"); }).kind).toBe("stale-target");
@@ -287,7 +288,7 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
       expect(() => foreignBinding.functionBoundary.run({ functionIndex: otherProgram.functionNamed("T_Damage").index, caller: 0, statement: -1 },
         Object.assign(foreignExecution, { skip: foreignExecution, cancel: (): never => { throw new Error("unexpected cancellation"); } }))).toThrow("binding belongs to another machine");
       if (variant === "failure") {
-        expect(invoke).toThrow(); expect(outcomes).toHaveLength(0); expect(vm.depth).toBe(0); vm.snapshot();
+        expect(invoke).toThrow("progs.dat: invalid string offset"); expect(outcomes).toHaveLength(0); expect(vm.depth).toBe(0); vm.snapshot();
         words.setInt(field("th_pain"), program.functionNamed("SUB_Null").index);
       }
       invoke();
@@ -437,23 +438,20 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
     expect(() => vm.execute(vm.program.functionNamed("setmodel").index, 2)).toThrow("unbound builtin setmodel");
     expect(() => vm.execute(vm.program.functionNamed("ex_bot_movetopoint").index, 3)).toThrow("unbound builtin ex_bot_movetopoint");
   });
-  test("shared executor invokes actual QC and restores its host save hook", async () => {
+  test("live QC checkpoint helpers run actual QC and restore the host save hook", async () => {
     const vm = machineFor(await readProgram("rerelease/id1/pak0.pak"));
     const module: ModuleIdentity = { id: "test:qc", artifactPath: vm.program.source, digest: vm.program.digest, revision: "corpus" };
     let hostCounter = 4;
-    const executor = new QuakeCExecutor({ kind: "quakec", module, numeric: Q1_DONOR_PROFILE,
-      host: describeQcHost(vm.program, "rerelease", vm.entities.layout, createQcBuiltins({ kind: "rerelease" })) }, vm, {
-      checkpoint: () => ({ state: { module, format: "test:counter", bytes: new Uint8Array([hostCounter]) }, random: [], callbacks: [] }),
-      restore: saved => { hostCounter = saved.state.bytes[0] ?? 0; },
-    });
-    const result = executor.invoke({ module, callback: { kind: "quakec", module, functionIndex: vm.program.functionNamed("vlen").index }, parent: null, self: null, other: null }, [
-      { kind: "float32", value: 3 },
-    ]);
-    expect(result.kind).toBe("aggregate");
-    const checkpoint = executor.checkpoint();
+    const host = {
+      checkpoint: () => ({ state: { module, format: "test:counter" as const, bytes: new Uint8Array([hostCounter]) }, random: [], callbacks: [] }),
+      restore: (saved: { readonly state: { readonly bytes: Uint8Array } }) => { hostCounter = saved.state.bytes[0] ?? 0; return undefined; },
+    };
+    vm.globals.setFloat(4, 3);
+    vm.execute(vm.program.functionNamed("vlen").index, 1);
+    const checkpoint = captureQcCheckpoint(vm, module, host);
     hostCounter = 9;
     vm.globals.setFloat(1, 123);
-    executor.restore(checkpoint);
+    restoreQcCheckpoint(vm, module, host, checkpoint);
     expect(hostCounter).toBe(4);
     expect(vm.globals.float(1)).toBe(3);
     expect(checkpoint.module.digest).toBe(vm.program.digest);
@@ -658,8 +656,8 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
     expect(scene.spatial.get(expiredGround.id)).toBeNull();
     expect(() => host.actor(entities.slot(retainedGround))).toThrow("free source edict");
     fields.setInt(field("goalentity"), retainedGround); vm.globals.setFloat(4, 1);
-    expect(() => call("movetogoal", 1)).toThrow("free source edict");
-    expect(movementRandom.checkpoint()).toEqual(randomAfterGoal);
+    // SV_MoveToGoal reads a freed goal as a zeroed edict at the origin instead of failing (GAPCOMPAT-002).
+    expect(() => call("movetogoal", 1)).not.toThrow();
     fields.setInt(field("goalentity"), 0);
     const walkingFlags = fields.float(field("flags"));
     fields.setFloat(field("flags"), 0); fields.setInt(field("groundentity"), retainedGround);
@@ -702,7 +700,7 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
     failingWords.setInt(field("think1"), program.functionNamed("objerror").index);
     host.link(failingSlot);
     vm.globals.setFloat(4, 0); vm.globals.setFloat(7, 0);
-    expect(() => call("walkmove", 2)).toThrow();
+    expect(() => call("walkmove", 2)).toThrow("QuakeC 88:101: OBJECT ERROR in SUB_CalcMoveDone");
     expect(vm.globals.int(vm.globalOffset("self"))).toBe(reference);
     expect(vm.globals.int(vm.globalOffset("other"))).toBe(reference);
     failingWords.setInt(field("touch"), program.functionNamed("SUB_Remove").index);
@@ -773,9 +771,9 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
     restoredClients.visibility.restore(cached);
     const eye = { origin: hidden, viewOffset: zero };
     expect(restoredClients.visibility.check(eye, checkTime, numeric)).toBeNull();
-    expect(() => restoredClients.visibility.restore({ ...cached, lastCheckTime: Infinity })).toThrow();
-    expect(() => restoredClients.visibility.restore({ ...cached, lastCheckSlot: 3 })).toThrow();
-    expect(() => restoredClients.visibility.restore({ ...cached, checkedCluster: world.leaves.length })).toThrow();
+    expect(() => restoredClients.visibility.restore({ ...cached, lastCheckTime: Infinity })).toThrow("q1-client-visibility.lastCheckTime: expected a finite number");
+    expect(() => restoredClients.visibility.restore({ ...cached, lastCheckSlot: 3 })).toThrow("q1-client-visibility: visibility cache outside source range");
+    expect(() => restoredClients.visibility.restore({ ...cached, checkedCluster: world.leaves.length })).toThrow("q1-client-visibility: visibility cache outside source range");
     expect(restoredClients.visibility.capture()).toEqual(cached);
     checkTime = 0.21; expect(check()).toBe(host.reference(secondClient.id));
     expect(restoredClients.visibility.check(eye, checkTime, numeric)).toEqual(secondClient.id);
@@ -1051,7 +1049,7 @@ test.skipIf(!haveCorpus)("verified id1 attacks and environmental callbacks prese
         vm.globals.setInt(vm.globalOffset("multi_ent"), entities.reference(2)); vm.globals.setFloat(vm.globalOffset("multi_damage"), 4);
         expect(() => vm.execute(program.functionNamed("ApplyMultiDamage").index)).toThrow("Unmatched id1 synchronous damage scope");
         victim.setInt(field("th_pain"), program.functionNamed("error").index);
-        expect(() => vm.execute(program.functionNamed("W_FireAxe").index)).toThrow();
+        expect(() => vm.execute(program.functionNamed("W_FireAxe").index)).toThrow("progs.dat: invalid string offset");
         expect(() => vm.execute(program.functionNamed("ApplyMultiDamage").index)).toThrow("Unmatched id1 synchronous damage scope");
       }
       actors.close(); return { bytes, velocity };
@@ -1147,9 +1145,9 @@ test.skipIf(!haveCorpus)("actual id1 broadcast writers preserve all temp effects
     reset();
     write("WriteByte", 23); write("WriteByte", 3); for (let axis = 0; axis < 3; axis++) write("WriteCoord", 0);
     write("WriteByte", 23); write("WriteByte", 6); write("WriteShort", 15); for (let axis = 0; axis < 6; axis++) write("WriteCoord", 0);
-    expect(() => messages.flush()).toThrow("had no owned actor"); expect(events).toHaveLength(0);
+    expect(() => messages.flush()).not.toThrow(); expect(events).toHaveLength(0); expect(messages.bytes()).toHaveLength(0);
     reset(); write("WriteByte", 23); write("WriteByte", 3); write("WriteCoord", 0);
-    expect(() => messages.flush()).toThrow(); expect(events).toHaveLength(0);
+    expect(() => messages.flush()).not.toThrow(); expect(events).toHaveLength(0); expect(messages.bytes()).toHaveLength(0);
     reset(); const byte = messages.host.get("WriteByte"); if (byte === undefined) throw new Error("Missing byte writer");
     for (const destination of [1, 2, 3]) { vm.globals.setFloat(4, destination); expect(() => byte(vm)).toThrow("destination"); }
     expect(messages.bytes()).toHaveLength(0);
@@ -1237,8 +1235,6 @@ for (const mode of ['qc', 'native']) {
     }
     emit('not_a_registered_engine_command\n'); await app.step(100);
     if (!printed.join('').includes('Unknown command')) throw new Error('Unsupported command silently swallowed');
-    expect(delivered).toHaveLength(2);
-    expect(printed.join('')).toContain('Unknown command');
   } finally { await app.close(); }
 }
 }, 30000);

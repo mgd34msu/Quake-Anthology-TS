@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../../support/corpus.ts";
+import { corpusFile, corpusHasFile } from "../../../support/corpus.ts";
 
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { createContentDigest } from "../../../../src/contracts/content.ts";
 import type { ModuleIdentity, GuestCallContext, GuestAddress } from "../../../../src/contracts/execution.ts";
 import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from "../../../../src/guest/core/index.ts";
@@ -13,9 +11,9 @@ import { X64Cpu } from "../../../../src/guest/x64/index.ts";
 import { mapPeImage, parsePe } from "../../../../src/guest/pe/index.ts";
 import { UnsupportedWindowsImport, WindowsGuestRuntime } from "../../../../src/guest/runtime/windows/index.ts";
 
-for (const relativePath of ["ctf/gamex86.dll", "lmctf/gamex86.dll", "rerelease/baseq2/game_x64.dll"]) {
-  const path = join(testCorpusRoot(), relativePath);
-  test.skipIf(!existsSync(path))(`actual ${relativePath} performs Windows DLL attach and detach through guest instructions`, async () => {
+for (const relativePath of ["q2/ctf/gamex86.dll", "q2/lmctf/gamex86.dll", "q2/rerelease/baseq2/game_x64.dll"]) {
+  const path = corpusFile(relativePath);
+  test.skipIf(!corpusHasFile(relativePath))(`actual ${relativePath} performs Windows DLL attach and detach through guest instructions`, async () => {
     const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
     const digest = createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"));
     const module: ModuleIdentity = { id: "test:windows-startup", artifactPath: path, revision: "installed", digest };

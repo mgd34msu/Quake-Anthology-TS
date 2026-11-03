@@ -355,13 +355,6 @@ export const tankMoves: readonly MonsterMove[] = [
     { ai: "walk", distance: Math.fround(6), actions: [], lerpFrame: -1 },
     { ai: "walk", distance: Math.fround(6), actions: ["tank_footstep"], lerpFrame: -1 },
   ] },
-  { name: "tank_move_stop_walk", firstFrame: 50, lastFrame: 54, end: "tank_stand", sidestepScale: 0, frames: [
-    { ai: "walk", distance: Math.fround(3), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(3), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(2), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(2), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(4), actions: ["tank_footstep"], lerpFrame: -1 },
-  ] },
   { name: "tank_move_start_run", firstFrame: 30, lastFrame: 33, end: "tank_run", sidestepScale: 0, frames: [
     { ai: "run", distance: Math.fround(0), actions: [], lerpFrame: -1 },
     { ai: "run", distance: Math.fround(6), actions: [], lerpFrame: -1 },
@@ -385,13 +378,6 @@ export const tankMoves: readonly MonsterMove[] = [
     { ai: "run", distance: Math.fround(7), actions: [], lerpFrame: -1 },
     { ai: "run", distance: Math.fround(6), actions: [], lerpFrame: -1 },
     { ai: "run", distance: Math.fround(6), actions: ["tank_footstep"], lerpFrame: -1 },
-  ] },
-  { name: "tank_move_stop_run", firstFrame: 50, lastFrame: 54, end: "tank_walk", sidestepScale: 0, frames: [
-    { ai: "run", distance: Math.fround(3), actions: [], lerpFrame: -1 },
-    { ai: "run", distance: Math.fround(3), actions: [], lerpFrame: -1 },
-    { ai: "run", distance: Math.fround(2), actions: [], lerpFrame: -1 },
-    { ai: "run", distance: Math.fround(2), actions: [], lerpFrame: -1 },
-    { ai: "run", distance: Math.fround(4), actions: ["tank_footstep"], lerpFrame: -1 },
   ] },
   { name: "tank_move_pain1", firstFrame: 197, lastFrame: 200, end: "tank_run", sidestepScale: 0, frames: [
     { ai: "move", distance: Math.fround(0), actions: [], lerpFrame: -1 },

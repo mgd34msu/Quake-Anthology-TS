@@ -1,10 +1,10 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../../../support/corpus.ts";
+import { expect } from "bun:test";
+import { corpusTest, corpusFile } from "../../../../support/corpus.ts";
 
 import type { ActorId, OwnedActor } from "../../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../../src/contracts/identity.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../../src/world/gameplay/index.ts";
 import { createSceneQueries } from "../../../../../src/world/collision/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../../../src/core/numeric.ts";
 import { Q1MonsterMovement } from "../../../../../src/movement/q1/monsters.ts";
@@ -21,6 +21,8 @@ import { parseMdl } from "../../../../../src/formats/q12-model/mdl.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../../../src/persistence/q1-foundation.ts";
 import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../../src/persistence/world-state.ts";
 import type { BodyCheckpoint, CombatCheckpoint, InventoryCheckpoint } from "../../../../../src/contracts/session.ts";
+import { impulseAuthority } from "../../../../support/authority.ts";
+const test = corpusTest("q1/rerelease/mg3/pak0.pak");
 
 interface SavedHeavy {
   readonly source: ReturnType<Q1Foundation["capture"]>;
@@ -32,7 +34,7 @@ interface SavedHeavy {
 }
 
 async function session(name: string, saved?: SavedHeavy) {
-  const archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/mg3/pak0.pak`);
+  const archive = await openArchive(corpusFile("q1/rerelease/mg3/pak0.pak"));
   const entry = archive.findEntries(`maps/${name}.bsp`)[0]; if (entry === undefined) throw new Error(`Missing retail ${name}`);
   const map = readQ1Bsp(await archive.readEntry(entry), { source: `maps/${name}.bsp` }); archive.close();
   const identity = createIdentityOwner("mg3-heavy"), actors = saved === undefined ? new SessionActorRegistry(identity) : SessionActorRegistry.restore(identity, saved.slots, saved.sources), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
@@ -53,7 +55,7 @@ async function session(name: string, saved?: SavedHeavy) {
     bodies.write(actor, { ...body, origin: state.origin, angles: state.angles, ground: state.ground.kind === "none" ? null : state.ground.kind === "actor" ? state.ground.actor : active?.world?.actor.id ?? null });
     entity.movementFlags = state.flags; entity.idealYaw = state.idealYaw; entity.yawSpeed = state.yawSpeed; return undefined;
   }, link: actor => bodies.link(actor) });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: (actor, impulse) => { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, velocity: vadd(body.velocity, impulse) }); return undefined; }, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = impulseAuthority(actors, callbacks, bodies);
   const inventory = new SharedInventoryTable(actors);
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => randomValue, trace: request => {
     const trace = scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" }, policy: { kind: "q1", move: request.monsters ? "normal" : "no-monsters", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: request.ignore });
@@ -91,7 +93,7 @@ async function session(name: string, saved?: SavedHeavy) {
 }
 
 test("MG3 retail heavy models cover all 401 source frame callbacks", async () => {
-  const current = await session("map2"), archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/mg3/pak0.pak`);
+  const current = await session("map2"), archive = await openArchive(corpusFile("q1/rerelease/mg3/pak0.pak"));
   try {
     let frames = 0;
     for (const definition of current.monsters.definitions.values()) {

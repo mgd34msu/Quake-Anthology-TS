@@ -1,4 +1,4 @@
-import { testCorpusRoot } from "../support/corpus.ts";
+import { testCorpusRoot, corpusTest } from "../support/corpus.ts";
 import type { Q3SeatAudioFrame } from "../../src/app/bootstrap/audio/q3.ts";
 import { ApplicationInput } from "../../src/app/bootstrap/input.ts";
 import { InputRouter } from "../../src/input/router.ts";
@@ -6,7 +6,7 @@ import { SdlControllers } from "../../src/platform/controller.ts";
 import { SdlAudioDevice } from "../../src/platform/audio.ts";
 import type { ControllerOperationResult } from "../../src/platform/controller.ts";
 import { FrontendPreferences, applyFrontendPreferences } from "../../src/app/bootstrap/frontend-preferences.ts";
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
 import { UnifiedAudio } from "../../src/audio/engine.ts";
 import { Application } from "../../src/app/bootstrap/application.ts";
 import { applicationPreset } from "../../src/app/bootstrap/content.ts";
@@ -23,6 +23,7 @@ import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { AudioListener } from "../../src/audio/types.ts";
 import { EntityEvent } from "../../src/movement/q3/constants.ts";
 import { q2MuzzleSounds, q2MonsterMuzzleSounds } from "../../src/app/bootstrap/audio/q2-events.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q2/baseq2/pak0.pak", "q2/rerelease/baseq2/pak0.pak", "q3a/baseq3/pak0.pk3");
 
 test("audio diagnostics and play use the actual common console and queued PCM for every family", async () => {
   const fixtures = [
@@ -156,7 +157,19 @@ test("bootstrap plays source player events, filters a wet listener, replaces mus
       expect(audioWet.engine.mix(22050).some(sample => sample !== 0)).toBe(true);
       await audioWet.playMusic(source.content, "2");
       expect(audioWet.engine.mix(22050).some(sample => sample !== 0)).toBe(true);
-      await audioWet.command({ name: "stopsound", args: [], seat: null });
+      // A replacement must start the requested track from its beginning. On a dry engine (the wet filter carries a tail from the
+      // previous track) the replaced mix equals a fresh engine playing only that track, and a track that never changes does not.
+      const trackMix = async (...tracks: readonly string[]): Promise<Int16Array> => {
+        const dryAudio = createAudio();
+        try {
+          for (const track of tracks) { await dryAudio.playMusic(source.content, track); if (track !== tracks[tracks.length - 1]) dryAudio.engine.mix(22050); }
+          return dryAudio.engine.mix(22050);
+        } finally { dryAudio.close(); }
+      };
+      const [alone2, alone3, replaced3, replaced2] = [await trackMix("2"), await trackMix("03.ogg"), await trackMix("2", "03.ogg"), await trackMix("03.ogg", "2")];
+      expect(alone2.some(sample => sample !== 0)).toBe(true); expect(alone3.some(sample => sample !== 0)).toBe(true);
+      expect(alone3).not.toEqual(alone2);
+      expect(replaced3).toEqual(alone3); expect(replaced2).toEqual(alone2);
       await audioWet.playMusic(source.content, "0");
       expect(audioWet.engine.mix(128).every(sample => sample === 0)).toBe(true);
       expect(q2MuzzleSounds(5, true, () => 2).map(sound => [sound.volume, sound.delaySeconds])).toEqual([[0.2, 0], [0.2, 0.033], [0.2, 0.066]]);

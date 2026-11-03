@@ -16,7 +16,6 @@ export const RF_DEPTHHACK = 8;
 export const RF_NOSHADOW = 64;
 export const RF_LIGHTING_ORIGIN = 128;
 export const RF_SHADOW_PLANE = 256;
-export const RF_WRAP_FRAMES = 512;
 
 interface ShadedEntity {
   renderFlags: number;
@@ -112,6 +111,26 @@ export type Q3AdmittedRefEntity = RefEntity | Extract<SourceRefEntityRecord, { r
 /** Typed producers retain their existing shapes; VM handles stay numeric until consumed. */
 export type SourceRefEntity = SourceHandles<RefEntity> | SourceRefEntityRecord;
 
+/** The source never bounds scene coordinates, but values past this range or non-finite ones only poison lighting, fog and vertex upload. */
+const SCENE_COORDINATE_LIMIT = 1e9;
+const sceneCoordinate = (value: number): boolean => Number.isFinite(value) && Math.abs(value) <= SCENE_COORDINATE_LIMIT;
+const sceneVector = (vector: Vec3): boolean => sceneCoordinate(vector.x) && sceneCoordinate(vector.y) && sceneCoordinate(vector.z);
+export function refEntityIsAdmissible(entity: Q3AdmittedRefEntity): boolean {
+  if (!sceneVector(entity.origin) || "oldOrigin" in entity && !sceneVector(entity.oldOrigin)) return false;
+  if ("axis" in entity && !entity.axis.every(sceneVector)) return false;
+  if ("lightingOrigin" in entity && !sceneVector(entity.lightingOrigin)) return false;
+  if ("radius" in entity && !Number.isFinite(entity.radius)) return false;
+  if ("rotation" in entity && !Number.isFinite(entity.rotation)) return false;
+  if ("shadowPlane" in entity && !Number.isFinite(entity.shadowPlane)) return false;
+  if ("backLerp" in entity && !Number.isFinite(entity.backLerp)) return false;
+  if ("shaderTime" in entity && !Number.isFinite(entity.shaderTime)) return false;
+  if ("shaderTexCoord" in entity && !(Number.isFinite(entity.shaderTexCoord.x) && Number.isFinite(entity.shaderTexCoord.y))) return false;
+  return true;
+}
+export function refPolyIsAdmissible(poly: RefPoly): boolean {
+  return poly.vertices.every(vertex => sceneVector(vertex.position) && Number.isFinite(vertex.texCoord.x) && Number.isFinite(vertex.texCoord.y));
+}
+
 function zero(): Vec3 { return { x: 0, y: 0, z: 0 }; }
 function zeroAxis(): Axis { return [zero(), zero(), zero()]; }
 function shading(): ShadedEntity {
@@ -129,9 +148,6 @@ export function createBeamEntity(): RefBeamEntity {
 }
 export function createRailCoreEntity(): RefRailCoreEntity {
   return { ...shading(), kind: "rail-core", origin: zero(), oldOrigin: zero(), radius: 0 };
-}
-export function createRailRingsEntity(): RefRailRingsEntity {
-  return { ...shading(), kind: "rail-rings", origin: zero(), oldOrigin: zero(), radius: 0 };
 }
 export function createLightningEntity(): RefLightningEntity {
   return { ...shading(), kind: "lightning", origin: zero(), oldOrigin: zero(), radius: 0 };
@@ -157,18 +173,6 @@ export function copyRefEntity(entity: Q3AdmittedRefEntity): Q3AdmittedRefEntity 
     axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }], shaderRGBA: color, shaderTexCoord: texCoord };
 }
 
-export function copySourceRefEntity(entity: SourceRefEntity): SourceRefEntity {
-  if ("lightingOrigin" in entity) return { ...entity, origin: { ...entity.origin }, oldOrigin: { ...entity.oldOrigin },
-    lightingOrigin: { ...entity.lightingOrigin }, axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }],
-    shaderRGBA: { ...entity.shaderRGBA }, shaderTexCoord: { ...entity.shaderTexCoord } };
-  if (entity.kind === "portal-surface") return { ...entity, origin: { ...entity.origin }, oldOrigin: { ...entity.oldOrigin },
-    axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }] };
-  const color = { ...entity.shaderRGBA }, texCoord = { ...entity.shaderTexCoord };
-  if (entity.kind === "sprite") return { ...entity, origin: { ...entity.origin }, shaderRGBA: color, shaderTexCoord: texCoord };
-  if (entity.kind === "beam") return { ...entity, origin: { ...entity.origin }, oldOrigin: { ...entity.oldOrigin },
-    axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }], shaderRGBA: color, shaderTexCoord: texCoord };
-  return { ...entity, origin: { ...entity.origin }, oldOrigin: { ...entity.oldOrigin }, shaderRGBA: color, shaderTexCoord: texCoord };
-}
 
 export function copyRefPoly(poly: RefPoly): RefPoly {
   return { shader: poly.shader, vertices: poly.vertices.map(vertex => ({ position: { ...vertex.position },

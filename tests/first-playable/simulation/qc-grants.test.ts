@@ -35,6 +35,9 @@ for (const game of ["q1-classic-hipnotic", "q1-quakeworld"]) test(`${game} give 
     run("give r 17; give h 61; give a 120");
     expect(words.float(field("ammo_rockets"))).toBe(17); expect(words.float(field("health"))).toBe(61);
     expect(words.float(field("armorvalue"))).toBe(120); expect(words.float(field("armortype"))).toBeCloseTo(0.6);
+    // Host_Give_f does nothing for empty or unknown arguments; the VM source must not throw at its client.
+    run("give"); run("give frobnicate"); run("give item_frobnicate");
+    expect(words.float(field("ammo_rockets"))).toBe(17);
     if (source.kind === "netquake") { run("give 6a"); expect(Math.trunc(words.float(field("items"))) & (1 << 16)).not.toBe(0); }
     if (source.kind === "netquake") {
       const powerups = [

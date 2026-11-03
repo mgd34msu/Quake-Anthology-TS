@@ -6,13 +6,13 @@ import type { CommandContext, CommandDialect } from "../contracts/common.ts";
 import type { SeatId } from "../contracts/identity.ts";
 import type { Vec2, Vec3 } from "../contracts/math.ts";
 import type { InputAction, InputBinding, InputBindingTarget, PhysicalInput, SeatInputEvent, SeatInputFocus } from "../contracts/ui.ts";
-import type { CommandBuffer, CommandInvocation } from "../core/commands/index.ts";
+import { CommandUsageError, type CommandBuffer, type CommandInvocation } from "../core/commands/index.ts";
 import { commandSeparatorOffset, sourceCommandText } from "../core/commands/text.ts";
 import { InputButton } from "./buttons.ts";
 import { GamepadInput } from "./gamepad.ts";
 import type { GamepadTuning } from "./gamepad.ts";
 import { quakeMouseButton } from "./mouse-buttons.ts";
-import { KeyCode } from "./key-codes.ts";
+import { KeyCode } from "../core/key-codes.ts";
 import { parseImpulse } from "./impulse.ts";
 
 export type SourceAction = InputAction | "turn-left" | "turn-right" | "look-up" | "look-down" | "strafe" | "mlook" | "klook" | "holster" | `button${number}`;
@@ -67,6 +67,7 @@ export class SeatInput {
   private readonly held = new Map<string, HeldBinding>();
   private readonly buttons = new Map<SourceAction, InputButton>();
   private mouse: Vec2 = { x: 0, y: 0 };
+  private wheelRemainder = 0;
   private pendingImpulse = 0;
   private uiBinding: UiBinding;
 
@@ -191,8 +192,12 @@ export class SeatInput {
         if (!consumed && this.currentFocus.kind === "game") this.mouse = { x: this.mouse.x + event.delta.x, y: this.mouse.y + event.delta.y };
         break;
       case "mouse-wheel": {
-        const code = event.delta.y > 0 ? KeyCode.MouseWheelUp : KeyCode.MouseWheelDown;
-        for (let count = 0; count < Math.abs(event.delta.y); count++) {
+        // High-resolution wheels report fractions of a notch; one press is emitted per whole accumulated notch.
+        if (event.delta.y !== 0 && Math.sign(event.delta.y) !== Math.sign(this.wheelRemainder)) this.wheelRemainder = 0;
+        const total = this.wheelRemainder + event.delta.y, notches = Math.trunc(Math.abs(total));
+        this.wheelRemainder = total - Math.sign(total) * notches;
+        const code = total > 0 ? KeyCode.MouseWheelUp : KeyCode.MouseWheelDown;
+        for (let count = 0; count < notches; count++) {
           this.digital({ kind: "key", code }, true, time, consumed); this.digital({ kind: "key", code }, false, time);
         }
         break;
@@ -208,6 +213,8 @@ export class SeatInput {
     for (const [key, held] of this.held) if ((held.input.kind === "controller-axis" || held.input.kind === "controller-button") && held.input.device === device) {
       this.runBinding(held, false, time); this.held.delete(key);
     }
+    // A stick held while the device vanished would otherwise keep repeating in the menu until it closes.
+    for (const axis of ["left-x", "left-y"] as const) this.uiBinding.callback({ kind: "controller-axis", seat: this.seat, timeMilliseconds: time, device, axis, value: 0 }, this.currentFocus);
     this.gamepad.clear(); this.gamepad.resetGyroCalibration();
   }
   release(time: number, commands: Pick<CommandBuffer, "append"> = this.options.commands): void {
@@ -243,7 +250,7 @@ export function registerInputCommands(commands: CommandBuffer, lookup: (seat: Se
       const seat = lookup(origin.seat);
       if (seat === null) return;
       const time = Number(invocation.argv[2] ?? 0), key = invocation.argv[1] ?? "console";
-      if (!Number.isFinite(time)) throw new RangeError("Invalid button command timestamp");
+      if (!Number.isFinite(time)) throw new CommandUsageError("Invalid button command timestamp");
       if (!down && invocation.argv[1] === undefined) seat.button(action).release(time);
       else seat.commandButton(action, key, down, time);
     })) names.push(commandName);
@@ -251,7 +258,10 @@ export function registerInputCommands(commands: CommandBuffer, lookup: (seat: Se
   if (commands.register("impulse", invocation => {
     let origin = invocation.source.origin;
     while (origin.kind === "script") origin = origin.caller;
-    if (origin.kind === "local-seat") lookup(origin.seat)?.setImpulse(parseImpulse(invocation.argv[1] ?? "", invocation.dialect));
+    if (origin.kind !== "local-seat") return;
+    const impulse = parseImpulse(invocation.argv[1] ?? "", invocation.dialect);
+    if (!Number.isInteger(impulse) || impulse < 0 || impulse > 255) throw new CommandUsageError("Input impulse must fit a byte");
+    lookup(origin.seat)?.setImpulse(impulse);
   })) names.push("impulse");
   return () => { for (const name of names) commands.unregister(name); };
 }

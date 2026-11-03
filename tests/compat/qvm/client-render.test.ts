@@ -23,11 +23,11 @@ import { createSceneQueries } from "../../../src/world/collision/index.ts";
 import { CommonParseCursor, CommonParseState } from "../../../src/core/common-parse.ts";
 
 async function fixture(world?: Q3ResourceWorld, load: () => Promise<void> = async () => {},
-  fogSelections: ConstructorParameters<typeof Q3SceneRecorder>[0]["fogSelections"] = () => []) {
+  fogSelections: ConstructorParameters<typeof Q3SceneRecorder>[0]["fogSelections"] = () => [], print: (text: string) => void = () => {}) {
   const identity = createIdentityOwner("qvm-render"), seat = identity.seat(1), scenes: Q3PresentedScene[] = [], pictures: MaterialTextDraw[] = [];
   const target = { x: 0, y: 0, width: 640, height: 480 };
   const scene = new Q3SceneRecorder({ seat, viewport: target, nearClip: 4, farClip: 4096, rail: DEFAULT_RAIL_SETTINGS,
-    fogSelections, print: () => {}, actor: () => null, publish: value => { scenes.push(value); } });
+    fogSelections, print, actor: () => null, publish: value => { scenes.push(value); } });
   const registered: RegisteredImage = { frame: { image: { owner: { identity: Symbol("qvm"), session: identity.session, generation: 0 },
     ordinal: 0, source: { kind: "generated", name: "white" }, width: 1, height: 1 } }, tmu: 0 };
   const compiled = (await compileShaderScript("vm/picture { { map $whiteimage } }", { whiteImage: registered, defaultImage: registered, lightmapImage: registered,
@@ -135,7 +135,7 @@ test("QVM world traps iterate retail entity bytes and query the loaded collision
     await noVis.resources.loadWorld("maps/q3dm1.bsp");
     const point = visiblePoint; if (point === undefined) throw new Error("Missing visible retail leaf point");
     expect(noVis.resources.inPVS(() => point, () => point)).toBe(true);
-    expect(() => qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_INPVS, [4094, 512]), f.resources, f.draw)).toThrow();
+    expect(() => qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_INPVS, [4094, 512]), f.resources, f.draw)).toThrow("QVM memory span exceeds allocation or has an invalid length");
   } finally { archive.close(); }
 });
 
@@ -156,7 +156,7 @@ test("world token and PVS traps retain source exhaustion, plane-side and lazy po
   failLoad = true;
   await expect(f.resources.loadWorld("failed")).rejects.toThrow("world load failed");
   expect(token(7)).toBe(1); expect(f.guest.readString(512)).toBe("quoted");
-  expect(() => token(32, 4090)).toThrow();
+  expect(() => token(32, 4090)).toThrow("Q_strncpyz destination exceeds QVM allocation");
   expect(token()).toBe(1); expect(f.guest.readString(512)).toBe("}");
   expect(token()).toBe(0); expect(token()).toBe(1);
   const origin = { x: 0, y: 0, z: 0 }, front = { x: 1, y: 0, z: 0 };
@@ -169,11 +169,14 @@ test("world token and PVS traps retain source exhaustion, plane-side and lazy po
 test("guest record marshalling preserves complete values and rejects truncated records", () => {
   const entity = new DataView(new ArrayBuffer(140)); entity.setInt32(0, 0, true); entity.setInt32(8, 12, true); entity.setUint8(119, 255);
   expect(readQvmRefEntity(entity).model).toBe(12); expect(readQvmRefEntity(entity).shaderRGBA.w).toBe(255);
-  expect(() => readQvmRefEntity(new DataView(new ArrayBuffer(139)))).toThrow();
+  expect(() => readQvmRefEntity(new DataView(new ArrayBuffer(139)))).toThrow("QVM refEntity_t:0: record requires 140 bytes, received 139");
   const refdef = new DataView(new ArrayBuffer(368)); refdef.setUint8(80, 123); refdef.setUint8(112, 65);
   const saved = readQvmRefdef(refdef); refdef.setUint8(80, 0);
   expect(saved.areaMask[0]).toBe(123); expect(saved.text[0].startsWith("A\0")).toBe(true);
-  expect(() => readQvmRefdef(new DataView(new ArrayBuffer(367)))).toThrow();
+  expect(() => readQvmRefdef(new DataView(new ArrayBuffer(367)))).toThrow("QVM refdef_t:0: record requires 368 bytes, received 367");
+  // RE_RenderScene copies the 32 text bytes opaquely, so a row without a NUL is not an error.
+  for (let index = 0; index < 32; index++) refdef.setUint8(112 + index, 66);
+  expect(readQvmRefdef(refdef).text[0]).toBe("B".repeat(32));
 });
 
 test("guest scene admission keeps refentity slots, polygon membership, and earlier snapshots", async () => {
@@ -249,4 +252,25 @@ test("renderer diagnostics retain real handles, exclude failures, and snapshot r
   expect(resources.registeredSkins()).toEqual([{ path: "skin", handle: 1, skin: f.skin }]);
   expect(resources.modelForHandle(1)).toBe(model); expect(resources.skinForHandle(1)).toBe(f.skin);
   expect(emptyModels).toEqual([]); expect(emptySkins).toEqual([]);
+});
+
+test("guest refentities and polygons with non-finite or huge coordinates are dropped with one warning", async () => {
+  const printed: string[] = [];
+  const f = await fixture(undefined, async () => {}, () => [], text => { printed.push(text); });
+  const recorder = f.scene, resources = f.resources;
+  f.guest.writeString(512, "vm/picture", 32);
+  await qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_REGISTERSHADER, [512]), resources, f.draw);
+  const entity = f.guest.view(1024, 140);
+  const submit = (type: number, x: number, oldX = 0): void => {
+    entity.setInt32(0, type, true); entity.setFloat32(68, x, true); entity.setFloat32(84, oldX, true);
+    qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_ADDREFENTITYTOSCENE, [1024]), resources, f.draw);
+  };
+  submit(2, 16);
+  for (const type of [0, 2, 4, 5, 6]) { submit(type, Number.NaN); submit(type, 3e9); submit(type, 0, Number.POSITIVE_INFINITY); }
+  const vertices = f.guest.view(2048, 72);
+  for (let index = 0; index < 3; index++) vertices.setFloat32(index * 24, index === 1 ? Number.NaN : 20, true);
+  qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_ADDPOLYTOSCENE, [17, 3, 2048]), resources, f.draw);
+  expect(recorder.capture().admission.entities).toHaveLength(1);
+  expect(recorder.capture().admission.polygons).toHaveLength(0);
+  expect(printed.filter(text => text.includes("dropped"))).toHaveLength(1);
 });

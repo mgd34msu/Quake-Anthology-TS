@@ -43,6 +43,8 @@ export function createRereleaseGladiatorDefinitions(weapons: Q2MissionPackMonste
     },
     die(context, reaction) {
       const { entity, game, state } = context;
+      // g_monster.cpp only applies weapon_sound while health > 0.
+      game.host.emit({ kind: "sound", actor: entity.actor.id, origin: game.body(entity).origin, path: entity.style === 1 ? "weapons/phaloop.wav" : "weapons/rg_hum.wav", channel: 1, volume: 1, attenuation: 1, reliable: false, loop: "stop" });
       if (checkGib(context)) {
         game.sound(entity, "misc/udeath.wav", 2); entity.skin = Math.trunc(entity.skin / 2);
         for (let i = 0; i < 2; i++) { throwGib(entity, game, "models/objects/gibs/bone/tris.md2", reaction.damage); throwGib(entity, game, "models/objects/gibs/sm_meat/tris.md2", reaction.damage); throwGib(entity, game, "models/monsters/gladiatr/gibs/thigh.md2", reaction.damage, { skinned: true }); }

@@ -1,8 +1,20 @@
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { ClockProfile, FrameContext, FrameOrdering } from "../../src/contracts/time.ts";
+import type { OwnedActor, ProviderId } from "../../src/contracts/identity.ts";
 import { FrameScheduler, compareInvocationOrder, thinkCallbackTime } from "../../src/world/scheduler.ts";
 import { SessionActorRegistry } from "../../src/world/actors/index.ts";
+
+/** Mirrors production dispatch: each actor is run at its own physics site, in source-slot order. */
+function traverse(scheduler: FrameScheduler, actors: readonly OwnedActor[], sourceSlot: (actor: OwnedActor) => number,
+  frames: readonly { readonly provider: ProviderId; readonly frame: FrameContext }[]): void {
+  for (const actor of [...actors].sort((left, right) => sourceSlot(left) - sourceSlot(right))) {
+    const provider = scheduler.pending(actor.id)?.timing.executionProvider ?? actor.owner;
+    const frame = frames.find(entry => entry.provider === provider)?.frame;
+    if (frame === undefined) throw new Error(`Missing source frame for provider: ${provider}`);
+    scheduler.run(actor.id, frame, "during-physics");
+  }
+}
 
 test("map-owned actors require their registered execution clock without changing source order", () => {
   const actors = new SessionActorRegistry(createIdentityOwner("selected monster scheduler"));
@@ -20,10 +32,10 @@ test("map-owned actors require their registered execution clock without changing
   expect(() => scheduler.schedule(creature, "world:think", timing)).toThrow("registered continuation");
   scheduler.schedule(creature, "world:think", { ...timing, executionProvider: "q2:monsters/rerelease/baseq2" });
   scheduler.schedule(later, "world:think", { due: { kind: "seconds", value: 1 }, boundary: "during-physics", order: { actor: later.id, provider: later.owner, sequence: 0 } });
-  scheduler.advance([
+  traverse(scheduler, [later, creature], actor => actors.sourceOf(actor.id)?.slot ?? -1, [
     { provider: "q1:game", frame: { frame: 1, phase: "entity-physics", time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.025 } } },
     { provider: "q2:monsters/rerelease/baseq2", frame: { frame: 1, phase: "entity-physics", time: { kind: "milliseconds", value: 1000 }, elapsed: { kind: "milliseconds", value: 25 } } },
-  ], "during-physics");
+  ]);
   expect(calls).toEqual(["q2:monsters/rerelease/baseq2/2/milliseconds", "q1:game/9/seconds"]);
   expect(actors.sourceOf(creature.id)).toEqual({ provider: "q1:game", slot: 2 });
   scheduler.close(); actors.close();
@@ -74,7 +86,7 @@ test("real source bindings order thinks and release/reentry cannot run stale cal
     } });
   actors.onRelease(actor => scheduler.cancel(actor));
   for (const actor of [later, first]) scheduler.schedule(actor, "q1:think", { due: { kind: "seconds", value: 1.01 }, boundary: "during-physics", order: { provider: actor.owner, actor: actor.id, sequence: 1 } });
-  scheduler.advance([{ provider: "q1:game", frame }], "during-physics");
+  traverse(scheduler, [later, first], actor => actors.sourceOf(actor.id)?.slot ?? -1, [{ provider: "q1:game", frame }]);
   expect(calls).toEqual([2, 2]);
   expect(scheduler.pending(later.id)).toBeNull();
   actors.close();
@@ -97,10 +109,10 @@ test("native source slots retain order while explicit equipment clocks retain th
     } });
   scheduler.schedule(grenade, "q2:think", { due: { kind: "milliseconds", value: 1050 }, boundary: "during-physics", order: { provider: grenade.owner, actor: grenade.id, sequence: 0 } });
   scheduler.schedule(native, "q1:think", { due: { kind: "seconds", value: 1.04 }, boundary: "during-physics", order: { provider: native.owner, actor: native.id, sequence: 0 } });
-  scheduler.advance([
+  traverse(scheduler, [grenade, native], actor => actors.sourceOf(actor.id)?.slot ?? -1, [
     { provider: grenade.owner, frame: { frame: 1, phase: "entity-physics", time: { kind: "milliseconds", value: 1050 }, elapsed: { kind: "milliseconds", value: 50 } } },
     { provider: native.owner, frame: { frame: 1, phase: "entity-physics", time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.05 } } },
-  ], "during-physics");
+  ]);
   expect(calls).toEqual([{ slot: 2, time: 1.04, unit: "seconds" }, { slot: 9, time: 1050, unit: "milliseconds" }]);
   expect(scheduler.pending(grenade.id)?.timing.due).toEqual({ kind: "milliseconds", value: 1050 });
   scheduler.close();

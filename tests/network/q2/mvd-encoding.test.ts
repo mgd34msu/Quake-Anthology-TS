@@ -54,7 +54,7 @@ test('authoritative captures feed real TCP GTV playback and reusable MVD recordi
     try {
         producer.observe(capture(2013));
         const port = await producer.listen('127.0.0.1', 0);
-        await expect(GtvConnection.connect({ host: '127.0.0.1', port, identity: { username: 'bad', password: 'wrong', version: 'test' }, timeoutMilliseconds: 1000, event: () => {} })).rejects.toThrow();
+        await expect(GtvConnection.connect({ host: '127.0.0.1', port, identity: { username: 'bad', password: 'wrong', version: 'test' }, timeoutMilliseconds: 1000, event: () => {} })).rejects.toThrow("GTV connection closed");
         connection = await GtvConnection.connect({ host: '127.0.0.1', port, identity: { username: 'viewer', password: 'fixture', version: 'test' }, timeoutMilliseconds: 1000, event: event => {
             if (event.kind === 'data') { for (const record of reader.read(event.bytes)) if (record.event.kind === 'frame') { frames++; resolveFrame?.(); } }
         } });

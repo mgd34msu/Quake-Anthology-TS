@@ -1,4 +1,5 @@
 import { BoundedQueue } from "../foundation/bounded-queue.ts";
+import { requireNoSignalHandlers } from "./signal-hint.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Q1/Q2 gamepad_assign.ts supplies explicit-before-automatic assignment intent.
 // SDL2 SDL_events.h, SDL_gamecontroller.h and SDL_joystick.h define the device ABI.
@@ -90,8 +91,7 @@ function initialize(): void {
   mainThread();
   const api = sdl();
   api.SDL_SetMainReady();
-  if (api.SDL_SetHint(cString("SDL_NO_SIGNAL_HANDLERS"), cString("1")) !== 1)
-    throw new Error("SDL must leave signal handling to the Unix signal owner");
+  requireNoSignalHandlers(api.SDL_SetHint(cString("SDL_NO_SIGNAL_HANDLERS"), cString("1")));
   checked(api.SDL_InitSubSystem(subsystem), "SDL_InitSubSystem controller");
 }
 
@@ -261,13 +261,17 @@ export class SdlControllers {
     }
     this.routes = routes;
   }
+  /** Controllers skipped because SDL could not open them. */
+  openFailures = 0;
   private discover(timestamp: number, deviceIndex: number | null = null): void {
     const api = sdl(), count = checked(api.SDL_NumJoysticks(), "SDL_NumJoysticks");
     const end = deviceIndex === null ? count : Math.min(count, deviceIndex + 1);
     for (let index = deviceIndex ?? 0; index >= 0 && index < end; index++) {
       const instance = api.SDL_JoystickGetDeviceInstanceID(index);
       if (instance < 0 || this.opened.has(instance) || api.SDL_IsGameController(index) === 0) continue;
-      const pointer = required(api.SDL_GameControllerOpen(index), "SDL_GameControllerOpen");
+      // A device that fails to open (udev permission race, unplug during open, busy HID node) is skipped; a later hotplug event retries.
+      const pointer = api.SDL_GameControllerOpen(index);
+      if (pointer === null) { this.openFailures++; continue; }
       try {
         const joystick = required(api.SDL_GameControllerGetJoystick(pointer), "SDL_GameControllerGetJoystick");
         if (checked(api.SDL_JoystickInstanceID(joystick), "SDL_JoystickInstanceID") !== instance)
@@ -281,7 +285,7 @@ export class SdlControllers {
         const description = describe(device);
         this.opened.set(instance, device);
         this.pending.push({ kind: "connected", timestamp, device: description });
-      } catch (error) { api.SDL_GameControllerClose(pointer); throw error; }
+      } catch { api.SDL_GameControllerClose(pointer); this.openFailures++; }
     }
     this.resolve(timestamp);
   }

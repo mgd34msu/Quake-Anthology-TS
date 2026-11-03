@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
@@ -9,6 +9,7 @@ import { expansionSupply } from "../../../src/content/composition/expansion-supp
 import { Q1_Q2_SUPPLY_PROFILE } from "../../../src/content/composition/q1-q2-supply.ts";
 import { Q3_Q2_SUPPLY_PROFILE } from "../../../src/content/composition/q3-q2-supply.ts";
 import { xatrixWeaponDefinitions, rogueWeaponDefinitions } from "../../../src/content/q2/missionpacks/weapons/definitions.ts";
+const test = corpusTest("q2/baseq2/pak0.pak", "q3a/baseq3/pak0.pk3", "q3a/missionpack/pak0.pk3");
 
 test("expansion menu arsenals resolve retail resources and distinct same-family source roles", async () => {
   const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });

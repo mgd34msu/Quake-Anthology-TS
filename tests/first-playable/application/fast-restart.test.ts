@@ -1,9 +1,8 @@
-import { expect, spyOn, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect, spyOn } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { ApplicationQ3Client } from "../../../src/app/bootstrap/q3-client.ts";
 import { ApplicationQ3Source } from "../../../src/app/bootstrap/q3-client/source.ts";
@@ -30,9 +29,12 @@ import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.t
 import { discoverInstalledContent } from "../../../src/content/catalog/index.ts";
 import { ConnectionState } from "../../../src/content/q3/base/game/state.ts";
 import { encodePng } from "../../../src/formats/images/png.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const test = corpusTest("q3a/missionpack/pak0.pk3");
+const tempDirectory = trackedTempDirectories();
 
 test("default mpteam1 six-client warmup and manual restart retain native owners and settle once per step", async () => {
-  const root = await mkdtemp(join(tmpdir(), "quake-fast-restart-"));
+  const root = await tempDirectory("quake-fast-restart-");
   const parsed = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--renderer", "cpu", "--hidden",
     "--width", "320", "--height", "240", "--user-content-root", root, "--listen", "0", "--bind", "127.0.0.1"]);
   if (parsed.kind !== "menu" && parsed.kind !== "run") throw new Error("Missing restart fixture options");
@@ -332,7 +334,7 @@ test("default mpteam1 six-client warmup and manual restart retain native owners 
 }, 360000);
 
 test("native Q3 initial and restored input uses accepted raw angles, including centerview", async () => {
-  const root = await mkdtemp(join(tmpdir(), "quake-raw-angle-save-"));
+  const root = await tempDirectory("quake-raw-angle-save-");
   const parsed = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--renderer", "cpu", "--hidden",
     "--width", "320", "--height", "240", "--user-content-root", root]);
   if (parsed.kind !== "menu" && parsed.kind !== "run") throw new Error("Missing angle fixture options");

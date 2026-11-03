@@ -3,6 +3,7 @@ import type { ControllerDevice } from "../../platform/controller.ts";
 import type { UiControl, UiControlId } from "../../contracts/ui.ts";
 import type { NativeUiController } from "../common/controller.ts";
 import { menuRow } from "../common/layout.ts";
+import { buttonControl } from "../common/controls.ts";
 import type { SettingsMenus } from "./index.ts";
 
 export interface GyroSettingsUi {
@@ -15,8 +16,7 @@ export interface GyroSettingsUi {
 export function registerGyroSettingsMenu(controller: NativeUiController, settings: GyroSettingsUi, title = "Gyro controls"): SettingsMenus {
   const root = "menu:settings:gyro";
   let error = "";
-  const button = (id: UiControlId, label: string, row: number, activate: () => void, enabled = true): UiControl => ({ id, kind: "button", label,
-    rect: menuRow(row), enabled, visible: true, activate: () => { activate(); return undefined; } });
+  const button = (id: UiControlId, label: string, row: number, activate: () => void, enabled = true): UiControl => buttonControl(id, label, menuRow(row), activate, enabled);
   const save = (): void => { void settings.save().catch((cause: unknown) => { error = cause instanceof Error ? cause.message : String(cause); }); };
   const dispose = controller.register(root, () => {
     const seat = controller.seat, device = settings.device(), input = settings.router.seat(seat);

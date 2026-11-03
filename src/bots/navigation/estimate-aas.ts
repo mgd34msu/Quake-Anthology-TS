@@ -3,6 +3,7 @@
 import type { Vec3 } from "../../contracts/math.ts";
 import type { AasAsset } from "./aas.ts";
 import { aasAreaTravelFlags, aasTravelFlag } from "./graph.ts";
+import { type EstimateStore, estimateStore, sharedEstimateStore } from "./estimate-store.ts";
 import type { NavigationEdge, NavigationEstimateQuery, NavigationEstimateResult, NavigationGraph } from "./types.ts";
 
 function at<T>(values: ArrayLike<T>, index: number): T {
@@ -15,8 +16,9 @@ export function aasEstimateAreaTime(settings: Pick<AasAsset["settings"][number],
   const f = Math.fround, x = f(f(start.x) - f(end.x)), y = f(f(start.y) - f(end.y)), z = f(f(start.z) - f(end.z));
   const distance = f(Math.sqrt(f(f(f(x * x) + f(y * y)) + f(z * z))));
   const factor = (settings.presence & 2) === 0 ? f(1.3) : (settings.flags & 4) !== 0 ? 1 : f(0.33);
-  const value = Math.trunc(f(distance * factor));
-  if (!Number.isFinite(value) || value > 0x7fffffff) throw new RangeError("AAS estimate distance exceeds source int range");
+  const converted = Math.trunc(f(distance * factor));
+  // The C float-to-int conversion yields INT_MIN for NaN and out-of-range values, which the later clamp turns into 1.
+  const value = Number.isFinite(converted) && converted <= 0x7fffffff ? converted : -0x80000000;
   return Math.max(1, value) & 0xffff;
 }
 interface Incoming { readonly area: number; readonly reach: number; }
@@ -50,6 +52,15 @@ function topology(asset: AasAsset): Topology {
   const result = { incoming, crossings, portalMaxima };
   topologies.set(asset, result); return result;
 }
+const sharedCaches = new WeakMap<object, EstimateStore<Cache>>();
+const edgeIndexes = new WeakMap<readonly NavigationEdge[], ReadonlyMap<number, NavigationEdge>>();
+function edgesById(edges: readonly NavigationEdge[]): ReadonlyMap<number, NavigationEdge> {
+  const existing = edgeIndexes.get(edges);
+  if (existing !== undefined) return existing;
+  const index = new Map(edges.map(edge => [edge.id, edge]));
+  edgeIndexes.set(edges, index);
+  return index;
+}
 interface Cache { readonly times: Uint16Array; readonly reaches: Uint8Array; }
 interface Update { area: number; cluster: number; time: number; row: Uint16Array; queued: boolean; }
 function update(): Update { return { area: 0, cluster: 0, time: 0, row: new Uint16Array(0), queued: false }; }
@@ -58,26 +69,31 @@ function update(): Update { return { area: 0, cluster: 0, time: 0, row: new Uint
 export class AasNavigationEstimates {
   private readonly topology: Topology;
   private readonly edges: ReadonlyMap<number, NavigationEdge>;
-  private readonly caches = new Map<string, Cache>();
-  private cacheBytes = 0;
+  private readonly store: EstimateStore<Cache>;
+  /** With a scope the store is shared by every runtime over this graph's edges, keyed by what `allowed` answers. */
   constructor(readonly graph: NavigationGraph, readonly asset: AasAsset,
-    private readonly allowed: (edge: NavigationEdge, flags: number | undefined) => boolean) {
+    private readonly allowed: (edge: NavigationEdge, flags: number | undefined) => boolean, private readonly scope: (() => string) | null = null) {
     this.topology = topology(asset);
-    this.edges = new Map(graph.edges.map(edge => [edge.id, edge]));
+    this.edges = edgesById(graph.edges);
+    this.store = scope === null ? estimateStore() : sharedEstimateStore(sharedCaches, graph.edges);
   }
-  invalidate(): void { this.caches.clear(); this.cacheBytes = 0; }
+  invalidate(): void {
+    if (this.scope !== null) return;
+    this.store.entries.clear(); this.store.used = 0;
+  }
   private remember(key: string, cache: Cache): Cache {
-    this.caches.set(key, cache); this.cacheBytes += cache.times.byteLength + cache.reaches.byteLength;
-    while (this.cacheBytes > 16 * 1024 * 1024 && this.caches.size > 1) {
-      const oldest = this.caches.entries().next();
+    const caches = this.store.entries;
+    caches.set(key, cache); this.store.used += cache.times.byteLength + cache.reaches.byteLength;
+    while (this.store.used > 16 * 1024 * 1024 && caches.size > 1) {
+      const oldest = caches.entries().next();
       if (oldest.done) break;
-      this.caches.delete(oldest.value[0]); this.cacheBytes -= oldest.value[1].times.byteLength + oldest.value[1].reaches.byteLength;
+      caches.delete(oldest.value[0]); this.store.used -= oldest.value[1].times.byteLength + oldest.value[1].reaches.byteLength;
     }
     return cache;
   }
   private cached(key: string): Cache | undefined {
-    const cache = this.caches.get(key);
-    if (cache !== undefined) { this.caches.delete(key); this.caches.set(key, cache); }
+    const caches = this.store.entries, cache = caches.get(key);
+    if (cache !== undefined) { caches.delete(key); caches.set(key, cache); }
     return cache;
   }
   private clusterArea(cluster: number, area: number): number {
@@ -87,7 +103,7 @@ export class AasNavigationEstimates {
     return portal.clusterAreas[portal.frontCluster === cluster ? 0 : 1];
   }
   private areaCache(cluster: number, goal: number, flags: number): Cache {
-    const key = `a:${cluster}:${goal}:${flags}`, cached = this.cached(key);
+    const key = `${this.scope?.() ?? ""}|a:${cluster}:${goal}:${flags}`, cached = this.cached(key);
     if (cached !== undefined) return cached;
     const count = at(this.asset.clusters, cluster).reachabilityAreaCount;
     const cache = { times: new Uint16Array(count), reaches: new Uint8Array(count) };
@@ -120,7 +136,7 @@ export class AasNavigationEstimates {
     return this.remember(key, cache);
   }
   private portalCache(cluster: number, goal: number, flags: number): Cache {
-    const key = `p:${goal}:${flags}`, cached = this.cached(key);
+    const key = `${this.scope?.() ?? ""}|p:${goal}:${flags}`, cached = this.cached(key);
     if (cached !== undefined) return cached;
     const count = this.asset.portals.length, cache = { times: new Uint16Array(count), reaches: new Uint8Array(count) };
     const updates = Array.from({ length: count + 1 }, update), first = at(updates, count);

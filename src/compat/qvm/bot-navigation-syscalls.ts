@@ -110,7 +110,8 @@ export function qvmBotNavigationSyscall(call: QvmHostCall, services: QvmBotNavig
       const flags = enabled === undefined ? info.flags : enabled ? info.flags & ~8 : info.flags | 8;
       out.setInt32(0, info.contents, true); out.setInt32(4, flags, true);
       out.setInt32(8, info.presenceType, true); out.setInt32(12, info.cluster, true);
-      vector(out, 16, node.bounds.min); vector(out, 28, node.bounds.max); vector(out, 40, node.origin);
+      const asset = runtime.graph.asset;
+      vector(out, 16, node.bounds.min); vector(out, 28, node.bounds.max); vector(out, 40, asset?.kind === "aas" ? asset.areas[area]?.center ?? node.origin : node.origin);
       return 52;
     }
     case 303: {
@@ -130,7 +131,7 @@ export function qvmBotNavigationSyscall(call: QvmHostCall, services: QvmBotNavig
     case 307: return services.navigation.pointArea(point(1));
     case 308: {
       memory.view(integer(3), 4).setInt32(0, 0, true);
-      const crossings = services.navigation.traceAreas(point(1), point(2), integer(5));
+      const crossings = services.navigation.traceAreas(point(1), point(2), Math.max(0, integer(5)));
       for (const [index, crossing] of crossings.entries()) {
         memory.view(integer(3), 4, index * 4).setInt32(0, crossing.area, true);
         if (integer(4) !== 0) vector(memory.view(integer(4), 12, index * 12), 0, crossing.point);
@@ -163,7 +164,12 @@ export function qvmBotNavigationSyscall(call: QvmHostCall, services: QvmBotNavig
     case 317: return Number(services.navigation.swimming(point(1)));
     case 318: {
       const presence = integer(4);
-      if (presence !== 2 && presence !== 4) throw new RangeError("QVM movement prediction requires a supported presence type");
+      if (presence !== 2 && presence !== 4) {
+        // AAS_PresenceTypeBoundingBox only prints; no prediction runs, so the caller reads a cleared result.
+        services.library.options.print(4, "AAS_PresenceTypeBoundingBox: unknown presence type\n");
+        memory.fillBytes(memory.span(integer(1), 84).byteOffset - memory.bytes.byteOffset, 84, 0);
+        return 0;
+      }
       const result = services.predictClientMovement({ entityNum: integer(2), origin: point(3), presence, onGround: integer(5) !== 0,
         velocity: point(6), commandMove: point(7), commandFrames: integer(8), maxFrames: integer(9), frameTime: float(10),
         stopEvents: integer(11), stopArea: integer(12), visualize: integer(13) !== 0 });
@@ -218,7 +224,8 @@ export function qvmBotNavigationSyscall(call: QvmHostCall, services: QvmBotNavig
       if (integer(1) === 0) return asset.clusters.reduce((sum, cluster) => (sum + cluster.reachabilityAreaCount) | 0, 0);
       const area = services.navigation.pointArea(point(1)); if (area === 0 || services.navigation.area(area).reachableAreaCount === 0) return 0;
       const settings = asset.settings[area]; if (settings === undefined) throw new RangeError("QVM reachability area exceeds AAS allocation");
-      if (settings.cluster < 0) throw new RangeError("AAS_PointReachabilityAreaIndex source reuses frontcluster as a negative portal index");
+      // The source indexes with the portal's frontcluster here, which is not a defined area index, so a portal area yields none.
+      if (settings.cluster < 0) return 0;
       return (asset.clusters.slice(0, settings.cluster).reduce((sum, cluster) => (sum + cluster.reachabilityAreaCount) | 0, 0) + settings.clusterArea) | 0;
     }
     default: return null;

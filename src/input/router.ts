@@ -195,7 +195,10 @@ export class InputRouter {
         translated = { ...common, kind: "key", code, down: event.down, repeat: event.repeat }; break;
       }
       case "text": translated = { ...common, kind: "text", text: event.text }; break;
-      case "mouse-motion": translated = { ...common, kind: "mouse-motion", position: this.pointerPosition(event.x, event.y), delta: { x: event.dx, y: event.dy } }; break;
+      case "mouse-motion":
+        // Relative game motion ignores the position, and motion never changes focus or capture, so the native size queries are skipped.
+        translated = { ...common, kind: "mouse-motion", position: seat.focus.kind === "game" ? { x: event.x, y: event.y } : this.pointerPosition(event.x, event.y), delta: { x: event.dx, y: event.dy } };
+        seat.input(translated); return;
       case "mouse-button":
         if (seat.focus.kind !== "game") seat.input({ ...common, kind: "mouse-motion", position: this.pointerPosition(event.x, event.y), delta: { x: 0, y: 0 } });
         translated = { ...common, kind: "mouse-button", button: event.button, down: event.down }; break;

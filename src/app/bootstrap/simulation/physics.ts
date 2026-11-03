@@ -291,7 +291,7 @@ export class SharedPhysics {
   }
   private policy(family: PhysicsFamily, mask: number, move: "normal" | "no-monsters" | "missile" = "normal"): TracePolicy {
     if (family === "q1") return { kind: "q1", move, hull: null };
-    if (family === "q2") return { kind: "q2", contentsMask: mask, leafContents: "merged" };
+    if (family === "q2") return { kind: "q2", contentsMask: mask, leafContents: this.options.q2Edition === "rerelease" ? "merged" : "stored" };
     return { kind: "q3", contentsMask: mask, curves: true, playerCurveClip: true };
   }
   trace(request: Q2TraceRequest, family: PhysicsFamily = "q2"): TraceResult {
@@ -352,7 +352,8 @@ export class SharedPhysics {
     if (other !== null && this.live(actor) && this.live(other) && this.solid(other)?.solid !== "none") this.options.callbacks.touch({ self: other, other: actor.id, plane: null, surface: null });
     return undefined;
   }
-  private pushEntity(actor: OwnedActor, displacement: Vec3, exclude: readonly ActorId[] = []): TraceResult {
+  /** SV_PushEntity runs once per toss; `callbacks: false` is the sliding retry, which must not repeat touch and impact callbacks. */
+  private pushEntity(actor: OwnedActor, displacement: Vec3, exclude: readonly ActorId[] = [], callbacks = true): TraceResult {
     const initial = this.bodies.read(actor.id);
     if (initial === null) throw new RangeError("Cannot push an actor without a body");
     const end = this.add(initial.origin, displacement);
@@ -363,16 +364,17 @@ export class SharedPhysics {
       // Q1 SV_PushEntity links with trigger touching before SV_Impact; Q2
       // impacts first and may retry the push when the obstacle was removed.
       const q1 = this.family(actor) === "q1";
-      if (q1 && this.live(actor)) this.touchTriggers(actor);
-      if (trace.fraction !== 1) {
+      if (q1 && callbacks && this.live(actor)) this.touchTriggers(actor);
+      // SV_PushEntity impacts on `trace.ent`, which is also set when the move starts inside a solid.
+      if (trace.fraction !== 1 || q1 && trace.startSolid) {
         const hit = this.hitActor(trace);
-        if (this.live(actor)) this.impact(actor, trace);
+        if (callbacks && this.live(actor)) this.impact(actor, trace);
         if (!q1 && hit !== null && !this.options.actors.isLive(hit) && this.live(actor)) {
           const changed = this.bodies.read(actor.id);
           if (changed !== null) { this.bodies.write(actor, { ...changed, origin: initial.origin }); this.bodies.link(actor); continue; }
         }
       }
-      if (!q1 && this.live(actor)) this.touchTriggers(actor);
+      if (!q1 && callbacks && this.live(actor)) this.touchTriggers(actor);
       return trace;
     }
   }
@@ -396,9 +398,15 @@ export class SharedPhysics {
     if (link) this.bodies.link(actor);
     return true;
   }
+  private candidateOrder: { readonly revision: number; readonly actors: readonly OwnedActor[] } | null = null;
   private candidates(): readonly OwnedActor[] {
-    return this.options.actors.observations().map(actor => actor.id).sort(this.options.sourceOrder)
+    // The registry revision moves on every allocation, source binding and release, so the ordered list is rebuilt only then.
+    const revision = this.options.actors.revision;
+    if (this.candidateOrder?.revision === revision) return this.candidateOrder.actors;
+    const actors = this.options.actors.observations().map(actor => actor.id).sort(this.options.sourceOrder)
       .flatMap(id => { const actor = this.options.actors.resolveOwned(id); return actor === null ? [] : [actor]; });
+    this.candidateOrder = { revision, actors };
+    return actors;
   }
   /** Source-owned fields stay in the caller; collision and rider movement stay here. */
   q1PusherServices(projection: Pick<Q1PusherServices, "read" | "write" | "link" | "blocked">): Omit<Q1PusherServices, "think"> {
@@ -612,7 +620,7 @@ export class SharedPhysics {
     const family = this.family(actor), before = this.actorFlags(actor);
     const contents = this.options.scene.pointContents({ point: body.origin, target: { kind: "world" },
       policy: this.policy(family, defaultMask), numeric: this.options.numeric, passActor: actor.id });
-    const value = contents.kind === "q2" ? contents.merged : contents.contents;
+    const value = contents.kind === "q2" ? this.options.q2Edition === "rerelease" ? contents.merged : contents.stored : contents.contents;
     const wet = family === "q1" ? value <= -3 && value >= -5 || value <= -9 && value >= -14 : (value & 56) !== 0;
     const wasWet = (before.waterLevel ?? 0) !== 0;
     this.setFlags(actor, { waterLevel: wet ? 1 : 0, waterType: value });
@@ -648,7 +656,13 @@ export class SharedPhysics {
         waterSound: origin => { this.emit({ actor: this.options.worldActor() ?? actor.id, kind: "water-enter", origin }); return undefined; },
       });
     }
-    if (state.ground !== null && (!this.options.actors.isLive(state.ground) || family !== "q1" && this.dot(state.velocity, motion.gravityVector) < 0)) { this.writeLive(actor, { ground: null }); state = this.bodies.read(actor.id); }
+    if (state.ground !== null && !this.options.actors.isLive(state.ground)) {
+      // WinQuake leaves FL_ONGROUND set when the supporting edict is freed, so Q1 items and monsters stay put;
+      // the dangling reference is rebound to world rather than kept.
+      const world = family === "q1" ? this.options.worldActor() : null;
+      this.writeLive(actor, { ground: world });
+      state = this.bodies.read(actor.id);
+    } else if (state.ground !== null && family !== "q1" && this.dot(state.velocity, motion.gravityVector) < 0) { this.writeLive(actor, { ground: null }); state = this.bodies.read(actor.id); }
     if (state === null) return undefined;
     const maximum = this.options.maxVelocity ?? 2000;
     const clamp = (v: number): number => Number.isFinite(v) ? Math.max(-maximum, Math.min(maximum, v)) : 0;
@@ -667,7 +681,11 @@ export class SharedPhysics {
       }
       if (state.ground === null && this.dot(velocity, motion.gravityVector) >= -100) {
         const floor = this.bodyTrace(actor, state.origin, this.add(state.origin, this.scale(motion.gravityVector, 0.25)));
-        if (floor.fraction < 1 && !floor.startSolid && this.dot(floor.sourcePlane.normal, motion.gravityVector) <= -0.7) { this.writeLive(actor, { ground: this.hitActor(floor) }); state = this.bodies.read(actor.id) ?? state; }
+        if (floor.fraction < 1 && !floor.startSolid && this.dot(floor.sourcePlane.normal, motion.gravityVector) <= -0.7) {
+          // M_CheckGround snaps to the trace end point and stops vertical motion on landing.
+          velocity = this.vector(velocity.x, velocity.y, 0);
+          this.writeLive(actor, { ground: this.hitActor(floor), origin: floor.end, velocity: this.vector(state.velocity.x, state.velocity.y, 0) }); state = this.bodies.read(actor.id) ?? state;
+        }
       }
       const wasGrounded = state.ground !== null, fallingFast = this.dot(state.velocity, motion.gravityVector) > this.worldGravity * 0.1;
       this.writeLive(actor, { angles: this.add(state.angles, this.scale(motion.angularVelocity, elapsed)) });
@@ -728,7 +746,7 @@ export class SharedPhysics {
       }
       this.writeLive(actor, { velocity });
       if (trace.fraction > 0 || bump >= 3 || !this.live(actor)) break;
-      trace = this.pushEntity(actor, this.scale(velocity, elapsed));
+      trace = this.pushEntity(actor, this.scale(velocity, elapsed), [], false);
       state = this.bodies.read(actor.id);
       if (state === null || trace.fraction === 1) break;
     }

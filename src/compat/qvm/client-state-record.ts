@@ -72,7 +72,9 @@ function writeGameState(memory: QvmMemory, view: DataView, state: SourceGameStat
 export function writeQvmSnapshot(memory: QvmMemory, view: DataView, snapshot: Snapshot, ping: number, profile: QvmAbiProfile = "q3-modern"): void {
   requireBytes(view, qvmSnapshotBytes(profile));
   const psBytes = profile === "q3-modern" ? 468 : 444, entityBytes = profile === "q3-modern" ? 208 : 204;
-  if (snapshot.areaMask.length !== 32 || snapshot.entities.length > 256) throw new RangeError("Invalid source snapshot_t extent");
+  if (snapshot.areaMask.length !== 32) throw new RangeError("Invalid source snapshot_t extent");
+  // CL_GetSnapshot truncates to MAX_ENTITIES_IN_SNAPSHOT
+  const entities = snapshot.entities.length > 256 ? snapshot.entities.slice(0, 256) : snapshot.entities;
   const ps = snapshot.playerState;
   const offset = view.byteOffset - memory.bytes.byteOffset;
   view.setInt32(0, snapshot.flags, true); view.setInt32(4, ping, true); view.setInt32(8, snapshot.serverTime, true);
@@ -93,9 +95,9 @@ export function writeQvmSnapshot(memory: QvmMemory, view: DataView, snapshot: Sn
     powerups: Array.from(ps.powerups.copy()), ammo: Array.from(ps.ammo.copy()), generic1: ps.generic1,
     loopSound: ps.loopSound, jumpPadEntity: ps.jumppadEnt, pingMilliseconds: ps.ping,
     movementFrameCount: ps.pmoveFramecount, jumpPadFrame: ps.jumppadFrame, entityEventSequence: ps.entityEventSequence,
-  }, profile);
-  view.setInt32(44 + psBytes, snapshot.entities.length, true);
-  snapshot.entities.forEach((entity, index) => writeQvmEntityState(memory.dataView(offset + 48 + psBytes + index * entityBytes, entityBytes), entity, profile));
+  }, profile, "initialize", "ignore");
+  view.setInt32(44 + psBytes, entities.length, true);
+  entities.forEach((entity, index) => writeQvmEntityState(memory.dataView(offset + 48 + psBytes + index * entityBytes, entityBytes), entity, profile, "ignore"));
   // CL_GetSnapshot leaves numServerCommands and unused entity slots untouched.
   view.setInt32(qvmSnapshotBytes(profile) - 4, snapshot.serverCommandNumber, true);
 }

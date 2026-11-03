@@ -1,16 +1,18 @@
+import { writeCapture } from "../../support/capture.ts";
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.ts";
-import { KeyCode } from "../../../src/input/key-codes.ts";
+import { KeyCode } from "../../../src/core/key-codes.ts";
 import { readSaveImage } from "../../../src/persistence/save-image.ts";
 import { encodePng } from "../../../src/formats/images/png.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 test("actual pause menu saves, confirms overwrite and restores a mixed-source local world", async () => {
-  const root = await mkdtemp(join(tmpdir(), "quake-save-menu-"));
+  const root = await tempDirectory("quake-save-menu-");
   const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q1", "--character", "q2", "--renderer", "cpu", "--hidden", "--width", "640", "--height", "480", "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Missing options");
   const app = await Application.open(parsed.options, { print: () => undefined, saveDirectory: join(root, "saves") });
@@ -50,7 +52,7 @@ test("actual pause menu saves, confirms overwrite and restores a mixed-source lo
     await Bun.write(join(root, "saves", "Broken.sav"), "broken");
     await enter("ui:application:load"); await settle();
     await enter("ui:saves:slot:Broken.sav"); expect(ui().controller.activeMenu).toBe("menu:saves:load");
-    const capture = app.captureNextFrame(); await app.step(1); await Bun.write("/tmp/quake-save-menu-load.png", encodePng(640, 480, await capture));
+    const capture = app.captureNextFrame(); await app.step(1); await writeCapture("quake-save-menu-load.png", encodePng(640, 480, await capture));
     const previous = app.simulation;
     await enter("ui:saves:slot:Save 001.sav"); await settle();
     expect(app.simulation).not.toBe(previous); expect(app.content.recipe).toEqual(saved.recipe);
@@ -61,7 +63,7 @@ test("actual pause menu saves, confirms overwrite and restores a mixed-source lo
 }, 60000);
 
 for (const mode of ["singleplayer", "deathmatch"]) test(`actual Q3 ${mode} pause keeps local bot policy and clock correct`, async () => {
-  const root = await mkdtemp(join(tmpdir(), "quake-pause-bots-"));
+  const root = await tempDirectory("quake-pause-bots-");
   const parsed = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--mode", mode, "--renderer", "cpu", "--hidden", "--width", "640", "--height", "480", "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Missing options");
   const app = await Application.open(parsed.options, { print: () => undefined, saveDirectory: join(root, "saves") });
@@ -80,7 +82,7 @@ for (const mode of ["singleplayer", "deathmatch"]) test(`actual Q3 ${mode} pause
 }, 60000);
 
 test("split-screen save menu restores both connected seats through the common save contract", async () => {
-  const root = await mkdtemp(join(tmpdir(), "quake-save-seats-"));
+  const root = await tempDirectory("quake-save-seats-");
   const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--seats", "2", "--renderer", "cpu", "--hidden", "--width", "640", "--height", "480", "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Missing options");
   const app = await Application.open(parsed.options, { print: () => undefined, saveDirectory: join(root, "saves") });

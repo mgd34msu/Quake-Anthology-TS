@@ -9,6 +9,8 @@ const classicObituaries: ReadonlyMap<string, string> = new Map([
   ["$qc_death_rl2", "{0} was gibbed by {1}'s rocket\n"], ["$qc_death_rl3", "{0} rides {1}'s rocket\n"], ["$qc_death_lg1", "{0} accepts {1}'s discharge\n"], ["$qc_death_lg2", "{0} accepts {1}'s shaft\n"],
   ["$qc_death_drown1", "{0} sleeps with the fishes\n"], ["$qc_death_drown2", "{0} sucks it down\n"], ["$qc_death_slime1", "{0} gulped a load of slime\n"], ["$qc_death_slime2", "{0} can't exist on slime alone\n"],
   ["$qc_death_lava1", "{0} burst into flames\n"], ["$qc_death_lava2", "{0} turned into hot slag\n"], ["$qc_death_lava3", "{0} visits the Volcano God\n"], ["$qc_death_squish", "{0} was squished\n"],
+  ["$qc_death_hook1", "{0} was hooked by {1}\n"], ["$qc_death_hook2", "{0} was hooked by {1}\n"],
+  ["$qc_ks_changed_teams", "{0} changed teams\n"], ["$qc_ks_tried_change_teams", "{0} tried to change teams\n"],
   ["$qc_death_fall", "{0} fell to his death\n"], ["$qc_death_died", "{0} died\n"],
 ]);
 export const classicMonsterObituaries: ReadonlyMap<string, string> = new Map([

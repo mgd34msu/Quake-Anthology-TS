@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { UiControl, UiMenuId } from "../../contracts/ui.ts";
 import type { NativeUiController } from "../common/controller.ts";
+import { buttonControl, wrapWords } from "../common/controls.ts";
 
 export interface ModMenuRow {
   readonly id: string;
@@ -33,16 +34,14 @@ export function registerModMenu(controller: NativeUiController, service: ModMenu
     });
     const current = rows.find(row => row.id === selected) ?? rows[0];
     selected = current?.id ?? null;
-    const button = (suffix: string, label: string, x: number, y: number, width: number, action: () => void, enabled = true): UiControl => ({
-      id: `ui:mods:${suffix}`, kind: "button", label, rect: { x, y, width, height: 28 }, enabled, visible: true,
-      activate: () => { action(); return undefined; },
-    });
+    const button = (suffix: string, label: string, x: number, y: number, width: number, action: () => void, enabled = true): UiControl =>
+      buttonControl(`ui:mods:${suffix}`, label, { x, y, width, height: 28 }, action, enabled);
     const messages = [
       ...(current === undefined ? [] : [`${current.title} (${current.source})`]),
       ...(current?.unavailable === undefined || current.unavailable === null ? [] : [current.unavailable]),
       service.status() || `${allRows.filter(row => row.enabled).length} enabled`,
     ];
-    const lines = messages.flatMap(message => message.match(/.{1,42}(?:\s+|$)|\S{1,42}/gu) ?? []);
+    const lines = messages.flatMap(message => wrapWords(message, 42));
     const details = lines.map((line, index) => ({
       ...button(`detail:${index}`, line.trim(), 48, 372 + index * 24, 528, () => undefined, false),
       rect: { x: 48, y: 372 + index * 24, width: 528, height: 24 },

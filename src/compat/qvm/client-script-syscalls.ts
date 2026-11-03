@@ -2,10 +2,10 @@
 import { SaveReader } from "../../persistence/value.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
 import { BotMemory } from "../../bots/behavior/library/memory.ts";
-import { allocateScriptSource } from "../../ui/common/legacy/script/lexer.ts";
-import type { SourceScriptStorage } from "../../ui/common/legacy/script/memory.ts";
-import { ScriptSourceReader } from "../../ui/common/legacy/script/preprocessor.ts";
-import type { IncludeRequest, ScriptGlobalDefines, ScriptSource } from "../../ui/common/legacy/script/preprocessor.ts";
+import { allocateScriptSource } from "../../content/legacy-script/lexer.ts";
+import type { SourceScriptStorage } from "../../content/legacy-script/memory.ts";
+import { ScriptSourceReader } from "../../content/legacy-script/preprocessor.ts";
+import type { IncludeRequest, ScriptGlobalDefines, ScriptSource } from "../../content/legacy-script/preprocessor.ts";
 import { QvmCgameImport, QvmUiImport } from "./abi.ts";
 import { QVM_SCRIPT_TOKEN_BYTES, writeQvmScriptToken } from "./script-record.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";

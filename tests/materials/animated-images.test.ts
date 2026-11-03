@@ -1,3 +1,4 @@
+import { writeCapture } from "../support/capture.ts";
 import { SceneMaterialRegistrations } from "../../src/render/scene/material-registrations.ts";
 import { corpusFile } from "../support/corpus.ts";
 
@@ -115,7 +116,7 @@ test.skipIf(process.env["SDL_VIDEODRIVER"] !== "offscreen" || !existsSync(`${roo
       const frame = frames.finish(true);
       operations.push(...frame.commands.flatMap(command => command.kind === "image-resource" ? [command.operation] : []));
       const capture = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute(frame); const pixels = await capture; captures.push(pixels);
-      if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/tmp/animated-images/${asset.split("/").at(-1)}-${family}-${rendererKind}-${time}.png`, encodePng(width, height, pixels));
+      if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await writeCapture(`animated-images/${asset.split("/").at(-1)}-${family}-${rendererKind}-${time}.png`, encodePng(width, height, pixels));
     }
     expect(captures[0]).not.toEqual(captures[1]);
     expect(captures[1]).not.toEqual(captures[2]);

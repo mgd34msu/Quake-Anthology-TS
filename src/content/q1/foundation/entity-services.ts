@@ -16,20 +16,20 @@ import type { BodyState } from "../../../contracts/world.ts";
 import type { Q1Entity } from "../../../formats/q1-map/index.ts";
 import { foreignShamblerDamage } from "./shambler-damage.ts";
 import { Q1PrecacheRegistry } from "./precache.ts";
-import { Q1Actor, sourceAngles } from "./entity.ts";
+import { Q1Actor, sourceAngles, targetnameEpoch } from "./entity.ts";
 import type { Q1FoundationHost, Q1FoundationOptions, Q1PlayerState, Q1Powerup, Q1Presentation, Q1Weapon, Q1SoundChannel, Q1Basis } from "./types.ts";
 import { Q1_PROVIDER, ZERO, POINT, vadd, vsub, vscale, dot, length, normalize, WEAPONS, weaponItem, isQ1BaseWeapon, vectors } from "./types.ts";
 import { spawnMapActor } from "./spawns.ts";
 import { fireWeapon, bestWeapon, weaponModel, projectileTouch } from "./weapons.ts";
 import { spawnPickup, registerPickupCallbacks } from "./pickups.ts";
+import type { Pickup } from "./pickups.ts";
 import { captureFoundation, captureEntitySourceState, restoreFoundation } from "./checkpoint.ts";
-import type { Q1FoundationCheckpoint } from "./checkpoint.ts";
+import type { Q1FoundationCheckpoint, Q1LegacyAnimation } from "./checkpoint.ts";
 import type { Q1WeaponDefinition, Q1PlayerExtension, Q1PickupRules, Q1WeaponRules } from "./extensions.ts";
 import { Q1CallbackRegistry, callbackName } from "./callbacks.ts";
 import type { Q1StateExtension } from "./callbacks.ts";
 import { registerMoverCallbacks } from "./movers.ts";
 import { registerSpawnCallbacks } from "./spawns.ts";
-import { registerMonsterCallbacks } from "./monsters.ts";
 import { registerWeaponCallbacks } from "./weapons.ts";
 import type { AuthoredTarget, MonsterMission } from "../../monsters/authored.ts";
 
@@ -70,12 +70,18 @@ export class Q1EntityServices {
   };
   pickupRules: Q1PickupRules | null = null;
   pickupAdmission: PickupAdmission | null = null;
+  /** Pickups for classnames the Q1 foundation does not define, supplied by the composition (for example Q3 items). */
+  foreignPickup: ((entity: Q1Actor) => Pickup | null) | null = null;
   private readonly weaponRules = new Map<string, Q1WeaponRules>();
   readonly registeredWeapons = new Map<Q1Weapon, Q1WeaponDefinition>();
   readonly playerExtensions = new Map<string, Q1PlayerExtension>();
   weaponOrder: readonly Q1Weapon[] | null = null;
   private weaponOrderOwner: string | null = null;
   readonly stateExtensions = new Map<string, Q1StateExtension>();
+  /** QC globals kept on world; a foreign world has no Q1 world actor, so they live here and are saved by an extension. */
+  readonly sourceWorldWords = new Map<string, number>();
+  /** Version 5 grunt and dog sequence cursors, read once by the base controller that takes the monster over. */
+  readonly legacyAnimations = new Map<OwnedActor, Q1LegacyAnimation>();
   readonly entities = new Map<OwnedActor, Q1Actor>();
   readonly authoredTargets = new Map<ActorId, AuthoredTarget>();
   readonly monsterMissions = new Map<ActorId, MonsterMission>();
@@ -93,6 +99,20 @@ export class Q1EntityServices {
   totalMonsters = 0;
   killedMonsters = 0;
   worldType = 0;
+  /** Set by the MG1 and MG3 programs, whose doors and buttons read the map's movedir key. */
+  sourceDoorKeys = false;
+  /** Extra precaches a program declares while its worldspawn spawns. */
+  readonly worldPrecaches: (() => void)[] = [];
+  /** MG3 MESSAGE_ALL_PLAYERS (spawnflag 8388608): SUB_UseTargets centerprints to every player, even for a non-player activator. */
+  sourceMessageAllPlayers = false;
+  /** MG1 and MG3 GRENADE_BOUNCE_FIX: the 0.05 s GrenadeThink, the bounce sound limit and direct damage to the final bosses. */
+  sourceGrenadeFix = false;
+  /** Hipnotic placebullethole: called for the first pellet of a FireBullets call that strikes the world. */
+  sourceBulletHole: ((shooter: OwnedActor, position: Vec3, normal: Vec3) => void) | null = null;
+  /** MG3 serverflags BLOODY_NIGHTMARE_ACTIVE test, installed by the add-on context; null for every other program. */
+  sourceBloodyNightmare: (() => boolean) | null = null;
+  /** MG1 and MG3 FogPushSettingsFrom(player, source): false when the source has no fog_info_entity. Installed by the add-on fog registration. */
+  sourceFogPush: ((player: ActorId, source: Q1Actor) => boolean) | null = null;
   mapName = "";
   world: Q1Actor | null = null;
   sightEntity: Q1Actor | null = null;
@@ -109,11 +129,11 @@ export class Q1EntityServices {
   constructor(readonly host: Q1FoundationHost, options: Q1FoundationOptions) {
     this.configuredOptions = options;
     this.nextDynamicSlot = (options.maxClients ?? 0) + 1;
-    this.named.register("SUB_Remove", { action: (game, entity) => game.remove(entity) });
+    this.named.register("SUB_Remove", { action: (game, entity) => game.remove(entity), touch: (game, entity) => game.remove(entity) });
     this.named.register("SUB_Null", { action: () => undefined });
     this.named.register("DelayThink", { action: (game, entity) => { game.useTargets(entity, entity.activator); return game.remove(entity); } });
-    registerMoverCallbacks(this); registerSpawnCallbacks(this); registerPickupCallbacks(this); registerWeaponCallbacks(this); registerMonsterCallbacks(this);
-    host.actors.onRelease(actor => { this.entities.delete(actor); this.authoredTargets.delete(actor.id); this.monsterMissions.delete(actor.id); this.players.delete(actor); host.cancelThink(actor); return undefined; });
+    registerMoverCallbacks(this); registerSpawnCallbacks(this); registerPickupCallbacks(this); registerWeaponCallbacks(this);
+    host.actors.onRelease(actor => { this.entities.delete(actor); this.entityEpoch++; this.authoredTargets.delete(actor.id); this.monsterMissions.delete(actor.id); this.players.delete(actor); host.cancelThink(actor); return undefined; });
   }
 
   registerDamageSourceEffects(id: string, effects: Q1DamageSourceEffects): undefined {
@@ -243,11 +263,21 @@ export class Q1EntityServices {
       if (this.live(entity)) this.link(entity); return undefined;
     } finally { this.spawnOptions = previous; }
   }
+  private keepingOwnedSpawns = false;
+  /** Runs `register` so the spawn handlers it adds never displace handlers the selected program already owns. */
+  adjoin<T>(register: () => T): T {
+    const previous = this.keepingOwnedSpawns; this.keepingOwnedSpawns = true;
+    try { return register(); } finally { this.keepingOwnedSpawns = previous; }
+  }
   registerSpawn(classname: string, handler: (game: Q1EntityServices, entity: Q1Actor) => undefined): undefined {
-    if (this.spawners.has(classname)) throw new Error(`Q1 spawn handler already registered: ${classname}`);
+    if (this.spawners.has(classname)) {
+      if (this.keepingOwnedSpawns) return undefined;
+      throw new Error(`Q1 spawn handler already registered: ${classname}`);
+    }
     this.spawners.set(classname, handler); return undefined;
   }
 
+  hasSpawn(classname: string): boolean { return this.spawners.has(classname); }
   replaceSpawn(classname: string, handler: (game: Q1EntityServices, entity: Q1Actor) => undefined): undefined {
     if (!this.spawners.has(classname)) throw new Error(`No registered Q1 spawn to replace: ${classname}`);
     this.spawners.set(classname, handler); return undefined;
@@ -269,7 +299,7 @@ export class Q1EntityServices {
     this.host.actors.assertOwned(entity.actor);
     if (this.entities.has(entity.actor)) throw new Error("Q1 actor already attached");
     if (this.host.bodies.read(entity.actor.id) === null || this.host.combat.read(entity.actor.id) === null) throw new Error("Attach Q1 behavior after shared body and combat admission");
-    this.entities.set(entity.actor, entity);
+    this.entities.set(entity.actor, entity); this.entityEpoch++;
     this.host.combat.bindDamageAdjustment(entity.actor, request => foreignShamblerDamage(entity.monster?.species, request));
     this.bindActorCallbacks(entity);
     this.host.registerEntity?.(entity, this);
@@ -285,7 +315,7 @@ export class Q1EntityServices {
     for (const [key, value] of source.fields) target.fields.set(key, value);
     for (const [key, actor] of source.references) target.references.set(key, actor);
     target.owner = source.owner; target.activator = source.activator; target.doorGroup = [...source.doorGroup];
-    target.monster = source.monster === null ? null : { ...source.monster, sequence: [...source.monster.sequence] };
+    target.monster = source.monster === null ? null : { ...source.monster };
     this.host.bodies.write(target.actor, this.body(source));
     const combat = this.host.combat.read(source.actor.id); if (combat === null) throw new Error("Source clone has no combat state");
     this.host.combat.setHealth(target.actor, combat.health); this.host.combat.setArmor(target.actor, combat.armor);
@@ -385,20 +415,41 @@ export class Q1EntityServices {
   effect(effect: Extract<import("./types.ts").Q1Event, { kind: "effect" }>["effect"], origin: Vec3, actor: ActorId | null = null, amount = 1): undefined {
     return this.host.emit({ kind: "effect", effect, origin, actor, amount });
   }
-  find(targetname: string): readonly Q1Actor[] { return targetname === "" ? [] : [...this.entities.values()].filter(entity => entity.targetname === targetname); }
+  private entityEpoch = 0;
+  private nameIndex = new Map<string, Q1Actor[]>();
+  private nameIndexEpoch = -1;
+  private nameIndexRenames = -1;
+  find(targetname: string): readonly Q1Actor[] {
+    if (targetname === "") return [];
+    if (this.nameIndexEpoch !== this.entityEpoch || this.nameIndexRenames !== targetnameEpoch.value) {
+      this.nameIndex = new Map();
+      for (const entity of this.entities.values()) if (entity.targetname !== "") { const bucket = this.nameIndex.get(entity.targetname); if (bucket === undefined) this.nameIndex.set(entity.targetname, [entity]); else bucket.push(entity); }
+      this.nameIndexEpoch = this.entityEpoch; this.nameIndexRenames = targetnameEpoch.value;
+    }
+    return this.nameIndex.get(targetname) ?? [];
+  }
+  /** QC `find(world, targetname, name)` as a walking monster uses it: "" matches the first edict, which is the first client. */
+  pathGoal(name: string): ActorId | null {
+    if (name !== "") return this.find(name)[0]?.actor.id ?? null;
+    return this.host.players()[0] ?? null;
+  }
   private targetActors(name: string): readonly AuthoredTarget[] {
     if (name === "") return [];
-    return [...this.entities.values(), ...this.authoredTargets.values()]
-      .filter(entity => entity.targetname === name && this.host.actors.isLive(entity.actor.id))
+    return [...this.find(name), ...[...this.authoredTargets.values()].filter(entity => entity.targetname === name)]
+      .filter(entity => this.host.actors.isLive(entity.actor.id))
       .sort((a, b) => (this.host.actors.sourceOf(a.actor.id)?.slot ?? a.actor.id.slot) - (this.host.actors.sourceOf(b.actor.id)?.slot ?? b.actor.id.slot));
   }
   useTargets(entity: AuthoredTarget, activator: ActorId | null): undefined {
     if (entity.delay !== 0) {
       const delayed = this.create("DelayedUse"); delayed.target = entity.target; delayed.killtarget = entity.killtarget; delayed.message = entity.message;
-      delayed.activator = activator;
+      delayed.activator = activator; delayed.spawnflags = entity instanceof Q1Actor ? entity.spawnflags & 8388608 : 0;
       return this.schedule(delayed, entity.delay, this.named.action(delayed, "DelayThink"));
     }
-    this.message(activator, entity.message);
+    const everyone = this.sourceMessageAllPlayers && entity instanceof Q1Actor && (entity.spawnflags & 8388608) !== 0 && entity.message !== "";
+    if (everyone) { for (const player of this.host.players()) this.message(player, entity.message); } else this.message(activator, entity.message);
+    if (entity.message !== "" && activator !== null && this.isPlayer(activator) && !(entity instanceof Q1Actor && entity.text("noise") !== "")) {
+      const owner = this.host.actors.resolveOwned(activator); if (owner !== null) this.sound(owner, "misc/talk.wav");
+    }
     for (const victim of this.targetActors(entity.killtarget)) if (this.host.actors.isLive(victim.actor.id)) this.host.actors.release(victim.actor);
     // Each use executes synchronously; targets removed by a nested call are not invoked afterward.
     for (const target of this.targetActors(entity.target)) if (this.host.actors.isLive(target.actor.id)) this.host.callbacks.use(target.actor, entity.actor.id, activator);
@@ -407,6 +458,10 @@ export class Q1EntityServices {
 
   damage(target: ActorId, inflictor: ActorId, attacker: ActorId | null, amount: number, weapon: Q1Weapon | null = null, delivery: "direct" | "radius" = "direct", deathType = "", armorEffect?: "bypass" | "half-effectiveness"): DamageOutcome {
     const targetBody = this.host.bodies.read(target); const source = this.host.bodies.read(inflictor);
+    const protectedPlayer = this.player(target);
+    if (protectedPlayer !== null && (protectedPlayer.powerups.get("invulnerability") ?? 0) >= this.time && (this.protectSound.get(protectedPlayer) ?? 0) < this.time) {
+      this.protectSound.set(protectedPlayer, this.time + 2); this.sound(protectedPlayer.actor, "items/protect3.wav", "item");
+    }
     const point = targetBody?.origin ?? ZERO;
     const direction = normalize(vsub(point, source?.origin ?? point));
     const scaled = Math.fround(Math.fround(amount) * Math.fround(attacker === null ? 1 : this.host.sourceDamageMultiplier?.(attacker) ?? 1));
@@ -454,9 +509,10 @@ export class Q1EntityServices {
   }
   radiusDamage(inflictor: ActorId, attacker: ActorId | null, amount: number, ignore: ActorId | null, weapon: Q1Weapon | null, deathType = ""): undefined {
     const source = this.host.bodies.read(inflictor); if (source === null) return undefined;
-    for (const observation of this.host.actors.observations()) {
+    // findradius prepends to its chain, so the highest edict is damaged first, and it skips SOLID_NOT (a downed zombie).
+    for (const observation of [...this.host.actors.observations()].reverse()) {
       const target = observation.id; const combat = this.host.combat.read(target), body = this.host.bodies.read(target);
-      if (combat === null || !combat.canTakeDamage || body === null || ignore !== null && sameActor(ignore, target)) continue;
+      if (combat === null || !combat.canTakeDamage || body === null || ignore !== null && sameActor(ignore, target) || this.entity(target)?.solid === "none") continue;
       const center = vadd(body.origin, vscale(vadd(body.bounds.min, body.bounds.max), 0.5));
       const distance = length(vsub(center, source.origin)); if (distance > amount + 40) continue;
       let points = Math.fround(amount - 0.5 * distance); if (attacker !== null && sameActor(target, attacker)) points *= 0.5;
@@ -506,6 +562,36 @@ export class Q1EntityServices {
   }
 
   /** Weapon/powerup/environment state; jumping belongs to the independently selected movement provider. */
+  /** invisible_time, invisible_sound and the matching per-powerup timers of CheckPowerups; they only drive cues, so they are not saved. */
+  private readonly powerupCues = new WeakMap<Q1PlayerState, Map<Q1Powerup, { warned: boolean; flashAt: number; hum: number }>>();
+  private powerupWarnings(actor: OwnedActor, player: Q1PlayerState, seconds: number): undefined {
+    const warnings: ReadonlyMap<Q1Powerup, readonly [string, string]> = new Map([
+      ["invisibility", ["$qc_ring_fade", "items/inv2.wav"]], ["invulnerability", ["$qc_protection_fade", "items/protect2.wav"]],
+      ["quad", ["$qc_quad_fade", "items/damage2.wav"]], ["suit", ["$qc_biosuit_fade", "items/suit2.wav"]],
+    ]);
+    let cues = this.powerupCues.get(player);
+    if (cues === undefined) { cues = new Map(); this.powerupCues.set(player, cues); }
+    for (const [powerup, expires] of player.powerups) {
+      const warning = warnings.get(powerup); if (warning === undefined || expires <= seconds) continue;
+      let cue = cues.get(powerup);
+      if (cue === undefined) { cue = { warned: false, flashAt: 0, hum: 0 }; cues.set(powerup, cue); }
+      if (powerup === "invisibility" && cue.hum < seconds) { this.sound(actor, "items/inv3.wav", "auto", 3, 0.5); cue.hum = seconds + (this.host.random() * 3 + 1); }
+      if (expires >= seconds + 3) { cue.warned = false; continue; }
+      const origin = this.host.bodies.read(actor.id)?.origin;
+      if (!cue.warned) {
+        cue.warned = true; cue.flashAt = seconds + 1;
+        this.message(actor.id, warning[0], false); this.sound(actor, warning[1], "auto");
+        if (origin !== undefined) this.effect("pickup", origin, actor.id);
+      } else if (cue.flashAt < seconds) {
+        cue.flashAt = seconds + 1;
+        if (origin !== undefined) this.effect("pickup", origin, actor.id);
+      }
+    }
+    return undefined;
+  }
+  private readonly protectSound = new WeakMap<Q1PlayerState, number>();
+  /** FL_INWATER, rebuilt from the first frame after a restore. */
+  private readonly waterborne = new WeakSet<Q1PlayerState>();
   playerFrame(actor: OwnedActor, seconds: number, waterLevel?: number): undefined {
     this.time = seconds; const player = this.players.get(actor);
     if (player === undefined) return undefined;
@@ -517,8 +603,9 @@ export class Q1EntityServices {
       if (health > player.maxHealth) { this.host.combat.setHealth(actor, health - 1); player.megaRotAt = seconds + 1; }
       else player.megaRotAt = -1;
     }
+    this.powerupWarnings(actor, player, seconds);
     for (const [powerup, expires] of player.powerups) if (expires <= seconds) {
-      player.powerups.delete(powerup); this.host.powerup(actor, powerup, 0);
+      player.powerups.delete(powerup); this.host.powerup(actor, powerup, 0); this.powerupCues.get(player)?.delete(powerup);
       if (powerup === "q3:flight" && this.host.setGravity !== undefined) this.setGravity(actor.id, 1);
     }
     // Foreign Q3 powerups granted by Q3-authored items on this primary.
@@ -532,19 +619,34 @@ export class Q1EntityServices {
     if (this.intermission !== null || this.health(actor.id) < 0) return undefined;
     const suit = (player.powerups.get("suit") ?? 0) > seconds;
     const lavaSuit = (player.powerups.get("mg3:lavasuit") ?? 0) > seconds;
+    if (player.waterLevel !== 3) {
+      if (player.airFinished < seconds) this.sound(actor, "player/gasp2.wav", "voice"); else if (player.airFinished < seconds + 9) this.sound(actor, "player/gasp1.wav", "voice");
+    }
     if (player.waterLevel !== 3 || suit || lavaSuit) { player.airFinished = seconds + 12; player.drownDamage = 2; }
     else if (player.airFinished < seconds && player.drownAt < seconds) {
       player.drownDamage += 2; if (player.drownDamage > 15) player.drownDamage = 10;
       this.damage(actor.id, this.world?.actor.id ?? actor.id, this.world?.actor.id ?? null, player.drownDamage, null, "direct", "drown"); player.drownAt = seconds + 1;
     }
+    if (player.waterLevel === 0) {
+      if (this.waterborne.delete(player)) this.sound(actor, "misc/outwater.wav", "body");
+      return undefined;
+    }
     const body = this.host.bodies.read(actor.id);
-    if (body !== null && player.waterLevel > 0 && player.hazardAt < seconds) {
-      const contents = this.host.contents(vadd(body.origin, { x: 0, y: 0, z: body.bounds.min.z + 1 }));
+    if (body === null) return undefined;
+    const contents = this.host.contents(vadd(body.origin, { x: 0, y: 0, z: body.bounds.min.z + 1 }));
+    if (player.hazardAt < seconds) {
       if (contents === "lava" && !lavaSuit) {
         player.hazardAt = seconds + (suit ? 1 : 0.2); this.damage(actor.id, this.world?.actor.id ?? actor.id, this.world?.actor.id ?? null, 10 * player.waterLevel, null, "direct", "lava");
       } else if (contents === "slime" && !suit && !lavaSuit) {
         player.hazardAt = seconds + 1; this.damage(actor.id, this.world?.actor.id ?? actor.id, this.world?.actor.id ?? null, 4 * player.waterLevel, null, "direct", "slime");
       }
+    }
+    if (!this.waterborne.has(player)) {
+      this.waterborne.add(player);
+      const entry = contents === "lava" ? "player/inlava.wav" : contents === "water" ? "player/inh2o.wav" : contents === "slime" ? "player/slimbrn2.wav" : null;
+      if (entry !== null) this.sound(actor, entry, "body");
+      // The first contact tick is followed by another on the next frame.
+      player.hazardAt = 0;
     }
     return undefined;
   }
@@ -597,7 +699,8 @@ export class Q1EntityServices {
     const body = this.body(selected);
     const exitAfter = this.time + (this.options.deathmatch !== 0 ? 5 : 2);
     this.intermission = { map, cause, exitAfter };
-    return this.host.emit({ kind: "intermission", origin: body.origin, angles: selected.classname === "info_intermission" ? selected.vector("mangle") : body.angles, map, exitAfter, track: 3 });
+    if (this.sourceFogPush !== null && this.world !== null) for (const player of this.host.players()) this.sourceFogPush(player, this.world);
+    return this.host.emit({ kind: "intermission", origin: body.origin, angles: selected.vector("mangle"), map, exitAfter, track: 3 });
   }
   requestIntermissionExit(seconds: number, pressed: boolean): boolean {
     const pending = this.intermission;
@@ -712,17 +815,13 @@ export class Q1EntityServices {
   }
 }
 
+/** Ammunition of the id1 weapons; weapons that other programs add register their own through registerWeapon. */
 export function ammoItem(weapon: Q1Weapon): ItemId | null {
   switch (weapon) {
-    case "axe": return null;
     case "shotgun": case "supershotgun": return "q1:ammo/shells";
     case "nailgun": case "supernailgun": return "q1:ammo/nails";
     case "grenadelauncher": case "rocketlauncher": return "q1:ammo/rockets";
-    case "lightning": case "hipnotic:laser": case "mg3:laser": return "q1:ammo/cells";
-    case "hipnotic:mjolnir": case "rogue:grapple": case "ctf:grapple": case "mg3:mjolnir": return null;
-    case "hipnotic:proximity": return "q1:ammo/rockets";
-    case "rogue:lava-nailgun": case "rogue:lava-supernailgun": return "rogue:ammo/lava-nails";
-    case "rogue:multi-grenade": case "rogue:multi-rocket": return "rogue:ammo/multi-rockets";
-    case "rogue:plasma": return "rogue:ammo/plasma";
+    case "lightning": return "q1:ammo/cells";
+    default: return null;
   }
 }

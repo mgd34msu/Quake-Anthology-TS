@@ -1,4 +1,5 @@
 import type { ContentId, GameFamily, ResourceId } from "../../contracts/content.ts";
+import { cacheEvictingRejection } from "./cached-promise.ts";
 import { createMountPlanId } from "../../contracts/content.ts";
 import type { ImageLevel, Palette, RenderState, RendererImage } from "../../contracts/render.ts";
 import type { Vec2, Vec3 } from "../../contracts/math.ts";
@@ -341,13 +342,14 @@ function sampleTexture(texture: TurntableTexture, u: number, v: number, output: 
   const wrappedU = u - Math.floor(u), wrappedV = v - Math.floor(v);
   const px = wrappedU * texture.width - 0.5, py = wrappedV * texture.height - 0.5;
   const x0 = Math.floor(px), y0 = Math.floor(py), fx = px - x0, fy = py - y0;
-  const wrap = (value: number, size: number): number => ((value % size) + size) % size;
-  const xs = [wrap(x0, texture.width), wrap(x0 + 1, texture.width)], ys = [wrap(y0, texture.height), wrap(y0 + 1, texture.height)];
+  const xa = ((x0 % texture.width) + texture.width) % texture.width, xb = (((x0 + 1) % texture.width) + texture.width) % texture.width;
+  const ya = ((y0 % texture.height) + texture.height) % texture.height, yb = (((y0 + 1) % texture.height) + texture.height) % texture.height;
+  const pixels = texture.pixels;
   output[0] = 0; output[1] = 0; output[2] = 0; output[3] = 0;
   for (let row = 0; row < 2; row++) for (let column = 0; column < 2; column++) {
     const weight = (column === 0 ? 1 - fx : fx) * (row === 0 ? 1 - fy : fy);
-    const offset = ((ys[row] ?? 0) * texture.width + (xs[column] ?? 0)) * 4;
-    for (let channel = 0; channel < 4; channel++) output[channel] = (output[channel] ?? 0) + (texture.pixels[offset + channel] ?? 0) * weight;
+    const offset = ((row === 0 ? ya : yb) * texture.width + (column === 0 ? xa : xb)) * 4;
+    for (let channel = 0; channel < 4; channel++) output[channel] = (output[channel] ?? 0) + (pixels[offset + channel] ?? 0) * weight;
   }
 }
 
@@ -503,8 +505,7 @@ export class CharacterTurntable implements CharacterTurntableView {
       return openMountPlan({ id: createMountPlanId("startup", revision), mounts,
         defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
     })();
-    this.mounts.set(key, pending);
-    return pending;
+    return cacheEvictingRejection(this.mounts, key, pending);
   }
 
   private async load(key: string, catalog: InstalledCatalog, preview: CharacterTurntableRequest): Promise<void> {

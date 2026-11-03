@@ -1,12 +1,12 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../../../support/corpus.ts";
+import { expect } from "bun:test";
+import { corpusTest, corpusFile } from "../../../../support/corpus.ts";
 
 import { createIdentityOwner } from "../../../../../src/contracts/identity.ts";
 import type { OwnedActor } from "../../../../../src/contracts/identity.ts";
 import type { Vec3 } from "../../../../../src/contracts/math.ts";
 import type { TraceResult } from "../../../../../src/contracts/scene.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../../../../src/world/gameplay/index.ts";
 import { createSceneQueries } from "../../../../../src/world/collision/index.ts";
 import { Q2_DONOR_PROFILE } from "../../../../../src/core/numeric.ts";
 import { openArchive } from "../../../../../src/content/archive/index.ts";
@@ -19,13 +19,15 @@ import { Q2Ballistics } from "../../../../../src/content/q2/foundation/weapons/b
 import { Q2Monsters } from "../../../../../src/content/q2/foundation/monsters/index.ts";
 import { Q2RogueHints, decodeQ2RogueHintsCheckpoint } from "../../../../../src/content/q2/missionpacks/monsters/hints.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, SaveReader } from "../../../../../src/persistence/value.ts";
+import { inertAuthority } from "../../../../support/authority.ts";
+const test = corpusTest("q2/rogue/pak0.pak");
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
 function fixture(edition: Q2Edition = "classic", map: Q2DecodedMap | null = null) {
   const actors = new SessionActorRegistry(createIdentityOwner("q2-hint-paths")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined }), inventory = new SharedInventoryTable(actors);
+  const combat = inertAuthority(actors, callbacks), inventory = new SharedInventoryTable(actors);
   const world = actors.allocateAtSource("q2:game", 0, "q2:worldspawn"), player = actors.allocate("q3:character", "q3:sarge");
   const bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
   bodies.create(world, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
@@ -79,7 +81,7 @@ function fixture(edition: Q2Edition = "classic", map: Q2DecodedMap | null = null
 }
 
 test("actual Rogue maps construct their authored hint chains and named callbacks", async () => {
-  const archive = await openArchive(`${testCorpusRoot()}/q2/rogue/pak0.pak`);
+  const archive = await openArchive(corpusFile("q2/rogue/pak0.pak"));
   let maps = 0, nodes = 0;
   try {
     for (const entry of archive.entries.filter(entry => entry.path.startsWith("maps/") && entry.path.endsWith(".bsp"))) {
@@ -130,7 +132,7 @@ test("forks and circular hint chains are diagnosed and disconnected", () => {
 });
 
 test("rhangar2 hint pursuit uses retail BSP visibility and leaves rerelease nav pursuit alone", async () => {
-  const archive = await openArchive(`${testCorpusRoot()}/q2/rogue/pak0.pak`);
+  const archive = await openArchive(corpusFile("q2/rogue/pak0.pak"));
   try {
     const entry = archive.findEntries("maps/rhangar2.bsp")[0]; if (entry === undefined) throw new Error("Missing Rogue rhangar2.bsp");
     const map = toQ2WorldGeometry(readQ2Bsp(await archive.readEntry(entry))), scene = fixture("rerelease", map);

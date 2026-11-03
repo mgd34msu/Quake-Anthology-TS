@@ -42,7 +42,7 @@ export function grappleAttack(state: CtfState, actor: ActorId): boolean {
   const fired = state.grappleWeapon?.attack(actor) ?? false;
   if (fired) {
     const player = state.game.player(actor);
-    if (player !== null) player.attackFinished = state.grappleState(actor).attackFinished;
+    if (player !== null) { player.attackFinished = state.grappleState(actor).attackFinished; player.hostileUntil = Math.fround(state.game.time + 1); }
   }
   return fired;
 }

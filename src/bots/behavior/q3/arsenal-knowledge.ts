@@ -21,6 +21,9 @@ function tactics(candidate: BotWeaponKnowledge | undefined): BotWeaponTactics {
   const role = candidate === undefined ? Weapon.WP_NONE : personalityRole(candidate);
   return { melee: candidate?.melee ?? false, maximumRange: candidate?.maximumRange ?? null,
     weakness: role === Weapon.WP_MACHINEGUN ? 90 : 0,
+    closeRangeAimPenalty: candidate === undefined ? false : candidate.personalityRole === null
+      ? candidate.info.speed === 0 && !candidate.melee
+      : role === Weapon.WP_MACHINEGUN || role === Weapon.WP_SHOTGUN || role === Weapon.WP_LIGHTNING || role === Weapon.WP_RAILGUN,
     predictOccludedSplash: role === Weapon.WP_BFG || role === Weapon.WP_ROCKET_LAUNCHER || role === Weapon.WP_GRENADE_LAUNCHER,
     aimAccuracy: role === Weapon.WP_MACHINEGUN ? BotCharacteristic.AIM_ACCURACY_MACHINEGUN
       : role === Weapon.WP_SHOTGUN ? BotCharacteristic.AIM_ACCURACY_SHOTGUN
@@ -134,7 +137,7 @@ export function createBotArsenalKnowledge(data: BotArsenalData): BotArsenalKnowl
         consider(candidate, role, weight);
       }
       if (bestWeapon === 0) {
-        // Source BotChooseFightWeapon defaults to the gauntlet; weapon 0 has no weapon info.
+        // Deliberate guard, not source behavior: the source returns weapon 0 here, which has no weapon info.
         const fallback = available.find(candidate => candidate.info.valid && candidate.melee && owned(state, candidate))
           ?? available.find(candidate => candidate.info.valid && owned(state, candidate) && ammunition(state, candidate) >= candidate.info.ammoAmount)
           ?? available.find(candidate => candidate.info.valid);

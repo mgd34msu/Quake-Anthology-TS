@@ -78,7 +78,7 @@ export function backpackMessage(contents: BackpackContents, edition: "classic" |
 
 export function dropBackpack(game: Q1EntityServices, origin: Vec3, contents: BackpackContents, launch?: { readonly origin: Vec3; readonly velocity: Vec3; readonly movement: "bounce" | "toss" }): Q1Actor | null {
   if (contents.shells + contents.nails + contents.rockets + contents.cells + (contents.extra?.reduce((total, entry) => total + entry.count, 0) ?? 0) === 0) return null;
-  const pack = game.create("item_backpack"); pack.model = "progs/backpack.mdl"; pack.solid = "trigger"; pack.movement = launch?.movement ?? "toss";
+  const pack = game.create("item_backpack"); pack.model = "progs/backpack.mdl"; pack.solid = "trigger"; pack.movement = launch?.movement ?? "toss"; pack.movementFlags |= 256;
   const weapon = contents.weapon, rerelease = game.options.edition === "rerelease";
   q1Creatures(game).backpacks.set(pack.actor, {
     weapon, extra: contents.extra ?? [], selection: contents.selection ?? "source-default", avoidUnderwaterLightning: contents.avoidUnderwaterLightning ?? rerelease, ownerPickupDelay: contents.ownerPickupDelay ?? 0,
@@ -145,8 +145,9 @@ export function createMissile(game: Q1EntityServices, owner: ActorId | null, cla
   game.setBody(missile, { origin, velocity, bounds: POINT, angles: { x: -Math.atan2(velocity.z, Math.hypot(velocity.x, velocity.y)) * 180 / Math.PI, y: yawFor(velocity), z: 0 } });
   game.schedule(missile, lifetime, game.named.action(missile, "SUB_Remove")); game.link(missile); return missile;
 }
-export function launchSpike(game: Q1EntityServices, owner: ActorId | null, origin: Vec3, velocity: Vec3, kind: "spike" | "superspike" | "wizard" | "knight" = "spike"): Q1Actor {
-  const missile = createMissile(game, owner, kind === "wizard" ? "wizard_spike" : kind === "knight" ? "knight_spike" : kind, kind === "wizard" ? "w_spike" : kind === "knight" ? "k_spike" : "spike", origin, velocity, 6);
+export function launchSpike(game: Q1EntityServices, owner: ActorId | null, origin: Vec3, velocity: Vec3, kind: "spike" | "superspike" | "wizard" | "wizard2" | "knight" = "spike"): Q1Actor {
+  const wizard = kind === "wizard" || kind === "wizard2";
+  const missile = createMissile(game, owner, wizard ? "wizard_spike" : kind === "knight" ? "knight_spike" : kind, kind === "wizard2" ? "w_spike2" : wizard ? "w_spike" : kind === "knight" ? "k_spike" : "spike", origin, velocity, 6);
   missile.projectile = kind === "superspike" ? "superspike" : "spike";
   missile.touch = game.named.touch(missile, "projectile_touch");
   return missile;
@@ -154,6 +155,11 @@ export function launchSpike(game: Q1EntityServices, owner: ActorId | null, origi
 export function launchLaser(game: Q1EntityServices, owner: ActorId | null, origin: Vec3, direction: Vec3): Q1Actor {
   const missile = createMissile(game, owner, "enforcer_laser", "laser", origin, vscale(normalize(direction), 600)); missile.effects = 8;
   missile.touch = game.named.touch(missile, "base:laser_touch"); return missile;
+}
+/** mg3 LaunchLaserAlt: the Bloody Nightmare second bolt has no glow and no impact sound. */
+export function launchLaserAlt(game: Q1EntityServices, owner: ActorId | null, origin: Vec3, direction: Vec3): Q1Actor {
+  const missile = createMissile(game, owner, "enforcer_laser", "laser", origin, vscale(normalize(direction), 600));
+  missile.touch = game.named.touch(missile, "base:laser_alt_touch"); return missile;
 }
 function laserTouch(game: Q1EntityServices, missile: Q1Actor, other: ActorId): undefined {
     const owner = missile.owner;
@@ -164,15 +170,34 @@ function laserTouch(game: Q1EntityServices, missile: Q1Actor, other: ActorId): u
     else game.effect("gunshot", hit);
     return game.remove(missile);
 }
-export function spriteExplosion(game: Q1EntityServices, missile: Q1Actor): undefined {
-  game.effect("explosion", game.body(missile).origin); missile.touch = null; missile.solid = "none"; missile.movement = "none"; missile.model = "progs/s_explod.spr"; missile.frame = 0;
+function laserAltTouch(game: Q1EntityServices, missile: Q1Actor, other: ActorId): undefined {
+    const owner = missile.owner;
+    if (owner !== null && sameActor(other, owner)) return undefined;
+    const body = game.body(missile); if (game.host.contents(body.origin) === "sky") return game.remove(missile);
+    const hit = vsub(body.origin, vscale(normalize(body.velocity), 8));
+    if (game.health(other) !== 0) { game.effect("blood", hit, other, 15); game.damage(other, missile.actor.id, owner, 15); }
+    else game.effect("gunshot", hit);
+    return game.remove(missile);
+}
+/** BecomeExplosion; pass false when the caller already wrote its own TE_EXPLOSION variant. */
+export function spriteExplosion(game: Q1EntityServices, missile: Q1Actor, plainEffect = true): undefined {
+  if (plainEffect) game.effect("explosion", game.body(missile).origin); missile.touch = null; missile.solid = "none"; missile.movement = "none"; missile.model = "progs/s_explod.spr"; missile.frame = 0;
   game.setBody(missile, { velocity: ZERO }); game.link(missile);
   return game.schedule(missile, 0.1, game.named.action(missile, "base:explosion_frame"));
 }
 export function launchOgreGrenade(monster: BaseMonster): undefined {
   const { game, entity } = monster, target = monster.target; if (target === null) return undefined;
   game.effect("muzzleflash", monster.origin, entity.actor.id); game.sound(entity, "weapons/grenade.wav", "weapon");
-  monster.makeVectors(); const direction = normalize(vsub(target, monster.origin)); const missile = createMissile(game, entity.actor.id, "ogre_grenade", "grenade", monster.origin, { x: direction.x * 600, y: direction.y * 600, z: 200 }, 2.5);
+  const axes = monster.makeVectors(); const direction = normalize(vsub(target, monster.origin));
+  let velocity: Vec3 = { x: direction.x * 600, y: direction.y * 600, z: 200 };
+  const enemyBody = monster.enemy === null ? null : game.host.bodies.read(monster.enemy);
+  if (game.sourceBloodyNightmare?.() === true && entity.number("projectiles") === 1 && enemyBody !== null) {
+    const boost = enemyBody.origin.z - monster.origin.z, distance = Math.hypot(enemyBody.origin.x - monster.origin.x, enemyBody.origin.y - monster.origin.y);
+    if (boost > 30 || distance > 500) velocity = { ...velocity, z: 300 + (game.host.random() * 2 - 1) * 50 };
+    else if (boost < -30 || distance < 100) velocity = { ...velocity, z: 100 + (game.host.random() * 2 - 1) * 25 };
+    velocity = vadd(velocity, vscale(axes.right, (game.host.random() * 2 - 1) * 64));
+  }
+  const missile = createMissile(game, entity.actor.id, "ogre_grenade", "grenade", monster.origin, velocity, 2.5);
   missile.movement = "bounce"; missile.angularVelocity = { x: 300, y: 300, z: 300 };
   missile.touch = game.named.touch(missile, "base:ogre_grenade_touch"); return game.schedule(missile, 2.5, game.named.action(missile, "base:ogre_grenade_explode"));
 }
@@ -217,7 +242,7 @@ function voreTouch(game: Q1EntityServices, missile: Q1Actor, other: ActorId): un
     game.radiusDamage(missile.actor.id, missile.owner, 40, null, null); game.sound(missile, "weapons/r_exp3.wav", "weapon"); return spriteExplosion(game, missile);
 }
 export function registerProjectileCallbacks(game: Q1EntityServices): undefined {
-  game.named.register("base:backpack_touch", { touch: backpackTouch }); game.named.register("base:laser_touch", { touch: laserTouch });
+  game.named.register("base:backpack_touch", { touch: backpackTouch }); game.named.register("base:laser_touch", { touch: laserTouch }); game.named.register("base:laser_alt_touch", { touch: laserAltTouch });
   game.named.register("base:ogre_grenade_touch", { touch: ogreGrenadeTouch }); game.named.register("base:ogre_grenade_explode", { action: ogreGrenadeExplode });
   game.named.register("base:zombie_grenade_touch", { touch: zombieGrenadeTouch }); game.named.register("base:remove_touch", { touch: (runtime, entity) => runtime.remove(entity) });
   game.named.register("base:vore_touch", { touch: voreTouch }); game.named.register("base:vore_home", { action: voreHome });
@@ -225,7 +250,7 @@ export function registerProjectileCallbacks(game: Q1EntityServices): undefined {
 }
 export function castLightning(monster: BaseMonster): undefined {
   const { game, entity } = monster, target = monster.target; if (target === null) return undefined;
-  monster.face(); game.effect("muzzleflash", monster.origin, entity.actor.id); monster.lightningCount++;
+  monster.face(); game.effect("muzzleflash", monster.origin, entity.actor.id);
   const origin = vadd(monster.origin, { x: 0, y: 0, z: 40 }); const direction = normalize(vsub(vadd(target, { x: 0, y: 0, z: 16 }), origin));
   const wall = game.host.trace({ start: origin, end: vadd(monster.origin, vscale(direction, 600)), bounds: POINT, ignore: entity.actor.id, monsters: false });
   game.host.emit({ kind: "beam", style: "lightning1", actor: entity.actor.id, start: origin, end: wall.end });
@@ -233,7 +258,7 @@ export function castLightning(monster: BaseMonster): undefined {
   for (const offset of [ZERO, side, vscale(side, -1)]) {
     const trace = game.host.trace({ start: vadd(origin, offset), end: vadd(wall.end, offset), bounds: POINT, ignore: entity.actor.id, monsters: true });
     const targetActor = trace.actor;
-    if (targetActor !== null && game.host.combat.read(targetActor)?.canTakeDamage && !hit.some(id => sameActor(id, targetActor))) { hit.push(targetActor); game.damage(targetActor, entity.actor.id, entity.actor.id, 10); game.effect("blood", trace.end, targetActor, 40); }
+    if (targetActor !== null && game.host.combat.read(targetActor)?.canTakeDamage && !hit.some(id => sameActor(id, targetActor))) { hit.push(targetActor); game.damage(targetActor, entity.actor.id, entity.actor.id, 10, "lightning"); game.effect("blood", trace.end, targetActor, 40); }
   }
   return undefined;
 }

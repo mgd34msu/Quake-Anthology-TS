@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
+import { holdFire } from "../../support/matrix-play.ts";
 
 // QuakeWorld programs play in a local graphical session like every other
 // source -- no dedicated-server topology is required to play them.
@@ -21,10 +22,10 @@ test("QuakeWorld plays locally without dedicated operation", async () => {
     const ui = () => application.simulation.playerUi(local.actor);
     for (let frame = 0; frame < 400 && ui().health <= 0; frame++) await application.step(25);
     expect(ui().health).toBeGreaterThan(0);
-    application.input({ seat: local.seat.id, kind: "mouse-button", button: 1, down: true, timeMilliseconds: performance.now() });
-    for (let frame = 0; frame < 20; frame++) await application.step(25);
-    application.input({ seat: local.seat.id, kind: "mouse-button", button: 1, down: false, timeMilliseconds: performance.now() });
-    await application.step(25);
+    const shells = (): number => application.simulation.inventory.count(local.actor, "q1:ammo/shells");
+    const fired = await holdFire(application, local.seat.id, shells, () => ui().activeWeapon, 60);
+    expect(fired.ammoBefore).toBeGreaterThan(0);
+    expect(fired.ammoAfter).toBeLessThan(fired.ammoBefore);
     expect(ui().health).toBeGreaterThan(0);
   } finally { try { await app?.close(); } finally { await rm(root, { recursive: true, force: true }); } }
 }, 180000);

@@ -90,7 +90,7 @@ function readProfile(r: SaveReader): MovementProfile {
   }
   if(kind==='q2-classic')return {...base,kind,airAccelerate:r.field('airAccelerate').finite(),snapInitial:r.field('snapInitial').boolean(),...(r.field('strafejumpHack').value===undefined?{}:{strafejumpHack:r.field('strafejumpHack').boolean()})};
   if(kind==='q2-rerelease')return {...base,kind,airAccelerate:r.field('airAccelerate').finite(),n64Physics:r.field('n64Physics').boolean()};
-  return {...base,kind,product:r.field('product').choice('baseq3','missionpack'),fixedMilliseconds:r.field('fixedMilliseconds').nullable(v=>v.finite()),noFootsteps:r.field('noFootsteps').boolean()};
+  return {...base,kind,product:r.field('product').choice('baseq3','missionpack'),fixedMilliseconds:r.field('fixedMilliseconds').nullable(v=>v.finite()),noFootsteps:r.field('noFootsteps').boolean(),...(r.field('ladders').value===undefined?{}:{ladders:r.field('ladders').boolean()})};
 }
 function readCollision(r: SaveReader, identity: UnifiedIdentityDecoder): SpatialActor {
   const b=r.field('body'), s=b.field('state'),c=r.field('collision'),shape=c.field('shape'),kind=shape.field('kind').choice('box','capsule','model');

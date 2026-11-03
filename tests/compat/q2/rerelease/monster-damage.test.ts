@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import type { ActorId } from "../../../../src/contracts/identity.ts";
 import type { DamageRequest } from "../../../../src/contracts/gameplay.ts";
-import { available, nativeFixture } from "./native.test.ts";
+import { closeNativeSources, available, nativeFixture } from "./native-fixture.ts";
 import { RereleaseSourceEdict } from "../../../../src/compat/q2/rerelease/source-state.ts";
 import { guestPointer, guestInt, resultPointer } from "../../../../src/compat/q2/rerelease/module.ts";
 import { rereleaseDamageSignature, rereleaseModLayout, rereleaseFreeSignature, rereleaseSpawnSignature } from "../../../../src/compat/q2/rerelease/native-entries.ts";
+
+afterEach(closeNativeSources);
 
 test.skipIf(!available)("mod transforms intercept native damage entry and replacements skip mutation", async () => {
   let nativeSequence = 0;

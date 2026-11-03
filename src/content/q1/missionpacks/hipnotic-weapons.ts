@@ -4,7 +4,9 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
+import { spriteExplosion } from "../base/projectiles.ts";
 import type { Q1PlayerState, Q1Weapon } from "../foundation/types.ts";
+import { mg3Pickups } from "../foundation/pickups.ts";
 import { POINT, ZERO, dot, length, normalize, vadd, vscale, vsub } from "../foundation/types.ts";
 import { aim } from "../foundation/weapons.ts";
 import { grenadeVelocity, missionReference, moveMissile, setMissionNumber, setMissionReference, velocityAngles } from "./types.ts";
@@ -87,7 +89,7 @@ export function fireHipnoticProximity(game: Q1EntityServices, player: Q1PlayerSt
 }
 function proximityExplode(game: Q1EntityServices, mine: Q1Actor): undefined {
   game.radiusDamage(mine.actor.id, mine.activator, 95, null, "hipnotic:proximity");
-  game.effect("explosion", game.body(mine).origin); return game.remove(mine);
+  return spriteExplosion(game, mine);
 }
 function armProximityExplosion(game: Q1EntityServices, mine: Q1Actor, delay = 0.1): undefined {
   mine.damageable = false; setMissionNumber(mine, "hipnotic:detonating", 1); mine.owner = mine.activator;
@@ -115,7 +117,7 @@ function proximityWatch(game: Q1EntityServices, mine: Q1Actor): undefined {
     const other = observation.id, body = game.host.bodies.read(other); if (body === null) continue;
     const center = vadd(body.origin, vscale(vadd(body.bounds.min, body.bounds.max), 0.5)); if (length(vsub(origin, center)) > 140) continue;
     const target = game.entity(other);
-    const liveEnemy = !sameActor(other, mine.actor.id) && game.health(other) > 0 && (game.isPlayer(other) || target?.monster !== null && target?.monster !== undefined) && target?.classname !== mine.classname;
+    const liveEnemy = !sameActor(other, mine.actor.id) && game.health(other) > 0 && (game.isPlayer(other) || ((target?.movementFlags ?? 0) & 32) !== 0) && target?.classname !== mine.classname;
     const looseMine = target?.classname === mine.classname && target.count === 0;
     if (!liveEnemy && !looseMine) continue;
     const trace = game.host.trace({ start: origin, end: body.origin, bounds: POINT, ignore: mine.actor.id, monsters: false });
@@ -136,6 +138,8 @@ function hammerDamage(game: Q1EntityServices, from: ActorId, start: Vec3, end: V
   for (const offset of [ZERO, side, vscale(side, -1)]) {
     const trace = game.host.trace({ start: vadd(start, offset), end: vadd(end, offset), bounds: POINT, ignore: from, monsters: true });
     const target = trace.actor;
+    // MG3 HIP_HammerDamage returns when the first trace hits no entity, because trace_ent is then the player's owner, world.
+    if (target === null && offset === ZERO && mg3Pickups.has(game)) return undefined;
     if (target === null || hit.some(actor => sameActor(actor, target))) continue;
     hit.push(target);
     if (game.host.combat.read(target)?.canTakeDamage && (game.player(target)?.powerups.get("hipnotic:wetsuit") ?? 0) === 0) {
@@ -146,7 +150,7 @@ function hammerDamage(game: Q1EntityServices, from: ActorId, start: Vec3, end: V
 }
 function hammerStrike(game: Q1EntityServices, strike: Q1Actor): undefined {
   const player = strike.owner === null ? null : game.player(strike.owner), body = player === null ? null : game.host.bodies.read(player.actor.id);
-  if (player === null || body === null) return game.remove(strike);
+  if (player === null || body === null || game.health(player.actor.id) <= 0) return game.remove(strike);
   const basis = game.makeVectors(player.viewAngles), source = vadd(body.origin, { x: 0, y: 0, z: 16 });
   let trace = game.host.trace({ start: source, end: vadd(source, vscale(basis.forward, 32)), bounds: POINT, ignore: player.actor.id, monsters: true });
   const cells = game.host.inventory.count(player.actor.id, "q1:ammo/cells");
@@ -192,10 +196,10 @@ function hammerLightning(game: Q1EntityServices, bolt: Q1Actor): undefined {
     target = null; let best = 350;
     for (const observation of [...game.host.actors.observations()].reverse()) {
       const actor = observation.id, body = game.host.bodies.read(actor), entity = game.entity(actor);
-      if (body === null || sameActor(actor, bolt.activator) || game.health(actor) <= 0 || (entity?.movementFlags ?? 0) & 128 || !(game.isPlayer(actor) || entity?.monster !== null && entity?.monster !== undefined)) continue;
+      if (body === null || sameActor(actor, bolt.activator) || game.health(actor) <= 0 || (entity?.movementFlags ?? 0) & 128 || !(game.isPlayer(actor) || ((entity?.movementFlags ?? 0) & 32) !== 0)) continue;
       if ([...game.entities.values()].some(other => (other.classname === "hipnotic_mjolnir_lightning" || other.classname === "hipnotic_tesla_lightning") && other.count === 1 && (() => { const struck = missionReference(game, other, "hipnotic:enemy"); return struck !== null && sameActor(struck, actor); })())) continue;
       const distance = length(vsub(body.origin, origin)); if (distance >= best) continue;
-      const visible = game.host.trace({ start: origin, end: body.origin, bounds: POINT, ignore: bolt.actor.id, monsters: false });
+      const visible = game.host.trace({ start: origin, end: vadd(body.origin, { x: 0, y: 0, z: game.isPlayer(actor) ? 22 : entity?.vector("view_ofs").z ?? 0 }), bounds: POINT, ignore: bolt.actor.id, monsters: false });
       if (visible.fraction !== 1 || visible.inOpen && visible.inWater) continue;
       best = distance; target = actor;
     }

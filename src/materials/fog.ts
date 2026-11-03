@@ -3,7 +3,7 @@
 
 import { dot3, scale3, sub3 } from "../core/math.ts";
 import type { Bounds, Plane, Vec2, Vec3, Vec4 } from "../core/math.ts";
-import type { ShaderDefinition, ShaderStage } from "./material.ts";
+import type { ShaderDefinition } from "./material.ts";
 import type { RenderState, ImageLevel } from "../contracts/render.ts";
 
 export interface FogBrushMap {
@@ -30,7 +30,8 @@ function at<T>(items: readonly T[], index: number): T {
 }
 
 /** R_LoadFogs reads the six axial brush sides before the optional visible side. */
-export function prepareFogVolume(map: FogBrushMap, index: number, parameters: NonNullable<ShaderDefinition["fog"]>): FogVolume {
+/** tr_bsp.c scales the fog color by tr.identityLight, so fog volumes keep the brightness of lit surfaces when overbright shifts them. */
+export function prepareFogVolume(map: FogBrushMap, index: number, parameters: NonNullable<ShaderDefinition["fog"]>, identityLight = 1): FogVolume {
   const fog = at(map.fogs, index), brush = at(map.brushes, fog.brush);
   if (brush.sideCount < 6) throw new Error(`fog brush ${fog.brush} has fewer than six axial sides`);
   const plane = (side: number): Plane => at(map.planes, at(map.brushSides, brush.firstSide + side).plane);
@@ -38,7 +39,7 @@ export function prepareFogVolume(map: FogBrushMap, index: number, parameters: No
     max: { x: plane(1).distance, y: plane(3).distance, z: plane(5).distance } };
   const outsidePlane = fog.visibleSide < 0 ? null : plane(fog.visibleSide);
   const surface = outsidePlane === null ? null : { normal: sub3({ x: 0, y: 0, z: 0 }, outsidePlane.normal), distance: -outsidePlane.distance };
-  const byte = (value: number): number => (Math.trunc(Math.fround(value * 255)) & 255) / 255;
+  const byte = (value: number): number => (Math.trunc(Math.fround(Math.fround(value * identityLight) * 255)) & 255) / 255;
   return { bounds, surface, color: { x: byte(parameters.color.x), y: byte(parameters.color.y), z: byte(parameters.color.z), w: 1 },
     tcScale: Math.fround(1 / Math.fround(Math.max(1, parameters.depthForOpaque) * 8)) };
 }
@@ -83,39 +84,12 @@ export function createFogTexture(pixels: Uint8Array = new Uint8Array(256 * 32 * 
   return { width: 256, height: 32, pixels };
 }
 
-function isBlended(blend: RenderState["blend"]): boolean { return blend.source !== "one" || blend.destination !== "zero"; }
-
-export function fogAdjustment(stage: ShaderStage, first: ShaderStage): FogAdjustment {
-  if (!isBlended(stage.blend) || !isBlended(first.blend)) return "none";
-  const { source, destination } = stage.blend;
-  if (source === "one" && destination === "one" || source === "zero" && destination === "one-minus-src-color") return "rgb";
-  if (source === "src-alpha" && destination === "one-minus-src-alpha") return "alpha";
-  if (source === "one" && destination === "one-minus-src-alpha") return "rgba";
-  return "none";
-}
-
 export function attenuateFogColor(color: Vec4, adjustment: FogAdjustment, coordinates: Vec2): Vec4 {
   if (adjustment === "none") return color;
   const attenuation = Math.fround(1 - fogFactor(coordinates.x, coordinates.y));
   const modulate = (component: number): number => Math.trunc(Math.fround(Math.round(component * 255) * attenuation)) / 255;
   const rgb = adjustment === "rgb" || adjustment === "rgba", alpha = adjustment === "alpha" || adjustment === "rgba";
   return { x: rgb ? modulate(color.x) : color.x, y: rgb ? modulate(color.y) : color.y, z: rgb ? modulate(color.z) : color.z, w: alpha ? modulate(color.w) : color.w };
-}
-
-/** FinishShader and GeneratePermanentShader choose fog depth from final material sort. */
-export function shaderSort(shader: ShaderDefinition | null): number {
-  if (shader === null) return 3;
-  if (shader.stages.length === 0) return 7;
-  if (shader.sky !== null) return 2;
-  if (shader.sort !== null && shader.sort !== 0) return shader.sort;
-  if (shader.polygonOffset) return 4;
-  const first = at(shader.stages, 0);
-  return isBlended(first.blend) ? first.depthWrite ? 5 : 9 : 3;
-}
-
-export function shaderFogPass(shader: ShaderDefinition | null): FogPass {
-  if (shaderSort(shader) <= 3) return "equal";
-  return shader !== null && shader.surfaceParms.includes("fog") ? "less-equal" : "none";
 }
 
 export function fogPassState(pass: Exclude<FogPass, "none">, cull: RenderState["cull"]): RenderState {

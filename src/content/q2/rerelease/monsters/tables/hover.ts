@@ -398,18 +398,9 @@ export const hoverMoves: readonly MonsterMove[] = [
     { ai: "charge", distance: Math.fround(1), actions: [], lerpFrame: -1 },
     { ai: "charge", distance: Math.fround(1), actions: [], lerpFrame: -1 },
   ] },
-  { name: "hover_move_start_attack2", firstFrame: 197, lastFrame: 199, end: "hover_attack", sidestepScale: 0, frames: [
-    { ai: "charge", distance: Math.fround(15), actions: [], lerpFrame: -1 },
-    { ai: "charge", distance: Math.fround(15), actions: [], lerpFrame: -1 },
-    { ai: "charge", distance: Math.fround(15), actions: [], lerpFrame: -1 },
-  ] },
   { name: "hover_move_attack2", firstFrame: 200, lastFrame: 202, end: null, sidestepScale: 0, frames: [
     { ai: "charge", distance: Math.fround(10), actions: ["hover_fire_blaster"], lerpFrame: -1 },
     { ai: "charge", distance: Math.fround(10), actions: ["hover_fire_blaster"], lerpFrame: -1 },
     { ai: "charge", distance: Math.fround(10), actions: ["hover_reattack"], lerpFrame: -1 },
-  ] },
-  { name: "hover_move_end_attack2", firstFrame: 203, lastFrame: 204, end: "hover_run", sidestepScale: 0, frames: [
-    { ai: "charge", distance: Math.fround(15), actions: [], lerpFrame: -1 },
-    { ai: "charge", distance: Math.fround(15), actions: [], lerpFrame: -1 },
   ] },
 ];

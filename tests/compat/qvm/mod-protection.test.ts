@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { QvmModule, QvmOpcode, rejectQvmSyscall, resolveQvmArtifact } from "../../../src/compat/qvm/index.ts";
+import { QvmModule } from "../../../src/compat/qvm/module.ts";
+import { QvmOpcode } from "../../../src/compat/qvm/image.ts";
+import { rejectQvmSyscall } from "../../../src/compat/qvm/syscalls.ts";
+import { resolveQvmArtifact } from "../../../src/compat/qvm/artifacts.ts";
 import { QvmModProtection } from "../../../src/compat/qvm/mod-protection.ts";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
 import { digestBytes } from "../../../src/content/mounts/index.ts";

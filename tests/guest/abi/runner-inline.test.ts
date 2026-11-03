@@ -98,3 +98,33 @@ for (const wide of [false, true]) {
     expect(f.runner.depth).toBe(0);
   });
 }
+
+for (const wide of [false, true]) {
+  test(`${wide ? "x64" : "i386"} recover returns the processor to its entry state after a stopped call`, () => {
+    const f = fixture(wide);
+    const entryStack = f.cpu.state.registers.read("rsp", wide ? 64 : 32);
+    // A one-instruction budget stops the call midway with the callee's frame still on the stack.
+    expect(() => f.runner.invoke({ ...f.request, instructionBudget: 1 })).toThrow(GuestCallStopped);
+    expect(f.cpu.state.registers.read("rsp", wide ? 64 : 32)).not.toBe(entryStack);
+    expect(f.runner.depth).toBe(0);
+    f.runner.recover();
+    expect(f.cpu.state.registers.read("rsp", wide ? 64 : 32)).toBe(entryStack);
+    expect(f.cpu.state.instructionPointer).toBe(0x1800n);
+    expect(f.runner.invoke(f.request).kind).toBe("int32");
+  });
+}
+
+test("bulk host work is charged against the instruction budget", () => {
+  const f = fixture(false);
+  const calls: number[] = [];
+  const trap = f.callbacks.bind({ id: "test:bulk", signature: { abi: f.abi, parameters: [], result: "void", variadic: false },
+    invoke: () => { f.runner.chargeBytes(calls.length === 0 ? 64 : 64 * 100); calls.push(1); return { kind: "void" }; } });
+  f.cpu.memory.protect(f.at(0x1000n), 4096, "read-write");
+  // mov eax, trap; call eax; ret
+  const code = [0xb8, ...[0, 8, 16, 24].map(shift => Number((trap.byteOffset >> BigInt(shift)) & 255n)), 0xff, 0xd0, 0xc3];
+  f.cpu.memory.write(f.at(0x1000n), new Uint8Array(code));
+  f.cpu.memory.protect(f.at(0x1000n), 4096, "read-execute");
+  const request: Parameters<typeof f.runner.invoke>[0] = { ...f.request, instructionBudget: 50, signature: { ...f.request.signature, result: "void" } };
+  expect(f.runner.invoke(request).kind).toBe("void");
+  expect(() => f.runner.invoke(request)).toThrow(GuestCallStopped);
+});

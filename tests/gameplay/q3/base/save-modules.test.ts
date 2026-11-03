@@ -22,7 +22,7 @@ test("module memory restores allocation position and retained source bytes", () 
   memory.initialize();
   expect(memory.allocate(16).readString()).toBe("retained");
   const before = memory.captureSaveState();
-  expect(() => memory.restoreSaveState({ pool: new Uint8Array(2), allocPoint: 32 })).toThrow();
+  expect(() => memory.restoreSaveState({ pool: new Uint8Array(2), allocPoint: 32 })).toThrow("q3.memory: invalid module memory extent");
   expect(memory.captureSaveState()).toEqual(before);
 });
 
@@ -49,7 +49,7 @@ test("cached game settings retain their source update boundary", () => {
   const restored = new Q3GameSettings({ cvars, sendServerCommand: () => {}, remapTeams: () => {} }, "baseq3");
   restored.restoreSaveState(persisted(settings.captureSaveState()));
   expect(restored.integer("g_speed")).toBe(before);
-  expect(() => restored.restoreSaveState([])).toThrow();
+  expect(() => restored.restoreSaveState([])).toThrow("q3.settings: invalid settings snapshot names");
   expect(restored.integer("g_speed")).toBe(before);
   restored.update();
   expect(restored.integer("g_speed")).toBe(777);

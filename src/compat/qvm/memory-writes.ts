@@ -9,6 +9,8 @@ export type QvmWriteCapture = readonly Capture[] | null;
 /** One allocation owns publication, including views retained before a watch is installed. */
 export class QvmMemoryWrites {
   private watches: readonly Watch[] = [];
+  /** One flag per 4 KiB page that any watch covers, so stores elsewhere skip the watch scan. */
+  private watchedPages = new Uint8Array(0);
   private publishing = false;
   private closed = false;
   private sequence = 0;
@@ -31,11 +33,23 @@ export class QvmMemoryWrites {
         merged[merged.length - 1] = { byteOffset: previous.byteOffset, byteLength: Math.max(previous.byteOffset + previous.byteLength, range.byteOffset + range.byteLength) - previous.byteOffset };
       else merged.push(range);
     }
-    const watch: Watch = { ranges: merged, publish, afterPublication, active: true }; this.watches = [...this.watches, watch];
-    return () => { if (watch.active) { watch.active = false; this.watches = this.watches.filter(entry => entry !== watch); } return undefined; };
+    const watch: Watch = { ranges: merged, publish, afterPublication, active: true }; this.watches = [...this.watches, watch]; this.indexWatches();
+    return () => { if (watch.active) { watch.active = false; this.watches = this.watches.filter(entry => entry !== watch); this.indexWatches(); } return undefined; };
+  }
+  private indexWatches(): void {
+    if (this.watches.length === 0) { this.watchedPages = new Uint8Array(0); return; }
+    const pages = new Uint8Array((this.bytes.length >>> 12) + 1);
+    for (const watch of this.watches) for (const range of watch.ranges) pages.fill(1, range.byteOffset >>> 12, ((range.byteOffset + range.byteLength - 1) >>> 12) + 1);
+    this.watchedPages = pages;
+  }
+  private watched(offset: number, length: number): boolean {
+    if (length === 0) return false;
+    for (let page = offset >>> 12, last = (offset + length - 1) >>> 12; page <= last; page++) if (this.watchedPages[page] === 1) return true;
+    return false;
   }
   before(offset: number, length: number): QvmWriteCapture {
     this.assertWritable(); this.range(offset, length);
+    if (!this.watched(offset, length)) return null;
     let captures: Capture[] | null = null;
     for (const watch of this.watches) {
       let ranges: CapturedRange[] | null = null;
@@ -63,7 +77,7 @@ export class QvmMemoryWrites {
       this.effect(() => afterPublication(event));
     }
   }
-  clear(): void { this.assertNotPublishing(); for (const watch of this.watches) watch.active = false; this.watches = []; }
+  clear(): void { this.assertNotPublishing(); for (const watch of this.watches) watch.active = false; this.watches = []; this.watchedPages = new Uint8Array(0); }
   close(): void { this.clear(); this.closed = true; }
 }
 

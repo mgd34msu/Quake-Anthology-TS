@@ -52,7 +52,7 @@ export function musicFallback(content: ContentId, catalog: InstalledCatalog): Co
 /** One world soundtrack owns the shared engine's intro/loop stream. */
 export class ApplicationMusic {
   private current: {
-    readonly source: MusicSource; readonly bank: SoundBank; readonly fallback: OpenMusicTrack | null;
+    source: MusicSource; readonly bank: SoundBank; fallback: OpenMusicTrack | null;
     readonly player: MusicPlayer; readonly cd: CdMusic; readonly opener: { open: OpenMusicTrack };
     track: string; looping: boolean; authoredCue: string;
   } | null = null;
@@ -72,12 +72,14 @@ export class ApplicationMusic {
     if (this.current?.source.content === source.content && this.current.bank === bank) {
       // Same soundtrack already selected: keep playback state, but a later
       // selection may supply (or withdraw) the alternate-edition fallback.
-      this.current = { ...this.current, source, fallback };
+      // Updated in place: a pending startTrack holds this record and reports state through it.
+      this.current.source = source; this.current.fallback = fallback;
       return;
     }
     this.stop();
     const player = new MusicPlayer(this.engine.sampleRate, source.family, this.volumeMode, this.controls);
     player.setVolume(this.gain);
+    player.onFault = error => { this.print(`WARNING: music playback stopped: ${error instanceof Error ? error.message : String(error)}\n`); };
     const opener = { open: (path: string) => bank.openMusic(path) };
     const cd = new CdMusic(player, path => opener.open(path));
     this.current = { source, bank, fallback, player, cd, opener, track: "", looping: false, authoredCue: "" };
@@ -245,7 +247,9 @@ export class ApplicationMusic {
     const intro = await open(introName);
     if (intro === null) { if (request === this.request && active()) this.print(`Music unavailable: ${content}/${introName}\n`); return; }
     if (request !== this.request || !this.controls.enabled || !active()) { intro.close(); return; }
-    const loop = !looping ? null : loopName === undefined || loopName === "" || loopName === introName ? intro : await open(loopName);
+    let loop: PcmStream | null;
+    try { loop = !looping ? null : loopName === undefined || loopName === "" || loopName === introName ? intro : await open(loopName); }
+    catch (error) { intro.close(); throw error; }
     if (request !== this.request || !this.controls.enabled || !active()) { intro.close(); if (loop !== intro) loop?.close(); return; }
     current.looping = loop !== null; player.start(intro, loop);
   }

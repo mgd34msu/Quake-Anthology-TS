@@ -18,7 +18,7 @@ export function registerAddonTriggers(context: Q1AddonContext): undefined {
   });
 
   const counterMessage = (entity: Q1Actor, activator: ActorId | null, sacrifice: boolean, force = false): undefined => {
-    if (!game.isPlayer(activator) || !force && (entity.spawnflags & 1) !== 0) return undefined;
+    if (!game.isPlayer(activator) && (entity.spawnflags & 8388608) === 0 || !force && (entity.spawnflags & 1) !== 0) return undefined;
     const count = entity.count;
     return context.broadcast(sacrifice ? count === 0 ? "$mg3_qc_sacricie_count_complete" : count >= 1 && count <= 8 ? `$mg3_qc_sacricie_count_${count}_more` : "$mg3_qc_sacricie_count_more"
       : count === 0 ? "$qc_sequence_completed" : count === 1 ? "$qc_one_more" : count === 2 ? "$qc_two_more" : count === 3 ? "$qc_three_more" : "$qc_more_go");

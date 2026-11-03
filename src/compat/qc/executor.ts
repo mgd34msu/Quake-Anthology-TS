@@ -1,9 +1,9 @@
 import type { ActorId } from "../../contracts/identity.ts";
-import type { ExecutionProfile, GuestCallContext, GuestCallResult, GuestCallValue, GuestCheckpoint, GuestExecutor, GuestLayout,
+import type { GuestCheckpoint, GuestLayout,
   GuestPrivateState, ModuleIdentity, QuakeCCheckpoint, RawEntityTable, SavedGuestCallbackBinding } from "../../contracts/execution.ts";
 import type { RandomState } from "../../contracts/numeric.ts";
 import { BinaryReader, BinaryWriter } from "../../core/binary/index.ts";
-import type { QcMachine } from "./machine.ts";
+import type { QcMachine, QcMachineSnapshot } from "./machine.ts";
 
 export interface QcHostSavedState {
   readonly state: GuestPrivateState;
@@ -16,44 +16,6 @@ export interface QcExecutorHost {
 }
 function sameModule(left: ModuleIdentity, right: ModuleIdentity): boolean {
   return left.id === right.id && left.artifactPath === right.artifactPath && left.digest === right.digest && left.revision === right.revision;
-}
-/** GuestExecutor bridge. Save hooks run only after the source callback returns. */
-export class QuakeCExecutor implements GuestExecutor {
-  constructor(readonly profile: Extract<ExecutionProfile, { readonly kind: "quakec" }>, readonly machine: QcMachine, private readonly host: QcExecutorHost) {
-    if (profile.host.api.kind !== machine.program.api.kind || profile.numeric.id !== machine.numeric.profile.id
-      || profile.module.digest !== machine.program.digest) machine.fail("execution profile disagrees with loaded program");
-  }
-  invoke(context: GuestCallContext, arguments_: readonly GuestCallValue[]): GuestCallResult {
-    const callback = context.callback;
-    if (callback.kind !== "quakec" || !sameModule(context.module, this.profile.module) || !sameModule(callback.module, this.profile.module)) this.machine.fail("callback belongs to another guest module");
-    if (arguments_.length > 8) this.machine.fail("too many QuakeC arguments");
-    if (context.self !== null) {
-      if (!sameModule(context.self.module, this.profile.module)) this.machine.fail("self belongs to another guest module");
-      this.machine.globals.setInt(this.machine.globalOffset("self"), this.machine.entities.reference(context.self.slot));
-    }
-    if (context.other !== null) {
-      if (!sameModule(context.other.module, this.profile.module)) this.machine.fail("other belongs to another guest module");
-      this.machine.globals.setInt(this.machine.globalOffset("other"), this.machine.entities.reference(context.other.slot));
-    }
-    for (let index = 0; index < arguments_.length; index++) {
-      const value = arguments_[index];
-      if (value === undefined) this.machine.fail("missing argument");
-      const offset = 4 + index * 3;
-      switch (value.kind) {
-        case "int32": case "uint32": this.machine.globals.setInt(offset, value.value); break;
-        case "float32": this.machine.globals.setFloat(offset, value.value); break;
-        case "aggregate":
-          if (value.bytes.length !== 12 || value.layout.byteLength !== 12) this.machine.fail("QuakeC aggregate argument must be three words");
-          this.machine.globals.bytes.set(value.bytes, offset * 4); break;
-        case "pointer": case "int64": case "uint64": case "float64": this.machine.fail(`QuakeC does not accept ${value.kind} arguments; encode a source word or vector`);
-      }
-    }
-    this.machine.execute(callback.functionIndex, arguments_.length);
-    const layout: GuestLayout = { id: "quakec:return-words", byteLength: 12, alignment: 4, pointerBytes: 4, byteOrder: "little-endian", fields: [] };
-    return { kind: "aggregate", layout, bytes: this.machine.globals.bytes.slice(4, 16) };
-  }
-  checkpoint(): QuakeCCheckpoint { return captureQcCheckpoint(this.machine, this.profile.module, this.host); }
-  restore(checkpoint: GuestCheckpoint): undefined { return restoreQcCheckpoint(this.machine, this.profile.module, this.host, checkpoint); }
 }
 export function captureQcCheckpoint(machine: QcMachine, module: ModuleIdentity, hostAdapter: QcExecutorHost): QuakeCCheckpoint {
     const snapshot = machine.snapshot();
@@ -71,7 +33,8 @@ export function captureQcCheckpoint(machine: QcMachine, module: ModuleIdentity, 
       callStack: [], locals: new Uint8Array(), hostState: { module: module, format: "quakec:host-v1", bytes: writer.finish() } };
   }
 
-export function restoreQcCheckpoint(machine: QcMachine, module: ModuleIdentity, hostAdapter: QcExecutorHost, checkpoint: GuestCheckpoint): undefined {
+/** Validates and decodes a checkpoint without touching the machine or host, so a corrupt save fails before any state is released. */
+export function preflightQcCheckpoint(machine: QcMachine, module: ModuleIdentity, checkpoint: GuestCheckpoint): { readonly snapshot: QcMachineSnapshot; readonly state: QcHostSavedState["state"] } {
     if (checkpoint.kind !== "quakec" || !sameModule(checkpoint.module, module) || checkpoint.api.kind !== machine.program.api.kind || checkpoint.api.programVersion !== machine.program.api.programVersion || checkpoint.api.systemCrc !== machine.program.api.systemCrc || !sameModule(checkpoint.hostState.module, module)) machine.fail("incompatible QuakeC checkpoint");
     if (checkpoint.callStack.length !== 0 || checkpoint.locals.length !== 0 || checkpoint.functionIndex !== 0) machine.fail("checkpoint is not at an idle callback boundary");
     if (checkpoint.entityStrideBytes !== machine.entities.layout.strideBytes || checkpoint.hostState.format !== "quakec:host-v1") machine.fail("checkpoint layout mismatch");
@@ -86,10 +49,16 @@ export function restoreQcCheckpoint(machine: QcMachine, module: ModuleIdentity, 
     const separator = format.indexOf(":");
     if (separator < 1 || separator === format.length - 1) machine.fail("invalid host state format");
     const stateFormat: `${string}:${string}` = `${format.slice(0, separator)}:${format.slice(separator + 1)}`;
-    machine.restore({ globals: checkpoint.globals, entities: checkpoint.entities, entityCount: checkpoint.entityCount, strings: checkpoint.strings,
-      statement: checkpoint.statement, functionIndex: checkpoint.functionIndex, argumentCount: checkpoint.argumentCount, profiling, traceEnabled });
-    hostAdapter.restore({ random: checkpoint.random, callbacks: checkpoint.callbacks,
-      state: { module: module, format: stateFormat, bytes: stateBytes } });
+    const snapshot: QcMachineSnapshot = { globals: checkpoint.globals, entities: checkpoint.entities, entityCount: checkpoint.entityCount, strings: checkpoint.strings,
+      statement: checkpoint.statement, functionIndex: checkpoint.functionIndex, argumentCount: checkpoint.argumentCount, profiling, traceEnabled };
+    machine.validateSnapshot(snapshot);
+    return { snapshot, state: { module: module, format: stateFormat, bytes: stateBytes } };
+  }
+export function restoreQcCheckpoint(machine: QcMachine, module: ModuleIdentity, hostAdapter: QcExecutorHost, checkpoint: GuestCheckpoint): undefined {
+    const { snapshot, state } = preflightQcCheckpoint(machine, module, checkpoint);
+    machine.restore(snapshot);
+    hostAdapter.restore({ random: checkpoint.random, callbacks: checkpoint.callbacks, state });
+    return undefined;
   }
 /** Exposes complete live edict records and resolves actor authority on every access. */
 export function createQcRawEntityTable(machine: QcMachine, module: ModuleIdentity, layout: GuestLayout, currentActor: (slot: number) => ActorId | null): RawEntityTable {

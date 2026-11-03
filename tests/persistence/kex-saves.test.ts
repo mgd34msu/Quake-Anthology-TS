@@ -9,7 +9,7 @@ import { discoverInstalledContent } from "../../src/content/catalog/index.ts";
 import { nightdiveAddonDirectories } from "../../src/content/roots.ts";
 import { decodeKexQ2ServerSave, readKexQ2SaveInfo } from "../../src/persistence/kex-q2-save.ts";
 import { encodeQ1Save, type Q1SaveData } from "../../src/persistence/q1.ts";
-import { testCorpusRoot } from "../support/corpus.ts";
+import { corpusHasFile, testCorpusRoot } from "../support/corpus.ts";
 
 function lengthString(value: string): Uint8Array {
   const bytes = new Uint8Array(4 + value.length);
@@ -84,7 +84,7 @@ test.skipIf(realQ2Save === undefined || !existsSync(realQ2SavePath))("the instal
   expect(info.gameDirectory).toBe("baseq2");
 });
 
-test.skipIf(!existsSync(testCorpusRoot()))("external nightdive saves list beside own saves and resolve by name", async () => {
+test.skipIf(!corpusHasFile("q1/rerelease/id1/pak0.pak"))("external nightdive saves list beside own saves and resolve by name", async () => {
   const root = await mkdtemp(resolve(tmpdir(), "quake-kex-saves-"));
   try {
     const own = join(root, "saves"), external = join(root, "steam/Quake");

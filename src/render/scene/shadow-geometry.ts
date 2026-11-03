@@ -1,9 +1,12 @@
+import type { Vec4 } from "../../contracts/math.ts";
+import type { SceneCamera } from "../../contracts/render.ts";
 import type { SceneEntity } from "../../contracts/scene.ts";
 import type { CompiledMaterial } from "../../materials/compile.ts";
 import { deformGeometry } from "../../materials/deform.ts";
 import type { MaterialDrawContext } from "../../materials/evaluate.ts";
 import { MaterialDeformState } from "../../materials/geometry.ts";
 import type { MaterialGeometry } from "../../materials/geometry.ts";
+import { projectPoint } from "./view.ts";
 
 /** View models, transparent effects and sprites have no world-space silhouette. */
 export function entityCastsShadow(entity: SceneEntity, viewModel = false): boolean {
@@ -29,4 +32,10 @@ export function shadowMaterialGeometry(shader: CompiledMaterial, geometry: Mater
   if (definition.clampTime !== 0 && time >= definition.clampTime) time = definition.clampTime;
   return deformGeometry(new MaterialDeformState(geometry, context.refdefTime, context.renderText, definition), definition.deforms,
     context.deformView, Math.fround(time), context.noise, context.projectionShadow);
+}
+
+/** RB_ShadowFinish draws this quad at eye-space z = -10 under the view projection. */
+export function shadowFinishQuad(camera: SceneCamera): readonly [Vec4, Vec4, Vec4, Vec4] {
+  const corner = (x: number, y: number): Vec4 => projectPoint(camera.projection, { x, y, z: -10 });
+  return [corner(-100, 100), corner(100, 100), corner(100, -100), corner(-100, -100)];
 }

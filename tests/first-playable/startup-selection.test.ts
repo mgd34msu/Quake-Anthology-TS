@@ -12,6 +12,8 @@ import { openMountPlan } from "../../src/content/mounts/index.ts";
 import { applicationPreset, applicationOptionsForRecipe, resolveApplicationMovement } from "../../src/app/bootstrap/content.ts";
 import { StartupSelectionModel } from "../../src/app/bootstrap/startup-selection.ts";
 import { defaultNetQuakeProfile } from "../../src/network/q1/profile.ts";
+import { trackedTempDirectories } from "../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 const corpus = testCorpusRoot();
 test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3") || !corpusHasFile("q2/baseq2/pak0.pak"))("startup choices resolve independent installed source selections without starting a world", async () => {
@@ -315,9 +317,8 @@ for (const profile of [{ family: "q1", product: "q1-classic-id1", map: "e1m1" },
   const { Application } = await import("../../src/app/bootstrap/application.ts");
   const { StartupServerBrowser, browserAddress } = await import("../../src/app/bootstrap/server-browser.ts");
   const { ConfigStore } = await import("../../src/settings/config.ts");
-  const { mkdtemp, rm } = await import("node:fs/promises");
-  const { tmpdir } = await import("node:os");
-  const directory = await mkdtemp(`${tmpdir()}/quake-browser-`), config = new ConfigStore(directory);
+  const { rm } = await import("node:fs/promises");
+  const directory = await tempDirectory("quake-browser-"), config = new ConfigStore(directory);
   const command = parseApplicationCommand(["--content-root", corpus, "--game", profile.product, "--map", profile.map, "--character", profile.family, "--movement", profile.family, "--dedicated", "--listen", "0", "--bind", "127.0.0.1"]);
   if (command.kind !== "run") throw new Error("Missing host options");
   const app = await Application.open(command.options, { print: () => undefined });
@@ -336,12 +337,19 @@ for (const profile of [{ family: "q1", product: "q1-classic-id1", map: "e1m1" },
     browser.address = browserAddress(address);
     const restored = await StartupServerBrowser.open(config);
     try { restored.choose(profile.family); expect(restored.rows()[0]?.sources).toContain("favorite"); expect(restored.rows()[0]?.address).toEqual(address); }
-    finally { restored.close(); }
+    finally { await restored.close(); }
     if (profile.family === "q1") {
       await config.dump("servers-q1", '[{"kind":"loopback","id":"invalid-favorite"}]');
-      await expect(StartupServerBrowser.open(config)).rejects.toThrow("requires an IP address");
+      // An invalid saved list is skipped and reported; it must not stop the browser opening.
+      const tolerant = await StartupServerBrowser.open(config);
+      try {
+        tolerant.choose("q1");
+        expect(tolerant.rows().filter(row => row.sources.includes("favorite"))).toHaveLength(0);
+        expect(tolerant.status).toContain("Ignored invalid saved server data");
+        expect(tolerant.status).toContain("requires an IP address");
+      } finally { await tolerant.close(); }
     }
-  } finally { browser.close(); await app.close(); await rm(directory, { recursive: true, force: true }); }
+  } finally { await browser.close(); await app.close(); await rm(directory, { recursive: true, force: true }); }
 }, 30000);
 
 test.skipIf(!corpusHasFile("q2/baseq2/pak0.pak"))("native campaign presets replace gameplay choices without changing the custom draft", async () => {

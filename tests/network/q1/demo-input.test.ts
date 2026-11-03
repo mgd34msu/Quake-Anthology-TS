@@ -1,5 +1,7 @@
+import { MusicContent, MusicMemoryMounts, musicWave } from "../../support/music-fixtures.ts";
+import { recipeFixture } from "../../support/save-fixtures.ts";
 import { expect, test } from 'bun:test';
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import { writeNetQuakeMessage } from '../../../src/network/q1/netquake.ts';
 import { SizeBuf } from '../../../src/network/q1/message.ts';
@@ -7,62 +9,14 @@ import { Q1RemotePresentation } from '../../../src/app/bootstrap/network/remote-
 import { QwRemotePresentation } from '../../../src/app/bootstrap/network/remote-qw.ts';
 import { LoadedApplicationContent } from '../../../src/app/bootstrap/content.ts';
 import { InstalledCatalog } from '../../../src/content/catalog/index.ts';
-import { MountedContent } from '../../../src/content/mounts/index.ts';
-import type { OpenedResource } from '../../../src/content/mounts/index.ts';
 import { readQ1Bsp } from '../../../src/formats/q1-map/index.ts';
 import { createIdentityOwner } from '../../../src/contracts/identity.ts';
 import { EngineSession } from '../../../src/world/session/session.ts';
 import { nextActorGeneration } from '../../../src/world/actors/registry.ts';
 import type { QwServerData } from '../../../src/app/bootstrap/network/qw-types.ts';
-import type { ExecutableRecipe, ProviderReference, ResolvedResourceReference, ContentId } from '../../../src/contracts/content.ts';
-import { createContentDigest, createResourceId, createMountPlanId, createMountIdentity, createMountId } from '../../../src/contracts/content.ts';
-function recipe(): ExecutableRecipe {
-  const content = "q1:classic:musicmod:fixture";
-  const provider = (role: string): ProviderReference => ({ provider: `q1:${role}`, content });
-  const raw: Omit<ResolvedResourceReference, "id"> = { requestedPath: "maps/start.bsp", provenance: { kind: "loose", memberPath: "maps/start.bsp", mount: { kind: "loose", identity: { id: "mount:q1:fixture", content, generation: 2 }, rootPath: "/fixture" } },
-    digest: createContentDigest("0".repeat(64)), byteLength: 123, resolution: { kind: "default-order", plan: "mount-plan:fixture:1", rank: 0 } };
-  const geometry = { ...raw, id: createResourceId(raw) };
-  return { schemaVersion: 3, id: "recipe:fixture:1", preset: "recipe:fixture:1", map: { geometryContent: content, geometry, entities: provider("game") }, campaign: { kind: "campaign", mission: provider("mission"), gamecode: provider("game") },
-    movement: provider("movement"), character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
-    presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: content, hud: provider("hud"), effects: provider("effects"), audio: provider("audio") }, engineBehavior: provider("engine"), combat: provider("combat"), inventory: provider("inventory"), match: provider("match"), transition: provider("transition"),
-    execution: [{ kind: "typescript", owner: provider("game"), implementation: "q1:official", role: "server-game", api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } }],
-    mounts: { id: "mount-plan:fixture:1", mounts: [raw.provenance.mount], defaultOrder: [raw.provenance.mount.identity.id], prefixOrders: [] }, resources: [geometry], timing: [],
-    ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } } };
-}
+import type { ExecutableRecipe } from '../../../src/contracts/content.ts';
+const recipe = (): ExecutableRecipe => recipeFixture("q1:classic:musicmod:fixture");
 
-function musicWave(sample: number): Uint8Array {
-  const bytes = new Uint8Array(44 + 64), view = new DataView(bytes.buffer);
-  const tag = (offset: number, value: string): void => { bytes.set(new TextEncoder().encode(value), offset); };
-  tag(0, "RIFF"); view.setUint32(4, bytes.length - 8, true); tag(8, "WAVE"); tag(12, "fmt ");
-  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
-  view.setUint32(24, 44100, true); view.setUint32(28, 88200, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
-  tag(36, "data"); view.setUint32(40, 64, true);
-  for (let offset = 44; offset < bytes.length; offset += 2) view.setInt16(offset, sample, true);
-  return bytes;
-}
-
-class MusicMemoryMounts extends MountedContent {
-  constructor(readonly content: ContentId, private readonly files: ReadonlyMap<string, Uint8Array>) {
-    super({ id: createMountPlanId("music-memory", content.replaceAll(":", "-")), mounts: [], defaultOrder: [], prefixOrders: [] }, []);
-  }
-  override async open(path: string): Promise<OpenedResource | null> {
-    this.assertOpen();
-    const bytes = this.files.get(path); if (bytes === undefined) return null;
-    const record: Omit<ResolvedResourceReference, "id"> = { requestedPath: path, byteLength: bytes.length,
-      digest: createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex")),
-      provenance: { kind: "loose", memberPath: path, mount: { kind: "loose", rootPath: "/music-memory",
-        identity: createMountIdentity(createMountId("music-memory", this.content.replaceAll(":", "-")), this.content, 0) } },
-      resolution: { kind: "default-order", plan: this.plan.id, rank: 0 } };
-    return { bytes, reference: { ...record, id: createResourceId(record) } };
-  }
-}
-
-class MusicContent extends LoadedApplicationContent {
-  override async forContent(content: ContentId): Promise<MountedContent> {
-    if (content !== this.recipe.map.entities.content) throw new Error('Wrong music content owner');
-    return this.mounts;
-  }
-}
 function fixture() {
   const selected = recipe(), bytes = new Uint8Array(124); new DataView(bytes.buffer).setInt32(0, 29, true);
   const owner = selected.map.entities.content;
@@ -127,7 +81,7 @@ test('QWD timedemo consumes timestamp groups rather than draining the file',asyn
  const input=new QuakeWorldDemoInput(new QuakeWorldDemoReader(bytes),remote);
  try{expect(await input.advance({frame:0,elapsedSeconds:0,timedemo:true})).toEqual({phase:'loading',recordedSeconds:4,recordsRead:2});expect(await input.advance({frame:1,elapsedSeconds:0,timedemo:true})).toEqual({phase:'ended',reason:'eof',recordedSeconds:5,recordsRead:1});}finally{input.close();session.close();await content.close();}
 });
-const retail=`${testCorpusRoot()}/q1/id1/PAK0.PAK`;
+const retail=corpusFile("q1/id1/PAK0.PAK");
 test.skipIf(!existsSync(retail))('retail demo1 traverses actual records through NQ presentation to recorded disconnect',async()=>{
  const archive=await openArchive(retail),entry=archive.findEntries('demo1.dem')[0];if(entry===undefined)throw Error('Missing demo1');
  const {content,session,options}=fixture();let remote:Q1RemotePresentation;
@@ -177,7 +131,7 @@ test('candidate demo publication and client lifetime remain owned by caller',asy
 
 test('NQ malformed demo errors propagate without converting them into normal EOF',async()=>{
  const {content,session,options}=fixture(),remote=new Q1RemotePresentation(options),input=new NetQuakeDemoInput(new NetQuakeDemoReader(concat([writeNetQuakeDemoHeader(),new Uint8Array([1])])),remote);
- try{await expect(input.advance({frame:0,elapsedSeconds:0,timedemo:false})).rejects.toThrow();input.close();expect(await input.advance({frame:1,elapsedSeconds:0,timedemo:false})).toMatchObject({phase:'ended',reason:'closed'});}finally{input.close();session.close();await content.close();}
+ try{await expect(input.advance({frame:0,elapsedSeconds:0,timedemo:false})).rejects.toThrow("Invalid demo message size");input.close();expect(await input.advance({frame:1,elapsedSeconds:0,timedemo:false})).toMatchObject({phase:'ended',reason:'closed'});}finally{input.close();session.close();await content.close();}
 });
 
 function qwPacket(sequence:number,ack:number,messages:readonly Parameters<typeof writeQuakeWorldMessage>[2][],frame=false):Uint8Array {
@@ -238,5 +192,5 @@ test('retained script mounts outlive content retirement until the last idempoten
  const {content,session}=fixture();const first=content.retainMainMounts(),second=content.retainMainMounts(),mounts=content.mounts;
  await content.close();expect(()=>content.retainMainMounts()).toThrow('Application content is closed');
  expect(await mounts.open('music/06.wav')).not.toBeNull();first();first();expect(await mounts.open('music/06.wav')).not.toBeNull();
- second();second();expect(mounts.open('music/06.wav')).rejects.toThrow();session.close();
+ second();second();await expect(mounts.open('music/06.wav')).rejects.toThrow("Content mount plan is closed");session.close();
 });

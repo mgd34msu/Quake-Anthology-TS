@@ -42,14 +42,12 @@ export function registerHipnoticPaths(runtime: Q1MissionPackMonsters): undefined
     if (monster === null) return false;
     if (monster.state.path !== corner.targetname || monster.enemy !== null) return true;
     if (entity.classname === "monster_ogre") game.sound(entity, "ogre/ogdrag.wav", "voice", 2);
-    if (corner.target !== "") {
-      const target = game.find(corner.target)[0]; monster.state.path = target?.targetname ?? "";
-      entity.references.set("goalentity", target?.actor.id ?? null); entity.references.set("movetarget", target?.actor.id ?? null);
-      entity.idealYaw = yawFor(vsub(target === undefined ? ZERO : game.body(target).origin, monster.origin));
-      if (target !== undefined) {
-        if (corner.delay !== 0) { monster.state.pauseUntil = game.time + corner.delay; monster.play(monster.spec.stand); }
-        return true;
-      }
+    const target = game.pathGoal(corner.target); monster.state.path = target === null ? "" : game.entity(target)?.targetname ?? "";
+    entity.references.set("goalentity", target); entity.references.set("movetarget", target);
+    entity.idealYaw = yawFor(vsub(target === null ? ZERO : game.host.bodies.read(target)?.origin ?? ZERO, monster.origin));
+    if (target !== null) {
+      if (corner.delay !== 0) { monster.state.pauseUntil = game.time + corner.delay; monster.play(monster.spec.stand); }
+      return true;
     }
     monster.state.pauseUntil = game.time + 999999; monster.play(monster.spec.stand); return true;
   });

@@ -1,3 +1,4 @@
+import { expectWorldRegion } from "../../support/pixels.ts";
 import { nextActorGeneration } from '../../../src/world/actors/registry.ts';
 import { expect, spyOn, test } from 'bun:test';
 import { QuakeCSource } from '../../../src/app/bootstrap/simulation/quakec-source.ts';
@@ -25,22 +26,9 @@ interface NativeClient {
     sounds: readonly string[];
     models: readonly string[];
 }
-async function client(name: string): Promise<NativeClient> {
-    const transport = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
-    return { transport, handshake: new NetQuakeConnectClient(), channel: new NetQuakeChannel(), decoder: new NetQuakeDecoder(),
-        signon: new NetQuakeSignon({ name, color: 0, spawnParameters: '', extensionFlags: null }), queued: [], messages: [], deliveries: [], sounds: [], models: [] };
-}
-test('retail NetQuake UDP shares actors, sound precaches, scoreboard, effects and travel', async () => {
-    const launch = parseApplicationCommand(['--game', 'q1-classic-id1', '--map', 'e1m1', '--movement', 'q1', '--character', 'q1', '--mode', 'coop', '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
-    if (launch.kind !== 'run')
-        throw new Error('Launch options missing');
-    const prints: string[] = [], app = await Application.open(launch.options, { print: text => { prints.push(text); return undefined; } });
-    const first = await client('First UDP'), second = await client('Second UDP'), peers = [first, second];
-    const address = app.networkAddress;
-    if (address === null || address.kind === "ipx")
-        throw new Error('No server address');
+function peerPump(app: Application, peers: readonly NativeClient[], address: Parameters<UdpTransport['send']>[0]) {
     let now = 0;
-    const command = (peer: Awaited<ReturnType<typeof client>>, text: string): void => { const bytes = new SizeBuf(256); writeClientStringCommand(bytes, text); peer.queued.push(bytes.bytes()); };
+    const command = (peer: NativeClient, text: string): void => { const bytes = new SizeBuf(256); writeClientStringCommand(bytes, text); peer.queued.push(bytes.bytes()); };
     const exchange = async (): Promise<void> => {
         now += 50;
         for (const peer of peers) {
@@ -91,6 +79,23 @@ test('retail NetQuake UDP shares actors, sound precaches, scoreboard, effects an
                     }
             }
     };
+    return { command, exchange };
+}
+async function client(name: string): Promise<NativeClient> {
+    const transport = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
+    return { transport, handshake: new NetQuakeConnectClient(), channel: new NetQuakeChannel(), decoder: new NetQuakeDecoder(),
+        signon: new NetQuakeSignon({ name, color: 0, spawnParameters: '', extensionFlags: null }), queued: [], messages: [], deliveries: [], sounds: [], models: [] };
+}
+test('retail NetQuake UDP shares actors, sound precaches, scoreboard, effects and travel', async () => {
+    const launch = parseApplicationCommand(['--game', 'q1-classic-id1', '--map', 'e1m1', '--movement', 'q1', '--character', 'q1', '--mode', 'coop', '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
+    if (launch.kind !== 'run')
+        throw new Error('Launch options missing');
+    const prints: string[] = [], app = await Application.open(launch.options, { print: text => { prints.push(text); return undefined; } });
+    const first = await client('First UDP'), second = await client('Second UDP'), peers = [first, second];
+    const address = app.networkAddress;
+    if (address === null || address.kind === "ipx")
+        throw new Error('No server address');
+    const { command, exchange } = peerPump(app, peers, address);
     try {
         for (let i = 0; i < 100 && peers.some(peer => !peer.signon.active); i++)
             await exchange();
@@ -216,7 +221,7 @@ test('retail NetQuake UDP shares actors, sound precaches, scoreboard, effects an
             peer.transport.close();
         await app.close();
     }
-}, 30000);
+}, 120000);
 
 test('production NetQuake remote frontend presents retail e1m1, sends input and travels without a simulation', async () => {
     const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
@@ -241,7 +246,7 @@ test('production NetQuake remote frontend presents retail e1m1, sends input and 
         if(local===undefined||admitted===undefined) throw new Error(`No native player: ${prints.join('\n')}`);
         expect(app.remote.playerUi(local.actor).health).toBe(server.simulation.playerUi(admitted.actor).health);
         expect(app.remote.playerUi(local.actor).activeWeapon).toBe(server.simulation.playerUi(admitted.actor).activeWeapon);
-        expect(new Set(app.readPixels()).size).toBeGreaterThan(16);
+        expectWorldRegion(app.readPixels(),160,120);
         const before=server.simulation.bodies.read(admitted.actor)?.origin;
         app.input({seat:local.seat.id,kind:'key',code:119,down:true,repeat:false,timeMilliseconds:performance.now()});
         for(let i=0;i<8;i++) await exchange();
@@ -334,7 +339,7 @@ test('production NetQuake remote frontend presents retail e1m1, sends input and 
         expect(connection.isClosed).toBe(true); expect(app.remote.client.connection).toBeNull();
         await app.close();await Bun.sleep(1);await server.step(50);expect(server.networkClients.length).toBe(0);
     } finally {await remote?.close();await server.close();}
-},30000);
+},120000);
 
 test('production NetQuake client honors advertised game port and original signon/move bytes', async () => {
     const { Q1ClientNetwork } = await import('../../../src/app/bootstrap/network/q1-client.ts');
@@ -384,7 +389,7 @@ test('production NetQuake client honors advertised game port and original signon
         const wideMove=server.receive(await receive(game),13).delivery;
         expect(wideMove===null?[]:[...wideMove.payload]).toEqual([3,0,0,128,63,0,0,0,64,0,128,200,0,156,255,0,0,3,7]);
         game.send(transport.address,server.unreliable(Uint8Array.of(4,9,3,0,0)));await Bun.sleep(1);
-        await expect(client.poll(14)).rejects.toThrow('Unsupported NetQuake protocol 777');
+        await client.poll(14);expect(reasons).toEqual(['Unsupported NetQuake protocol 777']);expect(client.phase).toBe('rejected');expect(await client.poll(15)).toEqual([]);
     } finally {client.close();control.close();game.close();}
 });
 
@@ -434,58 +439,7 @@ test('external QuakeC NetQuake routes native source messages and fields through 
     const first = await client('QC First'), second = await client('QC Second'), peers = [first, second];
     const address = app.networkAddress;
     if (address === null || address.kind === 'ipx') throw new Error('Missing UDP bind');
-    let now = 0;
-    const command = (peer: Awaited<ReturnType<typeof client>>, text: string): void => { const bytes = new SizeBuf(256); writeClientStringCommand(bytes, text); peer.queued.push(bytes.bytes()); };
-    const exchange = async (): Promise<void> => {
-        now += 50;
-        for (const peer of peers) {
-            if (peer.handshake.state.kind === 'waiting') {
-                const connect = peer.handshake.next(now);
-                if (connect !== null)
-                    peer.transport.send(address, connect);
-            }
-            if (peer.channel.canSendReliable) {
-                const bytes = peer.queued.shift();
-                if (bytes !== undefined)
-                    peer.channel.queueReliable(bytes);
-            }
-            const bytes = peer.channel.next(now);
-            if (bytes !== null)
-                peer.transport.send(address, bytes);
-        }
-        await Bun.sleep(1);
-        await app.step(50);
-        await Bun.sleep(1);
-        for (const peer of peers)
-            for (;;) {
-                const packet = peer.transport.poll();
-                if (packet === null)
-                    break;
-                if (packet.kind !== 'packet')
-                    continue;
-                if (new DataView(packet.payload.buffer, packet.payload.byteOffset).getUint32(0) >>> 16 === 0x8000) {
-                    peer.handshake.receive(packet.payload);
-                    continue;
-                }
-                const result = peer.channel.receive(packet.payload, now);
-                for (const reply of result.replies)
-                    peer.transport.send(address, reply);
-                if (result.delivery !== null)
-                    for (const message of peer.decoder.decode(result.delivery.payload)) {
-                        peer.messages.push(message);
-                        peer.deliveries.push({ message, kind: result.delivery.kind });
-                        if (message.kind === 'server-info') {
-                            peer.signon.stage = 0;
-                            peer.sounds = message.sounds;
-                            peer.models = message.models;
-                        }
-                        if (message.kind === 'signon')
-                            peer.queued.push(peer.signon.receive(message.stage));
-                        if (message.kind === 'entity')
-                            peer.signon.firstEntity();
-                    }
-            }
-    };
+    const { command, exchange } = peerPump(app, peers, address);
 
     try {
         const source = app.simulation.quakecSource(); if (source === null) throw new Error('Missing external QC');

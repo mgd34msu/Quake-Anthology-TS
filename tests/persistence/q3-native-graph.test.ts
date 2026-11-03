@@ -1,17 +1,18 @@
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../src/world/gameplay/index.ts";
 import { Q3EntityRecords } from "../../src/content/q3/base/records.ts";
 import { EntityPool } from "../../src/content/q3/base/game/entities.ts";
 import { captureQ3Graph, prepareQ3Graph, restoreQ3Graph } from "../../src/content/q3/base/game/save-state.ts";
 import { readQ3Graph } from "../../src/content/q3/base/game/save-reader.ts";
 import { encodeCheckpointValue, decodeCheckpointValue } from "../../src/persistence/value.ts";
 import { savedActorId } from "../../src/persistence/save-image.ts";
+import { inertAuthority } from "../support/authority.ts";
 
 function fixture(actors = new SessionActorRegistry(createIdentityOwner("q3-core-save"))) {
   const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors);
   let schedules = 0, fired = 0;
   const records = new Q3EntityRecords({ actors, bodies, combat, inventory, callbacks, foreign: () => null, isPlayer: () => false,
@@ -59,13 +60,29 @@ test("Q3 graph survives plain bytes with fresh identities, source bindings, free
   expect(target.fired()).toBe(1); expect(source.fired()).toBe(0); expect(restoredItem.count).toBe(1);
 });
 
-test("Q3 graph rejects unknown live callbacks and broken restored callback identities", () => {
+test("Q3 graph rejects unknown live callbacks", () => {
   const source = fixture(), entity = source.pool.spawn(); entity.think = () => {};
   expect(() => captureQ3Graph(source.records, source.pool)).toThrow("Unregistered");
   entity.think = source.think;
   const state = captureQ3Graph(source.records, source.pool), target = fixture();
   expect(() => target.pool.callbacks.think.resolve("not:registered")).toThrow("Unknown");
   expect(state.entities[entity.slot]?.think).toBe("test:think");
+});
+
+test("Q3 graph restore rejects a saved graph whose callback name is not registered", () => {
+  const source = fixture(), entity = source.pool.spawn(); entity.think = source.think; entity.nextthink = 8000;
+  const state = captureQ3Graph(source.records, source.pool);
+  const tampered = { ...state, entities: state.entities.map(saved => saved === null || saved.think !== "test:think" ? saved : { ...saved, think: "not:registered" }) };
+  expect(tampered.entities[entity.slot]?.think).toBe("not:registered");
+  const data = readQ3Graph(decodeCheckpointValue(encodeCheckpointValue(tampered)));
+  const actors = SessionActorRegistry.restore(createIdentityOwner("q3-bad-callback"), source.actors.checkpoint(), source.actors.sourceCheckpoint());
+  const target = fixture(actors);
+  prepareQ3Graph(target.records, data, actors);
+  for (const owned of source.actors.observations()) {
+    const restored = actors.resolveSaved(savedActorId(owned.id)); if (restored === null) throw new Error("missing actor");
+    const body = source.bodies.read(owned.id); if (body !== null) target.bodies.create(restored, body);
+  }
+  expect(() => restoreQ3Graph(target.records, target.pool, data, actors)).toThrow("Unknown");
 });
 
 test("Q3 hydration retains borrowed callback ownership", () => {

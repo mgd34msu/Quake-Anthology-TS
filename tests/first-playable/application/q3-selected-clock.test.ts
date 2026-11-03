@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
+import { glTest as test } from "../../support/gl.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { StartupApplication } from "../../../src/app/bootstrap/startup.ts";
 import { Application } from "../../../src/app/bootstrap/application.ts";
@@ -51,7 +52,7 @@ for (const product of ["q2-rerelease-baseq2", "q2-classic-baseq2"]) test(`${prod
     expect(samples.some(sample => sample.lastFire !== null)).toBe(true);
     let accumulated = 0;
     for (const sample of samples) {
-      accumulated += sample.elapsed;
+      accumulated += Math.min(sample.elapsed, 200); // the engine clamps a slow frame to 200 ms, as Com_ModifyMsec does
       expect(sample.clock).toBe(Math.trunc(accumulated)); expect(sample.viewClock).toBe(sample.clock);
     }
     expect(samples.at(-1)?.clock).toBeGreaterThan(samples[0]?.clock ?? 0);

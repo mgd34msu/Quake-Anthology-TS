@@ -1,17 +1,24 @@
-import { rename, rm } from "node:fs/promises";
+import { open, rename, rm } from "node:fs/promises";
+import { loadU32LE, storeU32LE } from "../foundation/binary.ts";
 import { basename, dirname, join } from "node:path";
 import type { ArmorState, RegularArmorState, PoweredProtectionState, CombatState, InventoryEntry } from "../contracts/gameplay.ts";
 import type { ActorSlotCheckpoint, ProviderCheckpoint, SaveImage, SavedActorId, SavedBodyAttachment, SavedBodyState } from "../contracts/session.ts";
+import type { ContentId } from "../contracts/content.ts";
 import type { ActorId } from "../contracts/identity.ts";
 import type { SourceActorCheckpoint } from "../world/actors/registry.ts";
 import { readGuest } from "./execution.ts";
 import { readModSession } from "./mods.ts";
-import { readCharacter, readProvider, readRecipe } from "./recipe.ts";
+import { readCharacter, readContentId, readProvider, readRecipe } from "./recipe.ts";
 import { readBounds, readFrame, readRandom, readTime, readVector } from "./shared.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, namespaced, SaveFormatError, SaveReader } from "./value.ts";
 
-const MAGIC = new TextEncoder().encode("QTSAVE3\n");
+const MAGIC = new TextEncoder().encode("QTSAVE5\n");
+const V4_MAGIC = new TextEncoder().encode("QTSAVE4\n");
+const V3_MAGIC = new TextEncoder().encode("QTSAVE3\n");
 const LEGACY_MAGIC = new TextEncoder().encode("QTSAVE2\n");
+const HEADER_LIMIT = 4096;
+/** Menu metadata stored ahead of the payload so listing a save never decodes guest memory. */
+export interface SaveHeader { readonly map: string; readonly content: ContentId }
 export function savedActorId(actor: ActorId): SavedActorId { return { slot: actor.slot, generation: actor.generation }; }
 export function readSavedActor(reader: SaveReader): SavedActorId { return { slot: reader.field("slot").integer(0), generation: reader.field("generation").integer(0) }; }
 export function readSavedBody(reader: SaveReader): SavedBodyState {
@@ -53,10 +60,10 @@ export function readInventoryEntry(reader: SaveReader): InventoryEntry {
 
 export function parseSaveImage(value: unknown): SaveImage {
   const reader = new SaveReader(value);
-  const version = reader.field("schemaVersion").choice(2, 3);
+  const version = reader.field("schemaVersion").choice(2, 3, 4);
   const legacyArmor = reader.field("legacyArmorLayout");
   if (legacyArmor.value !== undefined) legacyArmor.literal(true);
-  const image: SaveImage = { schemaVersion: 3, ...(version === 2 || legacyArmor.value === true ? { legacyArmorLayout: true } : {}), recipe: readRecipe(reader.field("recipe")), frame: readFrame(reader.field("frame")), nextEventSequence: reader.field("nextEventSequence").integer(0),
+  const image: SaveImage = { schemaVersion: 4, ...(version === 2 || legacyArmor.value === true ? { legacyArmorLayout: true } : {}), recipe: readRecipe(reader.field("recipe")), frame: readFrame(reader.field("frame")), nextEventSequence: reader.field("nextEventSequence").integer(0),
     clocks: reader.field("clocks").list(entry => ({ provider: namespaced(entry.field("provider")), time: readTime(entry.field("time")) })),
     random: reader.field("random").list(entry => ({ provider: namespaced(entry.field("provider")), state: readRandom(entry.field("state")) })), actors: reader.field("actors").list(readActorSlot),
     bodies: reader.field("bodies").list(entry => ({ actor: readSavedActor(entry.field("actor")), body: readSavedBody(entry.field("body")), attachment: entry.field("attachment").nullable(readSavedBodyAttachment), linkCount: entry.field("linkCount").integer(0), linked: entry.field("linked").nullable(link => ({ state: readSavedBody(link.field("state")), absoluteBounds: readBounds(link.field("absoluteBounds")) })) })),
@@ -67,31 +74,73 @@ export function parseSaveImage(value: unknown): SaveImage {
       ...(entry.field("executionProvider").value === undefined ? {} : { executionProvider: namespaced(entry.field("executionProvider")) }) })),
     providers: reader.field("providers").list(entry => ({ provider: namespaced(entry.field("provider")), schema: namespaced(entry.field("schema")), version: entry.field("version").integer(0), bytes: entry.field("bytes").bytes() })),
     guests: reader.field("guests").list(readGuest),
-    ...(reader.field("mods").value === undefined ? {} : { mods: readModSession(reader.field("mods")) }) };
+    ...(reader.field("mods").value === undefined ? {} : { mods: readModSession(reader.field("mods")) }),
+    // Versions 2 and 3 predate the record; they migrate to an empty one.
+    consumption: version === 4 ? reader.field("consumption").list(entry => ({
+      axis: entry.field("axis").choice("enemies", "movement", "character"), requested: entry.field("requested").string(),
+      outcome: entry.field("outcome").choice("honored", "partial", "guest-native"), detail: entry.field("detail").string() })) : [] };
   if ((image.recipe.mods?.length ?? 0) !== 0 && image.mods === undefined)
     return reader.field("mods").fail("selected gameplay mods require their saved checkpoint");
   return image;
 }
 
+function saveHeaderOf(image: SaveImage): SaveHeader { return { map: image.recipe.map.geometry.requestedPath, content: image.recipe.map.entities.content }; }
+function readSaveHeaderValue(value: unknown): SaveHeader {
+  const reader = new SaveReader(value, "save-header");
+  return { map: reader.field("map").string(), content: readContentId(reader.field("content")) };
+}
 export function encodeSaveImage(image: SaveImage): Uint8Array {
-  const payload = encodeCheckpointValue(image);
-  const output = new Uint8Array(MAGIC.length + payload.length);
-  output.set(MAGIC); output.set(payload, MAGIC.length);
+  const header = encodeCheckpointValue(saveHeaderOf(image)), payload = encodeCheckpointValue(image);
+  const output = new Uint8Array(MAGIC.length + 4 + header.length + payload.length);
+  output.set(MAGIC); storeU32LE(output, MAGIC.length, header.length);
+  output.set(header, MAGIC.length + 4); output.set(payload, MAGIC.length + 4 + header.length);
   return output;
 }
+function startsWith(bytes: Uint8Array, magic: Uint8Array): boolean { return magic.every((value, index) => bytes[index] === value); }
+function headerLength(bytes: Uint8Array): number {
+  if (bytes.length < MAGIC.length + 4) throw new SaveFormatError("save", "truncated save header");
+  const length = loadU32LE(bytes, MAGIC.length);
+  if (length > HEADER_LIMIT) throw new SaveFormatError("save", "save header is too large");
+  return length;
+}
 export function decodeSaveImage(bytes: Uint8Array): SaveImage {
-  const version = MAGIC.every((value, index) => bytes[index] === value) ? 3 : LEGACY_MAGIC.every((value, index) => bytes[index] === value) ? 2 : null;
+  const version = startsWith(bytes, MAGIC) ? 5 : startsWith(bytes, V4_MAGIC) ? 4 : startsWith(bytes, V3_MAGIC) ? 3 : startsWith(bytes, LEGACY_MAGIC) ? 2 : null;
   if (version === null) throw new SaveFormatError("save", "unsupported unified save signature/version");
-  const value = decodeCheckpointValue(bytes.subarray(MAGIC.length));
+  let body = bytes.subarray(MAGIC.length);
+  if (version >= 4) {
+    const length = headerLength(bytes), start = MAGIC.length + 4;
+    if (bytes.length < start + length) throw new SaveFormatError("save", "truncated save header");
+    const header = readSaveHeaderValue(decodeCheckpointValue(bytes.subarray(start, start + length)));
+    body = bytes.subarray(start + length);
+    const value = decodeCheckpointValue(body);
+    new SaveReader(value).field("schemaVersion").literal(version === 5 ? 4 : 3);
+    const image = parseSaveImage(value);
+    if (header.map !== saveHeaderOf(image).map || header.content !== saveHeaderOf(image).content) throw new SaveFormatError("save", "save header differs from its recipe");
+    return image;
+  }
+  const value = decodeCheckpointValue(body);
   new SaveReader(value).field("schemaVersion").literal(version);
   return parseSaveImage(value);
 }
+/** Reads only the header of a v4 or v5 save. Older envelopes carry none, so the caller falls back to a full decode. */
+export async function readSaveHeader(path: string): Promise<SaveHeader | null> {
+  const file = Bun.file(path);
+  const prefix = new Uint8Array(await file.slice(0, MAGIC.length + 4).arrayBuffer());
+  if (!startsWith(prefix, MAGIC) && !startsWith(prefix, V4_MAGIC)) return null;
+  const length = headerLength(prefix);
+  const bytes = new Uint8Array(await file.slice(MAGIC.length + 4, MAGIC.length + 4 + length).arrayBuffer());
+  if (bytes.length !== length) throw new SaveFormatError("save", "truncated save header");
+  return readSaveHeaderValue(decodeCheckpointValue(bytes));
+}
 export async function readSaveImage(path: string): Promise<SaveImage> { return decodeSaveImage(new Uint8Array(await Bun.file(path).arrayBuffer())); }
-/** Rename commits the completed sibling file; failed writes leave the previous save intact. */
+/** Rename commits the completed, synced sibling file; failed writes leave the previous save intact. Shipped saves go through writeContainedSave, which adds path containment. */
 export async function writeSaveImage(path: string, image: SaveImage): Promise<void> {
   const temporary = join(dirname(path), `.${basename(path)}.${crypto.randomUUID()}.tmp`);
-  try { await Bun.write(temporary, encodeSaveImage(image)); await rename(temporary, path); }
-  finally { await rm(temporary, { force: true }); }
+  try {
+    const file = await open(temporary, "wx", 0o600);
+    try { await file.writeFile(encodeSaveImage(image)); await file.sync(); } finally { await file.close(); }
+    await rename(temporary, path);
+  } finally { await rm(temporary, { force: true }); }
 }
 
 export function sourceActorsCheckpoint(sources: readonly SourceActorCheckpoint[]): ProviderCheckpoint {

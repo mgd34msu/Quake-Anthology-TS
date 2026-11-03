@@ -14,7 +14,6 @@ import { gameAtoi } from "../../../core/game-numeric.ts";
 import { q3SpawnAnimation } from "./arsenal.ts";
 
 export const Q3_CHARACTER_BOUNDS = { min: { x: -15, y: -15, z: -24 }, max: { x: 15, y: 15, z: 32 } };
-export const Q3_CHARACTER_VIEW_HEIGHT = 26;
 
 export interface Q3CharacterEvent {
   readonly actor: OwnedActor;

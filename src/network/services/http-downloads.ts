@@ -18,6 +18,8 @@ export interface HttpDownloadQueueOptions {
   readonly root: string;
   readonly concurrency?: number;
   readonly rangeStreams?: number;
+  /** Total bytes the queue may receive over its lifetime; exceeding it fails the transfer in progress. */
+  readonly totalBudgetBytes?: number;
   assertCurrent(): void;
   resolved(path: string): boolean | Promise<boolean>;
   refreshPackage(path: string): Promise<void>;
@@ -30,6 +32,8 @@ interface Entry {
   readonly resolve: (result: HttpDownloadResult) => void;
   readonly abort: AbortController;
   state: 'pending' | 'running' | 'done';
+  /** Resolution is re-checked only after content changes, not on every schedule. */
+  checked: boolean;
   received: number; total: number | null; result: HttpDownloadResult['kind'] | null;
 }
 function sameExpectation(left: HttpDownloadRequest['expected'], right: HttpDownloadRequest['expected']): boolean {
@@ -38,12 +42,36 @@ function sameExpectation(left: HttpDownloadRequest['expected'], right: HttpDownl
 }
 function failure(error: unknown): Error { return error instanceof Error ? error : new Error(String(error)); }
 
+const IDLE_TIMEOUT_MILLISECONDS = 30000;
+
 /** Redirects stay within the advertised origin and never acquire credentials. */
 async function downloadResponse(url: URL, signal: AbortSignal, method: 'GET' | 'HEAD' = 'GET', headers: Record<string, string> = {}): Promise<Response> {
   let current = new URL(url.href);
   for (let redirects = 0; ; redirects++) {
     if (!['http:', 'https:'].includes(current.protocol) || current.username || current.password) throw new Error('Invalid download URL');
-    const response = await fetch(current, { method, headers, redirect: 'manual', signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]) });
+    const idle = new AbortController(), expire = (): void => { idle.abort(new DOMException('HTTP download stalled', 'TimeoutError')); };
+    let timer = setTimeout(expire, IDLE_TIMEOUT_MILLISECONDS);
+    let response: Response;
+    try { response = await fetch(current, { method, headers, redirect: 'manual', signal: AbortSignal.any([signal, idle.signal]) }); }
+    finally { clearTimeout(timer); }
+    const source = response.body;
+    if (isReadableStream(source) && ![204, 205, 304].includes(response.status) && ![301, 302, 303, 307, 308].includes(response.status)) {
+      // The deadline covers response headers and each wait for the next chunk, not the whole transfer.
+      const reader = source.getReader();
+      const stream = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          timer = setTimeout(expire, IDLE_TIMEOUT_MILLISECONDS);
+          try {
+            const chunk = await reader.read();
+            if (chunk.done) controller.close();
+            else if (chunk.value instanceof Uint8Array) controller.enqueue(chunk.value);
+            else throw new TypeError('HTTP download supplied a non-byte chunk');
+          } finally { clearTimeout(timer); }
+        },
+        cancel(reason) { return reader.cancel(reason); }
+      });
+      response = new Response(stream, { status: response.status, headers: response.headers });
+    }
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     const body: unknown = response.body;
     if (isReadableStream(body)) await body.cancel();
@@ -220,7 +248,7 @@ export class HttpDownloadQueue {
     let resolve: (result: HttpDownloadResult) => void = () => {};
     const promise = new Promise<HttpDownloadResult>(complete => { resolve = complete; });
     const owned = { ...request, url: new URL(request.url.href), expected: { ...request.expected } };
-    this.entries.set(request.path, { request: owned, promise, resolve, abort: new AbortController(), state: 'pending', received: 0, total: null, result: null });
+    this.entries.set(request.path, { request: owned, promise, resolve, abort: new AbortController(), state: 'pending', checked: false, received: 0, total: null, result: null });
     this.schedule(); return promise;
   }
   get progress(): readonly DownloadProgress[] {
@@ -237,7 +265,10 @@ export class HttpDownloadQueue {
     else if (entry?.state === 'running') entry.abort.abort();
     this.schedule();
   }
+  private totalReceived = 0;
   private report(entry: Entry, received: number, total: number | null): void {
+    this.totalReceived += Math.max(0, received - entry.received);
+    if (this.options.totalBudgetBytes !== undefined && this.totalReceived > this.options.totalBudgetBytes) throw new Error('HTTP download quota exceeded');
     entry.received = received; entry.total = total; this.options.progress(entry.request.path, received, total);
   }
   private schedule(): void {
@@ -256,7 +287,8 @@ export class HttpDownloadQueue {
     if (this.closed || this.packageActive) return;
     try {
       this.options.assertCurrent();
-      for (const entry of this.entries.values()) if (entry.state === 'pending') {
+      for (const entry of this.entries.values()) if (entry.state === 'pending' && !entry.checked) {
+        entry.checked = true;
         const resolved = await this.options.resolved(entry.request.path);
         if (this.closed) return;
         this.options.assertCurrent();
@@ -277,7 +309,10 @@ export class HttpDownloadQueue {
       try { this.settle(entry, result); }
       finally {
         this.active--;
-        if (entry.request.kind === 'package') this.packageActive = false;
+        if (entry.request.kind === 'package') {
+          this.packageActive = false;
+          for (const other of this.entries.values()) other.checked = false;
+        }
         if (result.kind === 'failed') this.cancel(); else this.schedule();
       }
     };

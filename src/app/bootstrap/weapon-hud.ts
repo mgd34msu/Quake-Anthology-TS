@@ -1,4 +1,5 @@
 import type { ResourceId } from "../../contracts/content.ts";
+import { cacheEvictingRejection } from "./cached-promise.ts";
 import type { WeaponHudIcon, WeaponHudStatus } from "../../contracts/ui.ts";
 import type { PictureAsset } from "../../text/draw2d.ts";
 import { decodeQpic, decodeWad, indexedRenderImage } from "../../formats/images/index.ts";
@@ -44,7 +45,7 @@ export class ApplicationWeaponHudAssets {
   load(icon: WeaponHudIcon): Promise<ResourceId> {
     const key = icon.kind === "shader" ? `${icon.content}/${icon.name}` : `${icon.resource.content}/${icon.resource.path}/${icon.kind === "wad-picture" ? icon.lump : ""}`;
     const prior = this.pending.get(key); if (prior !== undefined) return prior;
-    const pending = this.loadIcon(icon, key); this.pending.set(key, pending); return pending;
+    return cacheEvictingRejection(this.pending, key, this.loadIcon(icon, key));
   }
   private async loadIcon(icon: WeaponHudIcon, key: string, providers: Pick<ApplicationAssets, "provider"> = this.assets,
     pictures: Map<ResourceId, PictureAsset> = this.pictures, aspects: Map<ResourceId, number> = this.logicalAspects): Promise<ResourceId> {

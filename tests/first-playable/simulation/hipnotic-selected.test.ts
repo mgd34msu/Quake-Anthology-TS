@@ -1,3 +1,4 @@
+import { writeCapture } from "../../support/capture.ts";
 import { expect, test } from "bun:test";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -108,7 +109,6 @@ for (const edition of ["classic", "rerelease"] satisfies readonly ("classic" | "
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.ts";
 import { encodePng } from "../../../src/formats/images/png.ts";
-import { mkdir } from "node:fs/promises";
 
 for (const product of ["q2-classic-baseq2", "q3-baseq3"]) test(`actual ${product} input selects Hipnotic through impulse, console, cycle and mouse wheel menu`, async () => {
   const parsed = parseApplicationCommand(["--game", product, "--map", product.startsWith("q2") ? "base1" : "q3dm1", "--movement", "q1",
@@ -143,12 +143,11 @@ for (const product of ["q2-classic-baseq2", "q3-baseq3"]) test(`actual ${product
     application.input({ seat: local.seat.id, kind: "mouse-motion", position: { x: 320, y: 240 }, delta: { x: Math.sin(angle) * 180, y: -Math.cos(angle) * 180 }, timeMilliseconds: performance.now() });
     await application.step(100);
     expect(presentation.ui.weaponWheel.drawState().wheel?.selected).toBe("q1:weapon/hipnotic:laser");
-    await mkdir(".artifacts/tmp/hipnotic-selected", { recursive: true });
-    await Bun.write(`.artifacts/tmp/hipnotic-selected/${product}-wheel.png`, encodePng(640, 480, application.readPixels()));
+    await writeCapture(`hipnotic-selected/${product}-wheel.png`, encodePng(640, 480, application.readPixels()));
     key(113, false); await application.step(100);
     expect(game.player(local.actor)?.weapon).toBe("hipnotic:laser");
     expect(application.simulation.presentations().find(model => model.actor.equals(local.actor) && model.viewWeapon)?.path).toBe("progs/v_laserg.mdl");
-    await Bun.write(`.artifacts/tmp/hipnotic-selected/${product}-laser.png`, encodePng(640, 480, application.readPixels()));
+    await writeCapture(`hipnotic-selected/${product}-laser.png`, encodePng(640, 480, application.readPixels()));
     expect(application.simulation.playerUi(local.actor).weaponStatus?.source.content).toBe(catalog.require("q1-rerelease-hipnotic").id);
   } finally { await application.close(); }
 }, 60000);

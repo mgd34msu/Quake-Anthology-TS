@@ -27,7 +27,7 @@ for (const seed of seeds) test(`streamed ${seed.identity.kind} recording closes 
     expect(recording.stop()).toBe(stop);
     await write; await stop;
     await expect(recording.append(packet)).rejects.toThrow("stopped");
-    await expect(DemoRecording.open(root, "session", seed)).rejects.toThrow();
+    await expect(DemoRecording.open(root, "session", seed)).rejects.toThrow("EEXIST");
     const bytes = await readFile(recording.path);
     if (seed.identity.kind === "mvd") {
       const messages: Uint8Array[] = [], reader = new MvdMessageFramer();
@@ -55,7 +55,7 @@ for (const seed of seeds) test(`streamed ${seed.identity.kind} recording closes 
 });
 
 test("recording names cannot escape the source user directory", () => {
-  for (const name of ["../outside", "/tmp/outside", "a/../../outside"]) expect(() => recordingPath("/game", name, { kind: "q1", protocol: 15, track: -1 })).toThrow();
+  for (const name of ["../outside", "/tmp/outside", "a/../../outside"]) expect(() => recordingPath("/game", name, { kind: "q1", protocol: 15, track: -1 })).toThrow("Invalid relative resource path");
 });
 
 test("demo library discovers actual recordings and reads them through the playback lookup", async () => {

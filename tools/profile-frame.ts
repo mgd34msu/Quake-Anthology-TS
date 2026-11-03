@@ -14,7 +14,8 @@ import { parseApplicationCommand } from "../src/app/bootstrap/options.ts";
 import { WorldSeatPresentation } from "../src/app/bootstrap/presentation.ts";
 import { InputRouter } from "../src/input/router.ts";
 
-const corpus = process.env["QTS_TEST_CORPUS"] ?? "/home/buzzkill/Projects/qfiles";
+const corpus = process.env["QTS_TEST_CORPUS"];
+if (corpus === undefined || corpus === "") { console.error("Set QTS_TEST_CORPUS to the assembled game data directory."); process.exit(2); }
 const args = Bun.argv.slice(2);
 const scenario = args[0] ?? "q1-classic";
 const option = (name: string, fallback: string): string => {

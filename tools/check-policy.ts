@@ -1,6 +1,8 @@
 import { closeSync, lstatSync, openSync, readdirSync, readSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import ts from "typescript";
+import { layerEdgeAllowed, layerOf, loadLayerRules, type LayerRules } from "./layers.ts";
+import { auditUnreachable } from "./unreachable.ts";
 
 export interface PolicyDiagnostic {
   readonly file: string;
@@ -54,29 +56,61 @@ function isTypeReference(type: ts.Type): type is ts.TypeReference {
     && typeof type.objectFlags === "number" && (type.objectFlags & ts.ObjectFlags.Reference) !== 0;
 }
 
-function hasAny(type: ts.Type, checker: ts.TypeChecker, visited = new Set<ts.Type>()): boolean {
+/**
+ * Whether any is reachable from a type. A traversal that finds none has visited the type's whole reachable
+ * set, so every visited type is cached as free of any; a hit is cached only for the type it was found from.
+ * Results hold for the whole program, so the many expressions sharing a type walk it once.
+ */
+const anyReachable = new WeakMap<ts.Type, boolean>();
+
+function hasAny(type: ts.Type, checker: ts.TypeChecker): boolean {
+  const visited = new Set<ts.Type>();
+  const found = walkForAny(type, checker, visited);
+  if (found) anyReachable.set(type, true);
+  else for (const seen of visited) anyReachable.set(seen, false);
+  return found;
+}
+
+function walkForAny(type: ts.Type, checker: ts.TypeChecker, visited: Set<ts.Type>): boolean {
   if ((type.flags & ts.TypeFlags.Any) !== 0) return true;
+  const known = anyReachable.get(type);
+  if (known !== undefined) return known;
   if (visited.has(type)) return false;
   visited.add(type);
-  if (type.isUnionOrIntersection()) return type.types.some((part) => hasAny(part, checker, visited));
-  if (isTypeReference(type) && checker.getTypeArguments(type).some((argument) => hasAny(argument, checker, visited))) return true;
+  if (type.isUnionOrIntersection()) return type.types.some((part) => walkForAny(part, checker, visited));
+  if (isTypeReference(type) && checker.getTypeArguments(type).some((argument) => walkForAny(argument, checker, visited))) return true;
   if (type.flags & ts.TypeFlags.Object) {
     for (const kind of [ts.IndexKind.Number, ts.IndexKind.String]) {
       const element = checker.getIndexTypeOfType(type, kind);
-      if (element !== undefined && hasAny(element, checker, visited)) return true;
+      if (element !== undefined && walkForAny(element, checker, visited)) return true;
     }
     const awaited = checker.getAwaitedType(type);
-    if (awaited !== undefined && awaited !== type) return hasAny(awaited, checker, visited);
+    if (awaited !== undefined && awaited !== type) return walkForAny(awaited, checker, visited);
     for (const property of type.getProperties()) {
       const declaration = property.valueDeclaration ?? property.declarations?.[0];
       if (declaration !== undefined && !declaration.getSourceFile().isDeclarationFile) {
         const member = checker.getTypeOfSymbolAtLocation(property, declaration);
         if (member.getCallSignatures().length === 0 && member.getConstructSignatures().length === 0
-          && hasAny(member, checker, visited)) return true;
+          && walkForAny(member, checker, visited)) return true;
       }
     }
   }
   return false;
+}
+
+type PairCache = WeakMap<ts.Type, WeakMap<ts.Type, boolean>>;
+const unsafeConversions: PairCache = new WeakMap(), asyncErasures: PairCache = new WeakMap();
+
+/** The two erasure rules compare member types, which do not depend on where the expression sits, so one verdict serves every use of a type pair. */
+function cachedPair(cache: PairCache, actual: ts.Type, expected: ts.Type, compute: () => boolean): boolean {
+  if (actual === expected) return false;
+  let row = cache.get(actual);
+  if (row === undefined) cache.set(actual, row = new WeakMap());
+  const known = row.get(expected);
+  if (known !== undefined) return known;
+  const result = compute();
+  row.set(expected, result);
+  return result;
 }
 
 function isUnknown(type: ts.Type): boolean {
@@ -213,6 +247,28 @@ function isDynamicImplementation(symbol: ts.Symbol | undefined): boolean {
   const name = symbol?.getName();
   return (name === "eval" || name === "Function" || name === "WebAssembly" || name === "constructor")
     && (symbol?.declarations?.some((declaration) => declaration.getSourceFile().isDeclarationFile) ?? false);
+}
+
+function isWorkerConstructor(symbol: ts.Symbol | undefined): boolean {
+  return symbol?.getName() === "Worker" && (symbol.declarations?.some(declaration => declaration.getSourceFile().isDeclarationFile) ?? false);
+}
+
+/** Worker options that provably leave eval off: no options object that could carry it, or an eval field that is literally false. */
+function workerOptionsDisableEval(options: ts.Expression, checker: ts.TypeChecker): boolean {
+  if (ts.isObjectLiteralExpression(options)) {
+    return options.properties.every(property => {
+      if (ts.isSpreadAssignment(property)) return workerOptionsDisableEval(property.expression, checker);
+      const name = property.name;
+      const label = name !== undefined && (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) ? name.text : undefined;
+      if (label === undefined) return name === undefined || !ts.isComputedPropertyName(name);
+      if (label !== "eval") return true;
+      return ts.isPropertyAssignment(property) && property.initializer.kind === ts.SyntaxKind.FalseKeyword;
+    });
+  }
+  const evalProperty = checker.getPropertyOfType(checker.getTypeAtLocation(options), "eval");
+  if (evalProperty === undefined) return true;
+  const type = checker.getTypeOfSymbolAtLocation(evalProperty, options);
+  return (type.flags & ts.TypeFlags.BooleanLiteral) !== 0 && checker.typeToString(type) === "false";
 }
 
 type PlatformLibrary = "sdl" | "gl" | "unix" | "darwin" | "ucrt" | "msvcrt" | "ntdll" | "kernel32" | "winsock" | "bun-files" | "freetype" | "vorbisfile" | "theoradec";
@@ -369,7 +425,12 @@ function platformSymbolAllowed(library: PlatformLibrary, symbol: string, project
   }
 }
 
-export function auditProgram(program: ts.Program, projectFiles: readonly string[], projectRoot = program.getCurrentDirectory()): PolicyDiagnostic[] {
+export interface AuditScope {
+  /** Project-relative paths (forward slashes). Only these files get the type-aware rules; the program is still checked whole. */
+  readonly only?: ReadonlySet<string>;
+}
+
+export function auditProgram(program: ts.Program, projectFiles: readonly string[], projectRoot = program.getCurrentDirectory(), scope: AuditScope = {}): PolicyDiagnostic[] {
   const checker = program.getTypeChecker();
   const files = new Set(projectFiles.map((file) => resolve(file)));
   for (const source of program.getSourceFiles()) {
@@ -377,9 +438,11 @@ export function auditProgram(program: ts.Program, projectFiles: readonly string[
     if (!path.startsWith("../") && !path.startsWith("node_modules/")) files.add(resolve(source.fileName));
   }
   const diagnostics: PolicyDiagnostic[] = [];
+  const layerRules: LayerRules | undefined = loadLayerRules(projectRoot);
   for (const source of program.getSourceFiles()) {
     if (!files.has(resolve(source.fileName))) continue;
     const projectPath = relative(resolve(projectRoot), resolve(source.fileName)).replaceAll("\\", "/");
+    if (scope.only !== undefined && !scope.only.has(projectPath)) continue;
     const runtime = projectPath.startsWith("src/");
     const platform = projectPath.startsWith("src/platform/");
     const seen = new Set<string>();
@@ -394,6 +457,8 @@ export function auditProgram(program: ts.Program, projectFiles: readonly string[
       && source.text.replaceAll("\r\n", "\n").trim() === 'declare module "*.png" {\n  const path: string;\n  export default path;\n}';
     if (source.isDeclarationFile && !pngPathDeclaration) report(source, "ambient", "Project declaration files can hide implementation; use checked TypeScript definitions.", 0);
     function moduleBoundary(node: ts.Node, moduleName: string): void {
+      if (/^data:/i.test(moduleName)) report(node, "dynamic-implementation", "data: modules execute inline source and are forbidden.");
+      if (moduleName.replace(/^node:/, "") === "vm") report(node, "dynamic-implementation", "node:vm evaluates dynamic source and is forbidden.");
       if (nativeArtifactName.test(moduleName.replace(/[?#].*$/, ""))) report(node, "native-implementation", "Native addons and libraries cannot be project modules; use the SDL2/OpenGL platform boundary.");
       if (moduleName === "bun:ffi" && !platform) report(node, "ffi-boundary", "Only src/platform modules may import bun:ffi.");
       const builtin = moduleName.replace(/^node:/, "");
@@ -407,11 +472,15 @@ export function auditProgram(program: ts.Program, projectFiles: readonly string[
         }
         const attribute = ts.isImportDeclaration(node) ? node.attributes?.elements[0] : undefined;
         const menuFileImport = ((projectPath === "src/app/bootstrap/menu-art.ts"
-            && ["assets/ui/menu-background.png", "assets/ui/menu-panel.png", "assets/ui/menu-focus.png", "assets/ui/main-menu-background.png"].includes(imported))
+            && ["assets/ui/menu-background.png", "assets/ui/menu-panel.png", "assets/ui/menu-focus.png", "assets/ui/main-menu-background.png", "assets/ui/title.png"].includes(imported))
           || (projectPath === "src/app/bootstrap/splash.ts" && imported === "assets/ui/title.png"))
           && ts.isImportDeclaration(node) && node.attributes?.token === ts.SyntaxKind.WithKeyword
           && node.attributes.elements.length === 1 && attribute?.name.text === "type"
           && ts.isStringLiteral(attribute.value) && attribute.value.text === "file";
+        const fromLayer = layerOf(projectPath), toLayer = layerOf(imported);
+        if (layerRules !== undefined && fromLayer !== undefined && toLayer !== undefined && !layerEdgeAllowed(layerRules, fromLayer, toLayer)) {
+          report(node, "layer-edge", `src/${fromLayer} may not import src/${toLayer}: that is an upward import against tools/layer-order.json and not an exception in tools/layer-edges.json. Move the shared code down a layer.`);
+        }
         if (runtime && !imported.startsWith("src/") && !imported.startsWith("node_modules/") && !menuFileImport) report(node, "runtime-boundary", "Local runtime imports must stay within src; build tools, tests, and generated artifacts cannot implement runtime behavior.");
       }
     }
@@ -488,11 +557,11 @@ export function auditProgram(program: ts.Program, projectFiles: readonly string[
     function visit(node: ts.Node): void {
       comments(node);
       if (ts.isExpression(node) && !ts.isPartOfTypeNode(node) && !ts.isImportAttribute(node.parent)) {
-        const expected = checker.getContextualType(node);
-        if (expected !== undefined && erasesUnsafeValue(checker.getTypeAtLocation(node), expected, checker, node)) {
+        const expected = checker.getContextualType(node), actual = checker.getTypeAtLocation(node);
+        if (expected !== undefined && cachedPair(unsafeConversions, actual, expected, () => erasesUnsafeValue(actual, expected, checker, node))) {
           report(node, "unsafe-conversion", "A value property or callback return containing any cannot become a checked destination; preserve unknown and validate it.");
         }
-        if (expected !== undefined && erasesAsyncReturn(checker.getTypeAtLocation(node), expected, checker, node)) {
+        if (expected !== undefined && cachedPair(asyncErasures, actual, expected, () => erasesAsyncReturn(actual, expected, checker, node))) {
           report(node, "async-void", "A synchronous void contract cannot accept asynchronous work; expose and await the Promise or provide a synchronous implementation.");
         }
       }
@@ -573,6 +642,25 @@ export function auditProgram(program: ts.Program, projectFiles: readonly string[
           if (isDynamicImplementation(symbol)) report(node, "dynamic-implementation", "Dynamic JavaScript and WebAssembly implementations are forbidden.");
         }
       }
+      if (ts.isNewExpression(node) && isWorkerConstructor(referenceSymbol(node.expression, checker))) {
+        const options = node.arguments?.[1];
+        if (options !== undefined && !workerOptionsDisableEval(options, checker)) report(node, "dynamic-implementation", "Workers cannot evaluate source text; start a module file and leave eval unset or false.");
+      }
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression)
+        && node.expression.expression.text === "Reflect" && ["get", "getOwnPropertyDescriptor"].includes(node.expression.name.text)
+        && referenceSymbol(node.expression.expression, checker)?.declarations?.some(declaration => declaration.getSourceFile().isDeclarationFile) === true) {
+        const [target, key] = node.arguments;
+        if (target !== undefined && key !== undefined) {
+          const keyType = checker.getTypeAtLocation(key);
+          for (const part of keyType.isUnion() ? keyType.types : [keyType]) {
+            if (!part.isStringLiteral()) continue;
+            if (part.value === "constructor") report(node, "dynamic-implementation", "Dynamic JavaScript and WebAssembly implementations are forbidden.");
+            const symbol = checker.getPropertyOfType(checker.getTypeAtLocation(target), part.value);
+            nativeReference(node, symbol);
+            if (isDynamicImplementation(symbol)) report(node, "dynamic-implementation", "Dynamic JavaScript and WebAssembly implementations are forbidden.");
+          }
+        }
+      }
       if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
         const moduleName = node.arguments[0];
         if (moduleName !== undefined) {
@@ -601,7 +689,7 @@ export function auditProgram(program: ts.Program, projectFiles: readonly string[
   return diagnostics.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column || a.rule.localeCompare(b.rule));
 }
 
-export function auditProject(root: string): PolicyDiagnostic[] {
+export function auditProject(root: string, scope: AuditScope = {}): PolicyDiagnostic[] {
   const projectRoot = resolve(root);
   const files = discoverFiles(projectRoot);
   const configPath = ts.findConfigFile(projectRoot, ts.sys.fileExists, "tsconfig.json");
@@ -621,7 +709,7 @@ export function auditProject(root: string): PolicyDiagnostic[] {
     host.getDefaultLibFileName = options => resolve(libraryDirectory, ts.getDefaultLibFileName(options));
   }
   const program = ts.createProgram(typescriptFiles, parsed.options, host);
-  const diagnostics = auditProgram(program, typescriptFiles, projectRoot);
+  const diagnostics = auditProgram(program, typescriptFiles, projectRoot, scope);
   const required: readonly (keyof ts.CompilerOptions)[] = ["strict", "noUncheckedIndexedAccess", "exactOptionalPropertyTypes",
     "noImplicitOverride", "noImplicitReturns", "noFallthroughCasesInSwitch", "noUnusedLocals", "noUnusedParameters",
     "noPropertyAccessFromIndexSignature", "forceConsistentCasingInFileNames", "noEmit", "verbatimModuleSyntax"];
@@ -647,13 +735,20 @@ export function auditProject(root: string): PolicyDiagnostic[] {
     if (lstatSync(file).isSymbolicLink()) diagnostics.push({ file, line: 1, column: 1, rule: "source-symlink", message: "Project source cannot use symlinks to bypass source discovery or leave the workspace." });
     else if (!file.endsWith(".ts") || hasNativeHeader(file)) diagnostics.push({ file, line: 1, column: 1, rule: "implementation-language", message: "Project implementation must be .ts; native sources/binaries, JavaScript, shader and WASM artifacts are forbidden." });
   }
+  for (const problem of auditUnreachable(projectRoot)) {
+    const file = resolve(projectRoot, problem.file), path = relative(projectRoot, file).replaceAll("\\", "/");
+    if (scope.only === undefined || scope.only.has(path)) diagnostics.push({ file, line: 1, column: 1, rule: "unreachable-module", message: problem.message });
+  }
   return diagnostics;
 }
 
 if (import.meta.main) {
-  const root = resolve(process.argv[2] ?? process.cwd());
+  const arguments_ = process.argv.slice(2);
+  const filesFlag = arguments_.indexOf("--files");
+  const root = resolve((filesFlag < 0 ? arguments_[0] : arguments_.slice(0, filesFlag)[0]) ?? process.cwd());
+  const only = filesFlag < 0 ? undefined : new Set(arguments_.slice(filesFlag + 1).map(path => relative(root, resolve(path)).replaceAll("\\", "/")));
   try {
-    const diagnostics = auditProject(root);
+    const diagnostics = auditProject(root, only === undefined ? {} : { only });
     for (const diagnostic of diagnostics) process.stderr.write(`${relative(root, diagnostic.file)}:${diagnostic.line}:${diagnostic.column} [${diagnostic.rule}] ${diagnostic.message}\n`);
     if (diagnostics.length === 0) process.stdout.write("TypeScript policy passed.\n");
     process.exitCode = diagnostics.length === 0 ? 0 : 1;

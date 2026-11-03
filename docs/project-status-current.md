@@ -1,5 +1,7 @@
 # Historical project status at 98074c6e
 
+> **Dated record, not current status.** Status at commit `98074c6e` (September 2026), despite the file name. Requirement counts here (288 done / 189 open) differ from other dated pages. The maintained status is [status.md](status.md). Where this page disagrees with it or with the code, trust those. 
+
 This full report preserves the 2026-09-13 source snapshot at `98074c6e`, including its historical counts and installation claims. See [installed executable and recent fixes](execution-status.md#installed-executable-and-recent-fixes) for the newer verified installation and bounded checks. No new full requirement audit is claimed.
 
 Usability remains the highest product priority: visible values, direct editing, familiar commands, clear feedback, persistent settings and actual public-flow checks.

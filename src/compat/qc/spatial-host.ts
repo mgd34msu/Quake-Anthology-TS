@@ -44,7 +44,8 @@ export function createQcSpatialBindings(world: QcSpatialWorld): ReadonlyMap<QcHo
       const slot = options.entities.slot(vm.argInt(0));
       vm.setEntityInt(vm.argInt(0), "model", vm.argInt(1));
       vm.setEntityFloat(vm.argInt(0), "modelindex", model.index);
-      setSize(vm, slot, model.bounds);
+      // QuakeWorld sizes only inline models; any other model leaves the box to a later setsize.
+      if (options.program.api.kind !== "q1-quakeworld" || vm.argString(1).startsWith("*")) setSize(vm, slot, model.bounds);
     });
     install("pointcontents", vm => {
       const result = options.scene.pointContents({ point: vm.argVector(0), target: { kind: "world" },
@@ -88,7 +89,7 @@ export function createQcSpatialBindings(world: QcSpatialWorld): ReadonlyMap<QcHo
       vm.returnFloat(1);
     });
   function setSize(vm: QcMachine, slot: number, bounds: Bounds): void {
-    // PF_setsize never validated ordering; retail data (mg3) relies on it.
+    // The rerelease engine accepts unordered bounds here, and retail data (mg3) relies on it.
     const { min, max } = bounds;
     const reference = options.entities.reference(slot);
     vm.setEntityVector(reference, "mins", min); vm.setEntityVector(reference, "maxs", max);

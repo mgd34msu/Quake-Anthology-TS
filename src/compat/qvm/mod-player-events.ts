@@ -5,9 +5,11 @@ import type { SavedActorId } from "../../contracts/session.ts";
 import type { Q3SourcePlayerEvent } from "../../app/bootstrap/simulation/q3/types.ts";
 import { readSavedActor, savedActorId } from "../../persistence/save-image.ts";
 import { SaveReader } from "../../persistence/value.ts";
+import { loadI32LE } from "../../foundation/binary.ts";
 import type { QvmMemory } from "./memory.ts";
 import { qvmPlayerStateBytes, readSourceQvmPlayerState } from "./player-record.ts";
 
+const eventSequenceOffset = 108, externalEventOffset = 128, externalEventTimeOffset = 136;
 interface Cursor {
   external: number; externalTime: number; sequence: number; observedSequence: number;
   externalOrder: number | null; readonly predictable: Map<number, number>;
@@ -89,6 +91,11 @@ export class QvmModPlayerEvents {
     const pending: { readonly order: number; readonly event: Q3SourcePlayerEvent }[] = [];
     for (const entry of this.entries.values()) {
       if (!this.operations.live(entry.actor)) continue;
+      // An untouched record changes nothing below, so its three event words are read before the record is decoded in full.
+      const bytes = this.operations.memory.bytes, cursor = entry.cursor;
+      if (cursor.externalOrder === null && cursor.predictable.size === 0 && cursor.observedSequence === cursor.sequence
+        && loadI32LE(bytes, entry.address + eventSequenceOffset) === cursor.sequence && loadI32LE(bytes, entry.address + externalEventOffset) === cursor.external
+        && loadI32LE(bytes, entry.address + externalEventTimeOffset) === cursor.externalTime) continue;
       const ps = readSourceQvmPlayerState(this.operations.memory.dataView(entry.address, qvmPlayerStateBytes(this.operations.abiProfile)), this.operations.abiProfile);
       const external = ps.externalEvent !== 0 && (ps.externalEvent !== entry.cursor.external || ps.externalEventTimeMilliseconds !== entry.cursor.externalTime);
       const count = Math.min(2, Math.max(0, (ps.eventSequence - entry.cursor.sequence) | 0));

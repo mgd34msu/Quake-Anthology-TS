@@ -34,7 +34,9 @@ test("stock Q3 guest plays with the Quake arsenal as a black box", async () => {
     for (let frame = 0; frame < 60; frame++) await application.step(25);
     application.input({ seat: local.seat.id, kind: "mouse-button", button: 1, down: false, timeMilliseconds: performance.now() });
     await application.step(25);
-    if (ui().activeWeapon !== "q1:weapon/axe") expect(shells()).toBeLessThan(before);
+    expect(ui().activeWeapon).not.toBe("q1:weapon/axe");
+    expect(before).toBeGreaterThan(0);
+    expect(shells()).toBeLessThan(before);
     expect(ui().health).toBeGreaterThan(0);
   } finally { try { await app?.close(); } finally { await rm(root, { recursive: true, force: true }); } }
 }, 180000);

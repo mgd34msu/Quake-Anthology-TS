@@ -24,3 +24,4 @@ export async function writeSavedGame(directory: string, path: string, save: Save
   const bytes = save.kind === "shared" ? encodeSaveImage(save.image) : encodeQ1Save(save.data);
   await writeContainedSave(directory, path, bytes);
 }
+export { readSaveHeader, type SaveHeader } from "./save-image.ts";

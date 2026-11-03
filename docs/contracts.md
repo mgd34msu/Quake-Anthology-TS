@@ -9,7 +9,7 @@
 | `identity.ts` | `createIdentityOwner`, `ActorId`, `OwnedActor`, `SessionId`, `SeatId`, and `ClientId`; the session registry keeps the construction capability. |
 | `time.ts` | `ClockProfile`, `SourceTime`, `FrameContext`, and `FrameOrdering`; clocks retain source units and callback order. |
 | `content.ts` | `LaunchChoice`, `ExecutableRecipe`, and `ResolvedResourceReference`; the catalog resolves content and all named overrides before simulation construction. |
-| `common.ts` | `CommandDialect`, `CommandContext`, and `CvarPolicy`; command buffering retains session and source context across inserted text and waits. |
+| `common.ts` | `CommandDialect` and `CommandContext`; command buffering retains session and source context across inserted text and waits. |
 | `world.ts` | `ActorRegistry`, `BodyTable`, `ActorCallbacks`, and `ActorSchedule`; the world owns lifetime, bodies, links, and scheduled execution. |
 | `gameplay.ts` | `AttackProvenance`, `CombatPolicy`, `DamageAuthority`, `InventoryTable`, and `TransitionCoordinator`; each gameplay mutation has one owner. |
 | `scene.ts` | Source geometry, model, collision-query, and scene snapshot contracts. |
@@ -24,7 +24,7 @@ The identity classes have private fields and unexported constructors. A spread c
 
 `ActorObservation` permits inspection. `OwnedActor` permits changes through the owning tables and scheduler. The registry verifies that a handle is live and that the caller owns it. `LinkedBody` records the bounds visible at the last source-defined link. Changing a body does not imply a spatial relink.
 
-`ActorCallbacks` and mutating domain operations return `undefined`. A Promise-returning function cannot satisfy them. Source callbacks that return values keep those values. Q2 admission returns `allowed` and the potentially changed `userinfo`; Q3 admission returns a denial string or null. Nested callbacks finish before their caller returns. `SourceGameLifecycle` preserves QC `StartFrame`, Q2 classic `RunFrame`, Q2 rerelease `PrepFrame` and `RunFrame(mainLoop)`, and Q3 `RunFrame(levelTimeMilliseconds)` as shared-scheduler entry points.
+`ActorCallbacks` and mutating domain operations return `undefined`. A Promise-returning function cannot satisfy them. Source callbacks that return values keep those values. Q2 admission returns `allowed` and the potentially changed `userinfo`; Q3 admission returns a denial string or null. Nested callbacks finish before their caller returns.
 
 `NumericOperations` places arithmetic rounding at each operation. Its profile distinguishes binary32, x87 precision and rounding, and SSE denormal behavior. The explicit `donor-binary64` profile reproduces Q1 or Q2 TypeScript donor arithmetic, without claiming original native behavior. JavaScript numbers alone do not implement x87 extended precision. The guest implementation retains that representation. Unsupported arithmetic profiles fail during selection. Random generators have explicit checkpoint variants and draw counts. A provider owns its generator and its draw order.
 

@@ -245,7 +245,6 @@ type NativeModuleApi = Q3ModuleApi
 type SourceModuleApi = NativeModuleApi
   | { readonly role: "server-game"; readonly api: QuakeCApiIdentity };
 
-export type ModuleRole = SourceModuleApi["role"];
 export type NativeModuleProfile = NativeAbi;
 
 /** Execution form does not choose engine behavior, combat rules or wire format. */

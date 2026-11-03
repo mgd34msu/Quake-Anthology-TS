@@ -5,10 +5,11 @@ import { copyRefEntity, type RefModelEntity } from "../../content/q3/presentatio
 import { prepareQ3Model } from "../../content/q3/presentation/scene.ts";
 import type { ApplicationKeyProfile } from "./keys.ts";
 import { SharedCvarMirror } from "../../core/cvars/mirror.ts";
+import { q3RendererSettings, type Q3RendererSettings } from "./render-settings.ts";
 import { CollisionMapSettings, collisionMapCvarDefinitions } from "../../world/collision/q3/settings.ts";
 import { quakeMouseButton } from "../../input/mouse-buttons.ts";
 import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
-import { KEY_CHAR_FLAG, KeyCode } from "../../input/key-codes.ts";
+import { KEY_CHAR_FLAG, KeyCode } from "../../core/key-codes.ts";
 import type { SeatInputEvent } from "../../contracts/ui.ts";
 import { infoValueForKey } from "../../core/info-string.ts";
 import type { QvmPresentationArtifacts } from "./q3-client/qvm.ts";
@@ -36,6 +37,7 @@ import { freemem } from "node:os";
 import { anglesToAxis } from "../../core/math.ts";
 import type { SharedSceneQueries } from "../../world/collision/index.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
+import { applyServerSystemInfo } from "./q3-client/userinfo.ts";
 import type { Q3BrowserView } from "../../network/q3/browser-view.ts";
 import type { CvarSnapshot } from "../../core/cvars/index.ts";
 import { createQ3ClientPresentation } from "../../content/q3/presentation/client.ts";
@@ -93,6 +95,8 @@ interface ApplicationQ3ClientCommonOptions {
   readonly systemCinematics?: SystemCinematicHost;
   remapShader?(original: string, replacement: string, offset: string, initializing: boolean, current: () => boolean): Promise<void>;
   saveFontData(): boolean;
+  /** Renderer cvars read each frame: rail beam widths and the patch LOD error. */
+  readonly renderSettings?: () => Q3RendererSettings;
   readonly cvars?: CvarRegistry;
   readonly timeCvars?: CvarRegistry;
   readonly weaponHud?: WeaponHudReader;
@@ -175,6 +179,7 @@ export class ApplicationQ3Client {
   private initializing = true;
   private timeMirror: SharedCvarMirror | null = null;
   private appliedTimeSystemInfo: string | undefined;
+  private appliedSystemInfo: string | undefined;
   private keyCatcher = 0;
   private selection = { weapon: 2, sensitivity: 1 };
   private cinematics: ApplicationQ3Cinematics | null = null;
@@ -258,15 +263,11 @@ export class ApplicationQ3Client {
     if (this.closed) throw new Error("Q3 presentation is closed");
     this.options.assertCurrent?.();
     const info = this.source.systemInfo?.();
-    if (info !== undefined) {
-      const fields = info.split("\\");
-      for (let index = fields[0] === "" ? 1 : 0; index + 1 < fields.length; index += 2) {
-        const name = fields[index], value = fields[index + 1];
-        if (name !== undefined && this.options.timeCvars !== undefined && frameTimeCvarNames(this.options.timeCvars.dialect).includes(name.toLowerCase())) continue;
-        if (name?.toLowerCase() === "timescale" && info === this.appliedTimeSystemInfo) continue;
-        if (name !== undefined && name.length > 0 && value !== undefined && name.toLowerCase() !== "cl_allowdownload") this.cvars.set(name, value, true);
-      }
-      this.appliedTimeSystemInfo = info;
+    // A server's systeminfo is applied when it changes, not rewritten over the player's settings every frame.
+    if (info !== undefined && (this.initializing || info !== this.appliedSystemInfo)) {
+      const timeNames = this.options.timeCvars === undefined ? [] : frameTimeCvarNames(this.options.timeCvars.dialect);
+      applyServerSystemInfo(this.cvars, info, name => timeNames.includes(name.toLowerCase()) || name.toLowerCase() === "timescale" && info === this.appliedTimeSystemInfo);
+      this.appliedTimeSystemInfo = info; this.appliedSystemInfo = info;
     }
     if (this.timeMirror !== null) this.timeMirror.refresh();
     else if (this.options.timeCvars !== undefined) refreshFrameTimeCvars(this.options.timeCvars, this.cvars);
@@ -555,7 +556,11 @@ export class ApplicationQ3Client {
         continue;
       }
       const scene = submission.scene, camera = (scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0 ? scene.camera : transformCamera?.(scene.camera) ?? scene.camera;
-      const input: WorldViewInput = { camera, time, target: { kind: "seat", seat },
+      const rendering = this.options.renderSettings?.() ?? q3RendererSettings(undefined);
+      // r_shadows is the cgame cvar cg_shadows in id's renderer.
+      const shadowMode = (scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0 ? 0 : this.cvars.get("cg_shadows")?.integerValue ?? 0;
+      const input: WorldViewInput = { camera, time, target: { kind: "seat", seat }, curveError: rendering.curveError,
+        ...(shadowMode === 2 || shadowMode === 3 ? { modelShadows: shadowMode } : {}),
         q3Lights: scene.lights.map(light => ({ origin: light.origin, radius: light.radius, color: light.color, additive: light.additive })).slice(0, 32),
         renderText: scene.source.text, visibleAreas: new Set(Array.from({ length: scene.source.areaMask.length * 8 }, (_, area) => area)
           .filter(area => ((scene.source.areaMask[area >> 3] ?? 0) & (1 << (area & 7))) === 0)),
@@ -565,7 +570,7 @@ export class ApplicationQ3Client {
         const source = createSourceSceneOrder(this.options.assets.materialRegistrations), selected = { ...input, source: createWorldSurfaceAdmission(source) };
         const firstEntity = reserveSourceEntityRange(source, scene.admission.entities.length);
         this.frames.view({ target: input.target, time, viewport: scene.viewport,
-          clear: input.clear ?? null, clipPlane: null, beforeView: [], operations: finishSceneOperations(this.sceneRenderer.operations(scene, selected, firstEntity, { noWorldModel: true, splitScreen: this.options.splitScreen === true, supplementalViewWeapon: this.supplementalViewWeapon })) });
+          clear: input.clear ?? null, clipPlane: null, beforeView: [], operations: finishSceneOperations(this.sceneRenderer.operations(scene, selected, firstEntity, { noWorldModel: true, rail: rendering.rail, splitScreen: this.options.splitScreen === true, supplementalViewWeapon: this.supplementalViewWeapon })) });
       } else {
         const publish = (view: WorldViewInput): void => {
           const source = createSourceSceneOrder(this.options.assets.materialRegistrations);
@@ -574,7 +579,7 @@ export class ApplicationQ3Client {
           const combined: WorldViewInput = { ...view, source: createWorldSurfaceAdmission(source), ...(effects === undefined ? {} : { lights: effects.lights,
             q3Lights: [...view.q3Lights ?? [], ...effects.q3Lights].slice(0, 32) }) };
           world.prepareWorldOperations(combined);
-          this.frames.world(world.prepareView({ ...combined, operations: this.sceneRenderer.operations(scene, combined, firstEntity, { noWorldModel: view.noWorldModel === true, splitScreen: this.options.splitScreen === true, supplementalViewWeapon: this.supplementalViewWeapon, ...(viewOffset === undefined ? {} : { viewOffset }) }, effects?.operations) }));
+          this.frames.world(world.prepareView({ ...combined, operations: this.sceneRenderer.operations(scene, combined, firstEntity, { noWorldModel: view.noWorldModel === true, rail: rendering.rail, splitScreen: this.options.splitScreen === true, supplementalViewWeapon: this.supplementalViewWeapon, ...(viewOffset === undefined ? {} : { viewOffset }) }, effects?.operations) }));
         };
         const worldInput = { ...input, ...environment };
         const child = worldInput.noWorldModel === true ? null : this.portal(scene, worldInput);

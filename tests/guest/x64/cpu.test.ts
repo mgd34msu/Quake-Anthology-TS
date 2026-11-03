@@ -17,7 +17,8 @@ test("CPUID exposes the interpreted baseline without host AVX or random capabili
   const baseline = fixture([0xb8, 1, 0, 0, 0, 0x0f, 0xa2, 0xc3]);
   baseline.state.flags.value = 0x8d7n;
   expect(baseline.run().kind).toBe("return");
-  expect(baseline.state.registers.read("rdx", 64)).toBe(0x06008101n);
+  // CMPXCHG8B (bit 8) is not advertised: the x64 decoder does not implement 0F C7.
+  expect(baseline.state.registers.read("rdx", 64)).toBe(0x06008001n);
   expect(baseline.state.registers.read("rcx", 64)).toBe(0n);
   expect(baseline.state.flags.value).toBe(0x8d7n);
   const structured = fixture([0xb8, 7, 0, 0, 0, 0x0f, 0xa2, 0xc3]);
@@ -25,8 +26,8 @@ test("CPUID exposes the interpreted baseline without host AVX or random capabili
   expect(structured.state.registers.read("rbx", 64)).toBe(0n);
   const locked = fixture([0xf0, 0x0f, 0xa2]);
   const stopped = locked.run();
-  expect(stopped.kind).toBe("exception");
-  if (stopped.kind === "exception" && stopped.exception.kind === "processor") expect(stopped.exception.vector).toBe(6);
+  if (stopped.kind !== "exception" || stopped.exception.kind !== "processor") throw new Error(`Expected a processor exception, got ${stopped.kind}`);
+  expect(stopped.exception.vector).toBe(6);
 });
 function pointer(memory: SparseGuestMemory, value: bigint): GuestAddress {
   const address = memory.pointer(value);
@@ -81,7 +82,7 @@ test("immediate decoding retains unsigned widths and exact partial fault bytes",
   const signed = fixture([0x90, 0xff, 0xff, 0xff, 0xff]);
   expect(new X64DecodeCursor(signed.memory, signed.state).readSigned(4)).toBe(-1n);
   const truncated = fixture([0x90, 0x12, 0x34]), partial = new X64DecodeCursor(truncated.memory, truncated.state);
-  expect(() => partial.readUnsigned(4)).toThrow(); expect(partial.bytes).toEqual([0x90, 0x12, 0x34]);
+  expect(() => partial.readUnsigned(4)).toThrow("test:x64: execute at 0x10003 (1 bytes): range includes unmapped bytes"); expect(partial.bytes).toEqual([0x90, 0x12, 0x34]);
   const long = fixture([0x90, ...new Array<number>(15).fill(255)]), limited = new X64DecodeCursor(long.memory, long.state);
   limited.readUnsigned(8); limited.readUnsigned(4);
   expect(() => limited.readUnsigned(4)).toThrow("15 bytes"); expect(limited.bytes.length).toBe(15);
@@ -689,10 +690,10 @@ test("managed ownership is explicit and a throwing store observer retains origin
   Object.defineProperty(generic.state, "instructionPointer", { value: base + 1n, writable: true });
   expect(generic.state.instructionPointer).toBe(base + 1n);
   const f = fixture([0xb8, 1, 0, 0, 0, 0x83, 0xc0, 2, 0x89, 0x03, 0xc3], base, true);
-  expect(() => Object.defineProperty(f.state, "instructionPointer", { get: () => base })).toThrow();
-  expect(() => Object.defineProperty(f.state, "instructionPointer", { writable: false })).toThrow();
-  expect(() => Object.defineProperty(f.state.registers, "write", { value: () => undefined })).toThrow();
-  expect(() => Object.defineProperty(f.cpu, "state", { value: generic.state })).toThrow();
+  expect(() => Object.defineProperty(f.state, "instructionPointer", { get: () => base })).toThrow("Attempting to change the getter of an unconfigurable property.");
+  expect(() => Object.defineProperty(f.state, "instructionPointer", { writable: false })).toThrow("Attempting to change access mechanism for an unconfigurable property.");
+  expect(() => Object.defineProperty(f.state.registers, "write", { value: () => undefined })).toThrow("Attempting to change value of a readonly property.");
+  expect(() => Object.defineProperty(f.cpu, "state", { value: generic.state })).toThrow("Attempting to change value of a readonly property.");
   const data = f.memory.map({ base: 0x50000n, byteLength: 4, permissions: "read-write" });
   f.state.registers.write("rbx", 64, data.byteOffset);
   expect(f.run().kind).toBe("return");

@@ -1,5 +1,5 @@
 import type { MountedContent } from "../../content/mounts/index.ts";
-import type { UserFileStore } from "../../platform/files/writable.ts";
+import type { UserFileStore } from "../../core/files/writable.ts";
 import type { PresentationOwner } from "../../contracts/presentation.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { ModuleIdentity, QvmAbiProfile } from "../../contracts/execution.ts";

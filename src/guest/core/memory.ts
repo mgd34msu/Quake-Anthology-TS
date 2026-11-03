@@ -7,7 +7,7 @@ import type {
 } from "./contracts.ts";
 
 export type GuestMemoryFaultReason = "foreign-address-space" | "address-overflow" | "null-address"
-  | "invalid-length" | "unmapped" | "permission" | "overlap" | "noncontiguous-borrow";
+  | "invalid-length" | "unmapped" | "permission" | "overlap" | "noncontiguous-borrow" | "quota";
 export class GuestMemoryFault extends Error {
   constructor(
     readonly reason: GuestMemoryFaultReason,
@@ -68,6 +68,7 @@ interface WatchedRange {
 }
 interface ObserverHit { readonly chunk: number; readonly written: number; readonly range: GuestWrittenRange; }
 const observerPageBytes = 4096;
+const pageBytes = 4096, pagesPerSlab = 64;
 function invalidateCode(mapping: Mapping, offset: number, byteLength: number): void {
   if (byteLength === 0) return;
   const changes = mapping.changes, start = mapping.bytes.byteOffset + offset;
@@ -78,6 +79,8 @@ export interface SparseGuestMemoryOptions {
   readonly module: ModuleIdentity;
   readonly pointerBytes: GuestPointerBytes;
   readonly allocationBase?: bigint;
+  /** Upper bound on bytes mapped at once. Guests allocate through the host, so this bounds what a module can pin. */
+  readonly maximumMappedBytes?: number;
 }
 export interface GuestExecutableBlock {
   readonly unchanged: () => boolean;
@@ -95,6 +98,10 @@ export class SparseGuestMemory implements MappedGuestMemory {
   #mappings: Mapping[] = [];
   readonly #backingChanges = new WeakMap<ArrayBufferLike, BackingChanges>();
   #mappingGeneration = 0;
+  readonly #maximumMappedBytes: number;
+  #mappedTotal = 0;
+  readonly #slabs: { readonly base: bigint; readonly used: Uint8Array; next: number }[] = [];
+  readonly #freePages: number[] = [];
   readonly #allocationHints = new Map<bigint, { readonly base: bigint; readonly byteLength: number }>();
   readonly #recentMappings: Record<GuestAccess | "any", Mapping | undefined> = { read: undefined, write: undefined, execute: undefined, any: undefined };
   readonly #workingSet: Mapping[] = [];
@@ -102,6 +109,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   // Checked scalar callers capture this offset before any write observer can reenter.
   #lookupOffset = 0;
   readonly #writeObservers = new Set<WriteObserver>();
+  #writeDeliveries = 0;
   // Watched ranges indexed by backing buffer and 4 KiB page so an unrelated
   // write never scans the observer set.
   readonly #watchedPages = new Map<ArrayBufferLike, Map<number, Set<WatchedRange>>>();
@@ -136,6 +144,9 @@ export class SparseGuestMemory implements MappedGuestMemory {
       fill: { value: memory.fill },
       observeWrites: { value: memory.observeWrites },
       hasWriteObservers: { get: () => memory.#writeObservers.size !== 0 },
+      writeDeliveries: { get: () => memory.#writeDeliveries },
+      scalarRead: { value: memory.scalarRead },
+      scalarWrite: { value: memory.scalarWrite },
       readUint8: { value: memory.readUint8 },
       readInt8: { value: memory.readInt8 },
       readUint16: { value: memory.readUint16 },
@@ -169,6 +180,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
   static managed(memory: MappedGuestMemory): memory is SparseGuestMemory { return SparseGuestMemory.#managed.has(memory); }
   get hasWriteObservers(): boolean { return this.#writeObservers.size !== 0; }
+  /** Counts stores that reached at least one observer, so a block can tell a watched store from an unrelated one. */
+  get writeDeliveries(): number { return this.#writeDeliveries; }
 
   constructor(options: SparseGuestMemoryOptions) {
     this.module = options.module;
@@ -176,6 +189,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
     this.addressSpace = Symbol(options.module.id);
     this.#limit = 1n << BigInt(options.pointerBytes * 8);
     this.#allocationBase = options.allocationBase ?? 0x10000n;
+    this.#maximumMappedBytes = options.maximumMappedBytes ?? 0x40000000;
     this.#range(this.#allocationBase, 0, "map");
   }
 
@@ -194,6 +208,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
 
   map(options: GuestMapOptions): GuestAddress {
     this.#available(options.base, options.byteLength);
+    if (this.#mappedTotal + options.byteLength > this.#maximumMappedBytes)
+      this.#fault("quota", options.base, options.byteLength, "map", `guest mappings would exceed ${this.#maximumMappedBytes} bytes`);
     if (options.bytes !== undefined && options.bytes.byteLength > options.byteLength) {
       throw new RangeError("Initial guest bytes exceed the mapping length");
     }
@@ -204,6 +220,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
 
   allocate(options: GuestAllocationOptions): GuestAddress {
+    if (options.pooled === true && options.byteLength === pageBytes && (options.alignment ?? 16n) <= BigInt(pageBytes) && (options.permissions ?? "read-write") === "read-write")
+      return this.#allocatePooledPage(options.label ?? "allocation");
     const alignment = options.alignment ?? 16n;
     if (alignment <= 0n || (alignment & (alignment - 1n)) !== 0n) throw new RangeError("Guest allocation alignment must be a positive power of two");
     this.#range(this.#allocationBase, options.byteLength, "map");
@@ -231,7 +249,61 @@ export class SparseGuestMemory implements MappedGuestMemory {
     return this.#address(options.base);
   }
 
+  /**
+   * Small native allocations share slabs of whole pages: a page costs no mapping, typed array or mapping-list splice. Released pages
+   * are zeroed and reused, so a pooled page reads like a fresh mapping and, like a native heap, stays readable after release.
+   */
+  #allocatePooledPage(label: string): GuestAddress {
+    let page = this.#freePages.pop();
+    if (page === undefined) {
+      let slabIndex = this.#slabs.findIndex(slab => slab.next < pagesPerSlab);
+      if (slabIndex < 0) {
+        const base = this.allocate({ byteLength: pageBytes * pagesPerSlab, alignment: BigInt(pageBytes), label: `pooled pages (${label})` });
+        this.#slabs.push({ base: base.byteOffset, used: new Uint8Array(pagesPerSlab), next: 0 });
+        slabIndex = this.#slabs.length - 1;
+      }
+      const slab = this.#slabs[slabIndex];
+      if (slab === undefined) throw new Error("Guest page pool is inconsistent");
+      page = slabIndex * pagesPerSlab + slab.next++;
+    }
+    const slab = this.#slabs[Math.floor(page / pagesPerSlab)];
+    if (slab === undefined) throw new Error("Guest page pool is inconsistent");
+    slab.used[page % pagesPerSlab] = 1;
+    return this.#address(slab.base + BigInt((page % pagesPerSlab) * pageBytes));
+  }
+  #releasePooledPage(address: GuestAddress, byteLength: number): boolean {
+    const raw = address.byteOffset;
+    for (let slabIndex = 0; slabIndex < this.#slabs.length; slabIndex++) {
+      const slab = this.#slabs[slabIndex];
+      if (slab === undefined || raw < slab.base || raw >= slab.base + BigInt(pageBytes * pagesPerSlab)) continue;
+      if (raw === slab.base && byteLength === pageBytes * pagesPerSlab) {
+        // Guest disposal unmaps the slab's own mapping: retire the slab so none of its pages is handed out again.
+        slab.used.fill(1); slab.next = pagesPerSlab;
+        const first = slabIndex * pagesPerSlab, last = first + pagesPerSlab;
+        for (let free = this.#freePages.length - 1; free >= 0; free--) {
+          const page = this.#freePages[free];
+          if (page !== undefined && page >= first && page < last) this.#freePages.splice(free, 1);
+        }
+        return false;
+      }
+      const index = Number((raw - slab.base) / BigInt(pageBytes));
+      if (byteLength !== pageBytes || (raw - slab.base) % BigInt(pageBytes) !== 0n)
+        this.#fault("invalid-length", raw, byteLength, "map", "a pooled page can only be released whole");
+      if (slab.used[index] !== 1) this.#fault("unmapped", raw, byteLength, "map", "pooled page is not allocated");
+      slab.used[index] = 0;
+      const mapping = this.#singleMapping(address, byteLength, "write");
+      if (mapping === null) throw new Error("Pooled guest page lost its mapping");
+      const offset = this.#lookupOffset;
+      mapping.bytes.fill(0, offset, offset + byteLength);
+      if (mapping.changes.lastPage >= 0) invalidateCode(mapping, offset, byteLength);
+      this.#freePages.push(slabIndex * pagesPerSlab + index);
+      return true;
+    }
+    return false;
+  }
+
   unmap(address: GuestAddress, byteLength: number): undefined {
+    if (this.#slabs.length !== 0 && this.#releasePooledPage(address, byteLength)) return undefined;
     this.#chunks(address, byteLength, null);
     this.#replaceRange(address.byteOffset, byteLength, null);
     return undefined;
@@ -496,6 +568,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       }
     }
     if (pending === undefined) return undefined;
+    this.#writeDeliveries++;
     const errors: unknown[] = [];
     for (const [observer, hits] of [...pending].sort((a, b) => a[0].sequence - b[0].sequence)) {
       if (!this.#writeObservers.has(observer)) continue;
@@ -540,6 +613,44 @@ export class SparseGuestMemory implements MappedGuestMemory {
     };
   }
 
+  /**
+   * Number-addressed scalar read for interpreters: the value, or -1 when the access is not inside a recently used readable mapping.
+   * A miss changes nothing; the checked, GuestAddress-based accessors then perform the access and raise any fault.
+   */
+  scalarRead(address: number, byteLength: 1 | 2 | 4): number {
+    const mapping = this.#numericMapping(address, byteLength, "read");
+    if (mapping === null) return -1;
+    const offset = this.#lookupOffset;
+    return byteLength === 4 ? mapping.view.getUint32(offset, true) : byteLength === 2 ? mapping.view.getUint16(offset, true) : mapping.view.getUint8(offset);
+  }
+  /** Number-addressed scalar store with the semantics of `writeUint*`; false means nothing was written and the checked path must run. */
+  scalarWrite(address: number, byteLength: 1 | 2 | 4, value: number): boolean {
+    const mapping = this.#numericMapping(address, byteLength, "write");
+    if (mapping === null) return false;
+    const offset = this.#lookupOffset;
+    if (byteLength === 4) mapping.view.setUint32(offset, value, true);
+    else if (byteLength === 2) mapping.view.setUint16(offset, value, true);
+    else mapping.view.setUint8(offset, value);
+    if (mapping.changes.lastPage >= 0) invalidateCode(mapping, offset, byteLength);
+    if (this.#writeObservers.size !== 0) this.#notifyWrite([{ mapping, offset, byteLength }]);
+    return true;
+  }
+  #numericMapping(address: number, byteLength: number, access: GuestAccess): Mapping | null {
+    const recent = this.#recentMappings[access];
+    if (recent?.active === true && recent.numericBase !== null) {
+      const offset = address - recent.numericBase;
+      if (offset >= 0 && offset + byteLength <= recent.byteLength && allows(recent.permissions, access)) { this.#lookupOffset = offset; return recent; }
+    }
+    for (const candidate of this.#workingSet) {
+      if (candidate === recent || !candidate.active || candidate.numericBase === null) continue;
+      const offset = address - candidate.numericBase;
+      if (offset < 0 || offset + byteLength > candidate.byteLength || !allows(candidate.permissions, access)) continue;
+      this.#recentMappings[access] = candidate;
+      this.#lookupOffset = offset;
+      return candidate;
+    }
+    return null;
+  }
   readUint8(address: GuestAddress): number { const view = this.#readView(address, 1), offset = this.#lookupOffset; return view.getUint8(offset); }
   readInt8(address: GuestAddress): number { const view = this.#readView(address, 1), offset = this.#lookupOffset; return view.getInt8(offset); }
   readUint16(address: GuestAddress): number { const view = this.#readView(address, 2), offset = this.#lookupOffset; return view.getUint16(offset, true); }
@@ -652,6 +763,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
     let changes = this.#backingChanges.get(mapping.bytes.buffer);
     if (changes === undefined) { changes = { exposed: false, firstPage: Infinity, lastPage: -1, pages: new Map<number, CodePage>() }; this.#backingChanges.set(mapping.bytes.buffer, changes); }
     this.#mappingGeneration += 1;
+    this.#mappedTotal += mapping.byteLength;
     this.#mappings.splice(this.#firstEndAfter(mapping.base), 0, mappedBytes({ ...mapping, changes }));
     return undefined;
   }
@@ -735,6 +847,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       const mappingEnd = mapping.end;
       const startOffset = Number((base > mapping.base ? base : mapping.base) - mapping.base);
       const endOffset = Number((end < mappingEnd ? end : mappingEnd) - mapping.base);
+      if (permissions === null) this.#mappedTotal -= endOffset - startOffset;
       if (startOffset > 0) next.push(mappedBytes({ ...mapping, byteLength: startOffset, bytes: mapping.bytes.subarray(0, startOffset) }));
       if (permissions !== null) next.push(mappedBytes({ ...mapping, base: mapping.base + BigInt(startOffset), byteLength: endOffset - startOffset,
         permissions, bytes: mapping.bytes.subarray(startOffset, endOffset) }));

@@ -121,7 +121,8 @@ export class Q1Base implements MonsterServices {
       const { game } = this;
       if (this.lightningEnd >= game.time + 1) return undefined;
       const electrodes = [...game.entities.values()].filter(actor => actor.target === "lightning"); const first = electrodes[0], second = electrodes[1];
-      if (first === undefined || second === undefined) throw new Error("event_lightning is missing its two lightning electrodes");
+      // chthon.qc dprints "missing lightning targets" and returns.
+      if (first === undefined || second === undefined) return undefined;
       if (first.state !== second.state || first.state !== "top" && first.state !== "bottom") return undefined;
       game.cancel(first); game.cancel(second); this.electrodes = [first, second]; this.lightningEnd = game.time + 1; game.sound(entity, "misc/power.wav");
       this.fireLightning(entity); const boss = [...this.monsters.values()].find(monster => monster.spec.species === "boss");

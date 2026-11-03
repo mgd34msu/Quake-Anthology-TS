@@ -61,11 +61,15 @@ export function selectApplicationQ3Snapshot(player: Pick<PlayerStateFields, "cli
         for (const [index, value] of bits.entries()) bytes[index] = (bytes[index] ?? 0) | value;
         return bits.length;
       },
-      clusterPVS: from => ({ byteAt: index => {
-        let byte = 0;
-        for (let bit = 0; bit < 8; bit++) if (queries.clusterVisible(from, index * 8 + bit, "pvs")) byte |= 1 << bit;
-        return byte;
-      } }),
+      clusterPVS: from => {
+        const bytes = new Map<number, number>();
+        return { byteAt: index => {
+          const known = bytes.get(index); if (known !== undefined) return known;
+          let byte = 0;
+          for (let bit = 0; bit < 8; bit++) if (queries.clusterVisible(from, index * 8 + bit, "pvs")) byte |= 1 << bit;
+          bytes.set(index, byte); return byte;
+        } };
+      },
     },
   });
 }

@@ -224,6 +224,7 @@ function q3CommittedDamageFeedback(context: CombatContext, target: GameEntity, n
     client.lastHurtClient = ownerNumber; client.lastHurtMod = methodOfDeath;
   }
   if (nativeOwner !== null && (context.gameType === GameType.GT_CTF || context.product === "missionpack" && context.gameType === GameType.GT_1FCTF)) context.checkHurtCarrier(target, nativeOwner);
+  if (decision.reaction === "death") target.enemy = nativeOwner;
   if (decision.reaction === "death" && client !== null) target.flags |= GameFlags.NO_KNOCKBACK;
 }
 

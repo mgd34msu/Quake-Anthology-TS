@@ -13,7 +13,7 @@ import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import type { TransitionIntent } from "../../../src/contracts/gameplay.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { SessionActorRegistry, ActorCallbackTable } from "../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
 import { Q1Foundation } from "../../../src/content/q1/foundation/runtime.ts";
 import type { Q1Event, Q1FoundationHost } from "../../../src/content/q1/foundation/types.ts";
 import { ZERO, PLAYER_BOUNDS } from "../../../src/content/q1/foundation/types.ts";
@@ -23,6 +23,7 @@ import type { Q1AddonEvent } from "../../../src/content/q1/addons/index.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
 import type { Q1Entity } from "../../../src/formats/q1-map/index.ts";
+import { inertAuthority } from "../../support/authority.ts";
 
 function world(program: "mg1" | "mg3", withHorde = false, walkable = false, coop = false) {
   const actors = new SessionActorRegistry(createIdentityOwner("q1-addon-smoke")), callbacks = new ActorCallbackTable(actors);
@@ -41,7 +42,7 @@ function world(program: "mg1" | "mg3", withHorde = false, walkable = false, coop
     getFlags: actor => { const entry = execution(actor); return entry === null ? { player: true } : actorFlags(entry); } });
   const bodies = physics.bodies;
 
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors), events: Q1Event[] = [], addonEvents: Q1AddonEvent[] = [], pending = new Map<OwnedActor, number>(), players: ActorId[] = [];
   const cvars = new Map<string, number>(), transitions: TransitionIntent[] = [];
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, originalPickups: new SharedOriginalPickupAdmission(actors, combat, inventory), random: () => 0.4,
@@ -84,6 +85,32 @@ test("MG1 fifth rune and MG3 fourth rune keep distinct flags with a foreign char
     expect(mg1LastSigil(base.campaign.readFlags())).toBe(program === "mg1" ? 16 : 0);
     expect(mg3RuneCount(base.campaign.readFlags())).toBe(program === "mg1" ? 0 : 1);
     expect(rune.solid).toBe("none"); expect(() => game.capture()).not.toThrow(); state.actors.close();
+  }
+});
+
+test("MG1 and MG3 doors and buttons follow the authored movedir, key buttons need a key, and crusher doors do not reverse", () => {
+  for (const program of ["mg1", "mg3"] satisfies readonly ("mg1" | "mg3")[]) {
+    const state = world(program), { game, spawn, touch, player } = state;
+    const door = spawn("func_door", { movedir: "0 0 256", speed2: "50", spawnflags: "64", wait: "2" });
+    expect(door.pos2).toEqual({ x: door.pos1.x, y: door.pos1.y, z: door.pos1.z + 256 });
+    const button = spawn("func_button", { movedir: "0 128 0" });
+    expect(button.pos2).toEqual({ x: button.pos1.x, y: button.pos1.y + 128, z: button.pos1.z });
+    const locked = spawn("func_button", { spawnflags: "16" });
+    touch(locked); expect(locked.state).not.toBe("up");
+    game.host.inventory.give(player, "q1:key/silver", 1); touch(locked); expect(locked.state).toBe("up");
+    expect(game.host.inventory.count(player.id, "q1:key/silver")).toBe(0);
+    door.state = "up"; door.blocked?.(player.id); expect(door.state).toBe("up");
+    state.actors.close();
+  }
+});
+
+test("func_bob advances its sine in degrees", () => {
+  for (const program of ["mg1", "mg3"] satisfies readonly ("mg1" | "mg3")[]) {
+    const state = world(program), { game, spawn } = state;
+    const bob = spawn("func_bob", { dest: "0 0 64", wait: "10", spawnflags: "2" });
+    const velocity = game.body(bob).velocity;
+    expect(velocity.z).toBeCloseTo(64 * Math.sin(1.8 * Math.PI / 180) * 20, 3);
+    expect(bob.count).toBeCloseTo(1.8, 5); state.actors.close();
   }
 });
 
@@ -212,7 +239,7 @@ test("infected blocked transformation gibs once and sleeping hell knights retain
   expect(game.killedMonsters).toBe(1); expect(game.health(knight.actor.id)).toBe(-100); expect(knight.model).toBe("progs/h_zombie.mdl");
   for (const flags of [65536, 8388608]) {
     const corpse = spawn("monster_hell_knight_infected", { spawnflags: String(flags) }); think(corpse, 1);
-    expect(corpse.solid).toBe("none"); expect(corpse.pain).toBeNull(); expect(corpse.frame).toBe(flags === 65536 ? 53 : 62);
+    expect(corpse.solid).toBe("none"); expect(corpse.pain).not.toBeNull(); expect(corpse.frame).toBe(flags === 65536 ? 53 : 62);
     think(corpse, 1.1); expect(corpse.nextThink).toBeCloseTo(10000.1);
     corpse.use?.(null, player.id); think(corpse, 2); think(corpse, 2.1);
     expect(corpse.solid).toBe("none"); expect(corpse.nextThink).toBeCloseTo(7.1);
@@ -290,7 +317,7 @@ test("MG3 path visitation, pause cancellation and switching use saved actor bind
   cancel.use?.(null, null);
   expect(boss.use).not.toBeNull();
   expect(() => game.capture()).not.toThrow();
-  expect(() => spawn("target_cancelpause", { targetname: "invalid" })).toThrow();
+  expect(() => spawn("target_cancelpause", { targetname: "invalid" })).toThrow("target_cancelpause with no target given.");
   expect(spawn("path_corner", { targetname: "forever", wait: "-1" }).wait).toBe(999999);
   state.actors.close();
 });

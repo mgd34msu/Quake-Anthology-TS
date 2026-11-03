@@ -33,7 +33,7 @@ export const chickDefinition: Q2MonsterDefinition = {
     return context.setMove("chick_move_duck");
   },
   callbacks: {
-    chick_stand: stand, chick_run: run, chick_dead: finishCorpse,
+    chick_stand: stand, chick_run: run, chick_dead: context => finishCorpse(context, { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 16 } }),
     ChickMoan(context) { return context.game.sound(context.entity, context.game.host.random() < 0.5 ? "chick/chkidle1.wav" : "chick/chkidle2.wav", 2, 1, 2); },
     chick_fidget(context) { if (!context.state.standGround && context.game.host.random() <= 0.3) context.setMove("chick_move_fidget"); return undefined; },
     chick_duck_down(context) { if (context.state.ducked) return undefined; setDuck(context, true); context.state.pauseTime = context.game.host.now() + 1; return undefined; },

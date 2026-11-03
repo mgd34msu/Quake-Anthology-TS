@@ -50,6 +50,7 @@ export class Q1MissionPackRuntime {
   dropBackpack(actor: OwnedActor): Q1Actor | null { return dropMissionPackBackpack(this.game, actor, this.pack); }
   characterPose(actor: ActorId): Q1CharacterSourcePose { return missionPackCharacterPose(this.game, actor, this.pack); }
   characterFrame(actor: ActorId, presentation: Q1CharacterPresentation): undefined { return this.characterEffects.frame(actor, presentation); }
+  suicide(actor: ActorId): boolean { return this.world.suicide(actor); }
   selectSpawn(actor: ActorId): Q1Actor | undefined { return this.world.selectSpawn(actor); }
   obituary(input: Q1MissionPackObituaryInput, inflictor: ActorId | null): Q1Obituary {
     return missionPackObituary(input, { pack: this.pack, inflictorClassname: inflictor === null ? "" : this.game.host.classname(inflictor),

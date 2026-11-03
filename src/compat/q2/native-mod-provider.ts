@@ -302,6 +302,16 @@ function readCheckpoint(record: ProviderCheckpoint, module: ModuleIdentity, decl
 }
 export function validateNativeModCheckpoint(record: ProviderCheckpoint, module: ModuleIdentity, declaration: NativeModDeclaration): void { readCheckpoint(record, module, declaration); }
 
+/** A projection table that counts its own membership changes. */
+class ProjectionMap extends Map<ActorId, number> {
+  version = 0;
+  override set(actor: ActorId, slot: number): this { this.version++; return super.set(actor, slot); }
+  override delete(actor: ActorId): boolean { this.version++; return super.delete(actor); }
+  override clear(): void { this.version++; super.clear(); }
+}
+
+const readOnlyImports: ReadonlySet<string> = new Set(["trace", "pointcontents", "inPVS", "inPHS", "AreasConnected", "dprintf"]);
+
 /** Typed component callbacks run in the original native module and borrow canonical actors. */
 export class NativeModProvider implements NativeModProjection {
   private host_: NativeModHost | null = null;
@@ -313,7 +323,8 @@ export class NativeModProvider implements NativeModProjection {
   private readonly pickups: NativeModPickups;
   private readonly records = new Map<string, NativeModActorRecord>();
   private readonly nonclientRecords: readonly NativeModActorRecord[];
-  private readonly projections = new Map<ActorId, number>();
+  private readonly projections = new ProjectionMap();
+  private projectionIndex: { readonly version: number; readonly actors: ReadonlyMap<bigint, ActorId> } | null = null;
   private readonly frames: Invocation[] = [];
   private readonly pickupScopes: { readonly actor: ActorId; readonly execution: OriginalPickupExecution; readonly frame: Invocation }[] = [];
   private projectionWrites = 0;
@@ -931,10 +942,12 @@ export class NativeModProvider implements NativeModProjection {
       if (cancellation === undefined || processor === null || !cancellation.accepts(error)) throw error;
       restoreAbiProcessorState(this.host.entries.cpu.state, processor); return 0;
     } finally {
-      if (regionAuthority !== undefined) { const active = this.regionAuthorities.pop(); if (active !== regionAuthority) throw new Error("Native donor invocation ownership changed"); }
+      // A mismatch is reported only after the restores and unmaps below have run.
+      const ownershipChanged = regionAuthority !== undefined && this.regionAuthorities.pop() !== regionAuthority;
       if (frame !== null) this.frames.pop();
       if (!this.closed) for (const global of globals.reverse()) this.host.memory.write(global.address, global.bytes);
       if (!this.closed) for (const allocation of allocations.reverse()) this.host.memory.unmap(allocation.address, allocation.bytes);
+      if (ownershipChanged) throw new Error("Native donor invocation ownership changed");
     }
   }
   private transfer<Result>(invoke: () => Result): Result {
@@ -991,11 +1004,14 @@ export class NativeModProvider implements NativeModProjection {
       }
       return { kind: "void" };
     }
+    // Queries read no projected state: world geometry changes only at linkentity, and the next mutating import or frame end publishes pending guest stores.
+    if (readOnlyImports.has(name)) return invoke();
     this.flush();
     if (name === "linkentity" || name === "unlinkentity" || name === "setmodel") {
       const value = values[0]; if (value?.kind !== "pointer" || value.value === null) throw new Error("Native entity import requires an actor");
-      const world = this.host.entities().base, actor = [...this.projections.keys()].find(actor => this.address(actor).byteOffset === value.value?.byteOffset);
-      const owned = this.owned?.entries().find(entry => this.host.entity(entry.slot).address.byteOffset === value.value?.byteOffset);
+      const table = this.host.entities(), world = table.base, actor = this.projectedActorAt(value.value.byteOffset);
+      const difference = value.value.byteOffset - world.byteOffset;
+      const owned = difference >= 0n && difference % BigInt(table.stride) === 0n ? this.owned?.actorAt(Number(difference / BigInt(table.stride))) ?? undefined : undefined;
       if (value.value.byteOffset !== world.byteOffset && actor === undefined && owned === undefined) throw new Error("Native source allocated an actor without a declared shared lifecycle");
       if (actor !== undefined && (name === "linkentity" || name === "unlinkentity")) {
         const owner = this.services.actors.resolveOwned(actor); if (owner === null) throw new Error("Native mod linked an expired actor");
@@ -1004,6 +1020,15 @@ export class NativeModProvider implements NativeModProjection {
       }
     }
     try { return invoke(); } finally { this.refresh(); const frame = this.frames.at(-1); if (frame !== undefined) frame.observations = this.observe(); }
+  }
+  /** Address-to-actor lookup for linkentity and setmodel, rebuilt only after the projected set changes. */
+  private projectedActorAt(offset: bigint): ActorId | undefined {
+    if (this.projectionIndex === null || this.projectionIndex.version !== this.projections.version) {
+      const actors = new Map<bigint, ActorId>();
+      for (const actor of this.projections.keys()) actors.set(this.address(actor).byteOffset, actor);
+      this.projectionIndex = { version: this.projections.version, actors };
+    }
+    return this.projectionIndex.actors.get(offset);
   }
   private releasePending(): void {
     if (this.frames.length !== 0 || this.lifecycle || this.closed) return;
@@ -1079,10 +1104,13 @@ export class NativeModProvider implements NativeModProjection {
     this.pendingHostClose = false; this.host_?.close();
   }
   close(): undefined {
-    this.objectives.close(); this.releaseMatch?.(); this.releaseMatch = null;
-    if (this.closed || this.closing) return undefined; this.closing = true;
     const errors: unknown[] = [];
-    this.clientOutputs.close();
+    try { this.objectives.close(); } catch (error) { errors.push(error); }
+    try { this.releaseMatch?.(); } catch (error) { errors.push(error); }
+    this.releaseMatch = null;
+    if (this.closed || this.closing) { if (errors.length !== 0) throw new AggregateError(errors, "Native mod cleanup failed"); return undefined; }
+    this.closing = true;
+    try { this.clientOutputs.close(); } catch (error) { errors.push(error); }
     try { this.items?.close(); } catch (error) { errors.push(error); }
     try { this.pickups.close(); } catch (error) { errors.push(error); }
     try { this.protection?.close(); } catch (error) { errors.push(error); }

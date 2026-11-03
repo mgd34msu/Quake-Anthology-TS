@@ -1,6 +1,7 @@
 import type { UiControl, UiControlId, UiMenuId } from "../../contracts/ui.ts";
 import type { NativeUiController } from "../common/controller.ts";
 import { menuRow } from "../common/layout.ts";
+import { buttonControl, wrapWords } from "../common/controls.ts";
 import { rankingAccountView, type RankingAccountActions } from "./rankings.ts";
 
 export function registerRankingAccountMenu(controller: NativeUiController,
@@ -22,10 +23,7 @@ export function registerRankingAccountMenu(controller: NativeUiController,
     const actions = current(), view = actions === null ? null : rankingAccountView(actions);
     const player = view?.kind === "account" ? view.player : null;
     const editable = !busy && player !== null && player.kind !== "active" && player.kind !== "pending";
-    const button = (id: UiControlId, label: string, row: number, action: () => void, enabled = true): UiControl => ({
-      id, kind: "button", label, rect: menuRow(row), visible: true, enabled,
-      activate: () => { action(); return undefined; },
-    });
+    const button = (id: UiControlId, label: string, row: number, action: () => void, enabled = true): UiControl => buttonControl(id, label, menuRow(row), action, enabled);
     const field = (id: UiControlId, label: string, row: number, text: string, change: (text: string) => void, masked = false): UiControl => ({
       id, kind: "text-entry", label, rect: menuRow(row), visible: true, enabled: editable,
       text, masked, maximumLength: 128, change: (_seat, value) => { change(value); return undefined; }, submit: () => undefined,
@@ -51,7 +49,7 @@ export function registerRankingAccountMenu(controller: NativeUiController,
       button("ui:rankings:spectate", "Spectate / sign out", 6, () => { clear(); if (actions !== null) run(() => actions.spectate()); }, !busy && player !== null && player.kind !== "pending"),
       button("ui:rankings:back", "Back", 11, () => controller.closeMenu()),
     ];
-    const lines = status.match(/.{1,64}(?:\s|$)|.{1,64}/g) ?? [];
+    const lines = wrapWords(status, 64);
     lines.slice(0, 3).forEach((line, index) => controls.push(button(`ui:rankings:status-${index}`, line, 8 + index, () => undefined, false)));
     return { id: root, title: "Ranking account", fullScreen: false, controls, open: () => undefined, close: () => { close(); return undefined; } };
   });

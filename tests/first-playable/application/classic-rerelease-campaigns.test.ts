@@ -1,8 +1,9 @@
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
-import { readObject, readString } from "../../support/reflect.ts";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
+import { holdFire, holdForward } from "../../support/matrix-play.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q2/baseq2/pak0.pak", "q3a/baseq3/pak0.pk3");
 
 // Unified matrix: rerelease-authored Q1 campaigns must load and play as true
 // classic-edition products (classic engine behaviour and physics), with the
@@ -18,10 +19,18 @@ for (const [product, program] of classicCampaigns) {
       for (let index = 0; index < 20; index++) await app.step(50);
       const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
       expect(app.simulation.playerUi(local.actor).health).toBeGreaterThan(0);
-      const source = readObject(app.simulation, "source");
-      expect(readString(source, "kind")).toBe("q1");
-      expect(readString(readObject(readObject(source, "composition"), "selection"), "program")).toBe(program);
-      expect(readString(readObject(readObject(source, "game"), "options"), "edition")).toBe("classic");
+      const origin = (): { readonly x: number; readonly y: number } => app.simulation.bodies.read(local.actor)?.origin ?? { x: Number.NaN, y: Number.NaN };
+      expect(await holdForward(app, local.seat.id, origin, 20, 119)).toBeGreaterThan(32);
+      app.queueCommand("weapon", ["2"], local.seat.id);
+      for (let index = 0; index < 20; index++) await app.step(50);
+      const shells = (): number => app.simulation.inventory.count(local.actor, "q1:ammo/shells");
+      const fired = await holdFire(app, local.seat.id, shells, () => app.simulation.playerUi(local.actor).activeWeapon, 20);
+      expect(fired.ammoBefore).toBeGreaterThan(0);
+      expect(fired.ammoAfter).toBeLessThan(fired.ammoBefore);
+      const source = app.simulation.diagnostics().source();
+      expect(source.kind).toBe("q1");
+      expect(source.q1?.program).toBe(program);
+      expect(source.q1?.edition).toBe("classic");
       expect(app.simulation.recipe.engineBehavior.content).toContain(":classic:");
     } finally { await app.close(); }
   }, 120000);

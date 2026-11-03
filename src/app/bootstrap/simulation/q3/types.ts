@@ -94,6 +94,7 @@ export interface Q3SourceHost extends ClientMovementHost {
   /** Convert command units for source policy; moveClient still runs the selected provider. */
   sourceCommand(input: ActorCommand): UserCommand;
   spawnPlayer(entity: GameEntity, pose: SpawnPose): void;
+  selectSpawnWeapon(entity: GameEntity): void;
   entityEvent(event: Q3SourceEntityEvent): void;
 }
 

@@ -7,6 +7,8 @@ export type Q3RankingReport =
 export class Q3RankingReports {
   private sink: ((report: Q3RankingReport) => void) | null = null;
   private warmup: () => boolean = () => true;
+  /** MOD_GRAPPLE is 23 in base Q3 and 28 under MISSIONPACK, where MOD_NAIL takes 23. */
+  grappleDeath = 23;
   attach(sink: (report: Q3RankingReport) => void, warmup: () => boolean): () => void {
     if (this.sink !== null) throw new Error("Ranking report owner already attached");
     this.sink = sink; this.warmup = warmup;
@@ -382,7 +384,7 @@ export class Q3RankingReports {
     key_damage = 1111020906;
     key_splash = 1111020908;
     break;
-  case 23:
+  case this.grappleDeath:
     key_hit = 1111021004;
     key_damage = 1111021006;
     break;
@@ -459,7 +461,7 @@ export class Q3RankingReports {
       key_damage = 1111020905;
       key_splash = 1111020907;
       break;
-    case 23:
+    case this.grappleDeath:
       key_hit = 1111021003;
       key_damage = 1111021005;
       break;
@@ -604,7 +606,7 @@ export class Q3RankingReports {
     case 13:
       this.integer( p1, p2, 1111020901, 1, true);
       break;
-    case 23:
+    case this.grappleDeath:
       this.integer( p1, p2, 1111021001, 1, true);
       break;
     default:
@@ -652,7 +654,7 @@ export class Q3RankingReports {
     case 13:
       this.integer( p1, p2, 1211020900, 1, true);
       break;
-    case 23:
+    case this.grappleDeath:
       this.integer( p1, p2, 1211021000, 1, true);
       break;
     default:

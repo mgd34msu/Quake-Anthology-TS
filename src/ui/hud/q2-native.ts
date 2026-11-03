@@ -2,9 +2,12 @@ import { q2RereleaseLayout, q2RereleaseInventory, type NativeQ2HudEnvironment } 
 export type { NativeQ2HudEnvironment } from "./q2-rerelease-layout.ts";
 import type { Q2ProtocolIdentity } from "../../contracts/protocol.ts";
 import type { ResourceId } from "../../contracts/content.ts";
-import { Tokenizer } from "../../core/common-parse.ts";
+import { TextParseError, Tokenizer } from "../../core/common-parse.ts";
 import { gameAtoi } from "../../core/game-numeric.ts";
 import { q2ApplicationLayout } from "../../app/bootstrap/network/q2-layout.ts";
+
+/** A server-supplied layout or stat reference outside source limits; callers skip the HUD frame instead of ending the process. */
+export class NativeQ2HudLayoutError extends Error {}
 
 /** Public playerstate and received svc/configstrings only; playerNumber is zero based. */
 export interface NativeQ2HudFrame {
@@ -32,13 +35,34 @@ export interface NativeQ2HudArsenal {
   readonly ammunition?: { readonly count: number | null; readonly icon: { readonly resource: ResourceId; readonly aspect: number } | null };
 }
 
+const layoutTokenCache = new Map<string, readonly string[]>();
+/** A layout string rarely changes between frames, so its tokens are kept; a malformed token is a layout error, not an engine fault. */
+function layoutTokens(source: string): readonly string[] {
+  const cached = layoutTokenCache.get(source);
+  if (cached !== undefined) return cached;
+  const parser = new Tokenizer(source, "Q2 HUD layout"), tokens: string[] = [];
+  for (let token = parser.next(); token !== undefined; token = parser.next()) tokens.push(token.value);
+  if (layoutTokenCache.size >= 16) layoutTokenCache.clear();
+  layoutTokenCache.set(source, tokens);
+  return tokens;
+}
+
 /** Q2 client/cl_scrn.c SCR_ExecuteLayoutString and SCR_DrawField. */
 export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, width: number, height: number, arsenal?: NativeQ2HudArsenal, environment?: NativeQ2HudEnvironment): readonly NativeQ2HudOperation[] {
+  try { return layoutOperations(source, frame, width, height, arsenal, environment); }
+  catch (error) {
+    if (error instanceof TextParseError) throw new NativeQ2HudLayoutError(error.message);
+    throw error;
+  }
+}
+function layoutOperations(source: string, frame: NativeQ2HudFrame, width: number, height: number, arsenal?: NativeQ2HudArsenal, environment?: NativeQ2HudEnvironment): readonly NativeQ2HudOperation[] {
   if (frame.protocol.kind === "q2-rerelease" || frame.protocol.kind === "q2-kex" || frame.protocol.kind === "q2-kex-demo") {
     if (environment === undefined) throw new Error("Rerelease HUD requires source localization and font services");
     return q2RereleaseLayout(source, frame, width, height, environment, arsenal);
   }
-  const out: NativeQ2HudOperation[] = [], parser = new Tokenizer(source, "Q2 HUD layout"), config = q2ApplicationLayout(frame.protocol);
+  const out: NativeQ2HudOperation[] = [], tokens = layoutTokens(source), config = q2ApplicationLayout(frame.protocol);
+  let cursor = 0;
+  const parser = { next: (): { readonly value: string } | undefined => { const value = tokens[cursor++]; return value === undefined ? undefined : { value }; } };
   let x = 0, y = 0;
   const next = (): string => parser.next()?.value ?? "";
   const integer = (): number => gameAtoi(next());
@@ -55,7 +79,7 @@ export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, widt
   };
   const client = (index: number): { readonly name: string; readonly icon: string } => {
     const max = Number(frame.configstrings.get(config.maxClients) ?? "256");
-    if (index < 0 || index >= Math.max(1, max)) throw new RangeError(`Q2 HUD client ${index} is outside clientinfo`);
+    if (index < 0 || index >= Math.max(1, max)) throw new NativeQ2HudLayoutError(`Q2 HUD client ${index} is outside clientinfo`);
     const info = frame.configstrings.get(config.playerSkins + index) ?? "", slash = info.indexOf("\\");
     const skin = slash < 0 ? "male/grunt" : info.slice(slash + 1);
     return { name: slash < 0 ? info : info.slice(0, slash), icon: `/players/${skin || "male/grunt"}_i.pcx` };
@@ -79,7 +103,7 @@ export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, widt
           break;
         }
         const image = stat(index);
-        if (image < 0 || image >= config.maxImages) throw new RangeError(`Q2 HUD image ${image} is outside configstrings`);
+        if (image < 0 || image >= config.maxImages) throw new NativeQ2HudLayoutError(`Q2 HUD image ${image} is outside configstrings`);
         picture(frame.configstrings.get(config.images + image) ?? ""); break;
       }
       case "picn": picture(next()); break;
@@ -87,7 +111,7 @@ export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, widt
       case "hnum": { const value = stat(1); if ((stat(15) & 1) !== 0) picture("field_3"); number(value, 3, value <= 0 || value <= 25 && ((frame.serverFrame >> 2) & 1) !== 0); break; }
       case "anum": { const value = stat(3); if (value < 0) break; if ((stat(15) & 4) !== 0) picture("field_3"); number(value, 3, value <= 5 && ((frame.serverFrame >> 2) & 1) !== 0); break; }
       case "rnum": { const value = stat(5); if (value < 1) break; if ((stat(15) & 2) !== 0) picture("field_3"); number(value, 3, false); break; }
-      case "stat_string": { const index = stat(integer()); if (index < 0 || index >= config.maxConfigStrings) throw new RangeError("Q2 HUD stat_string is outside configstrings"); text(frame.configstrings.get(index) ?? ""); break; }
+      case "stat_string": { const index = stat(integer()); if (index < 0 || index >= config.maxConfigStrings) throw new NativeQ2HudLayoutError("Q2 HUD stat_string is outside configstrings"); text(frame.configstrings.get(index) ?? ""); break; }
       case "string": case "string2": text(next(), token.value === "string2"); break;
       case "cstring": case "cstring2": {
         let py = y;
@@ -149,7 +173,7 @@ export function q2NativeHudOperations(frame: NativeQ2HudFrame, width: number, he
 }
 
 export function nativeQ2HudStat(frame: NativeQ2HudFrame, index: number, arsenal?: NativeQ2HudArsenal): number {
-  if (index < 0 || index >= frame.stats.length) throw new RangeError(`Q2 HUD stat ${index} is outside playerstate`);
+  if (index < 0 || index >= frame.stats.length) throw new NativeQ2HudLayoutError(`Q2 HUD stat ${index} is outside playerstate`);
   if (arsenal?.ammunition !== undefined && index === 2) return arsenal.ammunition.count === null ? 0 : 1;
   if (arsenal?.ammunition !== undefined && index === 3) return arsenal.ammunition.count ?? -1;
   return frame.stats[index] ?? 0;

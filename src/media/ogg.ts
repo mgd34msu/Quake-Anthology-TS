@@ -28,8 +28,10 @@ function join(parts: readonly Uint8Array[], length: number): Uint8Array {
   for (const part of parts) { bytes.set(part, offset); offset += part.length; }
   return bytes;
 }
+/** Checked against the input size before the whole file is read into memory. */
+export const MAX_OGG_MOVIE_BYTES = 512 * 1024 * 1024;
 export function decodeOggMovie(bytes: Uint8Array): OggMovie {
-  if (bytes.length > 512 * 1024 * 1024) throw new RangeError("Ogg movie exceeds 512 MiB");
+  if (bytes.length > MAX_OGG_MOVIE_BYTES) throw new RangeError("Ogg movie exceeds 512 MiB");
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), streams = new Map<number, LogicalStream>();
   let offset = 0;
   while (offset < bytes.length) {
@@ -63,7 +65,7 @@ export function decodeOggMovie(bytes: Uint8Array): OggMovie {
       stream.pieces.push(bytes.subarray(cursor, cursor + length)); stream.pendingBytes += length; cursor += length;
       if (stream.pendingBytes > 16 * 1024 * 1024) throw new Error("Ogg packet exceeds 16 MiB");
       if (length < 255) {
-        const packet: OggPacket = { data: join(stream.pieces, stream.pendingBytes), first: stream.packets.length === 0,
+        const packet: OggPacket = { data: stream.pieces.length === 1 ? stream.pieces[0] ?? new Uint8Array(0) : join(stream.pieces, stream.pendingBytes), first: stream.packets.length === 0,
           last: false, granule: -1n, index: stream.packets.length };
         stream.packets.push(packet); completed.push(packet); stream.pieces = []; stream.pendingBytes = 0;
       }

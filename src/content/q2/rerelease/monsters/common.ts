@@ -2,7 +2,7 @@ import type { MonsterContext } from "../../foundation/monsters/types.ts";
 import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { TraceResult } from "../../../../contracts/scene.ts";
-import { attackTraceMask, changeYaw, enemyBody, finishDodge, health, monsterSolidMask } from "../../foundation/monsters/ai.ts";
+import { attackTraceMask, changeYaw, enemyBody, finishDodge, health, monsterSolidMask, waterAboveWaistAt } from "../../foundation/monsters/ai.ts";
 import { add, dot, length, normalize, scale, subtract } from "../../foundation/fields.ts";
 import type { Q2RereleaseRandomSource } from "../../../../core/random/q2-rerelease.ts";
 
@@ -141,7 +141,7 @@ export function blockedCheckJump(context: MonsterContext, _distance: number, dro
     if (trace.fraction === 1 || trace.allSolid || trace.startSolid) return "none";
     if (rerelease && (traceContents(trace) & 32) !== 0) {
       const deep = game.host.trace({ start: trace.end, end, bounds: null, ignore: entity.actor.id, mask: monsterSolidMask(game) });
-      if ((game.host.pointContents({ ...deep.end, z: deep.end.z + body.bounds.min.z + 49 }) & 56) !== 0) return "none";
+      if (waterAboveWaistAt(game, deep.end, body.bounds.min.z)) return "none";
     }
     if (minZ - trace.end.z < 24 || (traceContents(trace) & (rerelease ? 35 : 3)) === 0 || enemyMin - trace.end.z > 32
       || trace.contact.kind !== "plane" || trace.contact.plane.normal.z < 0.9) return "none";

@@ -5,7 +5,10 @@ import type { ModuleIdentity } from "../../../src/contracts/execution.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { modInstanceProvider, modSelectionKey } from "../../../src/contracts/mods.ts";
 import type { ModDescription, ModPrivateCheckpoint, ModSelection } from "../../../src/contracts/mods.ts";
-import { QvmModule, QvmOpcode, rejectQvmSyscall, resolveQvmArtifact } from "../../../src/compat/qvm/index.ts";
+import { QvmModule } from "../../../src/compat/qvm/module.ts";
+import { QvmOpcode } from "../../../src/compat/qvm/image.ts";
+import { rejectQvmSyscall } from "../../../src/compat/qvm/syscalls.ts";
+import { resolveQvmArtifact } from "../../../src/compat/qvm/artifacts.ts";
 import { ActorCallbackTable } from "../../../src/world/actors/callbacks.ts";
 import { SessionActorRegistry } from "../../../src/world/actors/registry.ts";
 import { GameplayAuthority } from "../../../src/world/gameplay/authority.ts";
@@ -144,12 +147,9 @@ test("powered component reservations precede source initialization and activate 
     expect(events).toEqual(["open:q3-one/amount", "restore:q3-one/amount", "activate:q3-one/amount"]);
     expect(w.combat.read(w.player.id)?.armor).toEqual({ regular, powered: { kind: "shield", cells: 20 } });
     events.length = 0;
-    await expect(owner.setEnabled(second, true)).rejects.toThrow("component owner");
-    expect(events).toEqual([]);
+    await expect(SessionMods.open({ ...options, enabled: [first, second] })).rejects.toThrow("component owner");
     expect(owner.enabled()).toEqual([first]);
-    await owner.restore(saved);
-    expect(events).toEqual(["restore:q3-one/amount", "activate:q3-one/amount"]);
-    await owner.setEnabled(first, false);
+    owner.close();
     expect(w.combat.read(w.player.id)?.armor).toEqual({ regular, powered: { kind: "none" } });
     expect(w.inventory.count(w.player.id, "q2:cells")).toBe(20);
   } finally { owner.close(); w.actors.close(); }
@@ -164,10 +164,12 @@ test("mod appearance groups preserve attachments and restore the preceding enabl
     prepared(w, second, events, 1, false, { appearances: replacement })], enabled: [first, second], operations: w.operations, nextFrame: async () => {} });
   try {
     expect(owner.appearanceOverrides().get(w.player.id)).toEqual(replacement);
-    await owner.setEnabled(second, false);
-    expect(owner.appearanceOverrides().get(w.player.id)).toEqual(original);
-    await owner.setEnabled(first, false);
-    expect(owner.appearanceOverrides().size).toBe(0);
+    owner.close();
+    const firstOnly = await SessionMods.open({ prepared: [prepared(w, first, events, 1, false, { appearances: original }),
+      prepared(w, second, events, 1, false, { appearances: replacement })], enabled: [first], operations: w.operations, nextFrame: async () => {} });
+    expect(firstOnly.appearanceOverrides().get(w.player.id)).toEqual(original);
+    firstOnly.close();
+    expect(firstOnly.appearanceOverrides().size).toBe(0);
     expect(w.actors.resolveOwned(w.player.id)?.owner).toBe("q2:game");
   } finally { owner.close(); w.actors.close(); }
 });
@@ -187,15 +189,13 @@ test("two guest mods compose on real Q2 inventory and actor operations with inde
   }
   expect(w.actors.ownedBy(modInstanceProvider(first))).toHaveLength(1);
   expect(w.actors.ownedBy(modInstanceProvider(second))).toHaveLength(1);
-  await owner.setEnabled(first, false);
+  owner.close(); owner.close();
+  const secondOnly = await SessionMods.open({ prepared: mods, enabled: [second], operations: w.operations, nextFrame: async () => {} });
   expect(w.inventory.give(w.player, "q2:cells", 1)).toBe(3);
-  expect(owner.enabled()).toEqual([second]);
+  expect(secondOnly.enabled()).toEqual([second]);
   expect(w.actors.ownedBy(modInstanceProvider(first))).toHaveLength(0);
   expect(w.actors.ownedBy(modInstanceProvider(second))).toHaveLength(1);
-  await owner.setEnabled(first, true);
-  expect(owner.enabled()).toEqual([second, first]);
-  expect(w.inventory.give(w.player, "q2:cells", 1)).toBe(5);
-  owner.close(); owner.close();
+  secondOnly.close();
   expect(w.inventory.give(w.player, "q2:cells", 1)).toBe(1);
   expect(w.callbacks.operations.use.active).toBe(false);
   w.actors.close();
@@ -207,11 +207,10 @@ test("dependencies initialize first and disabling a dependency closes dependents
   const owner = await SessionMods.open({ prepared: mods, enabled: [second], operations: w.operations, nextFrame: async () => {} });
   expect(owner.enabled()).toEqual([first, second]);
   expect(events).toEqual(["open:q3-one/amount", "open:q3-two/amount"]);
-  await owner.setEnabled(first, false);
+  owner.close();
   expect(events.slice(2)).toEqual(["close:q3-two/amount", "release:q3-two/amount", "close:q3-one/amount", "release:q3-one/amount"]);
-  expect(owner.enabled()).toEqual([]);
   expect(w.inventory.operations.give.active).toBe(false);
-  owner.close(); w.actors.close();
+  w.actors.close();
 });
 
 test("dependency conflicts reject before initialization and partial acquisition rolls back", async () => {
@@ -228,16 +227,14 @@ test("dependency conflicts reject before initialization and partial acquisition 
   w.actors.close();
 });
 
-test("failed registration removes only newly enabled hooks and providers", async () => {
+test("failed registration removes every hook and provider the open acquired", async () => {
   const w = world(), events: string[] = [];
   const mods = [prepared(w, first, events, 2), prepared(w, second, events, 3, true, { failRegister: true })];
-  const owner = await SessionMods.open({ prepared: mods, enabled: [first], operations: w.operations, nextFrame: async () => {} });
-  await expect(owner.setEnabled(second, true)).rejects.toThrow("Registration failed");
-  expect(owner.enabled()).toEqual([first]);
-  expect(w.inventory.give(w.player, "q2:cells", 1)).toBe(3);
+  await expect(SessionMods.open({ prepared: mods, enabled: [first, second], operations: w.operations, nextFrame: async () => {} })).rejects.toThrow("Registration failed");
+  expect(w.inventory.give(w.player, "q2:cells", 1)).toBe(1);
   expect(w.actors.ownedBy(modInstanceProvider(second))).toHaveLength(0);
-  expect(w.actors.ownedBy(modInstanceProvider(first))).toHaveLength(1);
-  owner.close(); w.actors.close();
+  expect(w.actors.ownedBy(modInstanceProvider(first))).toHaveLength(0);
+  w.actors.close();
 });
 
 test("save identity, order and all source state validate before any live restore", async () => {
@@ -245,18 +242,13 @@ test("save identity, order and all source state validate before any live restore
   const mods = [prepared(w, first, events, 2), prepared(w, second, events, 3, true, controls)];
   const options = { prepared: mods, enabled: [first, second], operations: w.operations, nextFrame: async () => {} };
   const owner = await SessionMods.open(options), saved = await owner.checkpoint();
-  events.length = 0;
-  await expect(owner.restore({ ...saved, mods: [...saved.mods].reverse() })).rejects.toThrow("order or identity");
+  owner.close(); events.length = 0;
   const altered = saved.mods.map(entry => ({ ...entry, identity: { ...entry.identity, declarationDigest: createContentDigest("f".repeat(64)) } }));
-  await expect(owner.restore({ ...saved, mods: altered })).rejects.toThrow("order or identity");
+  await expect(SessionMods.open(options, { ...saved, mods: altered })).rejects.toThrow("order or identity");
   controls.invalidState = true;
-  await expect(owner.restore(saved)).rejects.toThrow("Invalid source state");
+  await expect(SessionMods.open(options, saved)).rejects.toThrow("Invalid source state");
   expect(events).toEqual([]);
   controls.invalidState = false;
-  w.inventory.give(w.player, "q2:cells", 1);
-  await owner.restore(saved);
-  expect(await owner.checkpoint()).toEqual(saved);
-  owner.close(); events.length = 0;
   await expect(SessionMods.open(options, { ...saved, mods: [...saved.mods].reverse() })).rejects.toThrow("order or identity");
   expect(events).toEqual([]);
   const restored = await SessionMods.open(options, saved);
@@ -264,16 +256,15 @@ test("save identity, order and all source state validate before any live restore
   restored.close(); w.actors.close();
 });
 
-test("a later restore failure restores earlier and failing guest state without leaking registrations", async () => {
+test("a restore failure while opening closes every mod without leaking registrations", async () => {
   const w = world(), events: string[] = [], controls: Controls = {};
-  const owner = await SessionMods.open({ prepared: [prepared(w, first, events, 2), prepared(w, second, events, 3, true, controls)],
-    enabled: [first, second], operations: w.operations, nextFrame: async () => {} });
-  const initial = await owner.checkpoint();
-  w.inventory.give(w.player, "q2:cells", 1);
-  const previous = await owner.checkpoint(); events.length = 0; controls.failRestore = true;
-  await expect(owner.restore(initial)).rejects.toThrow("Restore failed");
-  expect(events).toEqual(["restore:q3-one/amount", "restore:q3-two/amount", "restore:q3-two/amount", "restore:q3-one/amount"]);
-  expect(await owner.checkpoint()).toEqual(previous);
-  expect(w.inventory.give(w.player, "q2:cells", 1)).toBe(9);
-  owner.close(); w.actors.close();
+  const options = { prepared: [prepared(w, first, events, 2), prepared(w, second, events, 3, true, controls)],
+    enabled: [first, second], operations: w.operations, nextFrame: async () => {} };
+  const initial = await SessionMods.open(options), saved = await initial.checkpoint();
+  initial.close(); controls.failRestore = true;
+  await expect(SessionMods.open(options, saved)).rejects.toThrow("Restore failed");
+  expect(w.actors.ownedBy(modInstanceProvider(first))).toHaveLength(0);
+  expect(w.actors.ownedBy(modInstanceProvider(second))).toHaveLength(0);
+  expect(w.inventory.give(w.player, "q2:cells", 1)).toBe(1);
+  w.actors.close();
 });

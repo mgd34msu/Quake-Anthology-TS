@@ -1,5 +1,6 @@
+import { writeCapture } from "../../support/capture.ts";
 import { decodePng } from "../../../src/formats/images/png.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import { drawWeaponHud } from "../../../src/ui/hud/weapon.ts";
 import type { CommonWeaponHud } from "../../../src/ui/hud/weapon.ts";
@@ -13,7 +14,7 @@ import type { RendererResourceOwner } from "../../../src/contracts/render.ts";
 import type { UiDrawContext } from "../../../src/contracts/ui.ts";
 import { CommandBuffer } from "../../../src/core/commands/index.ts";
 import { CvarRegistry } from "../../../src/core/cvars/index.ts";
-import { KeyCode } from "../../../src/input/key-codes.ts";
+import { KeyCode } from "../../../src/core/key-codes.ts";
 import { InputRouter } from "../../../src/input/router.ts";
 import { SeatInput } from "../../../src/input/seat.ts";
 import { InputCommandBuilder } from "../../../src/input/user-command.ts";
@@ -114,7 +115,7 @@ test("private HUD messages, keyed POIs and real wheel selection keep source reci
   expect(health?.kind === "text" ? health.origin.x : -1).toBeGreaterThan(640);
 });
 
-const archivePath = `${testCorpusRoot()}/q1/rerelease/QuakeEX.kpf`;
+const archivePath = corpusFile("q1/rerelease/QuakeEX.kpf");
 test.skipIf(!existsSync(archivePath))("real generated menu art and rerelease glyphs render through native CPU commands", async () => {
   const owner = createIdentityOwner("native-ui-pixels"), seat = owner.seat(1), context = drawContext(owner, seat, 640);
   const renderOwner: RendererResourceOwner = { identity: Symbol("ui"), session: owner.session, generation: 0 };
@@ -143,7 +144,7 @@ test.skipIf(!existsSync(archivePath))("real generated menu art and rerelease gly
       if (x < 640) firstSeat += lit; else secondSeat += lit;
     }
     expect(firstSeat).toBe(0); expect(secondSeat).toBeGreaterThan(100000);
-    if (process.env["QUAKE_UI_NATIVE_SMOKE"] === "1") await Bun.write(".artifacts/w59-native-menu.png", encodePng(1280, 480, renderer.pixels));
+    if (process.env["QUAKE_UI_NATIVE_SMOKE"] === "1") await writeCapture("w59-native-menu.png", encodePng(1280, 480, renderer.pixels));
   } finally { art.close(); fonts.close(); archive.close(); target.close(); window?.close(); images.close(); }
 }, 20000);
 

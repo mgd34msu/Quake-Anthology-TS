@@ -48,8 +48,13 @@ export interface Q3ResourceHost {
   remapShader(original: string, replacement: string, offset: string): Promise<void>;
 }
 /** Source integer handles index the session's actual shared registered objects. */
+/** Peers choose model names, so unresolved lookups are cached only up to this many entries. */
+const MAX_FAILED_LOOKUPS = 256;
+
 export class Q3RendererResources implements RendererResources {
   private readonly models: SceneModel[] = [DEFAULT_MODEL];
+  private failedModels = 0;
+  private failedSkins = 0;
   private readonly modelNames = new Map<string, SceneModel>();
   private readonly skinHandles: (SceneSkin | null)[] = [null];
   private readonly skins = new Map<string, SceneSkin | null>();
@@ -121,7 +126,7 @@ export class Q3RendererResources implements RendererResources {
     this.operations++;
     let model: SceneModel;
     try { model = await this.host.model(path); } finally { this.operations--; }
-    this.modelNames.set(path, model);
+    if (model.kind !== "default" || this.failedModels++ < MAX_FAILED_LOOKUPS) this.modelNames.set(path, model);
     if (model.kind !== "default" && !this.models.includes(model)) this.models.push(model);
     return model;
   }
@@ -130,7 +135,7 @@ export class Q3RendererResources implements RendererResources {
     this.operations++;
     let skin: SceneSkin | null;
     try { skin = await this.host.skin(path); } finally { this.operations--; }
-    this.skins.set(path, skin);
+    if (skin !== null || this.failedSkins++ < MAX_FAILED_LOOKUPS) this.skins.set(path, skin);
     if (skin !== null && !this.skinHandles.includes(skin)) this.skinHandles.push(skin);
     return skin;
   }
@@ -148,9 +153,13 @@ export class Q3RendererResources implements RendererResources {
     const handle = existing ?? (this.handles === "client" ? this.shaders.size + 1 : picture.material.order);
     this.shaders.set(handle, picture); this.pictureHandles.set(picture, handle); this.shaderRequests.push({ path, mip, handle }); return picture;
   }
+  /** HUD draws look pictures up by shader name every frame; the lowercase key is computed once per name. */
+  private readonly lowerNames = new Map<string, string>();
   picture(shader: SceneShader | null): MaterialPicture {
     if (shader === null) return this.host.zeroPicture;
-    const picture = this.pictures.get(shader.name.replace(/[A-Z]/g, value => value.toLowerCase()));
+    let key = this.lowerNames.get(shader.name);
+    if (key === undefined) { key = shader.name.replace(/[A-Z]/g, value => value.toLowerCase()); this.lowerNames.set(shader.name, key); }
+    const picture = this.pictures.get(key);
     if (picture === undefined) throw new Error(`Cgame shader is not registered in this resource owner: ${shader.name}`);
     return picture;
   }

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { UiDrawContext } from "../../src/contracts/ui.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 import { LlmSettingsService, type LlmProvider } from "../../src/llm/settings.ts";
 import { NativeUiController, defaultUiSkin } from "../../src/ui/common/index.ts";
 import { registerLlmSettingsMenu } from "../../src/ui/settings/llm.ts";

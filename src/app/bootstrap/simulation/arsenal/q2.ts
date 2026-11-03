@@ -122,10 +122,8 @@ export class Q2SelectedArsenal implements SelectedArsenal {
   }
   step(input: WeaponStepInput, intent: ArsenalIntent | undefined): WeaponStepResult {
     if (intent !== undefined && intent.provider !== this.provider) throw new Error("Arsenal intent belongs to another provider");
-    if (intent?.weapon != null) {
-      if (!this.definitions.some(definition => definition.item === intent.weapon)) throw new Error("Weapon does not belong to selected Q2 arsenal");
-      this.select(input.actor.id, intent.weapon);
-    }
+    // Peers choose this string; a weapon outside the arsenal is no request.
+    if (intent?.weapon != null && this.definitions.some(definition => definition.item === intent.weapon)) this.select(input.actor.id, intent.weapon);
     const before = this.read(input.actor.id), observed = this.options.observe(input.actor.id);
     const turn = this.requireTurn(input.actor.id);
     latchQ2WeaponButtons(turn, (input.command.buttons & ~1) | (observed.input.attack ? 1 : 0));

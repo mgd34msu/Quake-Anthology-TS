@@ -31,17 +31,17 @@ test("shared axis controls scale actual mouse movement independently and retain 
   const horizontal = slider(bindings, "mouse-yaw"), vertical = slider(bindings, "mouse-pitch");
   slider(bindings, "sensitivity").write(5);
   vertical.write(50);
-  expect(builder.mouse.tuning.pitch).toBeCloseTo(0.011);
-  expect(builder.mouse.tuning.yaw).toBeCloseTo(0.022);
+  expect(builder.mouse.tuning.pitch).toBeCloseTo(0.011, 6);
+  expect(builder.mouse.tuning.yaw).toBeCloseTo(0.022, 6);
   const motion = builder.mouse.sample({ x: 10, y: 10 }, 16, false, true);
-  expect(motion.yaw).toBeCloseTo(-1.1); expect(motion.pitch).toBeCloseTo(0.55);
+  expect(motion.yaw).toBeCloseTo(-1.1, 4); expect(motion.pitch).toBeCloseTo(0.55, 4);
   expect(settingControl(vertical, { x: 0, y: 0, width: 100, height: 20 }, seat)).toMatchObject({ label: "Vertical sensitivity", valueLabel: "50%" });
   builder.mouse.tuning = { ...builder.mouse.tuning, invertPitch: true, yaw: -0.022 };
   vertical.write(0); vertical.write(100);
   horizontal.write(0);
   expect(Object.is(builder.mouse.tuning.yaw, -0)).toBe(true);
   horizontal.write(50);
-  expect(builder.mouse.tuning.yaw).toBeCloseTo(-0.011);
+  expect(builder.mouse.tuning.yaw).toBeCloseTo(-0.011, 6);
   expect(builder.mouse.tuning.invertPitch).toBe(true);
   expect(builder.mouse.sample({ x: 10, y: 10 }, 16, false, true).pitch).toBeLessThan(0);
   expect(vertical.minimum).toBe(0); expect(vertical.maximum).toBe(200); expect(vertical.step).toBe(1);
@@ -51,12 +51,12 @@ test("menu reads retain console coefficients beyond the slider range", () => {
   const { seat, builder, cvars, bindings } = controls();
   cvars.set("m_pitch", "0.11"); cvars.set("m_yaw", "-0.066");
   const vertical = slider(bindings, "mouse-pitch");
-  expect(vertical.read()).toBeCloseTo(500);
+  expect(vertical.read()).toBeCloseTo(500, 4);
   expect(settingControl(vertical, { x: 0, y: 0, width: 100, height: 20 }, seat)).toMatchObject({ label: "Vertical sensitivity", valueLabel: "500%" });
-  expect(builder.mouse.tuning.pitch).toBeCloseTo(0.11);
-  expect(builder.mouse.tuning.yaw).toBeCloseTo(-0.066);
-  vertical.write(201);
-  expect(builder.mouse.tuning.pitch).toBeCloseTo(0.044);
+  expect(builder.mouse.tuning.pitch).toBeCloseTo(0.11, 6);
+  expect(builder.mouse.tuning.yaw).toBeCloseTo(-0.066, 6);
+  vertical.write(250);
+  expect(builder.mouse.tuning.pitch).toBeCloseTo(0.044, 6); // clamped to the slider maximum, not 0.055
 });
 
 test("frontend uses the same axis bindings and transfers only selected coefficient changes", () => {

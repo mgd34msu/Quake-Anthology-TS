@@ -56,20 +56,24 @@ export function checkRange(source: string, size: number, offset: number, length:
 }
 
 export function normalizeEntryPath(path: string): string {
+  const normalized = tryNormalizeEntryPath(path);
+  if (normalized === null) throw new RangeError(`Unsafe archive member path: ${JSON.stringify(path)}`);
+  return normalized;
+}
+
+/** Empty and "." segments collapse as the original engines' lookups do. Returns null for members that can never be addressed safely. */
+export function tryNormalizeEntryPath(path: string): string | null {
   const separated = path.replaceAll("\\", "/");
-  const candidate = separated.endsWith("/") ? separated.slice(0, -1) : separated;
-  if (candidate.length === 0 || candidate.includes("\0") || candidate.includes(":")
-    || candidate.split("/").some(part => part === "" || part === ".")) {
-    throw new RangeError(`Unsafe archive member path: ${JSON.stringify(path)}`);
-  }
+  if (separated.includes("\0") || separated.includes(":")) return null;
   const parts: string[] = [];
-  for (const part of candidate.split("/")) {
+  for (const part of separated.split("/")) {
+    if (part === "" || part === ".") continue;
     if (part === "..") {
-      if (parts.length === 0) throw new RangeError(`Unsafe archive member path: ${JSON.stringify(path)}`);
+      if (parts.length === 0) return null;
       parts.pop();
     } else parts.push(part);
   }
-  if (parts.length === 0) throw new RangeError(`Unsafe archive member path: ${JSON.stringify(path)}`);
+  if (parts.length === 0) return null;
   return parts.join("/") + (separated.endsWith("/") ? "/" : "");
 }
 

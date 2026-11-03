@@ -12,18 +12,29 @@ export class SaveNumber {
 export type SaveJson = null | boolean | string | SaveNumber | SaveJson[] | SaveObject;
 export interface SaveObject { [key: string]: SaveJson; }
 
+const literals = [["null", null], ["true", true], ["false", false]] satisfies readonly (readonly [string, null | boolean])[];
+const numberPattern = /(?:NaN|-?Infinity|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/y;
+
 export function parseSourceJson(text: string): SaveJson {
   let offset = 0;
   const fail = (message: string): never => { throw new SaveFormatError(`json:${offset}`, message); };
-  const whitespace = (): void => { while (/\s/.test(text.charAt(offset)) && offset < text.length) offset++; };
+  const whitespace = (): void => {
+    for (; offset < text.length; offset++) {
+      const code = text.charCodeAt(offset);
+      if (code === 32 || code === 10 || code === 13 || code === 9) continue;
+      // Other control and non-ASCII characters keep the exact \s semantics.
+      if ((code < 14 && code > 8 || code > 127) && /\s/.test(text.charAt(offset))) continue;
+      break;
+    }
+  };
   const string = (): string => {
     if (text.charAt(offset) !== '"') return fail("expected a string");
     const start = offset++;
     for (;;) {
-      const character = text.charAt(offset++);
-      if (character === "") return fail("unterminated string");
-      if (character === "\\") { offset++; continue; }
-      if (character === '"') break;
+      if (offset >= text.length) return fail("unterminated string");
+      const code = text.charCodeAt(offset++);
+      if (code === 92) { offset++; continue; }
+      if (code === 34) break;
     }
     const decoded: unknown = JSON.parse(text.slice(start, offset));
     return typeof decoded === "string" ? decoded : fail("invalid string");
@@ -51,10 +62,11 @@ export function parseSourceJson(text: string): SaveJson {
       if (text.charAt(offset++) !== end) return fail(`expected '${end}'`);
       return character === "{" ? object : array;
     }
-    for (const [literal, parsed] of [["null", null], ["true", true], ["false", false]] satisfies readonly (readonly [string, null | boolean])[]) {
+    for (const [literal, parsed] of literals) {
       if (text.startsWith(literal, offset)) { offset += literal.length; return parsed; }
     }
-    const match = /^(?:NaN|-?Infinity|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/.exec(text.slice(offset));
+    numberPattern.lastIndex = offset;
+    const match = numberPattern.exec(text);
     if (match === null) return fail("expected a value");
     offset += match[0].length; return new SaveNumber(match[0]);
   };

@@ -19,7 +19,7 @@ export const gladiatorDefinition: Q2MonsterDefinition = {
     context.game.sound(context.entity, "gladiator/railgun.wav", 1);
     return context.setMove("gladiator_move_attack_gun");
   },
-  sight: sound("gladiator/sight.wav"), idle: sound("gladiator/gldidle1.wav", 2, 2), search: sound("gladiator/gldsrch1.wav", 2, 2),
+  sight: sound("gladiator/sight.wav"), idle: sound("gladiator/gldidle1.wav", 2, 2), search: sound("gladiator/gldsrch1.wav"),
   pain(context) {
     damagedSkin(context);
     const airborne = context.game.body(context.entity).velocity.z > 100;

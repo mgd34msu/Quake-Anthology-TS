@@ -102,3 +102,15 @@ test("entity parsing keeps byte text, literal escapes and source duplicate prece
   expect(entities[0]?.get("message")).toBe("caf\u00e9\\nnext");
   expect(() => parseEntities('{ "key" }')).toThrow("missing value");
 });
+
+test("hostile IBSP44 vertex counts and leaf areas are rejected before allocation", () => {
+  const polygon = q3TestFixture();
+  const polygonView = new DataView(polygon.buffer, polygon.byteOffset, polygon.byteLength);
+  polygonView.setInt32(polygonView.getInt32(8 + 12 * 8, true) + 76, 100_000_000, true);
+  expect(() => parseQ3Bsp(polygon)).toThrow("invalid IBSP44 record range");
+
+  const areas = q3Fixture();
+  const view = new DataView(areas.buffer, areas.byteOffset, areas.byteLength);
+  view.setInt32(view.getInt32(8 + 4 * 8, true) + 4, 0x7ffffffe, true);
+  expect(() => parseQ3Bsp(areas)).toThrow("invalid leaf area");
+});

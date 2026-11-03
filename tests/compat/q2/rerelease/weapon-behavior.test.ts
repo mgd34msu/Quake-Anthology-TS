@@ -118,8 +118,8 @@ test('generic native declaration executes authored callback sequences and retain
     const bytes = new Uint8Array(11); bytes.set([0x48, 0xb8]); new DataView(bytes.buffer).setBigUint64(2, address.byteOffset, true); bytes[10] = 0xc3; memory.write(at(rva), bytes);
   };
   getter(0x100, table); getter(0x180, memory.offset(edicts, BigInt(stride * 2)));
-  for (const rva of [0x120, 0x130, 0x190, 0x1a0]) memory.write(at(rva), new Uint8Array([0xc3]));
-  for (const [rva, amount] of [[0x140, 1], [0x150, 2], [0x160, 4]]) {
+  for (const rva of [0x120, 0x1a0]) memory.write(at(rva), new Uint8Array([0xc3]));
+  for (const [rva, amount] of [[0x130, 8], [0x140, 1], [0x150, 2], [0x160, 4], [0x190, 16]]) {
     if (rva === undefined || amount === undefined) throw new Error('Missing authored instruction');
     const bytes = new Uint8Array([0x83, 0x81, 0, 0, 0, 0, amount, 0xc3]);
     new DataView(bytes.buffer).setUint32(2, original.entity.generation, true); memory.write(at(rva), bytes);
@@ -137,7 +137,8 @@ test('generic native declaration executes authored callback sequences and retain
   memory.writePointer(memory.offset(shooter.address, BigInt(declaration.entity.client)), client);
   memory.writePointer(memory.offset(client, BigInt(declaration.client.weapon)), weapon);
   memory.writePointer(memory.offset(weapon, BigInt(declaration.equippedWeapon.callback)), at(0x120));
-  profile.equip(shooter); profile.launch(shooter); expect(profile.generation(shooter)).toBe(3);
+  profile.equip(shooter); expect(profile.generation(shooter)).toBe(8);
+  profile.launch(shooter); expect(profile.generation(shooter)).toBe(11);
   memory.writePointer(memory.offset(projectile.address, BigInt(declaration.entity.owner)), shooter.address);
   memory.writePointer(memory.offset(projectile.address, BigInt(declaration.entity.touchCallback)), at(0x1a0));
   expect(profile.matches(projectile, shooter)).toBe(true);
@@ -152,4 +153,5 @@ test('generic native declaration executes authored callback sequences and retain
   expect(() => profile.think(projectile)).toThrow('typed source save registration');
   memory.writeUint8(memory.offset(projectile.address, BigInt(fieldOffset(edictLayout, 'inuse'))), 1);
   profile.free(projectile);
+  expect(profile.generation(projectile)).toBe(20);
 });

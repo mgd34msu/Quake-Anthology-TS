@@ -1,3 +1,5 @@
+import { MusicContent, MusicMemoryMounts, musicWave } from "../../support/music-fixtures.ts";
+import { recipeFixture } from "../../support/save-fixtures.ts";
 import { ApplicationAssets } from '../../../src/app/bootstrap/assets.ts';
 import { ApplicationEffects } from '../../../src/app/bootstrap/effects.ts';
 import { createSceneQueries } from '../../../src/world/collision/index.ts';
@@ -10,65 +12,16 @@ import { Q1RemotePresentation } from '../../../src/app/bootstrap/network/remote-
 import { QwRemotePresentation } from '../../../src/app/bootstrap/network/remote-qw.ts';
 import { ApplicationAudio } from '../../../src/app/bootstrap/audio.ts';
 import { ApplicationMusic } from '../../../src/app/bootstrap/audio/music.ts';
-import { LoadedApplicationContent } from '../../../src/app/bootstrap/content.ts';
 import { InstalledCatalog } from '../../../src/content/catalog/index.ts';
-import { MountedContent } from '../../../src/content/mounts/index.ts';
-import type { OpenedResource } from '../../../src/content/mounts/index.ts';
 import { SoundBank, UnifiedAudio } from '../../../src/audio/index.ts';
 import { readQ1Bsp } from '../../../src/formats/q1-map/index.ts';
 import { createIdentityOwner } from '../../../src/contracts/identity.ts';
 import { EngineSession } from '../../../src/world/session/session.ts';
 import { nextActorGeneration } from '../../../src/world/actors/registry.ts';
 import type { QwServerData } from '../../../src/app/bootstrap/network/qw-types.ts';
-import type { ExecutableRecipe, ProviderReference, ResolvedResourceReference, ContentId } from '../../../src/contracts/content.ts';
-import { createContentDigest, createResourceId, createMountPlanId, createMountIdentity, createMountId } from '../../../src/contracts/content.ts';
-function recipe(): ExecutableRecipe {
-  const content = "q1:classic:musicmod:fixture";
-  const provider = (role: string): ProviderReference => ({ provider: `q1:${role}`, content });
-  const raw: Omit<ResolvedResourceReference, "id"> = { requestedPath: "maps/start.bsp", provenance: { kind: "loose", memberPath: "maps/start.bsp", mount: { kind: "loose", identity: { id: "mount:q1:fixture", content, generation: 2 }, rootPath: "/fixture" } },
-    digest: createContentDigest("0".repeat(64)), byteLength: 123, resolution: { kind: "default-order", plan: "mount-plan:fixture:1", rank: 0 } };
-  const geometry = { ...raw, id: createResourceId(raw) };
-  return { schemaVersion: 3, id: "recipe:fixture:1", preset: "recipe:fixture:1", map: { geometryContent: content, geometry, entities: provider("game") }, campaign: { kind: "campaign", mission: provider("mission"), gamecode: provider("game") },
-    movement: provider("movement"), character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
-    presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: content, hud: provider("hud"), effects: provider("effects"), audio: provider("audio") }, engineBehavior: provider("engine"), combat: provider("combat"), inventory: provider("inventory"), match: provider("match"), transition: provider("transition"),
-    execution: [{ kind: "typescript", owner: provider("game"), implementation: "q1:official", role: "server-game", api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } }],
-    mounts: { id: "mount-plan:fixture:1", mounts: [raw.provenance.mount], defaultOrder: [raw.provenance.mount.identity.id], prefixOrders: [] }, resources: [geometry], timing: [],
-    ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } } };
-}
+import type { ExecutableRecipe, ContentId } from '../../../src/contracts/content.ts';
+const recipe = (): ExecutableRecipe => recipeFixture("q1:classic:musicmod:fixture");
 
-function musicWave(sample: number): Uint8Array {
-  const bytes = new Uint8Array(44 + 64), view = new DataView(bytes.buffer);
-  const tag = (offset: number, value: string): void => { bytes.set(new TextEncoder().encode(value), offset); };
-  tag(0, "RIFF"); view.setUint32(4, bytes.length - 8, true); tag(8, "WAVE"); tag(12, "fmt ");
-  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
-  view.setUint32(24, 44100, true); view.setUint32(28, 88200, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
-  tag(36, "data"); view.setUint32(40, 64, true);
-  for (let offset = 44; offset < bytes.length; offset += 2) view.setInt16(offset, sample, true);
-  return bytes;
-}
-
-class MusicMemoryMounts extends MountedContent {
-  constructor(readonly content: ContentId, private readonly files: ReadonlyMap<string, Uint8Array>) {
-    super({ id: createMountPlanId("music-memory", content.replaceAll(":", "-")), mounts: [], defaultOrder: [], prefixOrders: [] }, []);
-  }
-  override async open(path: string): Promise<OpenedResource | null> {
-    this.assertOpen();
-    const bytes = this.files.get(path); if (bytes === undefined) return null;
-    const record: Omit<ResolvedResourceReference, "id"> = { requestedPath: path, byteLength: bytes.length,
-      digest: createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex")),
-      provenance: { kind: "loose", memberPath: path, mount: { kind: "loose", rootPath: "/music-memory",
-        identity: createMountIdentity(createMountId("music-memory", this.content.replaceAll(":", "-")), this.content, 0) } },
-      resolution: { kind: "default-order", plan: this.plan.id, rank: 0 } };
-    return { bytes, reference: { ...record, id: createResourceId(record) } };
-  }
-}
-
-class MusicContent extends LoadedApplicationContent {
-  override async forContent(content: ContentId): Promise<MountedContent> {
-    if (content !== this.recipe.map.entities.content) throw new Error('Wrong music content owner');
-    return this.mounts;
-  }
-}
 function fixture() {
   const selected = recipe(), bytes = new Uint8Array(216), view = new DataView(bytes.buffer);
   view.setInt32(0, 29, true);

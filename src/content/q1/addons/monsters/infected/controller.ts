@@ -12,10 +12,12 @@ import { infectedKind, infectedSpecies } from "./species.ts";
 import { initMg3Monster, startMg3Monster, mg3MonsterActivator } from "../startup.ts";
 import { mg3OrdinaryAttack } from "../ordinary/attack.ts";
 import { armyActions, armyPain } from "../ordinary/army.ts";
+import { mg3NoBackpackActions } from "../ordinary/classic.ts";
 
 export const infectedPrefix = "mg3:infected";
 const actions: ReadonlyMap<string, (monster: BaseMonster) => undefined> = new Map([
   ...armyActions,
+  ...mg3NoBackpackActions,
   ["infected_corpse_hold", monster => monster.delay(9999)],
   ["infected_test_rise", monster => {
     const { game, entity } = monster; entity.solid = "slidebox";
@@ -34,14 +36,17 @@ export class Q1Infected extends Mg3Monster {
     const { game, entity, context, spec } = this;
     const classname = spec.classnames[0]; if (classname === undefined) throw new Error("Infected source class has no native name");
     entity.classname = classname; context.setNumber(entity, "infected", 1); game.host.combat.setHealth(entity.actor, spec.health);
-    entity.pain = spec.stand.startsWith("hknight_corpse") ? null : game.named.pain(entity, `${infectedPrefix}:monster_pain`);
+    entity.pain = game.named.pain(entity, `${infectedPrefix}:monster_pain`);
     entity.die = game.named.die(entity, `${infectedPrefix}:monster_die`); entity.pathEnd = game.named.action(entity, `${infectedPrefix}:monster_stand`);
     if (spec.species === "knight" || spec.species === "hellknight") { context.setNumber(entity, "allowPathFind", 1); context.setNumber(entity, "combat_style", spec.species === "knight" ? 2 : 3); }
     return initMg3Monster(this, context, `progs/${spec.model}.mdl`, 1, spec.species === "army" || spec.species === "knight" ? 1 : 2);
   }
   override start(): undefined { return startMg3Monster(this, this.context); }
   override use(activator: ActorId | null): undefined {
-    return super.use(mg3MonsterActivator(this.game, activator));
+    const { game } = this, observed = activator === null || !game.isPlayer(activator) ? null : game.monsterTarget(activator);
+    if (this.enemy === null && game.health(this.entity.actor.id) > 0 && observed?.invisible === true && this.spec.stand.startsWith("hknight_corpse")) return this.play(this.spec.run);
+    if (observed?.invisible === true || observed?.notarget === true) return undefined;
+    return super.use(mg3MonsterActivator(game, activator));
   }
   override tryAttack(): boolean {
     return mg3OrdinaryAttack(this);
@@ -51,6 +56,7 @@ export class Q1Infected extends Mg3Monster {
     const r = this.game.host.random(); return this.play(r < 0.3 ? "zombie_atta1" : r < 0.6 ? "zombie_attb1" : "zombie_attc1");
   }
   override pain(attacker: ActorId | null, damage: number): undefined {
+    if (this.spec.stand.startsWith("hknight_corpse") && this.entity.number("infected.risen") === 0) return this.retaliate(attacker);
     if (this.spec.species === "enforcer") {
       this.retaliate(attacker); const { game, entity, state } = this, r = game.host.random();
       if (state.painFinished > game.time || game.options.skill > 2 && game.host.random() * 200 > damage) return undefined;

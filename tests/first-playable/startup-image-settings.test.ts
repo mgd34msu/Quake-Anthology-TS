@@ -1,5 +1,6 @@
-import { testCorpusRoot } from "../support/corpus.ts";
-import { expect, spyOn, test } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../support/corpus.ts";
+import { rendererBackends } from "../support/gl.ts";
+import { expect, spyOn } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -7,8 +8,9 @@ import { StartupApplication } from "../../src/app/bootstrap/startup.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { SceneImageRegistry } from "../../src/render/scene/resources.ts";
 import { encodePng } from "../../src/formats/images/png.ts";
+const test = corpusTest("q2/baseq2/pak0.pak");
 
-for (const backend of ["cpu", "gl"]) test(`actual startup ${backend} fonts honor saved image replacement settings`, async () => {
+for (const backend of rendererBackends) test(`actual startup ${backend} fonts honor saved image replacement settings`, async () => {
   const root = await mkdtemp(join(tmpdir(), "startup-images-"));
   try {
     await mkdir(join(root, "q2/baseq2/pics"), { recursive: true }); await mkdir(join(root, "settings"));

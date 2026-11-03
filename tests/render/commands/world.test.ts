@@ -1,3 +1,4 @@
+import { writeCapture } from "../../support/capture.ts";
 import { SceneMaterialRegistrations } from "../../../src/render/scene/material-registrations.ts";
 import { testCorpusRoot } from "../../support/corpus.ts";
 
@@ -196,7 +197,7 @@ ordering/flash { cull none
   } finally { scene.close(); images.close(); }
 });
 
-const root = process.env["QFILES_ROOT"] ?? `${testCorpusRoot()}`;
+const root = testCorpusRoot();
 const cases: readonly { readonly family: "q1" | "q2" | "q3"; readonly archive: string; readonly map: string }[] = [
   { family: "q1", archive: "q1/id1/PAK0.PAK", map: "maps/start.bsp" },
   { family: "q2", archive: "q2/baseq2/pak0.pak", map: "maps/base1.bsp" },
@@ -315,7 +316,7 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
     }
     let colored = 0;
     for (let pixel = 0; pixel < backend.pixels.length; pixel += 4) if ((backend.pixels[pixel] ?? 0) + (backend.pixels[pixel + 1] ?? 0) + (backend.pixels[pixel + 2] ?? 0) > 0) colored++;
-    if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/w17-scene/${fixture.family}${fixture.archive.includes("rerelease") ? "-rerelease" : ""}.png`, encodePng(160, 120, backend.pixels));
+    if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await writeCapture(`w17-scene/${fixture.family}${fixture.archive.includes("rerelease") ? "-rerelease" : ""}.png`, encodePng(160, 120, backend.pixels));
     expect(colored).toBeGreaterThan(1000);
     if (fixture.map === "maps/q3test1.bsp") console.log(JSON.stringify({ format: "IBSP44", backend: "cpu", surfaces: scene.surfaces.length, visible: prepared.visibility.surfaces.length, colored }));
     if (fixture.family !== "q3" && !fixture.archive.includes("rerelease")) {
@@ -504,7 +505,7 @@ for (const family of ["q1", "q2"] satisfies readonly ("q1" | "q2")[]) for (const
               const pixel = pixels.slice((200 * 640 + 320) * 4, (200 * 640 + 320) * 4 + 4);
               if (unlitPixel === null) unlitPixel = pixel; else expect(Array.from(pixel)).toEqual(Array.from(unlitPixel));
             }
-            if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/tmp/authored-lighting/${rendererKind}-${label}-${enabled ? "lit" : "dark"}.png`, encodePng(640, 400, pixels));
+            if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await writeCapture(`authored-lighting/${rendererKind}-${label}-${enabled ? "lit" : "dark"}.png`, encodePng(640, 400, pixels));
           }
           return values;
         };
@@ -515,7 +516,7 @@ for (const family of ["q1", "q2"] satisfies readonly ("q1" | "q2")[]) for (const
           frames.world(control.prepareView({ camera, target: { kind: "preview", id: "stock-control" }, time: { kind: "milliseconds", value: 0 } }));
           const capture = drawControl.captureNextFrame().then(frame => frame.pixels); drawControl.execute(frames.finish(true));
           const pixels = await capture;
-          if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/tmp/authored-video/${family}-${rendererKind}-stock.png`, encodePng(640, 400, pixels));
+          if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await writeCapture(`authored-video/${family}-${rendererKind}-stock.png`, encodePng(640, 400, pixels));
           if (family === "q2") nativeLighting = await lightingFrames(control, controlAssets.images, drawControl, "native");
         } finally { drawControl.close(); }
         const minS = Math.min(...candidate.geometry.vertices.map(vertex => vertex.texCoord.x)), maxS = Math.max(...candidate.geometry.vertices.map(vertex => vertex.texCoord.x));
@@ -548,13 +549,13 @@ for (const family of ["q1", "q2"] satisfies readonly ("q1" | "q2")[]) for (const
               const decoded = binding.source.playback.currentFrame;
               if (decoded === null) throw new Error("Missing executed movie frame");
               decodedFrames.push(decoded.index);
-              if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/tmp/authored-video/${family}-${rendererKind}-${time}.png`, encodePng(640, 400, pixels));
+              if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await writeCapture(`authored-video/${family}-${rendererKind}-${time}.png`, encodePng(640, 400, pixels));
             }
           }
           expect(hashes[0]).not.toBe(hashes[1]);
           expect(decodedFrames[0]).not.toBe(decodedFrames[1]);
           if (family === "q2") await lightingFrames(scene, assets.images, renderer, "unlit");
-          if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/tmp/authored-video/${family}-${rendererKind}.json`, JSON.stringify({
+          if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await writeCapture(`authored-video/${family}-${rendererKind}.json`, JSON.stringify({
             fixture: "Explicit loose shader/movie overlay; unchanged copied retail map archive", source: content.recipe.presentation.assets,
             shader: name, movie: "video/mpteam1.roq", originalMovieArchive: "q3a/missionpack/pak0.pk3", surface: candidate.index, camera, center, normal, uvTransform: [scaleS, 0, 0, scaleT, -minS * scaleS, -minT * scaleT], times: [68, 136], decodedFrames }, null, 2));
         } finally { assets.close(); renderer.close(); }

@@ -24,7 +24,7 @@ export interface Q2MonsterPerceptionCheckpoint {
   readonly alerted: readonly { readonly actor: SavedActorId; readonly sighting: SavedSighting }[];
   readonly primary: SavedNoise | null;
   readonly secondary: SavedNoise | null;
-  readonly noises: readonly { readonly actor: SavedActorId; readonly primary: SavedActorId; readonly secondary: SavedActorId }[];
+  readonly noises: readonly { readonly actor: SavedActorId; readonly primary: SavedActorId; readonly secondary: SavedActorId; readonly primaryRecord: SavedNoise | null; readonly secondaryRecord: SavedNoise | null }[];
   readonly trails: readonly { readonly actor: SavedActorId; readonly points: readonly { readonly origin: Vec3; readonly time: number; readonly yaw: number }[] }[];
   readonly playerOrigins: readonly { readonly actor: SavedActorId; readonly origin: Vec3 }[];
   readonly hostile: readonly { readonly actor: SavedActorId; readonly time: number }[];

@@ -54,6 +54,15 @@ function entityInteger(key: "eType" | "eFlags" | "time" | "time2" | "otherEntity
   return { name: key, bits, get: (s) => s[key], set: (s, value) => { s[key] = value; } };
 }
 
+/** Visits fields[start, end) without allocating a slice per record. */
+function forEachField<F>(fields: readonly F[], start: number, end: number, visit: (field: F) => void): void {
+  for (let index = start; index < end; index++) {
+    const field = fields[index];
+    if (field === undefined) return;
+    visit(field);
+  }
+}
+
 function vectorField<T>(name: string, get: (state: Readonly<T>) => Vec3, set: (state: T, value: Vec3) => void, axis: keyof Vec3, bits = 0): NetField<T> {
   return { name, bits, get: (s) => get(s)[axis], set: (s, value) => { set(s, { ...get(s), [axis]: value }); } };
 }
@@ -212,7 +221,7 @@ export function writeDeltaEntity(writer: MessageWriter, from: Readonly<EntitySta
   if (last === 0) return;
   writer.writeByte(last);
   writer.sourceState?.addOldsize(ENTITY_FIELDS.length);
-  for (const field of ENTITY_FIELDS.slice(0, last)) writeField(writer, field, baseline, to, true);
+  forEachField(ENTITY_FIELDS, 0, last, field => { writeField(writer, field, baseline, to, true); });
 }
 
 export function readDeltaEntity(reader: MessageReader, from: Readonly<EntityStateFields>, number: number, diagnostics?: DeltaMessageDiagnostics | null): SourceEntityState;
@@ -239,8 +248,8 @@ export function readDeltaEntity(reader: MessageReader, from: Readonly<EntityStat
   if (printing !== null) printing.print(`${String(reader.readCount + offset).padStart(3)}: #${String(destination.number | 0).padEnd(3)} `);
   destination.number = number;
   if (last > ENTITY_FIELDS.length) throw new BinaryError(reader.source, reader.readCount, `Invalid entity last field ${last}`);
-  for (const field of ENTITY_FIELDS.slice(0, last)) readField(reader, field, from, destination, true, printing);
-  for (const field of ENTITY_FIELDS.slice(last)) field.set(destination, field.get(from));
+  forEachField(ENTITY_FIELDS, 0, last, field => { readField(reader, field, from, destination, true, printing); });
+  forEachField(ENTITY_FIELDS, last, ENTITY_FIELDS.length, field => { field.set(destination, field.get(from)); });
   if (printing !== null) printing.print(` (${diagnosticBitPosition(reader, offset) - startBit} bits)\n`);
   return destination;
 }
@@ -269,7 +278,7 @@ export function writeDeltaPlayerState(writer: MessageWriter, from: Readonly<Play
   const last = lastChanged(PLAYER_FIELDS, baseline, to);
   writer.writeByte(last);
   writer.sourceState?.addOldsize(PLAYER_FIELDS.length - last);
-  for (const field of PLAYER_FIELDS.slice(0, last)) writeField(writer, field, baseline, to, false);
+  forEachField(PLAYER_FIELDS, 0, last, field => { writeField(writer, field, baseline, to, false); });
   const changed = SLOT_FIELDS.some(({ key }) => slotMask(baseline[key], to[key]) !== 0);
   writer.writeBits(changed ? 1 : 0, 1);
   if (!changed) { writer.sourceState?.addOldsize(4); return; }
@@ -292,8 +301,8 @@ export function readDeltaPlayerState(reader: MessageReader, from: Readonly<Playe
   if (printing !== null) printing.print(`${String(reader.readCount + offset).padStart(3)}: playerstate `);
   const last = reader.readByte();
   if (last > PLAYER_FIELDS.length) throw new BinaryError(reader.source, reader.readCount, `Invalid player last field ${last}`);
-  for (const field of PLAYER_FIELDS.slice(0, last)) readField(reader, field, baseline, result, false, printing);
-  for (const field of PLAYER_FIELDS.slice(last)) field.set(result, field.get(baseline));
+  forEachField(PLAYER_FIELDS, 0, last, field => { readField(reader, field, baseline, result, false, printing); });
+  forEachField(PLAYER_FIELDS, last, PLAYER_FIELDS.length, field => { field.set(result, field.get(baseline)); });
   if (reader.readBits(1) !== 0) {
     for (const { key, width } of SLOT_FIELDS) {
       if (reader.readBits(1) === 0) continue;

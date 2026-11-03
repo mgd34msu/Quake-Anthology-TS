@@ -1,8 +1,8 @@
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
-import { readField, readObject, readString } from "../../support/reflect.ts";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q1/ctf/pak0.pak");
 
 // Classic ThreeWave lobby regression: bootstrap canonicalizes shared combat
 // teams to team:red/team:blue; the CTF team reader must accept that spelling
@@ -17,8 +17,7 @@ test("q1-classic-ctf lobby spawn keeps the player alive", async () => {
     const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
     for (let index = 0; index < 20; index++) await app.step(50);
     expect(app.simulation.playerUi(local.actor).health).toBe(100);
-    const source = readObject(app.simulation, "source");
-    expect(readString(source, "kind")).toBe("q1");
+    expect(app.simulation.diagnostics().source().kind).toBe("q1");
   } finally { await app.close(); }
 }, 120000);
 
@@ -31,11 +30,9 @@ test("q1-classic-ctf match spawn keeps the player alive on an assigned team", as
     const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
     for (let index = 0; index < 20; index++) await app.step(50);
     expect(app.simulation.playerUi(local.actor).health).toBe(100);
-    const combat = readObject(app.simulation, "combat"), read = readField(combat, "read");
-    if (typeof read !== "function") throw new Error("Combat authority has no reader");
-    const state: unknown = Reflect.apply(read, combat, [local.actor]);
-    if (typeof state !== "object" || state === null) throw new Error("Player has no combat state");
-    const team: unknown = readField(state, "team");
+    const state = app.simulation.combat.read(local.actor);
+    if (state === null) throw new Error("Player has no combat state");
+    const team: unknown = state.team;
     expect(team === "team:red" || team === "team:blue").toBe(true);
   } finally { await app.close(); }
 }, 120000);
@@ -50,8 +47,7 @@ test("generic CTF rules run the ThreeWave program on an id1 world", async () => 
     for (let index = 0; index < 20; index++) await app.step(50);
     expect(app.simulation.playerUi(local.actor).health).toBe(100);
     expect(app.simulation.recipe.match.provider).toBe("q1:ctf");
-    const source = readObject(app.simulation, "source");
-    expect(readString(readObject(readObject(source, "composition"), "selection"), "program")).toBe("ctf");
+    expect(app.simulation.diagnostics().source().q1?.program).toBe("ctf");
   } finally { await app.close(); }
 }, 120000);
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import type { GuestProcessorState, GuestSimdState, MappedGuestMemory } from "../core/contracts.ts";
+import type { GuestProcessorState, MappedGuestMemory } from "../core/contracts.ts";
 import { SparseGuestMemory } from "../core/memory.ts";
 import type { NumericExecutionResult, NumericInstruction, NumericOperand } from "./contracts.ts";
 
@@ -7,8 +7,6 @@ export type RawSseOperation =
   | { readonly kind: "move"; readonly registerIndex: number; readonly size: 4 | 8 | 16; readonly store: boolean; readonly aligned: boolean }
   | { readonly kind: "logic"; readonly registerIndex: number; readonly operation: "and" | "and-not" | "or" | "xor" };
 const executed: NumericExecutionResult = { kind: "executed" };
-const memoryOperands = new WeakMap<GuestSimdState, Uint8Array>();
-const scalarRegisters = new WeakMap<Uint8Array, { readonly view: DataView; low: number; high: number }>();
 
 export function prepareRawSse(opcode: number, prefix: NumericInstruction["prefix"], registerIndex: number): RawSseOperation | null {
   if (opcode === 0x10 || opcode === 0x11 || (opcode === 0x28 || opcode === 0x29) && (prefix === "none" || prefix === "66")
@@ -39,11 +37,7 @@ export function executeRawSse(operation: RawSseOperation, operand: NumericOperan
   if (operation.kind === "move") {
     const size = operation.size;
     if (operand.kind === "memory" && size < 16 && SparseGuestMemory.managed(memory)) {
-      let scalar = scalarRegisters.get(registers);
-      if (scalar === undefined) {
-        scalar = { view: new DataView(registers.buffer, registers.byteOffset, registers.byteLength), low: 0, high: 0 };
-        scalarRegisters.set(registers, scalar);
-      }
+      const scalar = state.simd.scratch.scalar;
       if (operation.store) {
         const low = scalar.view.getUint32(destination, true);
         if (size === 4) memory.writeUint32(operand.address, low);
@@ -75,10 +69,8 @@ export function executeRawSse(operation: RawSseOperation, operand: NumericOperan
   let right: Uint8Array, rightOffset = 0;
   if (operand.kind === "register") { right = registers; rightOffset = operand.index * 16; }
   else {
-    let retained = memoryOperands.get(state.simd);
-    if (retained === undefined) { retained = new Uint8Array(16); memoryOperands.set(state.simd, retained); }
-    memory.copyInto(operand.address, retained);
-    right = retained;
+    right = state.simd.scratch.operand;
+    memory.copyInto(operand.address, right);
   }
   for (let index = 0; index < 16; index++) {
     const leftByte = registers[destination + index], rightByte = right[rightOffset + index];

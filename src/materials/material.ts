@@ -673,18 +673,6 @@ class ShaderParser {
     return this.sourceAtof(this.required());
   }
 
-  private expect(value: string, allowLineBreaks = false): void {
-    const actual = this.required(allowLineBreaks);
-    if (value === "{" ? !actual.startsWith(value) : actual !== value) this.fail(`Expected '${value}', received '${actual}'`);
-  }
-
-  private vector(): Vec3 {
-    this.expect("(");
-    const result = { x: this.number(), y: this.number(), z: this.number() };
-    this.expect(")");
-    return result;
-  }
-
   private sourceVector(previous: Vec3): { readonly value: Vec3; readonly complete: boolean } {
     if (this.next(false)?.value !== "(") {
       this.warn(`WARNING: missing parenthesis in shader '${this.shaderName}'\n`);
@@ -831,7 +819,7 @@ class ShaderParser {
     switch (kind) {
       case "identity": case "identitylighting": case "entity": case "oneminusentity": case "vertex":
       case "exactvertex": case "lightingdiffuse": case "oneminusvertex": return { kind };
-      case "const": return { kind, color: this.vector() };
+      case "const": return { kind, color: this.sourceVector({ x: 0, y: 0, z: 0 }).value };
       case "wave": return { kind, wave: this.wave(previousWave) };
       default: this.warn(`WARNING: unknown rgbGen parameter '${token.value}' in shader '${this.shaderName}'\n`); return null;
     }
@@ -1268,7 +1256,13 @@ class ShaderParser {
     for (;;) {
       const nameToken = this.next();
       if (nameToken === undefined) return entries;
-      if (nameToken.value === "{" || nameToken.value === "}") this.fail("Expected shader name");
+      if (nameToken.value === "{" || nameToken.value === "}") {
+        if (!recover) this.fail("Expected shader name");
+        // A stray brace is skipped with its section, as SkipBracedSection does, so sibling shaders survive.
+        if (nameToken.value === "}") this.depth = 0;
+        else while (this.depth > 0) if (this.next() === undefined) return entries;
+        continue;
+      }
       const name = nameToken.value;
       const instructions: RegistrationInstruction[] = [], parser = this.definition(name);
       this.warningInstructions = instructions;
@@ -1446,9 +1440,14 @@ export function inspectShaderScript(text: string, source = "<shader>", registrat
 /** EvalWaveForm uses a 1024-entry table, including the repeated sine endpoint. */
 function shaderTableIndex(value: number): number {
   const integer = Math.trunc(value);
-  if (!Number.isFinite(integer) || integer < -2147483648 || integer > 2147483647)
-    throw new RangeError("Shader table index reaches undefined source float-to-int conversion");
+  // The source's float-to-int conversion yields the x86 "integer indefinite" (INT_MIN) here, which masks to zero.
+  if (!Number.isFinite(integer) || integer < -2147483648 || integer > 2147483647) return 0;
   return integer & 1023;
+}
+
+function finiteOrZero(value: number): number {
+  const single = Math.fround(value);
+  return Number.isFinite(single) ? single : 0;
 }
 
 export function evaluateWaveform(wave: Waveform, time: number): number {
@@ -1542,7 +1541,7 @@ export function evaluateTexCoords(stage: ShaderStage, uv: Vec2, position: Vec3, 
     }
     result = { x: Math.fround(result.x), y: Math.fround(result.y) };
   }
-  return { x: Math.fround(result.x), y: Math.fround(result.y) };
+  return { x: finiteOrZero(result.x), y: finiteOrZero(result.y) };
 }
 
 /** cull is the GL face to discard, matching tr_backend.c GL_Cull. */

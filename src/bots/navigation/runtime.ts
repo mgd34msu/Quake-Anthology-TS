@@ -1,13 +1,14 @@
 // Directed source reachabilities, NAV conditional-node checks, and movement-backed route admission.
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { NavigationEstimates } from "./estimates.ts";
+import { MinHeap } from "./heap.ts";
 import { navigationTrainRide } from "./train.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { NavigationEstimateQuery, NavigationEstimateResult, NavigationRoutePrediction } from "./types.ts";
 import { SaveReader } from "../../persistence/value.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import { aasBBoxAreas, aasPointArea, aasTraceAreas } from "./aas.ts";
-import { aasAreaTravelFlags, aasTravelFlag, navigationEdgeTravelFlag } from "./graph.ts";
+import { aasAreaTravelFlags, aasTravelFlag, KEX_TRAVEL_ELEVATOR, navigationEdgeTravelFlag } from "./graph.ts";
 import { clear, contents, distance, nodeProfile, trace, translated } from "./helpers.ts";
 import type { NavigationEdge, NavigationGraph, NavigationNode, NavigationRoute, NavigationRouteResult, NavigationWorld, TraversalAdmission, TraversalRequest } from "./types.ts";
 
@@ -22,36 +23,6 @@ export interface NavigationRouteQuery {
 type NavigationEligibilityQuery = Pick<NavigationRouteQuery, "travelFlags" | "disabledAreas" | "edgeFilter">;
 interface RouteTraversal { prediction: NavigationRoutePrediction; cursor: Vec3; seconds: number; readonly points: Vec3[]; }
 interface QueueItem { readonly node: number; readonly cost: number; }
-class Queue {
-  readonly values: QueueItem[] = [];
-  push(value: QueueItem): void {
-    let index = this.values.length;
-    this.values.push(value);
-    while (index > 0) {
-      const parentIndex = Math.floor((index - 1) / 2), parent = this.values[parentIndex];
-      if (parent === undefined || parent.cost <= value.cost) break;
-      this.values[index] = parent; index = parentIndex;
-    }
-    this.values[index] = value;
-  }
-  pop(): QueueItem | null {
-    const result = this.values[0], tail = this.values.pop();
-    if (result === undefined || tail === undefined) return null;
-    if (this.values.length === 0) return result;
-    let index = 0;
-    while (index * 2 + 1 < this.values.length) {
-      let childIndex = index * 2 + 1;
-      const right = this.values[childIndex + 1], left = this.values[childIndex];
-      if (left === undefined) break;
-      if (right !== undefined && right.cost < left.cost) childIndex++;
-      const child = this.values[childIndex];
-      if (child === undefined || tail.cost <= child.cost) break;
-      this.values[index] = child; index = childIndex;
-    }
-    this.values[index] = tail;
-    return result;
-  }
-}
 
 export interface NavigationRuntimeCheckpoint {
   readonly version: 1;
@@ -67,25 +38,38 @@ export class NavigationRuntime {
   readonly #estimates: NavigationEstimates;
   readonly #nodes = new Map<number, NavigationNode>();
   readonly #outgoing = new Map<number, NavigationEdge[]>();
+  readonly #edges = new Map<number, NavigationEdge>();
+  readonly #moverEdges = new Map<number, NavigationEdge>();
   readonly #enabled = new Map<number, boolean>();
   readonly #blocked = new Map<number, string>();
   readonly #admissionSeconds = new Map<number, number>();
   #worldRevision: number;
   #generation = 0;
+  #estimateScope: string | null = null;
   constructor(readonly graph: NavigationGraph, readonly world: NavigationWorld) {
     this.#worldRevision = world.revision;
     for (const node of graph.nodes) {
       if (this.#nodes.has(node.id)) throw new RangeError(`Duplicate navigation node ${node.id}`);
       this.#nodes.set(node.id, node); this.#outgoing.set(node.id, []);
     }
-    const ids = new Set<number>();
     for (const edge of graph.edges) {
       const list = this.#outgoing.get(edge.from);
-      if (list === undefined || !this.#nodes.has(edge.to) || ids.has(edge.id)) throw new RangeError("Invalid navigation edge identity/reference");
+      if (list === undefined || !this.#nodes.has(edge.to) || this.#edges.has(edge.id)) throw new RangeError("Invalid navigation edge identity/reference");
       if (!Number.isFinite(edge.travelSeconds) || edge.travelSeconds < 0) throw new RangeError("Invalid navigation edge cost");
-      ids.add(edge.id); list.push(edge);
+      this.#edges.set(edge.id, edge); list.push(edge);
+      const model = edge.entity?.model;
+      if (edge.mode === "mover" && model !== undefined && model !== null && !this.#moverEdges.has(model)) this.#moverEdges.set(model, edge);
     }
-    this.#estimates = new NavigationEstimates(graph, (edge, flags) => this.#staticEdgeAllowed(edge, flags === undefined ? undefined : { travelFlags: flags }));
+    this.#estimates = new NavigationEstimates(graph, (edge, flags) => this.#staticEdgeAllowed(edge, flags === undefined ? undefined : { travelFlags: flags }),
+      () => this.#scopeKey());
+  }
+  /** Everything #staticEdgeAllowed reads that differs between runtimes of one graph, so equal keys give equal estimates. */
+  #scopeKey(): string {
+    if (this.#estimateScope !== null) return this.#estimateScope;
+    const profile = this.graph.profile, byId = (a: number, b: number): number => a - b;
+    return this.#estimateScope = [[...profile.capabilities].sort().join(","), profile.team ?? "-", profile.monster ? 1 : 0, profile.maximumDrop,
+      [...this.#blocked.keys()].sort(byId).join(","),
+      [...this.#enabled].sort((a, b) => a[0] - b[0]).map(([id, enabled]) => `${id}${enabled ? "+" : "-"}`).join(",")].join("|");
   }
   checkpoint(): NavigationRuntimeCheckpoint {
     return { version: 1, map: { ...this.graph.map },
@@ -122,14 +106,17 @@ export class NavigationRuntime {
     this.#enabled.clear(); for (const [id, state] of enabled) this.#enabled.set(id, state);
     this.#blocked.clear(); for (const [id, reason] of blocked) this.#blocked.set(id, reason);
     this.#admissionSeconds.clear(); for (const [id, seconds] of admissions) this.#admissionSeconds.set(id, seconds);
-    this.#worldRevision = revision; this.#generation = generation; this.#estimates.invalidate();
+    this.#worldRevision = revision; this.#generation = generation; this.#estimateScope = null; this.#estimates.invalidate();
   }
   get generation(): number { this.#refresh(); return this.#generation; }
   node(id: number): NavigationNode | null { return this.#nodes.get(id) ?? null; }
+  edge(id: number): NavigationEdge | null { return this.#edges.get(id) ?? null; }
+  /** The first mover edge bound to a brush model, in graph order. */
+  moverEdge(model: number): NavigationEdge | null { return this.#moverEdges.get(model) ?? null; }
   outgoing(id: number): readonly NavigationEdge[] { return this.#outgoing.get(id) ?? []; }
   boardingElevator(node: number) {
     for (const edge of this.outgoing(node)) {
-      if ((edge.source.kind !== "nav3" && edge.source.kind !== "nav2") || edge.mode !== "mover" || edge.sourceTravelType !== 6 || edge.entity === null) continue;
+      if ((edge.source.kind !== "nav3" && edge.source.kind !== "nav2") || edge.mode !== "mover" || edge.sourceTravelType !== KEX_TRAVEL_ELEVATOR || edge.entity === null) continue;
       const state = this.world.entity(edge.entity);
       if (state?.elevator !== undefined && state.enabled && !state.locked) return { edge, actor: state.actor, platform: state.elevator };
     }
@@ -168,12 +155,12 @@ export class NavigationRuntime {
     if (node === null) throw new RangeError(`Unknown navigation area ${id}`);
     const previous = this.#enabled.get(id) ?? !(node.source.kind === "aas" && (node.flags & 8) !== 0);
     if (previous === enabled) return previous;
-    this.#enabled.set(id, enabled); this.#invalidate(); this.#estimates.invalidate(); return previous;
+    this.#enabled.set(id, enabled); this.#invalidate(); this.#estimateScope = null; this.#estimates.invalidate(); return previous;
   }
   blockEdge(id: number, reason: string | null): void {
-    if (!this.graph.edges.some(edge => edge.id === id)) throw new RangeError(`Unknown navigation edge ${id}`);
+    if (!this.#edges.has(id)) throw new RangeError(`Unknown navigation edge ${id}`);
     if (reason === null) this.#blocked.delete(id); else this.#blocked.set(id, reason);
-    this.#invalidate(); this.#estimates.invalidate();
+    this.#invalidate(); this.#estimateScope = null; this.#estimates.invalidate();
   }
   #invalidate(): void { this.#generation++; this.#admissionSeconds.clear(); }
   #refresh(): void { if (this.#worldRevision !== this.world.revision) { this.#worldRevision = this.world.revision; this.#invalidate(); } }
@@ -272,6 +259,10 @@ export class NavigationRuntime {
   edgeAllowed(edge: NavigationEdge, query?: NavigationRouteQuery): boolean {
     return this.#edgeAllowed(edge, query, (node, awaitElevator) => this.#nodeAllowed(node, query, awaitElevator));
   }
+  /** Source reachability validity: no movement simulation and no live world reads, as BotGetReachabilityToGoal and the retained-reachability test have none. */
+  edgeSelectable(edge: NavigationEdge, travelFlags?: number): boolean {
+    return this.#staticEdgeAllowed(edge, travelFlags === undefined ? undefined : { travelFlags });
+  }
   #staticEdgeAllowed(edge: NavigationEdge, query?: NavigationEligibilityQuery): boolean {
     const profile = this.graph.profile;
     if (!profile.capabilities.has(edge.mode) || edge.mode === "unknown" || this.#blocked.has(edge.id)) return false;
@@ -279,8 +270,10 @@ export class NavigationRuntime {
     if (query?.travelFlags !== undefined && (navigationEdgeTravelFlag(edge) & query.travelFlags) === 0) return false;
     const target = this.node(edge.to);
     const source = this.node(edge.from);
-    if (source === null || target === null || !this.#staticNodeAllowed(source, query) || !this.#staticNodeAllowed(target, query)) return false;
-    if (edge.mode === "drop" && edge.start.z - edge.end.z > profile.maximumDrop) return false;
+    if (source === null || target === null || !this.#staticNodeAllowed(target, query)) return false;
+    // AAS routing tests only the area entered (be_aas_route.c:1347), so a bot may leave a disabled area; its falls are priced by the stored travel time, not limited.
+    if (edge.source.kind === "aas" ? query?.disabledAreas?.has(source.id) === true : !this.#staticNodeAllowed(source, query)) return false;
+    if (edge.mode === "drop" && edge.source.kind !== "aas" && edge.start.z - edge.end.z > profile.maximumDrop) return false;
     if (edge.source.kind === "aas") {
       if (query?.travelFlags !== undefined && (aasTravelFlag(edge.sourceTravelType) & query.travelFlags) === 0) return false;
       if (profile.team === "red" && (edge.sourceTravelType & 0x01000000) !== 0 || profile.team === "blue" && (edge.sourceTravelType & 0x02000000) !== 0) return false;
@@ -312,7 +305,7 @@ export class NavigationRuntime {
     return true;
   }
   #candidate(start: number, goal: number, query: NavigationRouteQuery, rejected: ReadonlySet<number>, nodeAllowed: (node: NavigationNode, awaitElevator: boolean) => boolean): NavigationEdge[] | null {
-    const queue = new Queue(), costs = new Map([[start, 0]]), parents = new Map<number, NavigationEdge>();
+    const queue = new MinHeap<QueueItem>(item => item.cost), costs = new Map([[start, 0]]), parents = new Map<number, NavigationEdge>();
     queue.push({ node: start, cost: 0 });
     for (let current = queue.pop(); current !== null; current = queue.pop()) {
       if (current.cost !== costs.get(current.node)) continue;
@@ -353,7 +346,7 @@ export class NavigationRuntime {
       state.points.push(edge.start, edge.end); state.cursor = edge.end; state.seconds += edge.travelSeconds;
       state.prediction = this.world.beginRoute(this.graph.profile); return true;
     }
-    const mover = edge.mode === "mover" && (edge.source.kind === "nav3" || edge.source.kind === "nav2") && edge.sourceTravelType === 6 && edge.entity !== null ? this.world.entity(edge.entity) : null;
+    const mover = edge.mode === "mover" && (edge.source.kind === "nav3" || edge.source.kind === "nav2") && edge.sourceTravelType === KEX_TRAVEL_ELEVATOR && edge.entity !== null ? this.world.entity(edge.entity) : null;
     if (mover?.elevator !== undefined && mover.enabled && !mover.locked) {
       const elevator = mover.elevator;
       if (elevator.top.z <= elevator.bottom.z || elevator.top.x !== elevator.bottom.x || elevator.top.y !== elevator.bottom.y) return false;

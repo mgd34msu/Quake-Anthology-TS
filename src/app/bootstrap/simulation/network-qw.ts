@@ -16,6 +16,7 @@ import { writeQuakeWorldMessage } from '../../../network/q1/quakeworld.ts';
 import { PF_MSEC, PF_COMMAND, PF_MODEL, PF_VELOCITY1, PF_VELOCITY2, PF_VELOCITY3, PF_EFFECTS, PF_SKINNUM, PF_DEAD, PF_GIB, PF_WEAPONFRAME } from '../../../network/q1/qw-constants.ts';
 import { SizeBuf, SZ_Write } from '../../../network/q1/message.ts';
 import { downloadPath } from '../../../network/services/downloads.ts';
+import { isServedDownloadType } from '../../../network/services/download-types.ts';
 import { canDownloadResource } from '../../../content/mounts/index.ts';
 
 export interface QwApplicationServerBindingOptions {
@@ -128,6 +129,7 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
         authentication: { get password() { return game.cvars.variableString('password'); }, get spectatorPassword() { return game.cvars.variableString('spectator_password'); }, get highCharacters() { return game.cvars.variableValue('sv_highchars') !== 0; } },
         maxClients: 32, get paused() { return simulation.q1Paused; }, supportsSourceWire: () => ({ kind: 'supported' }),
         clientInfo: player => requireClient(player).info,
+        networkInfo: (player, info) => game.setClientNetwork(player.client, info),
         commandPhase: (player, action, emit) => simulation.queueQuakeWorldAction(player.client, () => {
             if (!clients.get(player.slot)?.player.actor.equals(player.actor)) return;
             const flush = (): void => {
@@ -188,7 +190,7 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
         baselines: () => baselines,
         prepareDownload: async (_player, requestedPath) => {
             const path = requestedPath.toLowerCase();
-            if (path.includes('..') || path.startsWith('.') || !path.includes('/') || game.cvars.variableValue('allow_download') === 0) return null;
+            if (path.includes('..') || path.startsWith('.') || !path.includes('/') || !isServedDownloadType(path) || game.cvars.variableValue('allow_download') === 0) return null;
             try { downloadPath(path); } catch { return null; }
             for (const [prefix, setting] of [['skins/', 'skins'], ['progs/', 'models'], ['sound/', 'sounds'], ['maps/', 'maps']])
                 if (prefix !== undefined && path.startsWith(prefix) && game.cvars.variableValue(`allow_download_${setting}`) === 0) return null;
@@ -224,7 +226,12 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
                 if (!game.clientKill(player.actor)) queued.admit({ message: { kind: 'print', level: 2, text: "Can't suicide -- allready dead!\n" }, destination: { kind: 'client', actor: player.actor, reliable: true } });
             } else if (name === 'setinfo' && args.length === 2) {
                 const key = args[0], value = args[1]; if (key === undefined || value === undefined || key.startsWith('*') || /[\\"\n\r]/.test(key + value)) return;
-                const client = requireClient(player); if (value === '') client.info.delete(key); else client.info.set(key, value);
+                const client = requireClient(player);
+                // Info_SetValueForKey: keys and values stay under 64 characters, and the whole string under MAX_INFO_STRING (196).
+                if (key.length >= 64 || value.length >= 64) return;
+                let length = 0; for (const [name, entry] of client.info) if (name !== key) length += name.length + entry.length + 2;
+                if (value !== '' && length + key.length + value.length + 2 > 196) return;
+                if (value === '') client.info.delete(key); else client.info.set(key, value);
                 game.setClientInfo(player.client, client.info); simulation.notifyClientEvent("userinfo", player.actor);
                 queued.admit({ message: { kind: 'set-info', slot: player.slot, key, value }, destination: { kind: 'broadcast', reliable: true } });
             } else options.print(`Unhandled QW client command: ${name}`);

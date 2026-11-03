@@ -1,5 +1,5 @@
 import type { SceneCamera } from "../contracts/render.ts";
-import type { CommandBuffer } from "../core/commands/index.ts";
+import { CommandUsageError, type CommandBuffer } from "../core/commands/index.ts";
 import { anglesToAxis, length3, vectorToAngles } from "../core/math.ts";
 import { perspectiveProjection } from "../render/scene/view.ts";
 import { CameraPlayback, parseCamera, serializeCamera } from "./spline.ts";
@@ -26,7 +26,10 @@ export class ApplicationSplineCamera {
     const handlers = new Map<string, Parameters<CommandBuffer["register"]>[1]>();
     const add = (name: string, run: (args: readonly string[]) => void): void => {
       if (commands.exists(name)) throw new Error(`Camera command already registered: ${name}`);
-      const handler: Parameters<CommandBuffer["register"]>[1] = invocation => { run(invocation.args); return undefined; };
+      const handler: Parameters<CommandBuffer["register"]>[1] = invocation => {
+        try { run(invocation.args); } catch (error) { throw new CommandUsageError(`Camera: ${error instanceof Error ? error.message : String(error)}`); }
+        return undefined;
+      };
       commands.register(name, handler, { summary: "Control the loaded source spline camera.", usage: `${name}${name === "loadcamera" || name === "savecamera" ? " <file.camera>" : ""}`, examples: [] }); handlers.set(name, handler);
     };
     add("loadcamera", args => { const path = args[0]; if (args.length !== 1 || path === undefined) throw new Error("Usage: loadcamera <file.camera>"); this.queue(this.load(path)); });

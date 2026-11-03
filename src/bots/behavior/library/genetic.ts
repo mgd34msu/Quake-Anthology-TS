@@ -5,12 +5,10 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
-import type { BotRandom } from "./weights.ts";
+import { sourceUnitRandom, type BotRandom } from "./weights.ts";
 
 const MAX_RANKS = 256;
 const INT32_MIN = -0x8000_0000;
-const UINT32_MAX = 0xffff_ffff;
-const RANDOM_MASK = 0x7fff;
 
 export type GeneticSelectionResult =
   | {
@@ -45,14 +43,6 @@ function rankAt(rankings: readonly number[], index: number): number {
     throw new RangeError(`rank index ${index} is outside ${rankings.length} entries`);
   }
   return ranking;
-}
-
-function sourceUnitRandom(random: BotRandom): number {
-  const raw = random.nextInt();
-  if (!Number.isInteger(raw) || raw < INT32_MIN || raw > UINT32_MAX) {
-    throw new RangeError("bot random nextInt must return an int32 or uint32 value");
-  }
-  return Math.fround((raw & RANDOM_MASK) / Math.fround(RANDOM_MASK));
 }
 
 function consumeUnusedWeightedDraw(random: BotRandom, sum: number): void {

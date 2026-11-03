@@ -1,0 +1,61 @@
+import { afterAll, mock } from "bun:test";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import * as realOs from "node:os";
+import { join } from "node:path";
+
+/**
+ * Preload for every `bun test` run. Application launches that omit a user root
+ * fall back to `homedir()`, which would read and overwrite the developer's real
+ * profile. Point HOME and `os.homedir()` at a throwaway directory so no test can
+ * reach it. Set QTS_TEST_STRICT_HOME=1 to fail the run when anything lands there,
+ * which finds launches that still lack an explicit user root.
+ */
+const realHome = realOs.homedir();
+const home = mkdtempSync(join(realOs.tmpdir(), "qts-test-home-"));
+process.env["HOME"] = home;
+process.env["XDG_DATA_HOME"] = join(home, ".local", "share");
+process.env["XDG_CONFIG_HOME"] = join(home, ".config");
+process.env["XDG_STATE_HOME"] = join(home, ".local", "state");
+// Audio tests must never open the machine's output device.
+process.env["SDL_AUDIODRIVER"] ??= "dummy";
+mock.module("node:os", () => ({ ...realOs, default: { ...realOs, homedir: () => home }, homedir: () => home }));
+
+// mock.module patches the live module namespace, so the real functions are captured by value before it runs.
+const realRoots = { ...(await import("../../src/content/roots.ts")) };
+const { contentRootCandidates: realCandidates, resolveDefaultContentRoot: realResolve } = realRoots;
+type Search = Parameters<typeof realCandidates>[0];
+const corpusRoot = process.env["QTS_TEST_CORPUS"] ?? "";
+/** Launches that pass no --content-root resolve against the corpus, not the checkout or a Steam install. */
+const searchIn = (search: Search = {}): Search => corpusRoot === "" || search.ownDirectory !== undefined ? search : { ...search, ownDirectory: corpusRoot };
+mock.module("../../src/content/roots.ts", () => ({
+  ...realRoots,
+  contentRootCandidates: (search: Search = {}, steamOnly = false) => realCandidates(searchIn(search), steamOnly),
+  resolveDefaultContentRoot: (search: Search = {}, steamOnly = false) => realResolve(searchIn(search), steamOnly),
+}));
+
+function leaked(directory: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) found.push(...leaked(path)); else found.push(path);
+  }
+  return found;
+}
+
+function finish(): void {
+  if (!existsSync(home)) return;
+  if (process.env["QTS_TEST_STRICT_HOME"] === "1") {
+    const files = leaked(home);
+    if (files.length > 0) {
+      console.error(`${files.length} files were written under the test home by launches without an explicit user root:\n${files.slice(0, 20).join("\n")}`);
+      process.exitCode = 1;
+    }
+  }
+  rmSync(home, { recursive: true, force: true });
+}
+// Bun runs preload afterAll hooks once, after the last file; the exit listener covers runs that end another way.
+afterAll(finish);
+process.on("exit", finish);
+
+export const hermeticHome = home;
+export const developerHome = realHome;

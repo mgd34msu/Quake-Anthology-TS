@@ -408,9 +408,10 @@ export class QuakeWorldDecoder {
             codec.readDeltaEntity(base, state, h, flags);
             states.set(h.number, state);
             r.finish();
-            if (states.size > codec.maxPacketEntities)
-                throw new PacketError('Packet entities overflow', r.offset);
         }
+        // Checked once merged: a delta can add entities before the removals later in the same message.
+        if (states.size > codec.maxPacketEntities)
+            throw new PacketError('Packet entities overflow', r.offset);
         if (invalid)
             return { kind: 'invalid-delta', sequence, requested: requested ?? 0 };
         const values = [...states.values()].sort((a, b) => a.number - b.number);

@@ -41,7 +41,7 @@ export function q2DamageFeedback(context: Q2CharacterContext, painIndex: number)
   state.damageAlpha = clamp(Math.max(state.damageAlpha, 0) + count * 0.01, 0.2, 0.6);
   state.damageBlend = { x: (state.damageArmor + state.damageBlood) / total, y: (state.damagePowerArmor + state.damageArmor) / total, z: state.damageArmor / total };
   if (state.damageKnockback !== 0 && health > 0) {
-    const kick = clamp(Math.abs(state.damageKnockback) * 100 / health, count * 0.5, 50);
+    const kick = Math.min(50, Math.max(count * 0.5, Math.abs(state.damageKnockback) * 100 / health));
     const direction = normalize(subtract(state.damageFrom, game.body(entity).origin));
     const vectors = angleVectorsRule(movement.viewAngles, "native");
     state.damageRoll = kick * dot(direction, vectors.right) * 0.3;
@@ -114,7 +114,7 @@ export function q2BuildView(context: Q2CharacterContext, flashes: number, interm
     flashes, health, armor: armor !== undefined && armor.powered.kind !== "none" && (armorPoints === 0 || (Math.round(now * 10) & 8) !== 0) ? armor.powered.cells : armorPoints,
     ammo: ammo === null ? 0 : game.host.inventory.count(entity.actor.id, ammo), score: state.score, selectedItem: state.selectedItem,
     timer: timer === null ? null : { item: timer.item === "q2:item_quad" ? "q2:item_quad" : timer.item === "q2:item_invulnerability" ? "q2:item_invulnerability" : timer.item === "q2:item_enviro" ? "q2:item_enviro" : "q2:item_breather", seconds: timer.seconds },
-    spectator: state.spectator, layouts: (state.showScores || state.showHelp || health <= 0 || intermission ? 1 : 0) | (state.showInventory && health > 0 ? 2 : 0) };
+    spectator: state.spectator, layouts: ((game.options.mode === "deathmatch" ? state.showScores || health <= 0 || intermission : state.showScores || state.showHelp) ? 1 : 0) | (state.showInventory && health > 0 ? 2 : 0) };
 }
 
 export function q2ClientAnimation(context: Q2CharacterContext): undefined {

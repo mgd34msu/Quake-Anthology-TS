@@ -1,5 +1,6 @@
+import { writeCapture } from "../support/capture.ts";
 import { SceneMaterialRegistrations } from "../../src/render/scene/material-registrations.ts";
-import { testCorpusRoot } from "../support/corpus.ts";
+import { corpusFile } from "../support/corpus.ts";
 
 import { sceneModelBatches } from "../../src/render/scene/submissions.ts";
 import { expect, test } from "bun:test";
@@ -21,7 +22,7 @@ import { SceneFrameBuilder } from "../../src/render/commands/frame.ts";
 import { anglesToAxis } from "../../src/core/math.ts";
 
 async function fixture() {
-  const archive = await openArchive(`${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`);
+  const archive = await openArchive(corpusFile("q2/rerelease/baseq2/pak0.pak"));
   const identity = createIdentityOwner("q2-md5-loader"), owner = { identity: Symbol("q2-md5"), session: identity.session, generation: 0 };
   const images = new SceneImageRegistry(owner), overrides = new Map<string, Uint8Array | null>(), ranks = new Map<string, number>();
   async function open(path: string): Promise<OpenedResource | null> {
@@ -121,7 +122,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.sk
         if (small && frame === 112) { expect(skeletal.frames[frame]?.joints.some(joint => joint.scale === 0)).toBe(true); expect(visibleChannels).toBe(0); }
         else expect(visibleChannels).toBeGreaterThan(100);
         snapshots.push(pixels);
-        await Bun.write(`/tmp/q2-md5-${backend}-${path.includes("soldier") ? "soldier" : small ? "grenades" : path.includes("v_blast") ? "blaster" : "male"}-${frame}.png`, encodePng(320, 240, pixels));
+        await writeCapture(`q2-md5-${backend}-${path.includes("soldier") ? "soldier" : small ? "grenades" : path.includes("v_blast") ? "blaster" : "male"}-${frame}.png`, encodePng(320, 240, pixels));
       }
       expect(snapshots[0]).not.toEqual(snapshots[1]);
     }

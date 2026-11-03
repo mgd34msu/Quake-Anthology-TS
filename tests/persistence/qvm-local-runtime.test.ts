@@ -12,7 +12,7 @@ import { CommandBuffer } from "../../src/core/commands/index.ts";
 import { CvarFlag } from "../../src/core/cvars/index.ts";
 import { fromQ3PlayerState, toQ3UserCommand } from "../../src/network/q3/adapters.ts";
 import type { WireUserCommand } from "../../src/network/q3/message.ts";
-import { UserFileStore } from "../../src/platform/files/writable.ts";
+import { UserFileStore } from "../../src/core/files/writable.ts";
 import { EngineSession } from "../../src/world/session/session.ts";
 
 test("actual local LRCTF uses shared admission and delivers each local command before its authoritative frame", async () => {

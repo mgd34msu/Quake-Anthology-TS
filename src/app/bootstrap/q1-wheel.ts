@@ -39,10 +39,16 @@ export class ApplicationQ1Wheel {
     const provider = await assets.provider(source.content), file = await provider.mounts.open("wwheel.txt");
     if (file === null) return;
     const parsed = parseQ1WeaponWheel(new TextDecoder().decode(file.bytes));
-    if (parsed.errors.length !== 0) throw new Error(`Invalid authored weapon wheel: ${parsed.errors.join("; ")}`);
+    if (parsed.errors.length !== 0) {
+      // The wheel is optional mod data: a bad one leaves the default wheel.
+      assets.warnOnce(`q1-wheel:${source.content}`, `Ignoring invalid authored weapon wheel: ${parsed.errors.join("; ")}\n`);
+      return;
+    }
     this.slots = parsed.slots;
     for (const slot of this.slots) for (const path of [slot.icon, slot.selectedIcon]) {
-      if (path !== null && !this.images.has(path)) this.images.set(path, await icons.load({ kind: "image", resource: { content: source.content, path } }));
+      if (path === null || this.images.has(path)) continue;
+      try { this.images.set(path, await icons.load({ kind: "image", resource: { content: source.content, path } })); }
+      catch (error) { assets.warnOnce(`q1-wheel-icon:${source.content}/${path}`, `Weapon wheel icon ${path} unavailable: ${error instanceof Error ? error.message : String(error)}\n`); }
     }
   }
   switchWeapon(player: PlayerUi, first: number, second: number): ItemId | null {

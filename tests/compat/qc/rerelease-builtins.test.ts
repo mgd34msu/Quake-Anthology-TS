@@ -47,9 +47,13 @@ test("retail rerelease programs select the rerelease host and bind every ex_* bu
     expect(printed).toEqual([marker]);
     vm.execute(program.functionNamed("ex_CheckPlayerEXFlags").index, 1);
     expect(vm.globals.float(1)).toBe(0);
+    const missing: string[] = [];
     for (const name of ["ex_draw_point", "ex_bot_movetopoint", "ex_walkpathtogoal", "ex_prompt", "ex_promptchoice", "ex_clearprompt"]) {
       const fn = program.functions.find(candidate => candidate.name === name);
-      if (fn !== undefined) vm.execute(fn.index, 0);
+      if (fn === undefined) missing.push(name); else vm.execute(fn.index, 0);
     }
-  } finally { archive.close(); }
+    // The retail rerelease program defines no QuakeC function with these names.
+    expect(missing).toEqual(["ex_prompt", "ex_promptchoice", "ex_clearprompt"]);
+    expect(printed).toEqual([marker]);
+  } finally { archive.close(); actors.close(); }
 });

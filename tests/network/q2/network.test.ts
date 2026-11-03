@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import type { Q2ProtocolIdentity } from '../../../src/contracts/protocol.ts';
-import { LoopbackHub } from '../../../src/network/common/loopback.ts';
+import { LoopbackHub } from '../../support/loopback.ts';
 import { Q2WireCodec, Q2Channel, EntityStateT, PlayerStateT, UsercmdT, createMessage, messageBytes, encodeQ2Frame, Q2ServerMessageReader, encodeQ2Move, readQ2ClientMessages, encodeQ2BatchMove, Q2ClientHandshake, Q2ChallengeTable, readQ2OutOfBand, readQ2Connect, q2OutOfBand, Q2CommandReplay, encodeQ2ServerEvent, toQ2RereleasePlayer } from '../../../src/network/q2/index.ts';
 import type { Q2WireFrame } from '../../../src/network/q2/index.ts';
 const protocols: readonly Q2ProtocolIdentity[] = [{ kind: 'q2-classic', version: 34 }, { kind: 'q2-r1q2', version: 35, revision: 1905 }, { kind: 'q2-q2pro', version: 36, revision: 1019 }, { kind: 'q2-rerelease', version: 1038 }, { kind: 'q2-private-classic', version: 4038 }, { kind: 'q2-kex', version: 2023 }, { kind: 'q2-kex-demo', version: 2022 }];
@@ -237,21 +237,6 @@ test('rerelease compression uses its opcode and a lost delta frame is consumed w
     expect(decodedFrame(reader, encodeQ2Frame(wire, next, first, new Map<number, EntityStateT>(), 4)).valid).toBe(false);
     expect(decodedFrame(reader, encodeQ2Frame(wire, packetFrame(new PlayerStateT(), [], 3), null, new Map<number, EntityStateT>(), 4)).valid).toBe(true);
 });
-test('native connectionless exchange dispatches admission and status through the source host', async () => {
-    const { Q2ConnectionlessServer, readQ2Status } = await import('../../../src/network/q2/index.ts');
-    const protocol: Q2ProtocolIdentity = { kind: 'q2-classic', version: 34 }, remote = { kind: 'loopback', id: 'q2-browser' } satisfies Parameters<typeof Q2ChallengeTable.prototype.issue>[0], replies: Uint8Array[] = [];
-    let connected = false;
-    const server = new Q2ConnectionlessServer({ profile: 'classic', protocols: [protocol], status: () => ({ serverInfo: String.raw `\hostname\Quake\mapname\base1\maxclients\4`, players: [{ name: 'player', score: 3, ping: 20 }] }), info: () => ({ name: 'Quake', map: 'base1', players: 1, maxPlayers: 4 }), connect: () => { connected = true; return { kind: 'accepted' }; }, reply: (_to, bytes) => { replies.push(bytes); }, rconPassword: () => '', limitedRcon: () => null, rconRateAllowed: () => true, rechargeRconRate: () => { }, executeRcon: async () => { } }, new Q2ChallengeTable(() => 42));
-    await server.receive(remote, q2OutOfBand('status'), 0);
-    const status = readQ2OutOfBand(replies[0] ?? new Uint8Array());
-    if (status === null)
-        throw new Error('status missing');
-    expect(readQ2Status(status, protocol)?.playerDetails[0]?.score).toBe(3);
-    await server.receive(remote, q2OutOfBand('connect 34 7 42 "\\name\\player"'), 0);
-    expect(connected).toBe(true);
-    expect(readQ2OutOfBand(replies[1] ?? new Uint8Array())?.command).toBe('client_connect');
-});
-
 test('IPX packet ceiling preserves native Q2 fragmentation and classic reliable capacity', () => {
     const protocol = { kind: 'q2-q2pro', version: 36, revision: 1026 } satisfies Q2ProtocolIdentity;
     const sender = new Q2Channel({ protocol, side: 'client', channel: 'new', qport: 17, maxDatagramBytes: 1394 });

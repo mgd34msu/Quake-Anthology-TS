@@ -1,5 +1,5 @@
 import { registerPlayerUserinfo, applyCharacterAppearance } from "./player-userinfo.ts";
-import { startupCommandPhases } from "./startup-commands.ts";
+import { applySelectedBindingDefaults, applyStartupVariables, inheritedBindingBaseline, noteBindingCommand, startupCommandPhases } from "./startup-commands.ts";
 import { applyQ3MapLaunch } from "./q3-map-command.ts";
 import { q3ProductMapCommands } from "../../core/q3-product-policy.ts";
 import { registerRunCvar } from "./shared-setting-cvars.ts";
@@ -9,7 +9,7 @@ import { audioOutputCvarNames, writeAudioOutputCvars } from "./audio/output-sett
 import { defaultAudioOutputFormat } from "../../audio/output.ts";
 import type { ApplicationHost } from "./application.ts";
 import type { ApplicationOptions } from "./options.ts";
-import type { ApplicationConfigurationContent } from "./content.ts";
+import type { ApplicationConfigurationContent, LoadedApplicationContent } from "./content.ts";
 import { applicationDiscoversMods, applicationConfigurationPreset, openApplicationConfigurationContent } from "./content.ts";
 import { sourceProgramProduct } from "../../content/catalog/source-program.ts";
 import { discoverInstalledContent, presetChoice, type InstalledCatalog } from "../../content/catalog/index.ts";
@@ -18,17 +18,16 @@ import type { ContentId } from "../../contracts/content.ts";
 import type { ClientId, IdentityOwner, SeatId } from "../../contracts/identity.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { EngineSession, SessionSeat } from "../../world/session/index.ts";
-import { CvarFlag, CvarRegistry, type CvarArchiveEntry } from "../../core/cvars/index.ts";
+import { CvarRegistry, type CvarArchiveEntry } from "../../core/cvars/index.ts";
 import { ConfigStore } from "../../settings/config.ts";
 import { defaultAddonContentRoots, defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
 import { serverDefinitionsForSelection } from "../../settings/server/index.ts";
 import { PreparedStartup, allowSeatConfigurationCommand, type PreparedClientCommands, type PreparedSeatConfiguration } from "./prepared-startup.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
 import { StartupConfig, type StartupConfigOptions } from "./startup-config.ts";
-import { defaultBindings, namedPhysicalInput } from "../../input/bindings.ts";
+import { defaultBindings } from "../../input/bindings.ts";
 import { physicalInputKey, type SeatInput } from "../../input/seat.ts";
 import type { CommandCvarRouting } from "../../core/commands/index.ts";
-import { asciiFold } from "../../core/commands/index.ts";
 import type { InputBinding } from "../../contracts/ui.ts";
 import { registerQ1ClientCommands } from "./q1-client-commands.ts";
 import { registerQ2ClientCommands } from "./q2-client-commands.ts";
@@ -37,7 +36,7 @@ import { createStartupSource, resolveStartupRules } from "./startup-source.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
 import { ApplicationViewSettings } from "./view-settings.ts";
 import { loadAudioSettings } from "./audio-settings.ts";
-import { loadCvarArchive } from "./cvar-archives.ts";
+import { archiveDataText, loadCvarArchive } from "./cvar-archives.ts";
 import { initializeQ3ClientCvars, q3ClientModel } from "./q3-client/userinfo.ts";
 import { MouseSettings } from "../../input/mouse-settings.ts";
 import { ConsoleScriptFiles, consoleConfigRoot, sourceScriptReader } from "./config-scripts.ts";
@@ -175,18 +174,10 @@ export async function prepareProfileConfiguration(args: {
         if (!choices.overridden.has(physicalInputKey(binding.input))) bindings.bind(binding);
     };
     const launchContext = seats[0]?.context ?? prepared.commands.context;
-    const applyStartupVariables = (): void => {
-      for (const variable of phases?.variables ?? []) {
-        const owner = routing.owner(variable.name, launchContext);
-        owner.set(variable.name, variable.value, true);
-        const registered = owner.register(variable.name, "");
-        if (registered === undefined) throw new Error(`Q3 startup variable registration rejected: ${variable.name}`);
-        owner.addFlags(registered.name, CvarFlag.UserCreated);
-      }
-    };
+    const applyVariables = (): void => { applyStartupVariables(phases?.variables ?? [], (name, context) => routing.owner(name, context), launchContext); };
     async function* run(): AsyncGenerator<void, void, void> {
       if (phases !== null) {
-        applyStartupVariables();
+        applyVariables();
         currentCommands().appendPreparation(phases.early, launchContext, dialect);
         await currentCommands().executeScriptsAsync(async () => {});
       }
@@ -205,21 +196,13 @@ export async function prepareProfileConfiguration(args: {
           applyBindingDefaults(seat.id, defaults);
           const primary = seats[0];
           const inherited = primary === undefined ? [] : bindingChoices.get(primary.id)?.authored ?? [];
-          const baseline = new Map(inherited.map(binding => [physicalInputKey(binding.input), binding]));
-          for (const binding of defaults) if (!baseline.has(physicalInputKey(binding.input))) baseline.set(physicalInputKey(binding.input), binding);
-          choices.authored = [...baseline.values()];
+          choices.authored = inheritedBindingBaseline(inherited, defaults);
         }
         if (index === 0) bindings().unbindAll();
         active = new StartupConfig({ ...(phases === null ? {} : { safeMode: phases.safe }), dialect, context: seat.context, hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
           scope: index === 0 ? "source" : "seat", read: (name, context, scope) => published === undefined ? read(name, context, scope) : published.readConfiguration(name, context, scope),
           applySelectedDefaults: () => {
-            for (const binding of bindings().bindings) if (binding.target.kind === "command" && /^(?:weapon|impulse|use)\s/i.test(binding.target.text)) bindings().unbind(binding.input);
-            const authored = new Map(bindings().bindings.map(binding => [physicalInputKey(binding.input), binding]));
-            for (const binding of defaults) {
-              bindings().bind(binding);
-              if (!authored.has(physicalInputKey(binding.input))) authored.set(physicalInputKey(binding.input), binding);
-            }
-            choices.authored = [...authored.values()];
+            choices.authored = applySelectedBindingDefaults(bindings(), defaults);
             collectingBindings = true;
             publishChoices(seat.id);
           },
@@ -244,21 +227,17 @@ export async function prepareProfileConfiguration(args: {
               if (seat.profile.alwaysRun !== undefined) currentSeat(seat.id).mouse.cvars.setCommandFlags("cl_run", seat.profile.alwaysRun ? "1" : "0", "archive");
             }
             if (index === 0 && args.clientSource?.archive !== undefined && args.clientSource.archive !== null)
-              currentCommands().insert(args.clientSource.archive, { ...seat.context, origin: { kind: "script", name: "client.cfg", caller: seat.context.origin } });
+              currentCommands().insert(archiveDataText(args.clientSource.archive, name => currentCommands().exists(name)), { ...seat.context, origin: { kind: "script", name: "client.cfg", caller: seat.context.origin } });
             collectingBindings = true;
           }, applyLaunchOptions: () => {},
-          replayStartupVariables: () => { if (index === 0 && phases !== null) { applyStartupVariables(); currentCommands().insert(phases.early, launchContext); } },
+          replayStartupVariables: () => { if (index === 0 && phases !== null) { applyVariables(); currentCommands().insert(phases.early, launchContext); } },
         });
         while (!await active.executeFrame({
           append: (text, context) => currentCommands().appendPreparation(text, context, dialect),
           executeScriptsAsync: (afterDispatch, shouldContinue) => currentCommands().executeScriptsAsync(afterDispatch, shouldContinue),
         }, async () => {
           if (!collectingBindings) return;
-          const [rawName, key] = currentCommands().tokenizedArguments, name = asciiFold(rawName ?? "");
-          if (name === "unbindall") choices.all = true;
-          if ((name === "bind" || name === "unbind") && key !== undefined) {
-            const input = namedPhysicalInput(key); if (input !== null) choices.overridden.add(physicalInputKey(input));
-          }
+          noteBindingCommand(currentCommands().tokenizedArguments, choices);
           publishChoices(seat.id);
         }, () => published === undefined ? !stopped : published.configurationCanContinue)) yield;
         active = null;
@@ -333,6 +312,17 @@ export function legacyConfigurationOptions(options: ApplicationOptions, catalog:
   return { legacyConfig: { sharedRoot, gameRoots } };
 }
 
+/** Console scripts for a loaded world: user files plus the scripts its source product mounts; the mounts stay retained while the scripts live. */
+export function sourceConsoleScripts(content: Pick<LoadedApplicationContent, "mounts" | "catalog" | "recipe" | "retainMainMounts">, options: ApplicationOptions, settings: ConfigStore): ConsoleScriptFiles {
+  const mounts = content.mounts, release = content.retainMainMounts();
+  return new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.recipe.engineBehavior.content),
+    consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
+    mountedScript: sourceScriptReader(content.catalog, mounts, content.recipe.engineBehavior.content),
+    mountedResource: name => mounts.open(name),
+    mountedFiles: (directory, extension) => mounts.listFiles(directory, extension),
+    mounted: name => mounts.open(name).then(resource => resource?.bytes) }, async () => { release(); });
+}
+
 export function configurationStore(options: ApplicationOptions, content: ApplicationConfigurationContent, reference: ContentId): ConfigStore {
   const product = content.catalog.product(reference);
   return new ConfigStore(product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
@@ -363,7 +353,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
   const inputCvars = new CvarRegistry({ dialect: movement, context, print: text => host.print(text) });
   const image = await ApplicationImageSettings.open({ deferPersistence: true, context, dialect,
     ...(options.renderWorker === undefined ? {} : { renderWorker: options.renderWorker }),
-    audioOutputFormat: (await loadAudioSettings(settings)).outputFormat ?? defaultAudioOutputFormat,
+    audioOutputFormat: (await loadAudioSettings(settings, text => host.print(text))).outputFormat ?? defaultAudioOutputFormat,
     ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => host.print(text) });
   const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
     consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
@@ -374,7 +364,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
   try {
     const sharedArchive = [...image?.persistedEntries ?? [], ...await loadInputDeviceSettings(inputDeviceStore(options.userContentRoot))];
     if (image?.cvars.find("volume") !== undefined) {
-      const audio = await loadAudioSettings(settings);
+      const audio = await loadAudioSettings(settings, text => host.print(text));
       if (audio.outputFormat !== undefined) {
         writeAudioOutputCvars(image.cvars, audio.outputFormat);
         sharedArchive.push(...audioOutputCvarNames.map(name => ({ name, value: image.cvars.variableString(name) })));
@@ -386,7 +376,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
     }
     if (image !== null) {
       const view = new ApplicationViewSettings(value => image.cvars.set("fov", String(value)));
-      await view.load(settings);
+      await view.load(settings, text => host.print(text));
       const release = view.bindCvars(image.cvars);
       if (view.override !== null && !sharedArchive.some(entry => entry.name === "fov")) sharedArchive.push({ name: "fov", value: String(view.fieldOfView) });
       release();

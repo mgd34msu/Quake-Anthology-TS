@@ -7,7 +7,7 @@ import { sourceMoverBoundsMatch } from "../../../bots/navigation/entity-binding.
 import type { NavigationEntityBinding } from "../../../bots/navigation/types.ts";
 import type { BotMovementPrediction } from "../../../bots/behavior/q3/navigation-types.ts";
 import { createMovementAdmission, createMovementRouteAdmission, loadNavigation, NavigationRuntime } from "../../../bots/navigation/index.ts";
-import type { NavigationPredictionDriver, NavigationProfile, NavigationWorld } from "../../../bots/navigation/index.ts";
+import type { NavigationPredictionDriver, NavigationProfile, NavigationWorld, TravelMode } from "../../../bots/navigation/index.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { LoadedApplicationContent } from "../content.ts";
 import { movementOrigin } from "./players.ts";
@@ -26,8 +26,10 @@ export function botNavigationProfile(player: LocomotionPlayer): NavigationProfil
   return { movement, shape: { kind: "box", bounds: player.standingBounds },
     ...(crouches ? { crouchedShape: { kind: "box", bounds: playerCrouchedBounds(player) } } satisfies Pick<NavigationProfile, "crouchedShape"> : {}),
     policy: playerTracePolicy(player),
-    capabilities: new Set(crouches ? ["walk", "crouch", "jump", "drop", "swim", "water-jump", "ladder", "mover"]
-      : ["walk", "jump", "drop", "swim", "water-jump", "ladder", "mover"]),
+    capabilities: new Set<TravelMode>([...(crouches ? ["walk", "crouch", "jump", "drop", "swim", "water-jump", "ladder", "mover"] as const
+      : ["walk", "jump", "drop", "swim", "water-jump", "ladder", "mover"] as const),
+    // TFL_DEFAULT includes TFL_TELEPORT and TFL_JUMPPAD; routing leaves selection to the travel flags.
+    ...(movement.kind === "q3" ? ["teleport", "jump-pad"] as const : [])]),
     maximumStep: 18, minimumFloorNormal: 0.7, maximumDrop: 128, team: null, monster: false };
 }
 
@@ -201,6 +203,10 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
     }, crouchedBounds: profile.crouchedShape?.bounds ?? first.standingBounds,
     travelWeapon: () => null,
     predictClientMovement(query: BotMovementPrediction) {
-      return predictApplicationBotMovement(simulation, playerFor(query.entityNum), query, forClient(query.entityNum));
+      // Entity -1 is a probe with no owner (the jump-pad item test): any admitted player's movement provides the physics.
+      const anyone = query.entityNum < 0 ? firstPlayer() : null;
+      if (query.entityNum < 0 && anyone === null) return { end: query.origin, velocity: query.velocity, frames: 0, stopEvent: 0, endArea: null,
+        trajectory: [query.origin], seconds: 0, grounded: false, waterLevel: 0, trace: null, bounds: null };
+      return predictApplicationBotMovement(simulation, anyone ?? playerFor(query.entityNum), query, anyone === null ? forClient(query.entityNum) : forClient(anyone.client.slot));
     } };
 }

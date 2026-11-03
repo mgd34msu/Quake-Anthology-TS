@@ -4,6 +4,7 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
+import { spriteExplosion } from "../base/projectiles.ts";
 import type { Q1PlayerState } from "../foundation/types.ts";
 import { POINT, ZERO, length, normalize, vadd, vscale, vsub } from "../foundation/types.ts";
 import { aim } from "../foundation/weapons.ts";
@@ -35,6 +36,7 @@ export function launchRogueLavaSpike(game: Q1EntityServices, owner: ActorId, ori
 export function fireRogueLava(game: Q1EntityServices, player: Q1PlayerState): boolean {
   const nails = game.host.inventory.count(player.actor.id, "rogue:ammo/lava-nails");
   const powered = player.weapon === "rogue:lava-supernailgun" && nails >= 2;
+  if (nails < 1) { game.message(player.actor.id, "$qc_out_lava_nails", false); return false; }
   if (!game.host.inventory.consume(player.actor, "rogue:ammo/lava-nails", powered ? 2 : 1)) return false;
   const body = game.host.bodies.read(player.actor.id); if (body === null) return false;
   const basis = game.makeVectors(player.viewAngles), origin = vadd(vadd(body.origin, { x: 0, y: 0, z: 16 }), vscale(basis.right, powered ? 0 : player.nailSide * 4));
@@ -74,7 +76,8 @@ export function fireRogueMultiGrenade(game: Q1EntityServices, player: Q1PlayerSt
 function grenadeExplode(game: Q1EntityServices, grenade: Q1Actor, mini = true): undefined {
   const player = grenade.owner !== null && game.isPlayer(grenade.owner);
   game.radiusDamage(grenade.actor.id, grenade.owner, mini ? player ? 90 : 60 : 120, null, "rogue:multi-grenade");
-  game.effect("explosion", game.body(grenade).origin); return game.remove(grenade);
+  if (!mini) { game.effect("explosion", game.body(grenade).origin); return game.remove(grenade); }
+  game.host.emit({ kind: "colored-explosion", origin: game.body(grenade).origin, colorStart: 230, colorLength: 5 }); return spriteExplosion(game, grenade, false);
 }
 function splitGrenade(game: Q1EntityServices, grenade: Q1Actor): undefined {
   if (grenade.owner === null) return game.remove(grenade);
@@ -107,14 +110,14 @@ function explodeRocket(game: Q1EntityServices, rocket: Q1Actor, direct: ActorId 
     game.damage(direct, rocket.actor.id, rocket.owner, damage, "rogue:multi-rocket");
   }
   game.radiusDamage(rocket.actor.id, rocket.owner, 75, direct, "rogue:multi-rocket");
-  game.effect("explosion", vsub(game.body(rocket).origin, vscale(normalize(game.body(rocket).velocity), 8))); return game.remove(rocket);
+  game.setBody(rocket, { origin: vsub(game.body(rocket).origin, vscale(normalize(game.body(rocket).velocity), 8)) }); return spriteExplosion(game, rocket);
 }
 function acquireRocket(game: Q1EntityServices, rocket: Q1Actor): undefined {
   if (rocket.delay < game.time) return explodeRocket(game, rocket, null);
   const body = game.body(rocket), owner = rocket.owner === null ? null : game.host.actors.resolveOwned(rocket.owner);
   const direction = owner === null ? normalize(body.velocity) : aim(game, rocket.actor, game.makeVectors(rocket.mangle).forward);
   const trace = game.host.trace({ start: body.origin, end: vadd(body.origin, vscale(direction, 1000)), bounds: POINT, ignore: rocket.actor.id, monsters: true });
-  if (trace.actor !== null && game.entity(trace.actor)?.monster !== null && game.entity(trace.actor)?.monster !== undefined) {
+  if (trace.actor !== null && ((game.entity(trace.actor)?.movementFlags ?? 0) & 32) !== 0) {
     setMissionReference(rocket, "rogue:enemy", trace.actor); return homeRocket(game, rocket);
   }
   rocket.mangle = velocityAngles(body.velocity); return game.schedule(rocket, 0.2, game.named.action(rocket, "rogue:rocket-acquire"));
@@ -142,7 +145,7 @@ export function fireRogueMultiRocket(game: Q1EntityServices, player: Q1PlayerSta
     if (multiplayer) game.schedule(rocket, 4, game.named.action(rocket, "rogue:rocket-explode"));
     else {
       const trace = game.host.trace({ start: origin, end: vadd(origin, velocity), bounds: POINT, ignore: player.actor.id, monsters: true });
-      if (trace.actor !== null && game.entity(trace.actor)?.monster !== null && game.entity(trace.actor)?.monster !== undefined) {
+      if (trace.actor !== null && ((game.entity(trace.actor)?.movementFlags ?? 0) & 32) !== 0) {
         // Both source editions return here without assigning nextthink.
         setMissionReference(rocket, "rogue:enemy", trace.actor); rocket.think = game.named.action(rocket, "rogue:rocket-home");
       } else game.schedule(rocket, 0.1, game.named.action(rocket, "rogue:rocket-acquire"));
@@ -190,11 +193,11 @@ function plasmaTouch(game: Q1EntityServices, plasma: Q1Actor, other: ActorId): u
     if (game.host.classname(other) === "monster_shambler") damage *= 0.5;
     game.damage(other, plasma.actor.id, plasma.owner, damage, "rogue:plasma");
   }
-  game.radiusDamage(plasma.actor.id, plasma.owner, 70, other, "rogue:plasma"); game.effect("explosion", origin);
+  game.radiusDamage(plasma.actor.id, plasma.owner, 70, other, "rogue:plasma"); game.host.emit({ kind: "colored-explosion", origin, colorStart: 244, colorLength: 3 });
   let count = 0;
   for (const observation of [...game.host.actors.observations()].reverse()) {
     const target = observation.id, body = game.host.bodies.read(target), entity = game.entity(target);
-    if (body === null || plasma.owner !== null && sameActor(plasma.owner, target) || !(game.isPlayer(target) || entity?.monster !== null && entity?.monster !== undefined)) continue;
+    if (body === null || plasma.owner !== null && sameActor(plasma.owner, target) || !(game.isPlayer(target) || ((entity?.movementFlags ?? 0) & 32) !== 0)) continue;
     const center = vadd(body.origin, vscale(vadd(body.bounds.min, body.bounds.max), 0.5)); if (length(vsub(center, origin)) > 320) continue;
     const trace = game.host.trace({ start: origin, end: body.origin, bounds: POINT, ignore: null, monsters: false }); if (trace.fraction !== 1) continue;
     game.host.emit({ kind: "beam", style: "lightning2", actor: target, start: body.origin, end: origin }); game.sound(plasma, "weapons/lhit.wav", "voice"); plasmaDamage(game, plasma, body.origin);

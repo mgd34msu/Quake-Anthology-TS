@@ -181,11 +181,12 @@ export function readQ2Lightgrid(lump: Q2BspxLump): Q2Lightgrid {
   }
   const pending = [root];
   const visited = new Set<number>();
-  while (pending.length > 0 && leaves.length > 0) {
+  // Cycle detection runs even for leafless grids, because lookups walk the nodes regardless.
+  while (pending.length > 0) {
     const next = pending.pop();
     if (next === undefined || next.kind === "occluded") continue;
     if (next.kind === "leaf") {
-      if (next.index >= leaves.length) throw new BinaryError(reader.source, 37, "invalid lightgrid leaf reference");
+      if (leaves.length > 0 && next.index >= leaves.length) throw new BinaryError(reader.source, 37, "invalid lightgrid leaf reference");
       continue;
     }
     const node = nodes[next.index];

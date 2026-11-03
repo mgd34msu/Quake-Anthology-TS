@@ -12,7 +12,7 @@ test("mixed launch selections remain independent of the renderer", () => {
   expect(command.options.renderer).toBe("cpu");
   expect(command.options.rendererSelection).toBe("explicit");
   expect(command.options.mode).toBe("coop");
-  expect(() => parseApplicationCommand(["--map", "../base1"])).toThrow();
+  expect(() => parseApplicationCommand(["--map", "../base1"])).toThrow("Invalid map name");
 });
 
 test("renderer persistence cannot override an explicit CLI backend", () => {
@@ -30,8 +30,8 @@ test("native network selection preserves the requested game composition", () => 
   expect(server.options.mode).toBe("coop");
   expect(server.options.movement).toBe("q1");
   expect(server.options.character).toBe("q3");
-  expect(() => parseApplicationCommand(["--listen-q2", "27910", "--connect-q2", "localhost"])).toThrow();
-  expect(() => parseApplicationCommand(["--bind", "127.0.0.1"])).toThrow();
+  expect(() => parseApplicationCommand(["--listen-q2", "27910", "--connect-q2", "localhost"])).toThrow("Choose a server listener or a remote connection");
+  expect(() => parseApplicationCommand(["--bind", "127.0.0.1"])).toThrow("--bind requires --listen");
 });
 
 
@@ -45,15 +45,15 @@ test("native listener chooses its wire from the retained game recipe", () => {
     expect(parsed.options.movement).toBe("q1");
     expect(parsed.options.character).toBe("q3");
   }
-  expect(() => parseApplicationCommand(["--listen", "0", "--listen-q2", "0"])).toThrow();
-  expect(() => parseApplicationCommand(["--listen", "0", "--connect-q2", "localhost"])).toThrow();
+  expect(() => parseApplicationCommand(["--listen", "0", "--listen-q2", "0"])).toThrow("Choose one server listener");
+  expect(() => parseApplicationCommand(["--listen", "0", "--connect-q2", "localhost"])).toThrow("Choose a server listener or a remote connection");
 });
 
 test("display gamma is shared, neutral by default, and range checked", () => {
   const defaults = parseApplicationCommand([]), configured = parseApplicationCommand(["--renderer", "cpu", "--gamma", "1.5"]);
   if (defaults.kind !== "menu" || configured.kind !== "menu") throw new Error("Expected startup menus");
   expect(defaults.options.gamma).toBe(1); expect(configured.options.gamma).toBe(1.5);
-  for (const value of ["NaN", "Infinity", "0", "0.49", "3.01"]) expect(() => parseApplicationCommand(["--gamma", value])).toThrow();
+  for (const value of ["NaN", "Infinity", "0", "0.49", "3.01"]) expect(() => parseApplicationCommand(["--gamma", value])).toThrow("Display gamma must be between 0.5 and 3");
 });
 
 

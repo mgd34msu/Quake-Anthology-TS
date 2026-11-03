@@ -31,7 +31,7 @@ test("retained writable views publish detached committed intersections with nati
   expect(events[0]?.ranges).toEqual([{ byteOffset: 1, before: [0x33, 0x22, 0x11], after: [0xcc, 0xbb, 0xaa] }]);
   view.setUint8(12, 5); expect(events).toHaveLength(1);
   view.setUint16(1.75, 0x1234); expect([...memory.bytes.slice(1, 3)]).toEqual([0x12, 0x34]);
-  expect(() => view.setUint32(31, 4)).toThrow(); expect(events).toHaveLength(2);
+  expect(() => view.setUint32(31, 4)).toThrow("Offset is outside the bounds of the DataView"); expect(events).toHaveLength(2);
   remove(); remove(); view.setUint32(0, 0, true); expect(events[0]?.ranges[0]?.after).toEqual([0xcc, 0xbb, 0xaa]);
   memory.observeWrites([{ byteOffset: 0, byteLength: 8 }], event => { events.push(event); return undefined; });
   view.setBigUint64(0, 0x123456789abcdef0n, true); expect(view.getBigUint64(0, true)).toBe(0x123456789abcdef0n);
@@ -59,8 +59,8 @@ test("raw-offset bulk writes include zero, retain overlapping copy semantics and
   expect(events[0]?.ranges[0]).toEqual({ byteOffset: 2, before: [2, 3, 4, 5, 6, 7], after: [0, 1, 2, 3, 4, 5] });
   memory.writeBytes(0, memory.bytes.subarray(2, 6)); expect([...memory.bytes.slice(0, 4)]).toEqual([0, 1, 2, 3]);
   memory.fillBytes(0, 2, 257); expect([...memory.bytes.slice(0, 2)]).toEqual([1, 1]);
-  expect(() => memory.copyBytes(30, 0, 3)).toThrow(); expect(events).toHaveLength(3);
-  expect(() => memory.dataView(-1, 1)).toThrow(); expect(() => memory.view(0, 1)).toThrow();
+  expect(() => memory.copyBytes(30, 0, 3)).toThrow("QVM raw memory range exceeds allocation"); expect(events).toHaveLength(3);
+  expect(() => memory.dataView(-1, 1)).toThrow(/QVM memory span requires a nonnull pointer|QVM raw memory range exceeds allocation/); expect(() => memory.view(0, 1)).toThrow(/QVM memory span requires a nonnull pointer|QVM raw memory range exceeds allocation/);
 });
 
 test("bytecode stores report masked aligned destinations and both source block-copy orders", () => {
@@ -83,7 +83,10 @@ test("memory and numeric intrinsics publish exact writes with aliased scalar inp
   memory.observeWrites([{ byteOffset: 64, byteLength: 40 }], event => { events.push(event); return undefined; });
   qvmMemorySyscall("game", trapWords([101, 64, 32, 4]), memory); expect(events[0]?.ranges[0]?.after).toEqual([4, 3, 2, 1]);
   qvmMemorySyscall("game", trapWords([100, 64, 7, 4]), memory); expect(events[1]?.ranges[0]?.after).toEqual([7, 7, 7, 7]);
-  expect(() => qvmMemorySyscall("game", trapWords([101, 65, 64, 4]), memory)).toThrow("Overlapping");
+  events.length = 0;
+  qvmMemorySyscall("game", trapWords([101, 64, 64, 4]), memory); expect(events).toHaveLength(0);
+  qvmMemorySyscall("game", trapWords([101, 65, 64, 4]), memory); expect([...memory.bytes.slice(64, 69)]).toEqual([7, 7, 7, 7, 7]);
+  events.length = 0;
   view.setFloat32(64, 1.5, true); view.setFloat32(68, 2.5, true); view.setFloat32(72, -1.5, true); events.length = 0;
   qvmSnapVectorSyscall("game", trapWords([42, 64]), memory); expect(events.map(event => event.ranges[0]?.byteOffset)).toEqual([64, 68, 72]);
   expect([view.getFloat32(64, true), view.getFloat32(68, true), view.getFloat32(72, true)]).toEqual([2, 2, -2]);
@@ -102,7 +105,7 @@ test("module, syscall and guest bridge share one observer owner and publication 
     events.push(event);
     module.observeFunction(reference, () => undefined)();
     expect(() => module.call([])).toThrow("bookkeeping");
-    expect(() => module.interpreter.invoke(qvmArguments([]))).toThrow();
+    expect(() => module.interpreter.invoke(qvmArguments([]))).toThrow(/QVM is already active; recursive calls belong to the current syscall|QVM store publication permits bookkeeping only/);
     expect(() => module.memory.view(64, 4).setInt32(0, 99, true)).toThrow("bookkeeping");
     return undefined;
   });

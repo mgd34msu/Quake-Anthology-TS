@@ -13,7 +13,7 @@ export function translateQ2RereleaseHudRecord(record: Q2ServerRecord, host: Q2Se
   if (value.time === 65535) host.emit({ ...stamp, event: { kind: 'remove-poi', actor: player.actor, key: value.key } });
   else {
    const image = host.configString(host.imageConfigOffset + value.image);
-   if (image === undefined) throw new Error("Q2 POI image " + value.image + " has no configstring");
+   if (image === undefined) return true;
    host.emit({ ...stamp, event: { kind: 'keyed-poi', actor: player.actor, key: value.key, duration: value.time, position: { x: readElement(value.pos, 0), y: readElement(value.pos, 1), z: readElement(value.pos, 2) }, image, color: value.color, flags: value.flags } });
   }
  } else for (const value of event.indicators) host.emit({ ...stamp, sequence: host.nextSequence(), event: { kind: 'directional-damage', actor: player.actor, damage: value.damage, health: value.health, armor: value.armor, shield: value.shield, direction: { x: readElement(value.direction, 0), y: readElement(value.direction, 1), z: readElement(value.direction, 2) } } });

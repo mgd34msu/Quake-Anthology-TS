@@ -1,20 +1,16 @@
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
+import type { ActorId } from "../../../src/contracts/identity.ts";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
-import { callMethod, objectValue, readField, readNumber, readObject, readString } from "../../support/reflect.ts";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q2/baseq2/pak0.pak", "q3a/baseq3/pak0.pk3");
 
 interface Vec { readonly x: number; readonly y: number; readonly z: number }
-function readVec(target: object, name: string): Vec {
-  const value = readObject(target, name);
-  return { x: readNumber(value, "x"), y: readNumber(value, "y"), z: readNumber(value, "z") };
-}
-function recordByActor(sim: object, actor: unknown): object | null {
-  const records = readObject(readObject(readObject(sim, "source"), "game"), "records");
-  const record: unknown = callMethod(records, "byActor", actor);
-  return record === null ? null : objectValue(record, "source record");
+type Simulation = import("../../../src/app/bootstrap/simulation/runtime.ts").SharedSimulation;
+function recordByActor(sim: Simulation, actor: ActorId) {
+  return sim.q3Source()?.records.byActor(actor) ?? null;
 }
 
 interface Case {
@@ -120,7 +116,7 @@ test("Q1 setup in Q3: +back moves backwards and arena bot combat never selects w
       const view = app.simulation.playerView(local.actor);
       if (bot !== undefined && view !== null && index % 100 === 99) {
         const radians = view.angles.y * Math.PI / 180;
-        callMethod(app.simulation, "setPlayerMovement", bot, { kind: "teleport",
+        app.simulation.diagnostics().movePlayer(bot, { kind: "teleport",
           origin: { x: view.origin.x + Math.cos(radians) * 300, y: view.origin.y + Math.sin(radians) * 300, z: view.origin.z },
           angles: { x: 0, y: (view.angles.y + 180) % 360, z: 0 }, velocity: { x: 0, y: 0, z: 0 },
           commandAngles: { x: 0, y: (view.angles.y + 180) % 360, z: 0 }, holdMilliseconds: 0, spectator: false });
@@ -133,20 +129,21 @@ test("Q1 setup in Q3: +back moves backwards and arena bot combat never selects w
     if (bot === undefined) throw new Error("Missing bot player");
     const botView = app.simulation.playerView(bot);
     if (botView === null) throw new Error("Missing bot view");
-    const game = readObject(readObject(app.simulation, "source"), "game");
+    const game = app.simulation.q3Source();
+    if (game === null) throw new Error("Missing Q3 source game");
     const botEntity = recordByActor(app.simulation, bot);
     if (botEntity === null) throw new Error("Missing bot entity");
-    const botBounds = readObject(botEntity, "r"), botNumber = readNumber(readObject(botEntity, "s"), "number");
+    const botBounds = botEntity.r, botNumber = botEntity.s.number;
     let placed: { x: number; y: number; z: number } | null = null;
     for (const offset of [{ x: 120, y: 0 }, { x: -120, y: 0 }, { x: 0, y: 120 }, { x: 0, y: -120 }]) {
       const end = { x: botView.origin.x + offset.x, y: botView.origin.y + offset.y, z: botView.origin.z };
-      const trace = objectValue(callMethod(readObject(game, "world"), "trace", { start: botView.origin, end, shape: { kind: "box", mins: readField(botBounds, "mins"), maxs: readField(botBounds, "maxs") },
-        passEntityNum: botNumber, mask: 0x2010001 }), "trace result");
-      if (readNumber(trace, "fraction") === 1 && readString(trace, "solidity") === "clear") { placed = end; break; }
+      const trace = game.world.trace({ start: botView.origin, end, shape: { kind: "box", mins: botBounds.mins, maxs: botBounds.maxs },
+        passEntityNum: botNumber, mask: 0x2010001 });
+      if (trace.fraction === 1 && trace.solidity === "clear") { placed = end; break; }
     }
     if (placed === null) throw new Error("No trace-clear placement near bot");
     const faceYaw = (Math.atan2(botView.origin.y - placed.y, botView.origin.x - placed.x) * 180 / Math.PI + 360) % 360;
-    callMethod(app.simulation, "setPlayerMovement", local.actor, { kind: "teleport", origin: placed,
+    app.simulation.diagnostics().movePlayer(local.actor, { kind: "teleport", origin: placed,
       angles: { x: 0, y: faceYaw, z: 0 }, velocity: { x: 0, y: 0, z: 0 },
       commandAngles: { x: 0, y: faceYaw, z: 0 }, holdMilliseconds: 0, spectator: false });
     let damaged = false;
@@ -174,20 +171,21 @@ test("Q1 lightning gibs a Q3 bot corpse in a Q3 world", async () => {
     for (let index = 0; index < 300 && sim.players().length < 2; index++) await app.step(50);
     const bot = sim.players().find(actor => !actor.equals(local.actor));
     if (bot === undefined) throw new Error("Missing arena bot");
-    callMethod(sim, "grantSelectedArsenal", local.actor, "weapons"); callMethod(sim, "grantSelectedArsenal", local.actor, "ammo");
-    const arsenal = readObject(sim, "selectedArsenal");
-    const game = readObject(readObject(arsenal, "options"), "game"), host = readObject(game, "host");
+    sim.diagnostics().grantArsenal(local.actor, "weapons"); sim.diagnostics().grantArsenal(local.actor, "ammo");
+    const game = sim.diagnostics().q1Services();
+    if (game === null) throw new Error("Missing selected Q1 arsenal");
+    const host = game.host;
     const health = (): number => sim.combat.read(bot)?.health ?? 0;
-    const teleport = (actor: unknown, origin: Vec): void => { callMethod(sim, "setPlayerMovement", actor, { kind: "teleport", origin,
+    const teleport = (actor: ActorId, origin: Vec): void => { sim.diagnostics().movePlayer(actor, { kind: "teleport", origin,
       angles: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, commandAngles: { x: 0, y: 0, z: 0 }, holdMilliseconds: 0, spectator: false }); };
-    callMethod(arsenal, "select", local.actor, "q1:weapon/lightning");
+    sim.diagnostics().selectArsenalWeapon(local.actor, "q1:weapon/lightning");
     teleport(bot, { x: -1152, y: -1245, z: 30 }); teleport(local.actor, { x: -1222, y: -1245, z: 30 });
     for (let index = 0; index < 20; index++) await app.step(50);
     const settledRecord = recordByActor(sim, bot);
-    const settled = settledRecord === null ? undefined : readVec(readObject(readObject(settledRecord, "s"), "pos"), "base");
+    const settled = settledRecord === null ? undefined : settledRecord.s.pos.base;
     for (let index = 0; index < 10 && health() > 0; index++) {
       if (settled !== undefined) teleport(bot, settled);
-      callMethod(game, "damage", bot, local.actor, local.actor, 30, "lightning");
+      game.damage(bot, local.actor, local.actor, 30, "lightning");
       await app.step(50);
     }
     expect(health()).toBeLessThanOrEqual(0);
@@ -195,20 +193,18 @@ test("Q1 lightning gibs a Q3 bot corpse in a Q3 world", async () => {
     expect(sim.combat.read(bot)?.canTakeDamage).toBe(true);
     const record = recordByActor(sim, bot);
     if (record === null) throw new Error("Missing bot record");
-    const recordBase = readVec(readObject(readObject(record, "s"), "pos"), "base");
-    const recordBounds = readObject(record, "r");
+    const recordBase = record.s.pos.base;
+    const recordBounds = record.r;
     const me = sim.bodies.read(local.actor); if (me === null) throw new Error("Missing local body");
     const eye = { x: me.origin.x, y: me.origin.y, z: me.origin.z + 16 };
-    const center = { x: recordBase.x, y: recordBase.y, z: recordBase.z + (readVec(recordBounds, "mins").z + readVec(recordBounds, "maxs").z) / 2 };
+    const center = { x: recordBase.x, y: recordBase.y, z: recordBase.z + (recordBounds.mins.z + recordBounds.maxs.z) / 2 };
     const beyond = { x: eye.x + (center.x - eye.x) * 2, y: eye.y + (center.y - eye.y) * 2, z: eye.z + (center.z - eye.z) * 2 };
-    const trace = objectValue(callMethod(host, "trace", { start: eye, end: beyond, bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } }, ignore: local.actor, monsters: true }), "trace result");
-    const traceActor: unknown = readField(trace, "actor");
-    expect(traceActor !== null && typeof traceActor === "object" && callMethod(traceActor, "equals", bot) === true).toBe(true);
+    const trace = host.trace({ start: eye, end: beyond, bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } }, ignore: local.actor, monsters: true });
+    expect(trace.actor?.equals(bot)).toBe(true);
     const pitch = -Math.atan2(center.z - eye.z, Math.hypot(center.x - eye.x, center.y - eye.y)) * 180 / Math.PI;
     app.input({ seat: local.seat.id, kind: "mouse-motion", position: { x: 160, y: 120 }, delta: { x: 0, y: Math.round(pitch / 0.066) }, timeMilliseconds: performance.now() });
     for (let index = 0; index < 4; index++) await app.step(50);
-    const playerValue: unknown = callMethod(game, "player", local.actor);
-    const viewPitch = playerValue === null ? 0 : readNumber(readObject(objectValue(playerValue, "game player"), "viewAngles"), "x");
+    const viewPitch = game.player(local.actor)?.viewAngles.x ?? 0;
     expect(Math.abs(viewPitch - pitch)).toBeLessThan(3);
     app.input({ seat: local.seat.id, kind: "mouse-button", button: 1, down: true, timeMilliseconds: performance.now() });
     for (let index = 0; index < 12; index++) await app.step(50);
@@ -218,6 +214,6 @@ test("Q1 lightning gibs a Q3 bot corpse in a Q3 world", async () => {
     expect(health()).toBeLessThanOrEqual(-40);
     expect(sim.combat.read(bot)?.canTakeDamage).toBe(false);
     const gibbed = recordByActor(sim, bot);
-    expect(gibbed === null ? null : readNumber(readObject(gibbed, "r"), "contents")).toBe(0);
+    expect(gibbed === null ? null : gibbed.r.contents).toBe(0);
   } finally { await app.close(); }
 }, 180000);

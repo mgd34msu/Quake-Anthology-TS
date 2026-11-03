@@ -1,7 +1,7 @@
 # Shared foundation: primitives and the event system
 
 `src/foundation` is the TypeScript counterpart of the native C project's
-shared foundation in [Quake-Anthology](https://github.com/mgd34msu/quake-anthology)
+shared foundation in [quake-anthology](https://github.com/mgd34msu/quake-anthology), a separate repository,
 (`include/qa/*.h`, `src/core/*.c`, adoption history in its
 `docs/core-adoption.md`). It applies the same data-processing rules here:
 
@@ -22,16 +22,12 @@ shared foundation in [Quake-Anthology](https://github.com/mgd34msu/quake-antholo
 
 | C foundation | This project | Notes |
 | --- | --- | --- |
-| `qa_vec2/3/4`, `qa_bounds`, inline math (`qa/math.h`) | `src/foundation/vec.ts`, `*Into` helpers in `src/core/math.ts` | Flat `Float32Array` slots (3 per vector, 6 per bounds) plus out-parameter object math. Staged binary32 rounding matches object math for finite values; NaN payloads canonicalize through typed-array storage. |
+| `qa_vec2/3/4`, `qa_bounds`, inline math (`qa/math.h`) | `*Into` helpers in `src/core/math.ts` | Out-parameter object math. The flat `Float32Array` vector store was removed unused; it can be rebuilt from the C layout if a caller adopts it. |
 | `qa_strings` (`qa_string_id`) | `StringTable` in `src/foundation/strings.ts` | Intern once, compare uint32 IDs. Name classification bits are computed at admission (`quakeNameFlags`), mirroring `strings.c`. Persist text, never IDs. |
-| `qa_arena` | `ByteArena` in `src/foundation/arena.ts` | Bump allocation over one load-sized buffer; offsets fixed until `reset`; overflow counted. |
-| `qa_pool` | `FixedPool` in `src/foundation/pool.ts` | O(1) free-list slots created at construction; `takeSlot`/`release` never allocate. |
 | `qa_stamp_set` | `StampSet` in `src/foundation/stamp.ts` | `begin()` is an epoch increment instead of clearing a set or flag array. |
 | `qa_id_index` | `IdIndex` in `src/foundation/id-index.ts` | `(string-id, discriminator)` hash over typed arrays; reserve at load, cursor iteration for duplicates. |
-| `qa_actor_id` value handle | Packed keys in `src/foundation/handles.ts` | `generation * 2^20 + slot` in one safe integer for hot storage/comparison within a session. Contract `ActorId` objects remain the API-boundary handle. |
 | `qa_load_*le` / `qa_store_*le` (`qa/binary.h`) | `src/foundation/binary.ts` | Plain byte arithmetic plus one retained scratch word for float reinterpretation. |
-| `qa_event_ring` + transactions/leases (THE-870) | `EventRing` in `src/foundation/event-ring.ts` | Power-of-two slot ring, append returns id or 0 (backpressure), `appendAll` is the all-or-nothing transaction, cursors, min-cursor retirement, leases, visitor drain with no allocation. |
-| `qa_sys_event` + `qa_platform_events` (THE-864) | `SysEventQueue` in `src/foundation/sys-queue.ts` | One timestamped tagged record, admission before destructive reads, payload bytes in a sealed arena, per-cursor consumption, latched quit, per-kind deferred/oversize counters. Byte capacity reclaims on full drain where the C pages reclaim per page. |
+| `qa_event_ring` + transactions/leases | `EventRing` in `src/foundation/event-ring.ts` | Power-of-two slot ring, append returns id or 0 (backpressure), `appendAll` is the all-or-nothing transaction, cursors, min-cursor retirement, leases, visitor drain with no allocation. |
 | Provider registration order (`qa_scheduler`) | Stored `providerRank` in `src/world/scheduler.ts` | Think ordering compares bound integers; no `indexOf` scans in the dispatch comparator. |
 
 `MutableVec3` storage semantics are unchanged on purpose: the
@@ -102,14 +98,12 @@ timings only; no whole-frame or FPS claim follows from them.
 | Work | Former | Foundation | Ratio |
 | --- | ---: | ---: | ---: |
 | `float32ToBits` | 275 ns | 5 ns | 50.6x |
-| normalize(cross(sub)), plain scratch | 70 ns | 23 ns | 3.03x |
-| angleVectors (Into / store) | 67–66 ns | 55 / 54 ns | 1.22–1.23x |
+| angleVectors (Into) | 67 ns | 55 ns | 1.22x |
 | projectPointOnPlane | 19 ns | 14 ns | 1.35x |
 | lookAtMat4 | 59 ns | 56 ns | 1.07x |
 | Visit marks x256 | 5,235 ns | 275 ns | 19.1x |
 | Resource lookup, 897 entries | 115 ns | 20 ns | 5.88x |
 | Think ordering sort x256 | 44,894 ns | 17,819 ns | 2.52x |
-| Bulk normalize x512, retained | 5,650 ns | 1,664 ns | 3.39x |
 | Event batch x64 drain | 212 ns | 326 ns | 0.65x |
 
 Honest limits: Bun's JIT can scalar-replace short-lived object chains in
@@ -135,25 +129,18 @@ the pre-change tree and this tree: 817 output lines identical.
    owner-retained plain scratch. Each site needs its aliasing check
    first: normalize-into-state is only valid when no other holder
    observes the previous vector object.
-2. Give spatial/body storage a flat layout (`vec.ts` stores plus
-   `FixedPool` snapshot slots) so broadphase and trace candidate work
-   stop materializing per-query objects — the collision counterpart of
-   the C caller-scratch migration. Visit marks already landed there.
-3. Feed platform intake through `SysEventQueue` (SDL/socket conversion at
-   intake, frame time as `SYS_TIME` records), as in THE-864/865. Window
-   and controller staging already ride the output ring; the numeric
-   tagged-record conversion at the SDL boundary is the remaining step.
-4. Move presentation/simulation consumers from `take()` arrays to ring
+2. Platform intake (SDL/socket conversion at intake, frame time as
+   timed records) has no tagged-record queue yet; `SysEventQueue` was removed unused and can be rebuilt from the C layout.
+3. Move presentation/simulation consumers from `take()` arrays to ring
    cursors and visitors (`drainPresentation`/`drainEvents` first), then
    let persistent presentation records hold ring leases instead of
    parallel retention.
-5. Intern provider/content identities at session construction so hot
+4. Intern provider/content identities at session construction so hot
    comparisons (event audiences, resource ownership) compare IDs end to
-   end; text stays at catalog/wire/save boundaries. Packed actor keys
-   (`handles.ts`) are ready for hot actor-keyed storage to adopt.
-6. Allocate network and codec scratch from `ByteArena`/`FixedPool`
+   end; text stays at catalog/wire/save boundaries.
+5. Allocate network and codec scratch from retained buffers
    instead of per-packet buffers, following the C whole-frame allocation
-   census (THE-2874): zero heap calls per warmed frame is the target
+   census: zero heap calls per warmed frame is the target
    shape to approximate under a GC runtime.
 
 ## Check a foundation change

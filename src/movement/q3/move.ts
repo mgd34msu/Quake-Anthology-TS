@@ -4,7 +4,7 @@ import { q3InvulnerabilityPose } from "./postures.ts";
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { add3, dot3, length3, normalize3, scale3, vec3 } from "../../core/math.ts";
 import { qvmAngleVectors } from "../../core/math.ts";
-import { q3GrappleVelocity } from "../../content/q3/base/game/grapple.ts";
+import { q3GrappleVelocity } from "./grapple.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import type { TraceResult } from "../../contracts/scene.ts";
 import { sameActor } from "../../contracts/identity.ts";
@@ -207,12 +207,12 @@ class MoveStep implements SlideMoveContext {
     if (this.groundNormal !== null) this.state.velocity = clipVelocity(this.state.velocity, this.groundNormal);
     stepSlideMove(this, true);
   }
-  // Unified-engine extension: stock Q3 pmove has no ladder move, so ladder
-  // surfaces (Q3 SURF_LADDER shaders, Q2 CONTENTS_LADDER brushes) climb with
-  // Quake II's ladder model.
+  // Unified-engine extension behind the `ladders` option: stock Q3 pmove has no
+  // ladder move, so SURF_LADDER surfaces climb with Quake II's ladder model only
+  // when the server enables it; otherwise no extra trace is spent.
   private checkLadder(): void {
     this.ladder = false;
-    if (this.state.pmTime) return;
+    if (this.options.ladders !== true || this.state.pmTime) return;
     const flat = normalize3(vec3(this.forward.x, this.forward.y, 0));
     const trace = this.test(this.state.origin, add3(this.state.origin, flat));
     if (trace.fraction < 1 && trace.kind === "q3" && (trace.surfaceFlags & SURF_LADDER) !== 0) this.ladder = true;
@@ -404,7 +404,9 @@ class MoveStep implements SlideMoveContext {
     this.bounds = ps.pmFlags & F.DUCKED ? postures.crouched.bounds : standingBounds;
     ps.viewheight = ps.pmFlags & F.DUCKED ? postures.crouched.viewHeight : postures.standingViewHeight;
     const requested = this.options.bodyBounds ?? this.bounds;
-    const accepted = movementBounds(previousBounds, requested, bounds => {
+    // id applies the posture hull unconditionally and leaves overlap to PM_CorrectAllSolid; only a hull supplied by a
+    // client output (a foreign body shape) keeps the shared expansion test.
+    const accepted = this.options.bodyBounds === undefined ? requested : movementBounds(previousBounds, requested, bounds => {
       const trace = this.options.trace(ps.origin, ps.origin, bounds, ps.actor, this.mask);
       return !trace.allSolid;
     });

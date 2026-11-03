@@ -1,4 +1,5 @@
-import type { Q2Entity, Q2GameServices, Q2SpawnModule } from "../../foundation/host.ts";
+import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
+import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think } from "../../foundation/host.ts";
 import { add, length, subtract, zero } from "../../foundation/fields.ts";
 import type { Q2PlayerState } from "./types.ts";
 
@@ -7,18 +8,30 @@ export function q2EntitiesNamed(game: Q2GameServices, classname: string): readon
   return [...game.entities.values()].filter(entity => entity.classname === classname).sort((left, right) =>
     (game.host.actors.sourceOf(left.actor.id)?.slot ?? left.actor.id.slot) - (game.host.actors.sourceOf(right.actor.id)?.slot ?? right.actor.id.slot));
 }
+const createCoopSpots: Q2Think = (_self, active) => {
+  for (const x of [124, 252, 316]) {
+    const spot = active.create("info_player_coop"); spot.targetname = "jail3";
+    active.move(spot, { origin: { x, y: -164, z: 80 }, angles: { x: 0, y: 90, z: 0 } });
+  }
+  return undefined;
+};
+const fixCoopSpots: Q2Think = (self, active) => {
+  for (const start of q2EntitiesNamed(active, "info_player_start")) {
+    if (start.targetname !== "" && length(subtract(active.body(start).origin, active.body(self).origin)) < 384) {
+      if (self.targetname.toLowerCase() !== start.targetname.toLowerCase()) self.targetname = start.targetname;
+      break;
+    }
+  }
+  return undefined;
+};
+export const q2PlayerSpawnCallbacks: Q2CallbackDefinitions = { think: { SP_CreateCoopSpots: createCoopSpots, SP_FixCoopSpots: fixCoopSpots } };
 export const q2PlayerSpawns: Q2SpawnModule = {
+  callbacks: q2PlayerSpawnCallbacks,
   spawn(entity, game) {
     switch (entity.classname) {
       case "info_player_start": {
         if (game.options.mode === "coop" && game.options.mapName.toLowerCase() === "security") {
-          game.schedule(entity, 0.1, (_self, active) => {
-            for (const x of [124, 252, 316]) {
-              const spot = active.create("info_player_coop"); spot.targetname = "jail3";
-              active.move(spot, { origin: { x, y: -164, z: 80 }, angles: { x: 0, y: 90, z: 0 } });
-            }
-            return undefined;
-          });
+          game.schedule(entity, 0.1, createCoopSpots);
         }
         return true;
       }
@@ -31,15 +44,7 @@ export const q2PlayerSpawns: Q2SpawnModule = {
       case "info_player_coop": {
         if (game.options.mode !== "coop") { game.remove(entity); return true; }
         if (fixedCoopMaps.includes(game.options.mapName.toLowerCase())) {
-          game.schedule(entity, 0.1, (self, active) => {
-            for (const start of q2EntitiesNamed(active, "info_player_start")) {
-              if (start.targetname !== "" && length(subtract(active.body(start).origin, active.body(self).origin)) < 384) {
-                if (self.targetname.toLowerCase() !== start.targetname.toLowerCase()) self.targetname = start.targetname;
-                break;
-              }
-            }
-            return undefined;
-          });
+          game.schedule(entity, 0.1, fixCoopSpots);
         }
         return true;
       }

@@ -92,14 +92,14 @@ export class RendererNoise {
 }
 
 function spriteGeometry(mesh: DeformGeometry, view: DeformView): DeformGeometry {
-  if (mesh.vertices.length % 4 !== 0 || mesh.indices.length !== mesh.vertices.length / 4 * 6) throw new Error("autosprite requires independent four-vertex quads");
-  const vertices: MaterialVertex[] = [], indices: number[] = [];
+  // tr_shade_calc.c only warns about an odd vertex or index count and then processes whole quads; a trailing partial quad is dropped.
+  const vertices: MaterialVertex[] = [], indices: number[] = [], quadVertices = mesh.vertices.length - mesh.vertices.length % 4;
   const leftDir = localDirection(view.axis[1], view), upDir = localDirection(view.axis[2], view);
   let axisScale = 1;
   if (view.nonNormalizedAxis !== null) {
     const length = length3(view.nonNormalizedAxis); axisScale = length === 0 ? 0 : Math.fround(1 / length);
   }
-  for (let start = 0; start < mesh.vertices.length; start += 4) {
+  for (let start = 0; start < quadVertices; start += 4) {
     const first = at(mesh.vertices, start);
     const center = scale3(add3(add3(first.position, at(mesh.vertices, start + 1).position), add3(at(mesh.vertices, start + 2).position, at(mesh.vertices, start + 3).position)), 0.25);
     const delta = sub3(first.position, center), radius = Math.fround(Math.sqrt(dot3(delta, delta)) * 0.707);
@@ -147,10 +147,9 @@ function textGeometry(tess: MaterialDeformState, index: number, view: DeformView
 }
 
 function pivotGeometry(mesh: DeformGeometry, view: DeformView): DeformGeometry {
-  if (mesh.vertices.length % 4 !== 0 || mesh.indices.length !== mesh.vertices.length / 4 * 6) throw new Error("autosprite2 requires independent four-vertex quads");
   const forward = localDirection(view.axis[0], view), vertices = [...mesh.vertices];
   const edges: readonly (readonly [number, number])[] = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]];
-  for (let start = 0; start < vertices.length; start += 4) {
+  for (let start = 0; start + 4 <= vertices.length; start += 4) {
     let shortest = 0, second = 0, firstLength = 999999, secondLength = 999999;
     for (const [index, [a, b]] of edges.entries()) {
       const delta = sub3(at(vertices, start + a).position, at(vertices, start + b).position), length = dot3(delta, delta);
@@ -186,7 +185,7 @@ export function deformGeometry(tess: MaterialDeformState, deforms: readonly Vert
     if (deform.kind === "autosprite") { result = spriteGeometry(result, view); tess.replaceGeometry(result); continue; }
     if (deform.kind === "autosprite2") { result = pivotGeometry(result, view); tess.replaceGeometry(result); continue; }
     if (deform.kind === "projectionshadow") {
-      if (projectionShadow === null) throw new Error("projectionshadow deformation requires retained entity orientation and lighting");
+      if (projectionShadow === null) continue;
       result = projectionShadowGeometry(result, projectionShadow); tess.replaceGeometry(result); continue;
     }
     if ((deform.kind === "move" || deform.kind === "wave") && (deform.wave.kind === "none" || deform.wave.kind === "noise")) {

@@ -1,5 +1,5 @@
 import { ModClientOutputs } from "../../../src/world/session/mod-client-outputs.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import { expect, test } from "bun:test";
 import { openArchive } from "../../../src/content/archive/index.ts";
@@ -8,7 +8,7 @@ import { QcModProvider } from "../../../src/compat/qc/mod-provider.ts";
 import type { ModActorField, ModCallbackDeclaration } from "../../../src/contracts/mod-callbacks.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { SessionActorRegistry, ActorCallbackTable, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
 import { ModClientApplications } from "../../../src/world/session/mod-client-applications.ts";
 import type { ModClientServices } from "../../../src/world/session/mod-clients.ts";
 import { SourceRandom } from "../../../src/app/bootstrap/simulation/random.ts";
@@ -18,8 +18,9 @@ import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import type { UserCommand } from "../../../src/contracts/protocol.ts";
 import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
+import { inertAuthority } from "../../support/authority.ts";
 
-const path = `${testCorpusRoot()}/q1/rerelease/hipnotic/pak0.pak`, zero = { x: 0, y: 0, z: 0 };
+const path = corpusFile("q1/rerelease/hipnotic/pak0.pak"), zero = { x: 0, y: 0, z: 0 };
 test.skipIf(!await Bun.file(path).exists())("original Hipnotic player calls own jump decisions and retained held-fire frames", async () => {
   const archive = await openArchive(path);
   const entry = archive.findEntries("progs.dat").at(-1); if (entry === undefined) throw new Error("Missing original source");
@@ -34,7 +35,7 @@ test.skipIf(!await Bun.file(path).exists())("original Hipnotic player calls own 
   const world = actors.allocate("q2:map", "q2:world"), player = actors.allocate("q2:game", "q2:player"), client = ids.client(0, 0);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   bodies.create(player, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: world.id });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   combat.create(player, { health: 100, mass: 200, canTakeDamage: true, invulnerable: false, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, team: null });
   const applications = new ModClientApplications(identity => actors.isLive(identity.actor));
   const inventory = new SharedInventoryTable(actors); inventory.create(player, [{ item: "q1:ammo/shells", count: 10, capacity: 100 }]);

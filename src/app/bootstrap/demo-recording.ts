@@ -1,4 +1,4 @@
-import { mkdir, open } from "node:fs/promises";
+import { mkdir, open, unlink } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Vec3 } from "../../contracts/math.ts";
@@ -51,17 +51,23 @@ export class DemoRecording implements DemoRecordingSink {
   private seconds = 0;
   private constructor(readonly path: string, readonly identity: DemoRecordingIdentity, private readonly file: FileHandle) {}
 
-  static async open(root: string, name: string, seed: DemoRecordingSeed): Promise<DemoRecording> {
+  static async open(root: string, name: string, seed: DemoRecordingSeed, replace = false): Promise<DemoRecording> {
     if (seed.packets.length === 0 || seed.packets.some(packet => packet.kind !== seed.identity.kind)) throw new Error("Recording requires matching initial source state");
     const path = recordingPath(root, name, seed.identity);
     await mkdir(dirname(path), { recursive: true });
-    const recording = new DemoRecording(path, seed.identity, await open(path, "wx"));
+    // A name the user typed replaces an existing demo like the original clients; generated names must not collide.
+    const recording = new DemoRecording(path, seed.identity, await open(path, replace ? "w" : "wx"));
     try {
       if (seed.identity.kind === "mvd") await recording.write(mvdMagic());
       if (seed.identity.kind === "q1") await recording.write(writeNetQuakeDemoHeader(seed.identity.track));
       for (const packet of seed.packets) await recording.append(packet);
       return recording;
-    } catch (error) { await recording.abort(); throw error; }
+    } catch (error) {
+      await recording.abort();
+      // A recording that never got its seed is a truncated file, not a demo.
+      try { await unlink(path); } catch { /* The write failure is the error worth reporting. */ }
+      throw error;
+    }
   }
 
   append(packet: DemoRecordingPacket): Promise<void> {

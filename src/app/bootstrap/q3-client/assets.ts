@@ -15,7 +15,7 @@ import { Q3PresentationSoundBank } from "../../../content/q3/presentation/audio.
 import { MountedFontReader } from "../../../text/mounted.ts";
 import { RendererFontRegistry } from "../../../text/q3-font-registry.ts";
 import { UiAssetRegistry } from "../../../text/q3-font.ts";
-import { UserFileStore } from "../../../platform/files/writable.ts";
+import { UserFileStore } from "../../../core/files/writable.ts";
 import type { ApplicationAssets, ProviderSceneAssets } from "../assets.ts";
 
 export async function registerQ3ModelRequest(path: string, load: (path: string) => Promise<SceneModel>): Promise<SceneModel> {
@@ -32,6 +32,8 @@ export async function registerQ3ShaderRequest<T>(path: string, load: (path: stri
 }
 
 /** Synchronous source script/sound calls read bytes resolved through the actual mount plan. */
+const sharedSynchronousAssets = new WeakMap<object, Map<string, Promise<OpenedResource | null>>>();
+
 export class ApplicationQ3Assets implements SoundAssetReader {
   private closed = false;
   private readonly retained = new Map<string, OpenedResource>();
@@ -78,8 +80,18 @@ export class ApplicationQ3Assets implements SoundAssetReader {
       }
     }
     const synchronous = mode === "guest-async" ? [] : [...result.names].filter(path => /\.(?:menu|hud|txt|cfg|voice|vc|h)$/i.test(path) || /^sound\/.*\.(?:wav|ogg)$/i.test(path));
+    // Owners of one mount plan (one per seat and source generation) share the opened bytes instead of each reading them again.
+    let shared = sharedSynchronousAssets.get(provider.mounts);
+    if (shared === undefined) { shared = new Map(); sharedSynchronousAssets.set(provider.mounts, shared); }
+    const table = shared;
     for (let start = 0; start < synchronous.length; start += 32) await Promise.all(synchronous.slice(start, start + 32).map(async path => {
-      const opened = await provider.mounts.open(path); if (opened !== null) result.retained.set(path, opened);
+      let pending = table.get(path);
+      if (pending === undefined) {
+        pending = provider.mounts.open(path);
+        table.set(path, pending);
+        pending.catch(() => { if (table.get(path) === pending) table.delete(path); });
+      }
+      const opened = await pending; if (opened !== null) result.retained.set(path, opened);
     }));
     return result;
   }

@@ -17,7 +17,7 @@ import { q2ActorShotMask } from "./projection.ts";
 import { freeQ2Entity as free } from "../callbacks.ts";
 import type { Q2CallbackDefinitions } from "../callbacks.ts";
 import { MOD, PLAYER_CONTENTS, WATER_MASK, Q2WeaponState } from "./types.ts";
-import type { Q2GrenadeAdjustment, Q2NoiseRecord, Q2WeaponHooks, Q2WeaponInput } from "./types.ts";
+import type { Q2GrenadeAdjustment, Q2WeaponHooks, Q2WeaponInput } from "./types.ts";
 
 function normal(trace: TraceResult): Vec3 { return trace.contact.kind === "plane" ? trace.contact.plane.normal : zero; }
 function contents(trace: TraceResult): number { return trace.kind === "q1" ? 0 : trace.contents; }
@@ -63,9 +63,6 @@ export class Q2Ballistics {
   protected readonly silencerCharges = new Map<ActorId, number>();
   readonly states = new Map<ActorId, Q2WeaponState>();
   readonly inputs = new Map<ActorId, Q2WeaponInput>();
-  readonly noises = new Map<ActorId, { primary: Q2NoiseRecord | null; secondary: Q2NoiseRecord | null }>();
-  soundEntity: Q2NoiseRecord | null = null;
-  sound2Entity: Q2NoiseRecord | null = null;
 
   constructor(readonly hooks: Q2WeaponHooks) {}
 
@@ -102,9 +99,7 @@ export class Q2Ballistics {
     this.releaseRegistries.add(game.host.actors);
     game.host.actors.onRelease(actor => {
       this.states.delete(actor.id); this.inputs.delete(actor.id);
-      this.blasterCauses.delete(actor.id); this.silencerCharges.delete(actor.id); this.noises.delete(actor.id);
-      if (this.soundEntity?.actor.equals(actor.id)) this.soundEntity = null;
-      if (this.sound2Entity?.actor.equals(actor.id)) this.sound2Entity = null;
+      this.blasterCauses.delete(actor.id); this.silencerCharges.delete(actor.id);
       return undefined;
     });
   }
@@ -129,12 +124,13 @@ export class Q2Ballistics {
       if (game.options.edition === "rerelease") this.hooks.emit({ kind: "invisibility-reveal", actor: owner, until: game.host.now() + (charges > 0 ? 0.4 : 2) });
       if (charges > 0) { this.silencerCharges.set(owner, charges - 1); return undefined; }
     }
-    if (game.options.mode === "deathmatch" || this.inputs.get(owner)?.notarget === true || game.monsterTarget(owner)?.notarget === true) return undefined;
-    const record: Q2NoiseRecord = { actor: owner, origin, time: game.host.now(), secondary: kind === "impact" };
-    const records = this.noises.get(owner) ?? { primary: null, secondary: null };
-    if (kind === "impact") { records.secondary = record; this.sound2Entity = record; }
-    else { records.primary = record; this.soundEntity = record; }
-    this.noises.set(owner, records);
+    if (game.options.mode === "deathmatch" || this.inputs.get(owner)?.notarget === true) return undefined;
+    // FL_DISGUISED: only a weapon shot is noticed, and it names the shooter as the next target for half a second.
+    const disguised = ((game.entity(owner)?.flags ?? 0) & 0x8000) !== 0;
+    if (disguised) {
+      if (kind !== "weapon") return undefined;
+      game.disguiseViolation = { actor: owner, until: game.host.now() + 0.5 };
+    } else if (game.monsterTarget(owner)?.notarget === true) return undefined;
     return this.hooks.noise(owner, origin, kind === "impact");
   }
 
@@ -293,6 +289,7 @@ export class Q2Ballistics {
     projectile.owner = owner; projectile.model = model; projectile.effects = effects;
     projectile.clipMask = clipMask; projectile.projectile = true;
     projectile.dodgeable = game.options.edition === "rerelease";
+    if (projectile.dodgeable) game.markDodgeable(projectile);
     projectile.movedir = direction;
     game.move(projectile, { origin: start, angles: vectorToAnglesRule(direction, "native"), velocity: scale(direction, speed), bounds: { min: zero, max: zero } }, false);
     return projectile;
@@ -313,7 +310,7 @@ export class Q2Ballistics {
   fireBlaster(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, effects: number, hyper = false, meansOfDeath = hyper ? MOD.hyperblaster : MOD.blaster): Q2Entity {
     const dir = game.options.edition === "classic" ? normalize(direction) : direction;
     const bolt = this.projectile(self, game, "bolt", start, dir, speed, "models/objects/laser/tris.md2", effects);
-    bolt.damage = damage;
+    bolt.damage = damage; bolt.serverFlags |= 2;
     this.blasterCauses.set(bolt.actor.id, meansOfDeath); bolt.touch = this.blasterTouch;
     game.schedule(bolt, 2, free); game.solid(bolt, "box"); game.motion(bolt, "fly-missile");
     const trajectory = this.launchBehavior(bolt, game, hyper ? "q2:weapon_hyperblaster" : "q2:weapon_blaster", "bolt");
@@ -516,7 +513,7 @@ export class Q2Ballistics {
           excluded.push(target);
           if (current.options.edition === "classic") { from = trace.end; ignore = target; }
         }
-        this.hooks.emit({ kind: "beam", effect: "bfg-laser", actor: entity.actor.id, start: origin, end: trace.end, duration: 0 });
+        this.hooks.emit({ kind: "beam", effect: "bfg-laser", actor: entity.actor.id, start: origin, end: current.options.edition === "rerelease" ? center : trace.end, duration: 0 });
       }
       return current.schedule(entity, 0.1, this.bfgThink);
 

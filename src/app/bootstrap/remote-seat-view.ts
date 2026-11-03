@@ -1,4 +1,5 @@
 import type { ApplicationModPresentationsOptions } from "./mod-presentations.ts";
+import { q3RendererSettings } from "./render-settings.ts";
 import { RemoteComponentView } from "./remote-components.ts";
 import { UnifiedRemotePresentation } from "./network/remote-unified.ts";
 import { loadQ3Character } from "../../content/q3/foundation/index.ts";
@@ -11,7 +12,7 @@ import type { Q3ClientConnection } from "../../network/q3/client.ts";
 import type { Q3BrowserView } from "../../network/q3/browser-view.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
-import { ApplicationAssets } from "./assets.ts";
+import { ApplicationAssets, createWorldAssets } from "./assets.ts";
 import type { ApplicationAudio, ApplicationAudioSeatEvents } from "./audio.ts";
 import { ApplicationEffects } from "./effects.ts";
 import type { ApplicationImageSettings } from "./image-settings.ts";
@@ -71,7 +72,7 @@ export class RemoteSeatView {
   static async prepare(options: RemoteSeatViewOptions): Promise<RemoteSeatView> {
     const { local, controls, source, audio, renderer } = options;
     const ownsAssets = options.content !== options.assets.content;
-    const assets = ownsAssets ? new ApplicationAssets(options.content,renderer.owner,undefined,{imageRegistry:renderer.images,imagePolicy:options.images.policy,modelPolicy:options.images.modelPolicy}) : options.assets;
+    const assets = ownsAssets ? createWorldAssets(options.content,renderer,options.print,options.images) : options.assets;
     const remote = source.remote, seat = local.player.seat;
     const context: CommandContext = { session: seat.id.session, origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } };
     const effects = new ApplicationEffects(assets, remote.scene, actor => remote.isPlayer(actor), options.options.seed);
@@ -97,7 +98,7 @@ export class RemoteSeatView {
           kind: "qvm", source: remote.cgameSource, connection: guest.connection,
           keys: guest.keys, cvars: options.cvars, timeCvars: options.cvars,
           get splitScreen() { return options.count() > 1; },
-          saveFontData: () => (controls.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0,
+          saveFontData: () => (controls.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0, renderSettings: () => q3RendererSettings(controls.sharedCvars),
           assertCurrent: options.assertCurrent, commandBuffer: controls.guestCommands,
           guestCvars: controls.guestCvars(seat.id), guestInput: controls.guestInput(seat.id),
           commandRegistration: controls.clientCommandRegistration(seat.id),

@@ -380,6 +380,8 @@ function gnuSymbolCount(r: Reader, segments: readonly ElfSegment[], address: big
     let symbol = r.u32(bucketOffset + bucket * 4);
     if (symbol === 0) continue;
     if (symbol < first) throw new ElfError("GNU hash bucket precedes symbol offset");
+    // Chains of a well-formed table are disjoint and ascending; a start inside the counted range only repeats a walk.
+    if (symbol < count) continue;
     for (;;) {
       const hash = r.u32(elfFileOffset(segments, chains + BigInt(symbol - first) * 4n, 4));
       count = Math.max(count, symbol + 1);

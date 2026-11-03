@@ -19,4 +19,8 @@ test('unified host filters private source UI while retaining public effects and 
   expect(visible({ ...base, kind: 'q3-source', event: { kind: 'console-command', execution: 'now', text: 'quit' } })).toBe(false);
   expect(visible({ ...base, kind: 'q3-source', event: { kind: 'server-command', client: 1, text: 'cp private' } })).toBe(false);
   expect(visible({ ...base, kind: 'q3-source', event: { kind: 'server-command', client: -1, text: 'cp public' } })).toBe(true);
+  // Each denial above has an owner case: the viewer keeps events addressed to its own slot or actor.
+  expect(visible({ ...base, kind: 'q3-source', event: { kind: 'server-command', client: 0, text: 'cp own' } })).toBe(true);
+  expect(visible({ ...base, kind: 'q2-composition', event: { kind: 'missionpack-player', event: { kind: 'ir', actor, until: 5 } } })).toBe(true);
+  expect(visible({ ...base, kind: 'q1-composition', event: { kind: 'addon', event: { kind: 'punch-angle', player: actor, angles: { x: 1, y: 0, z: 0 } } } })).toBe(true);
 });

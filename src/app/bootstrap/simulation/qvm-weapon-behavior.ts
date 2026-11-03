@@ -1,4 +1,4 @@
-import { parseQ1Entities, q1EntityValue } from '../../../formats/q1-map/entities.ts';
+import { QvmComponentState, qvmComponentSpatial } from './qvm-component-state.ts';
 import type { ActorId } from '../../../contracts/identity.ts';
 import type { BodyState } from '../../../contracts/world.ts';
 import type { QvmCheckpoint } from '../../../contracts/execution.ts';
@@ -18,8 +18,6 @@ import { qvmServerGameSyscall, type QvmServerGameServices } from '../../../compa
 import { QvmFiles, qvmFileSyscall } from '../../../compat/qvm/file-syscalls.ts';
 import { CvarRegistry } from '../../../core/cvars/index.ts';
 import type { CommandContext } from '../../../contracts/common.ts';
-import { CommonParseCursor, CommonParseState } from '../../../core/common-parse.ts';
-import { Q3_BINARY32_PROFILE } from '../../../core/numeric.ts';
 import type { MountedContent } from '../../../content/mounts/index.ts';
 import type { SharedSceneQueries } from '../../../world/collision/index.ts';
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from '../../../persistence/value.ts';
@@ -61,14 +59,11 @@ export class QvmWeaponBehaviorSource implements WeaponBehaviorSource {
   private readonly game: QvmGame;
   private readonly cvars: CvarRegistry;
   private readonly files: QvmFiles;
-  private readonly configstrings = new Map<number, string>();
   private readonly bindings = new Map<ActorId, Binding>();
   private readonly retired = new Map<ActorId, WeaponTrajectoryUpdate>();
   private readonly instances = new Set<ActorId>();
   private readonly activated = new Set<ActorId>();
-  private readonly userinfo = new Map<number, string>();
-  private readonly cursor: CommonParseCursor;
-  private readonly parser = new CommonParseState();
+  private readonly state: QvmComponentState;
   private readonly services: QvmServerGameServices;
   private time = 0;
   private ready = false;
@@ -77,67 +72,35 @@ export class QvmWeaponBehaviorSource implements WeaponBehaviorSource {
   private generation = 0;
   private constructor(private readonly options: QvmWeaponBehaviorOptions) {
     this.profile = validateQvmWeaponProfile(options.profile, options.artifact); this.definition = this.profile.definition;
-    this.cursor = new CommonParseCursor(qvmWeaponInitializationEntities(options.entityText));
     this.cvars = new CvarRegistry({ dialect: 'q3', context: options.context, print: options.print });
+    this.state = new QvmComponentState(options.entityText, this.cvars);
     for (const [name, value] of [['g_log', ''], ['cm_noCurves', '0'], ['cm_playerCurveClip', '1'], ['bot_enable', '0'], ['sv_maxclients', '64'], ['dedicated', '1'], ['g_gametype', options.teamMode ? '3' : '0']]) {
       if (name !== undefined && value !== undefined) this.cvars.register(name, value, 0);
     }
     this.files = new QvmFiles({ mounts: options.mounts, writable: null, print: options.print, assertCurrent: () => this.current() });
     this.game = new QvmGame({ artifact: options.artifact, host: call => this.host(call), hostState: {
       checkpoint: () => ({ state: { module: this.definition.module, format: 'q3:weapon-host', bytes: encodeCheckpointValue({
-        version: 1, mode: options.mode, teamMode: options.teamMode, time: this.time, data: this.game.data.checkpoint(), cvars: this.cvars.captureSaveState(),
-        configstrings: [...this.configstrings].map(([index, value]) => ({ index, value })), files: this.files.captureCheckpoint(),
-        entityText: this.cursor.source, userinfo: [...this.userinfo].map(([slot, value]) => ({ slot, value })), cursor: this.cursor.offset, parser: this.parser.captureSaveState(),
+        version: 1, mode: options.mode, teamMode: options.teamMode, time: this.time, ...this.state.capture(this.game.data, this.files),
       }) }, random: [], callbacks: [] }),
       restore: checkpoint => {
         if (checkpoint.state.format !== 'q3:weapon-host' || checkpoint.random.length !== 0 || checkpoint.callbacks.length !== 0) throw new Error('Invalid QVM weapon host checkpoint');
         const reader = new SaveReader(decodeCheckpointValue(checkpoint.state.bytes), 'qvm.weapon.host'); reader.field('version').literal(1);
-        reader.field('entityText').literal(this.cursor.source); reader.field('mode').literal(options.mode); reader.field('teamMode').literal(options.teamMode); this.time = reader.field('time').number();
+        reader.field('mode').literal(options.mode); reader.field('teamMode').literal(options.teamMode); this.time = reader.field('time').number();
         if (!Number.isFinite(this.time) || this.time < 0) throw reader.fail('invalid source time');
-        const data = reader.field('data'); this.game.data.restore({ entitiesWord: data.field('entitiesWord').integer(), numEntities: data.field('numEntities').integer(0), entityStride: data.field('entityStride').integer(0), clientsWord: data.field('clientsWord').integer(), clientStride: data.field('clientStride').integer(0) });
-        this.cvars.restoreSaveState(reader.field('cvars').value); this.configstrings.clear(); this.userinfo.clear();
-        for (const entry of reader.field('userinfo').list(cell => ({ slot: cell.field('slot').integer(0), value: cell.field('value').string() }))) { if (entry.slot >= 64 || this.userinfo.has(entry.slot)) throw new Error('Invalid component client userinfo'); this.userinfo.set(entry.slot, entry.value); }
-        for (const row of reader.field('configstrings').list(cell => ({ index: cell.field('index').integer(0), value: cell.field('value').string() }))) {
-          if (row.index >= 1024 || this.configstrings.has(row.index)) throw new Error('Invalid saved component configstring'); this.configstrings.set(row.index, row.value);
-        }
-        this.cursor.offset = reader.field('cursor').nullable(cell => cell.integer(0)); this.parser.restoreSaveState(reader.field('parser').value);
-        this.files.restoreCheckpoint(reader.field('files').value); return undefined;
+        this.state.restore(reader, this.game.data, this.files, 'component');
+        return undefined;
       },
     } });
     this.game.data.setClientCount(64);
     const forbidden = (operation: string): never => { throw new Error(`QVM trajectory component cannot ${operation}`); };
     this.services = { data: this.game.data, cvars: this.cvars, maxClients: 64,
-      configstrings: { get: index => this.configstrings.get(index) ?? '', set: (index, value) => { this.configstrings.set(index, value); } },
-      getUserinfo: slot => this.userinfo.get(slot) ?? '', setUserinfo: (slot, value) => { this.userinfo.set(slot, value); },
+      configstrings: { get: index => this.state.configstrings.get(index) ?? '', set: (index, value) => { this.state.configstrings.set(index, value); } },
+      getUserinfo: slot => this.state.userinfo.get(slot) ?? '', setUserinfo: (slot, value) => { this.state.userinfo.set(slot, value); },
       getUserCommand: () => ({ serverTime: Math.round(this.time * 1000), angles: [0, 0, 0], buttons: 0, weapon: 0, forwardmove: 0, rightmove: 0, upmove: 0 }),
       dropClient: () => forbidden('drop a primary client'), sendServerCommand: () => undefined,
-      entityToken: () => ({ token: this.parser.parse(this.cursor), ended: this.cursor.offset === null }),
-      spatial: {
-        trace: input => {
-          const trace = options.scene.trace({ start: input.start, end: input.end, shape: input.shape, target: { kind: 'world' },
-            numeric: Q3_BINARY32_PROFILE, passActor: this.actorForSlot(input.passEntityNum), policy: { kind: 'q3', contentsMask: input.mask, curves: this.cvars.variableValue('cm_noCurves') === 0, playerCurveClip: this.cvars.variableValue('cm_playerCurveClip') !== 0 } });
-          if (trace.kind !== 'q3') throw new Error('QVM weapon trace lost its source policy');
-          return { fraction: trace.fraction, end: trace.end, allSolid: trace.allSolid, startSolid: trace.startSolid, contents: trace.contents, surfaceFlags: trace.surfaceFlags, plane: trace.sourcePlane,
-            entityNum: trace.hit.kind === 'actor' ? this.slot(this.mirror(trace.hit.actor)) : trace.fraction === 1 ? 1023 : 1022 };
-        },
-        pointContents: (point, pass) => {
-          const sample = options.scene.pointContents({ point, target: { kind: 'world' }, passActor: this.actorForSlot(pass), numeric: Q3_BINARY32_PROFILE,
-            policy: { kind: 'q3', contentsMask: -1, curves: true, playerCurveClip: true } });
-          if (sample.kind !== 'q3') throw new Error('QVM weapon contents lost its source policy'); return sample.contents;
-        },
-        areaEntities: (bounds, maximum) => { const actors = options.scene.queryActors(bounds); return (maximum < 0 ? actors : actors.slice(0, maximum)).map(actor => this.slot(this.mirror(actor.body.actor))); },
-        entityContact: () => forbidden('perform undeclared brush contact'), setBrushModel: () => forbidden('bind a primary brush'), adjustAreaPortalState: () => forbidden('change world portals'),
-        inPvs: (first, second, ignore) => {
-          const a = options.scene.pointLeaf(first), b = options.scene.pointLeaf(second);
-          return options.scene.clusterVisible(options.scene.leafCluster(a), options.scene.leafCluster(b), 'pvs') && (ignore || options.scene.areasConnected(options.scene.leafArea(a), options.scene.leafArea(b)));
-        },
-        areasConnected: (first, second) => options.scene.areasConnected(first, second),
-        link: slot => {
-          const r = this.game.data.entity(slot).r; r.linked = true;
-          r.absmin = { x: r.currentOrigin.x + r.mins.x - 1, y: r.currentOrigin.y + r.mins.y - 1, z: r.currentOrigin.z + r.mins.z - 1 };
-          r.absmax = { x: r.currentOrigin.x + r.maxs.x + 1, y: r.currentOrigin.y + r.maxs.y + 1, z: r.currentOrigin.z + r.maxs.z + 1 };
-        }, unlink: slot => { this.game.data.entity(slot).r.linked = false; },
-      },
+      entityToken: () => ({ token: this.state.parser.parse(this.state.cursor), ended: this.state.cursor.offset === null }),
+      spatial: qvmComponentSpatial({ scene: options.scene, cvars: this.cvars, data: this.game.data, label: 'QVM weapon', actorForSlot: slot => this.actorForSlot(slot), slotOf: actor => this.slot(this.mirror(actor)),
+        reject: operation => forbidden(operation) }),
     };
   }
   static async create(options: QvmWeaponBehaviorOptions): Promise<QvmWeaponBehaviorSource> {
@@ -177,20 +140,20 @@ export class QvmWeaponBehaviorSource implements WeaponBehaviorSource {
   }
   private trajectory(pointer: number): WeaponTrajectoryUpdate { const entity = this.game.data.entityFromPointer(pointer); return { origin: entity.r.currentOrigin, velocity: entity.s.pos.delta, angles: entity.r.currentAngles }; }
   private actorForSlot(slot: number): ActorId | null { for (const binding of this.bindings.values()) if (this.slot(binding.pointer) === slot) return binding.actor; return null; }
-  private mirror(actor: ActorId): number {
-    const target = this.options.targets().find(value => value.actor === actor); if (target === undefined) throw new Error('QVM weapon query refers to an unavailable shared actor');
+  private mirror(actor: ActorId, known?: QvmWeaponTarget): number {
+    const target = known ?? this.options.targets().find(value => value.actor === actor); if (target === undefined) throw new Error('QVM weapon query refers to an unavailable shared actor');
     let binding = this.bindings.get(actor);
     if (binding === undefined) {
       if (target.kind === 'player') {
-        let slot = 0; while (slot < 64 && this.userinfo.has(slot)) slot++;
+        let slot = 0; while (slot < 64 && this.state.userinfo.has(slot)) slot++;
         if (slot === 64) throw new Error('QVM weapon source exhausted its admitted client capacity');
         const record = this.game.data.entityBytes(slot), pointer = record.byteOffset - this.game.module.memory.bytes.byteOffset;
         if (pointer === 0) throw new Error('QVM client entity cannot use a null pointer');
-        binding = { actor, pointer, kind: 'client' }; this.bindings.set(actor, binding); this.userinfo.set(slot, target.userinfo);
+        binding = { actor, pointer, kind: 'client' }; this.bindings.set(actor, binding); this.state.userinfo.set(slot, target.userinfo);
         try {
           const denial = this.game.clientConnect(slot, true, false); if (denial !== null) throw new Error(`QVM weapon source rejected client: ${denial}`);
           this.game.clientBegin(slot);
-        } catch (error) { this.bindings.delete(actor); this.userinfo.delete(slot); throw error; }
+        } catch (error) { this.bindings.delete(actor); this.state.userinfo.delete(slot); throw error; }
       } else {
         const pointer = this.game.module.call([], this.profile.allocate); this.slot(pointer);
         if (!this.live(pointer) || [...this.bindings.values()].some(entry => entry.pointer === pointer)) throw new Error('QVM source allocated an occupied or inactive entity');
@@ -200,7 +163,7 @@ export class QvmWeaponBehaviorSource implements WeaponBehaviorSource {
     if (target.kind === 'player') {
       if (binding.kind !== 'client') throw new Error('QVM mirrored actor changed client ownership');
       const slot = this.slot(binding.pointer);
-      if (this.userinfo.get(slot) !== target.userinfo) { this.userinfo.set(slot, target.userinfo); this.game.clientUserinfoChanged(slot); }
+      if (this.state.userinfo.get(slot) !== target.userinfo) { this.state.userinfo.set(slot, target.userinfo); this.game.clientUserinfoChanged(slot); }
       const teamNumbers = { free: 0, red: 1, blue: 2, spectator: 3 };
       const desiredTeam = teamNumbers[target.team];
       if (target.team !== 'spectator' && (this.options.teamMode ? target.team === 'free' : target.team !== 'free')) throw new Error('QVM player team differs from selected source team mode');
@@ -218,7 +181,7 @@ export class QvmWeaponBehaviorSource implements WeaponBehaviorSource {
   private refreshTargets(exclude?: ActorId): void {
     const targets = this.options.targets(), actors = new Set(targets.map(target => target.actor));
     for (const binding of [...this.bindings.values()]) if (binding.kind !== 'projectile' && !actors.has(binding.actor)) this.release(binding.actor);
-    for (const target of targets) if (target.actor !== exclude && this.bindings.get(target.actor)?.kind !== 'projectile') this.mirror(target.actor);
+    for (const target of targets) if (target.actor !== exclude && this.bindings.get(target.actor)?.kind !== 'projectile') this.mirror(target.actor, target);
   }
   attach(launch: WeaponBehaviorLaunch): WeaponBehaviorInstance {
     return this.operation(() => {
@@ -263,7 +226,7 @@ export class QvmWeaponBehaviorSource implements WeaponBehaviorSource {
   resume(actor: ActorId): WeaponBehaviorInstance { this.current(); return this.instance(actor); }
   private release(actor: ActorId): void {
     this.retired.delete(actor); this.activated.delete(actor); const binding = this.bindings.get(actor); if (binding === undefined) return; this.bindings.delete(actor);
-    if (binding.kind === 'client') { const slot = this.slot(binding.pointer); try { this.game.clientDisconnect(slot); } finally { this.userinfo.delete(slot); } }
+    if (binding.kind === 'client') { const slot = this.slot(binding.pointer); try { this.game.clientDisconnect(slot); } finally { this.state.userinfo.delete(slot); } }
     else if (this.live(binding.pointer)) this.game.module.call([binding.pointer], this.profile.free);
   }
   checkpoint(): QvmWeaponBehaviorCheckpoint {
@@ -300,10 +263,10 @@ export class QvmWeaponBehaviorSource implements WeaponBehaviorSource {
       for (const saved of checkpoint.bindings) {
         const actor = resolveActor(saved.actor); source.slot(saved.pointer);
         if (actors.has(actor) || pointers.has(saved.pointer) || !source.live(saved.pointer)) throw new Error('Invalid saved QVM weapon actor binding');
-        if ((saved.kind === 'client') !== source.userinfo.has(source.slot(saved.pointer))) throw new Error('Saved QVM client ownership differs');
+        if ((saved.kind === 'client') !== source.state.userinfo.has(source.slot(saved.pointer))) throw new Error('Saved QVM client ownership differs');
         actors.add(actor); pointers.add(saved.pointer); source.bindings.set(actor, { actor, pointer: saved.pointer, kind: saved.kind });
       }
-      if ([...source.bindings.values()].filter(binding => binding.kind === 'client').length !== source.userinfo.size) throw new Error('Unbound saved QVM client');
+      if ([...source.bindings.values()].filter(binding => binding.kind === 'client').length !== source.state.userinfo.size) throw new Error('Unbound saved QVM client');
       for (const saved of checkpoint.retired) {
         const actor = resolveActor(saved.actor); if (actors.has(actor)) throw new Error('Duplicate saved QVM weapon actor');
         actors.add(actor); source.retired.set(actor, saved.trajectory);
@@ -313,7 +276,7 @@ export class QvmWeaponBehaviorSource implements WeaponBehaviorSource {
     } catch (error) { try { source.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], 'QVM weapon restore and cleanup failed'); } throw error; }
   }
   close(): void {
-    if (this.closed) return; this.closed = true; this.instances.clear(); this.bindings.clear(); this.retired.clear(); this.activated.clear(); this.userinfo.clear();
+    if (this.closed) return; this.closed = true; this.instances.clear(); this.bindings.clear(); this.retired.clear(); this.activated.clear(); this.state.userinfo.clear();
     try { this.files.closeAll(); } finally { this.game.retire(); }
   }
 }
@@ -324,13 +287,4 @@ export function readQvmWeaponBehaviorCheckpoint(reader: SaveReader, expected: We
   return { version: reader.field('version').literal(1), definition: readWeaponBehaviorDefinition(reader.field('definition'), expected), module, profileDigest, activated: reader.field('activated').list(readSavedActor),
     bindings: reader.field('bindings').list(row => ({ actor: readSavedActor(row.field('actor')), pointer: row.field('pointer').integer(1), kind: row.field('kind').choice('target', 'client', 'projectile') })),
     retired: reader.field('retired').list(row => ({ actor: readSavedActor(row.field('actor')), trajectory: { origin: readVector(row.field('trajectory').field('origin')), velocity: readVector(row.field('trajectory').field('velocity')), angles: readVector(row.field('trajectory').field('angles')) } })) };
-}
-
-/** Only source initialization and client spawn points are needed by a trajectory component. */
-export function qvmWeaponInitializationEntities(text: string): string {
-  const classes = new Set(['worldspawn', 'info_player_start', 'info_player_deathmatch', 'info_player_intermission', 'team_CTF_redplayer', 'team_CTF_blueplayer', 'team_CTF_redspawn', 'team_CTF_bluespawn']);
-  const entities = parseQ1Entities(text).filter(entity => classes.has(q1EntityValue(entity, 'classname') ?? ''));
-  if (entities.filter(entity => q1EntityValue(entity, 'classname') === 'worldspawn').length !== 1) throw new Error('QVM component requires one authored worldspawn');
-  const quote = (value: string): string => { if (value.includes('"') || value.includes('\0')) throw new Error('Unquotable QVM spawn field'); return '"' + value + '"'; };
-  return entities.map(entity => '{\n' + entity.properties.map(field => quote(field.key) + ' ' + quote(field.value)).join('\n') + '\n}\n').join('');
 }

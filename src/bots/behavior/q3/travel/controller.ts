@@ -3,6 +3,7 @@
 import { add3, cross3, dot3, length3, normalize3, scale3, sub3, vec3, vectorToAnglesRule } from "../../../../core/math.ts";
 import type { Bounds, Vec3 } from "../../../../contracts/math.ts";
 import { finishCalls } from "../../library/call-steps.ts";
+import { KEX_TRAVEL_ELEVATOR } from "../../../navigation/graph.ts";
 import type { CallSteps } from "../../library/call-steps.ts";
 import type { BotGoal } from "../../library/goals.ts";
 import { BotMoveFlag, BotMoveResult, BotMoveResultFlag, BotMoveResultType, BotMoveType } from "../movement-state.ts";
@@ -17,6 +18,8 @@ import { finishTravelElevator, finishTravelFuncBobbing, finishTravelWeaponJump, 
 
 const f = Math.fround, SOLID = 1, WATER = 32, PLAYERCLIP = 0x10000, BODY = 0x2000000;
 const ZERO = vec3(0, 0, 0);
+// botlib AAS_InitSettings default for the phys_maxvelocity libvar.
+const PHYS_MAX_VELOCITY = 320;
 function ma(origin: Vec3, distance: number, direction: Vec3): Vec3 { return add3(origin, scale3(direction, distance)); }
 function copyResult(target: BotMoveResult, source: BotMoveResult): void {
   target.failure = source.failure; target.type = source.type; target.blocked = source.blocked;
@@ -66,7 +69,7 @@ class TravelStep implements BotTravelContext {
   vectorToAngles(direction: Vec3): Vec3 { return vectorToAnglesRule(direction, "bot-q3"); }
   bounds(presence: number): Bounds { return this.host.navigation.presenceBounds(presence === 2 ? 2 : 4); }
   traceBox(start: Vec3, end: Vec3, presence: number, entity: number) {
-    return this.host.trace(start, end, this.bounds(presence), entity, SOLID | PLAYERCLIP | BODY);
+    return this.host.trace(start, end, this.bounds(presence), entity, SOLID | PLAYERCLIP);
   }
   onGround(): boolean {
     const state = this.state, trace = this.traceBox(state.origin, { ...state.origin, z: state.origin.z - 10 }, state.presenceType, state.entityNum);
@@ -157,8 +160,8 @@ class TravelStep implements BotTravelContext {
     if (trace.solidity !== "clear") return false;
     trace = this.traceBox(trace.end, { ...trace.end, z: state.origin.z }, 2, state.entityNum);
     if (trace.solidity !== "clear" || trace.fraction >= 1 || f(trace.end.z - state.origin.z) < this.variable("svMaxStep").value) return false;
-    const admitted = this.graph.runtime.world.beginRoute(this.graph.runtime.graph.profile).admit({ from: state.origin, to: trace.end, mode: "jump", hint: null, entity: null });
-    if (!admitted.admitted) return false;
+    if (this.graph.runtime.graph.asset?.kind !== "aas"
+      && !this.graph.runtime.world.beginRoute(this.graph.runtime.graph.profile).admit({ from: state.origin, to: trace.end, mode: "jump", hint: null, entity: null }).admitted) return false;
     this.actions.jump(state.client); this.actions.move(state.client, horizontal, speed);
     state.moveFlags |= BotMoveFlag.BARRIERJUMP;
     return true;
@@ -181,25 +184,29 @@ class TravelStep implements BotTravelContext {
       commandMove: scale3(direction, 400), commandFrames: 1, maxFrames: 2, frameTime: f(0.1), stopEvents: 4 | 8 | 16 | 32 | 64, stopArea: 0, visualize: false });
     return (result.stopEvent & (8 | 16 | 32)) !== 0 ? start : result.end;
   }
-  jumpSpeed(state: BotMoveState, start: Vec3, end: Vec3, initialVerticalVelocity: number) {
-    const direction = normalize3(vec3(end.x - start.x, end.y - start.y, 0));
-    const prediction = this.host.predict({ entityNum: state.entityNum, origin: start, presence: 2, onGround: false,
-      velocity: vec3(state.velocity.x, state.velocity.y, initialVerticalVelocity), commandMove: scale3(direction, 400),
-      commandFrames: 30, maxFrames: 30, frameTime: f(0.1), stopEvents: 1 | 8 | 16 | 32, stopArea: 0, visualize: false });
-    if (!prediction.grounded || prediction.seconds <= 0) return { success: false, velocity: 400 };
-    return { success: true, velocity: Math.min(400, f(length3(vec3(end.x - start.x, end.y - start.y, 0)) / prediction.seconds)) };
+  /** AAS_HorizontalVelocityForJump: closed form, failing above phys_maxvelocity. */
+  jumpSpeed(_state: BotMoveState, start: Vec3, end: Vec3, initialVerticalVelocity: number) {
+    const gravity = this.variable("svGravity").value, ascent = f(initialVerticalVelocity / gravity);
+    const height = f(f(start.z + f(f(0.5 * gravity) * ascent * ascent)) - end.z);
+    if (height < 0) return { success: false, velocity: PHYS_MAX_VELOCITY };
+    const time = f(Math.sqrt(f(height / f(0.5 * gravity)))), total = f(time + ascent);
+    if (total === 0) return { success: false, velocity: PHYS_MAX_VELOCITY };
+    const velocity = f(f(Math.sqrt(f(f(f(end.x - start.x) * f(end.x - start.x)) + f(f(end.y - start.y) * f(end.y - start.y))))) / total);
+    return velocity > PHYS_MAX_VELOCITY ? { success: false, velocity: PHYS_MAX_VELOCITY } : { success: true, velocity };
   }
   airControl(state: BotMoveState, goal: Vec3) {
-    const prediction = this.host.predict({ entityNum: state.entityNum, origin: state.origin, presence: state.presenceType === 2 ? 2 : 4,
-      onGround: false, velocity: state.velocity, commandMove: ZERO, commandFrames: 0, maxFrames: 50, frameTime: f(0.1), stopEvents: 0, stopArea: 0, visualize: false });
-    let previous = state.origin;
-    for (const next of prediction.trajectory) {
-      if (next.z < previous.z && previous.z >= goal.z && next.z < goal.z) {
-        const fraction = f((goal.z - previous.z) / (next.z - previous.z));
-        const position = ma(previous, fraction, sub3(next, previous)), direction = sub3(goal, position), distance = Math.min(length3(direction), 32);
+    // BotAirControl integrates free flight: no collision, 0.1 s of velocity per step.
+    const gravity = this.variable("svGravity").value;
+    let org = state.origin, vel = scale3(state.velocity, 0.1);
+    for (let index = 0; index < 50; index++) {
+      vel = vec3(vel.x, vel.y, f(vel.z - gravity * 0.01));
+      if (vel.z < 0 && f(org.z + vel.z) < goal.z) {
+        vel = scale3(vel, f(f(goal.z - org.z) / vel.z));
+        org = add3(org, vel);
+        const direction = sub3(goal, org), distance = Math.min(length3(direction), 32);
         return { controlled: true, direction: normalize3(direction), speed: f(400 - f(400 - f(13 * distance))) };
       }
-      previous = next;
+      org = add3(org, vel);
     }
     return { controlled: false, direction: ZERO, speed: 400 };
   }
@@ -281,7 +288,14 @@ class TravelStep implements BotTravelContext {
       case TravelType.ROCKETJUMP: return airborne ? finishTravelWeaponJump(this, state, reach) : travelRocketJump(this, state, reach);
       case TravelType.BFGJUMP: return airborne ? finishTravelWeaponJump(this, state, reach) : travelBFGJump(this, state, reach);
       case TravelType.JUMPPAD: return airborne ? finishTravelJumpPad(this, state, reach) : travelJumpPad(this, state, reach);
-      case TravelType.FUNCBOB: return airborne ? finishTravelFuncBobbing(this, state, reach) : travelFuncBobbing(this, state, reach);
+      case TravelType.FUNCBOB: {
+        if (this.modelInfo(reach.face & 0xffff) === null) {
+          // BotFuncBobStartEnd prints and returns; the port ends the reachability instead of consuming its undefined origin.
+          this.print(1, `BotFuncBobStartEnd: no entity with model ${reach.face & 0xffff}\n`);
+          const result = new BotMoveResult(); result.failure = true; state.reachabilityTime = 0; return result;
+        }
+        return airborne ? finishTravelFuncBobbing(this, state, reach) : travelFuncBobbing(this, state, reach);
+      }
       default: throw new Error(`Source bot travel ${reach.travelType & TravelType.MASK} has no implemented action routine`);
     }
   }
@@ -300,12 +314,12 @@ class TravelStep implements BotTravelContext {
           const type = model.kind === "elevator" ? TravelType.ELEVATOR : TravelType.FUNCBOB;
           const prior = this.reachability(state.lastReachability);
           if (prior === null || (prior.travelType & TravelType.MASK) !== type || (prior.face & 0xffff) !== modelNumber) {
-            const edge = this.graph.runtime.graph.edges.find(edge => edge.mode === "mover" && edge.entity?.model === modelNumber);
-            if (edge === undefined) { result.blocked = true; result.blockEntity = entity; result.flags |= BotMoveResultFlag.ONTOPOFOBSTACLE; return; }
+            const edge = this.graph.runtime.moverEdge(modelNumber);
+            if (edge === null) { result.blocked = true; result.blockEntity = entity; result.flags |= BotMoveResultFlag.ONTOPOFOBSTACLE; return; }
             state.lastReachability = this.graph.handle(edge); state.reachabilityTime = f(f(this.time()) + reachabilityTime(this.graph.describe(edge)));
           }
           result.flags |= model.kind === "elevator" ? BotMoveResultFlag.ONTOPOF_ELEVATOR : BotMoveResultFlag.ONTOPOF_FUNCBOB;
-        } else if (model?.kind === "door" || model?.kind === "train") {
+        } else if (model?.kind === "door" || model?.kind === "static") {
           state.area = this.host.navigation.fuzzyPointReachabilityArea(state.origin);
           if (this.host.navigation.area(state.area).reachableAreaCount === 0) {
             result.blocked = true; result.blockEntity = entity; result.flags |= BotMoveResultFlag.ONTOPOFOBSTACLE; return;
@@ -320,7 +334,7 @@ class TravelStep implements BotTravelContext {
     if ((state.moveFlags & (BotMoveFlag.ONGROUND | BotMoveFlag.SWIMMING | BotMoveFlag.AGAINSTLADDER)) !== 0) {
       state.area = this.host.navigation.fuzzyPointReachabilityArea(state.origin);
       const riding = this.reachability(state.lastReachability);
-      if (riding?.graphEdge.source.kind === "nav3" && riding.graphEdge.sourceTravelType === 6 && this.onMover(state, riding)) {
+      if (riding?.graphEdge.source.kind === "nav3" && riding.graphEdge.sourceTravelType === KEX_TRAVEL_ELEVATOR && this.onMover(state, riding)) {
         state.area = this.graph.area(riding.graphEdge.from);
         state.reachabilityTime = f(f(this.time()) + 5);
       }
@@ -330,7 +344,7 @@ class TravelStep implements BotTravelContext {
       if (prior === null) number = 0;
       else {
         const type = prior.travelType & TravelType.MASK;
-        if ((travelFlagForType(prior.travelType) & travelFlags) === 0 || !this.graph.runtime.edgeAllowed(prior.graphEdge)) number = 0;
+        if ((travelFlagForType(prior.travelType) & travelFlags) === 0 || !(this.graph.runtime.graph.asset?.kind === "aas" ? this.graph.runtime.edgeSelectable(prior.graphEdge) : this.graph.runtime.edgeAllowed(prior.graphEdge))) number = 0;
         else if (type === TravelType.GRAPPLEHOOK) { if (state.reachabilityTime < f(this.time()) || (state.moveFlags & BotMoveFlag.GRAPPLERESET) !== 0) number = 0; }
         else if (type === TravelType.ELEVATOR || type === TravelType.FUNCBOB) {
           if ((result.flags & BotMoveResultFlag.ONTOPOF_FUNCBOB) !== 0) state.reachabilityTime = f(f(this.time()) + 5);
@@ -353,8 +367,9 @@ class TravelStep implements BotTravelContext {
       const end = ma(state.origin, f(-2 * state.thinkTime), state.velocity), areas = this.host.navigation.traceAreas(state.origin, end, 16);
       for (const crossing of [...areas].reverse()) {
         if ((this.host.navigation.area(crossing.area).contents & 128) === 0) continue;
-        const previousArea = state.area; state.area = crossing.area;
-        const selected = this.graph.select(state, goal, travelFlags, TravelFlags.JUMPPAD); state.area = previousArea;
+        // C passes the extrapolated `end` as the origin for the avoid-spot test.
+        const selected = this.graph.select(state, goal, travelFlags, TravelFlags.JUMPPAD,
+          { area: crossing.area, origin: end, lastGoalArea: state.lastGoalArea, lastArea: state.lastArea, avoid: state });
         const fallback = this.graph.outgoing(crossing.area).find(reach => (reach.travelType & TravelType.MASK) === TravelType.JUMPPAD);
         const number = selected.reachability || (fallback === undefined ? 0 : this.graph.handle(fallback.graphEdge));
         if (number !== 0) { state.lastReachability = number; state.lastArea = crossing.area; break; }

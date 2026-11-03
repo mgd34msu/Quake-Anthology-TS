@@ -22,7 +22,7 @@ import type { ResourceId } from "../../contracts/content.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { RenderCommand } from "../../contracts/render.ts";
 import type { SeatInputEvent, UiControl, UiDrawCommand, UiDrawContext, UiMenuId } from "../../contracts/ui.ts";
-import { KeyCode } from "../../input/key-codes.ts";
+import { KeyCode } from "../../core/key-codes.ts";
 import { NativeUiController, menuRow, renderUiCommands } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
 import { menuBackdrop, menuPanel, menuSkin, menuText, menuTitleFont } from "../../ui/common/menu-theme.ts";
@@ -84,6 +84,23 @@ const selectMenu: UiMenuId = "menu:startup:select";
 const rosterMenu: UiMenuId = "menu:startup:roster";
 const loadMenu: UiMenuId = "menu:startup:load";
 
+type BuilderRect = { x: number; y: number; width: number; height: number };
+interface BuilderField { readonly control: UiControl; readonly rect: BuilderRect; readonly label: string; readonly value: { readonly text: string; readonly width: number } | null }
+interface BuilderDropdownItem { readonly control: UiControl; readonly choice: string; readonly label: string; readonly selected: boolean; readonly header: boolean; readonly indent: boolean; readonly unavailable: string | null }
+interface BuilderDropdown { readonly x: number; readonly title: string; readonly itemScale: number; readonly itemsTop: number;
+  readonly scroll: { readonly offset: number; readonly visible: number; readonly total: number };
+  readonly toggle: { readonly classic: { readonly control: UiControl; readonly selected: boolean }; readonly rerelease: { readonly control: UiControl; readonly selected: boolean } } | null;
+  readonly items: readonly BuilderDropdownItem[] }
+interface BuilderViewer { readonly resource: ResourceId; readonly panel: BuilderRect; readonly rect: BuilderRect; readonly label: string; readonly control: UiControl }
+interface BuilderLayout {
+  readonly fields: readonly BuilderField[];
+  readonly heads: readonly { readonly x: number; readonly y: number; readonly label: string }[];
+  readonly dropdown: BuilderDropdown | null;
+  readonly footer: readonly { readonly control: UiControl; readonly rect: BuilderRect; readonly label: string }[];
+  readonly viewer: BuilderViewer | null;
+}
+type BuilderOpenDropdown = { readonly field: StartupSelectionField; readonly stage: StartupSelectionField; scroll: number; edition: "classic" | "rerelease" | null; collapsed: readonly string[] };
+
 export class StartupMenu {
   readonly controller: NativeUiController;
   private readonly text: UiTextRenderer;
@@ -109,7 +126,7 @@ export class StartupMenu {
   private hostDraft: StartupHosting = { kind: "offline", port: 27910, q1Protocol: null };
   private hostPort = "27910";
   private modsMenu: UiMenuId | null = null;
-  private builderDropdown: { readonly field: StartupSelectionField; readonly stage: StartupSelectionField; scroll: number; edition: "classic" | "rerelease" | null; collapsed: readonly string[] } | null = null;
+  private builderDropdown: BuilderOpenDropdown | null = null;
   private builderPreviewFocusArmed = false;
 
   constructor(private readonly options: StartupMenuOptions) {
@@ -506,25 +523,21 @@ export class StartupMenu {
    * short lists cycle inline. Section heads, labels, values, and dropdown
    * item text are drawn in draw().
    */
-  private builderLayout(): {
-    readonly fields: readonly { readonly control: UiControl; readonly rect: { x: number; y: number; width: number; height: number }; readonly label: string;
-      readonly value: { readonly text: string; readonly width: number } | null }[];
-    readonly heads: readonly { readonly x: number; readonly y: number; readonly label: string }[];
-    readonly dropdown: { readonly x: number; readonly title: string; readonly itemScale: number; readonly itemsTop: number;
-      readonly scroll: { readonly offset: number; readonly visible: number; readonly total: number };
-      readonly toggle: { readonly classic: { readonly control: UiControl; readonly selected: boolean }; readonly rerelease: { readonly control: UiControl; readonly selected: boolean } } | null;
-      readonly items: readonly { readonly control: UiControl; readonly choice: string; readonly label: string; readonly selected: boolean; readonly header: boolean; readonly indent: boolean; readonly unavailable: string | null }[] } | null;
-    readonly footer: readonly { readonly control: UiControl; readonly rect: { x: number; y: number; width: number; height: number }; readonly label: string }[];
-    readonly viewer: { readonly resource: ResourceId;
-      readonly panel: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
-      readonly rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
-      readonly label: string; readonly control: UiControl } | null;
-  } {
+  private builderLayout(): BuilderLayout {
     const all = new Map(this.safeRows().map(row => [row.id, row]));
     const dropdown = this.builderDropdown;
     const appearanceDropdown = dropdown !== null && this.options.characterTurntable !== undefined && characterAppearanceFields.has(dropdown.stage);
     const panelX = dropdown === null ? -1 : appearanceDropdown ? 64
       : ["product", "mapProduct", "map", "enemies", "character", "model", "skin", "topColor", "bottomColor", "movement", "weapons"].includes(dropdown.field) ? 328 : 64;
+    const { fields, heads } = this.builderFields(all, dropdown, appearanceDropdown, panelX);
+    const dropdownSpec = dropdown === null ? null : this.builderDropdownSpec(all, dropdown, appearanceDropdown, panelX);
+    const footer = this.builderFooter(dropdown);
+    const turntable = this.options.characterTurntable;
+    const viewer = appearanceDropdown && dropdown !== null && dropdownSpec !== null && turntable !== undefined ? this.builderViewer(all, dropdown, dropdownSpec, turntable) : null;
+    return { fields, heads, dropdown: dropdownSpec, footer, viewer };
+  }
+  /** The section heads and label/value rows of the one-page layout. */
+  private builderFields(all: ReadonlyMap<string, StartupSelectionRow>, dropdown: BuilderOpenDropdown | null, appearanceDropdown: boolean, panelX: number): { fields: BuilderField[]; heads: { x: number; y: number; label: string }[] } {
     const sections: readonly { readonly title: string; readonly x: number;
       readonly fields: readonly { readonly field: StartupSelectionField; readonly label: string; readonly picker: boolean; readonly indent?: boolean }[] }[] = [
       { title: "WORLD", x: 64, fields: [
@@ -549,8 +562,7 @@ export class StartupMenu {
         { field: "grenades", label: "Grenades", picker: false },
       ] },
     ];
-    const fields: { control: UiControl; rect: { x: number; y: number; width: number; height: number }; label: string;
-      value: { text: string; width: number } | null }[] = [];
+    const fields: BuilderField[] = [];
     const heads: { x: number; y: number; label: string }[] = [];
     const cursorByColumn = new Map<number, number>();
     for (const section of sections) {
@@ -591,14 +603,12 @@ export class StartupMenu {
       });
       cursorByColumn.set(section.x, startY + 15 + present.length * 23 + 8);
     }
-    let dropdownSpec: { x: number; title: string; itemScale: number; itemsTop: number;
-      scroll: { offset: number; visible: number; total: number };
-      toggle: { classic: { control: UiControl; selected: boolean }; rerelease: { control: UiControl; selected: boolean } } | null;
-      items: { control: UiControl; choice: string; label: string; selected: boolean; header: boolean; indent: boolean; unavailable: string | null }[] } | null = null;
-    if (dropdown !== null) {
-      const row = all.get(dropdown.stage);
-      if (row === undefined) this.builderDropdown = null;
-      else {
+    return { fields, heads };
+  }
+  /** The open dropdown panel: its items, edition toggle and scroll window. Closes the dropdown when its row no longer exists. */
+  private builderDropdownSpec(all: ReadonlyMap<string, StartupSelectionRow>, dropdown: BuilderOpenDropdown, appearanceDropdown: boolean, panelX: number): BuilderDropdown | null {
+    const row = all.get(dropdown.stage);
+    if (row === undefined) { this.builderDropdown = null; return null; }
         const entries = this.dropdownEntries(row, dropdown.edition, dropdown.collapsed);
         const staged = dropdown.stage !== dropdown.field;
         const visibleCount = (dropdown.edition === null ? 8 : 7) - (staged ? 1 : 0);
@@ -671,10 +681,11 @@ export class StartupMenu {
             visible: true, enabled: !this.busy, activate: () => { this.retreatStage(); return undefined; } },
             choice: row.value, label: `< ${previousLabel}`, selected: false, header: true, indent: false, unavailable: null });
         }
-        dropdownSpec = { x: panelX, title: row.label, itemScale, itemsTop, scroll: { offset: scroll, visible: visibleCount, total: entries.length }, toggle, items };
-      }
-    }
-    const footer: { control: UiControl; rect: { x: number; y: number; width: number; height: number }; label: string }[] = [];
+        return { x: panelX, title: row.label, itemScale, itemsTop, scroll: { offset: scroll, visible: visibleCount, total: entries.length }, toggle, items };
+  }
+  /** The bottom buttons: network, mods, server browser, local lobby, back and play. */
+  private builderFooter(dropdown: BuilderOpenDropdown | null): { control: UiControl; rect: BuilderRect; label: string }[] {
+    const footer: { control: UiControl; rect: BuilderRect; label: string }[] = [];
     {
       const options = this.options, footerEnabled = dropdown === null;
       const entries: { readonly control: UiControl; readonly label: string; readonly width: number }[] = [
@@ -700,41 +711,40 @@ export class StartupMenu {
           label: options.model.hosting().kind === "offline" ? "Play" : "Start server" },
       );
     }
-    let viewer: { resource: ResourceId; panel: { x: number; y: number; width: number; height: number };
-      rect: { x: number; y: number; width: number; height: number }; label: string; control: UiControl } | null = null;
-    if (appearanceDropdown && dropdown !== null && dropdownSpec !== null && this.options.characterTurntable !== undefined) {
-      const state = this.controller.state(), focusedId = state.focus.kind === "menu" ? state.focus.control : null;
-      const candidates = dropdownSpec.items.filter(item => !item.header && item.unavailable === null);
-      const hoveredCandidate = candidates.find(item => contains(item.control.rect, state.cursor));
-      const focusedCandidate = candidates.find(item => item.control.id === focusedId);
-      const candidate = hoveredCandidate ?? (focusedCandidate !== undefined
-        && (this.builderPreviewFocusArmed || candidates[0] !== focusedCandidate || focusedCandidate.selected)
-        ? focusedCandidate : undefined);
-      const overrides: Parameters<StartupSelectionModel["characterPreview"]>[0] = {};
-      if (candidate !== undefined) {
-        if (dropdown.stage === "character") overrides.character = candidate.choice;
-        else if (dropdown.stage === "model") overrides.model = candidate.choice;
-        else if (dropdown.stage === "skin") overrides.skin = candidate.choice;
-        else if (dropdown.stage === "topColor") overrides.topColor = candidate.choice;
-        else if (dropdown.stage === "bottomColor") overrides.bottomColor = candidate.choice;
-      }
-      const preview = this.options.model.characterPreview(overrides);
-      const colorLabel = (field: "topColor" | "bottomColor", value: number): string =>
-        all.get(field)?.choices.find(choice => choice.id === String(value))?.label ?? String(value);
-      const modelLabel = preview.family === "q1" && preview.model === "player" ? "Quake player" : preview.model;
-      const label = preview.family === "q1"
-        ? `${modelLabel} · ${colorLabel("topColor", preview.topColor)} / ${colorLabel("bottomColor", preview.bottomColor)}`
-        : `${modelLabel} · ${preview.skin === "" ? "Default" : preview.skin}`;
-      viewer = {
-        resource: this.options.characterTurntable.request(preview, this.options.now()),
-        panel: { x: 320, y: 110, width: 264, height: 272 },
-        rect: { x: 368, y: 118, width: 168, height: 224 },
-        label,
-        control: { ...this.button("preview-done", "", 0, () => { this.builderDropdown = null; this.builderPreviewFocusArmed = false; }),
-          rect: { x: 328, y: 358, width: 248, height: 20 }, enabled: !this.busy },
-      };
+    return footer;
+  }
+  /** The character preview beside an appearance dropdown. */
+  private builderViewer(all: ReadonlyMap<string, StartupSelectionRow>, dropdown: BuilderOpenDropdown, dropdownSpec: BuilderDropdown, turntable: NonNullable<StartupMenuOptions["characterTurntable"]>): BuilderViewer {
+    const state = this.controller.state(), focusedId = state.focus.kind === "menu" ? state.focus.control : null;
+    const candidates = dropdownSpec.items.filter(item => !item.header && item.unavailable === null);
+    const hoveredCandidate = candidates.find(item => contains(item.control.rect, state.cursor));
+    const focusedCandidate = candidates.find(item => item.control.id === focusedId);
+    const candidate = hoveredCandidate ?? (focusedCandidate !== undefined
+      && (this.builderPreviewFocusArmed || candidates[0] !== focusedCandidate || focusedCandidate.selected)
+      ? focusedCandidate : undefined);
+    const overrides: Parameters<StartupSelectionModel["characterPreview"]>[0] = {};
+    if (candidate !== undefined) {
+      if (dropdown.stage === "character") overrides.character = candidate.choice;
+      else if (dropdown.stage === "model") overrides.model = candidate.choice;
+      else if (dropdown.stage === "skin") overrides.skin = candidate.choice;
+      else if (dropdown.stage === "topColor") overrides.topColor = candidate.choice;
+      else if (dropdown.stage === "bottomColor") overrides.bottomColor = candidate.choice;
     }
-    return { fields, heads, dropdown: dropdownSpec, footer, viewer };
+    const preview = this.options.model.characterPreview(overrides);
+    const colorLabel = (field: "topColor" | "bottomColor", value: number): string =>
+      all.get(field)?.choices.find(choice => choice.id === String(value))?.label ?? String(value);
+    const modelLabel = preview.family === "q1" && preview.model === "player" ? "Quake player" : preview.model;
+    const label = preview.family === "q1"
+      ? `${modelLabel} · ${colorLabel("topColor", preview.topColor)} / ${colorLabel("bottomColor", preview.bottomColor)}`
+      : `${modelLabel} · ${preview.skin === "" ? "Default" : preview.skin}`;
+    return {
+      resource: turntable.request(preview, this.options.now()),
+      panel: { x: 320, y: 110, width: 264, height: 272 },
+      rect: { x: 368, y: 118, width: 168, height: 224 },
+      label,
+      control: { ...this.button("preview-done", "", 0, () => { this.builderDropdown = null; this.builderPreviewFocusArmed = false; }),
+        rect: { x: 328, y: 358, width: 248, height: 20 }, enabled: !this.busy },
+    };
   }
   private row(row: StartupSelectionRow, index: number): UiControl {
     const rect = { x: 64, y: 114 + index * 33, width: 512, height: 29 };
@@ -834,7 +844,7 @@ export class StartupMenu {
       (overlay ? overlayCommands : commands).push({ kind: "text", origin: { x, y }, text: value, font: heading ? menuTitleFont : this.options.art.skin.font, scale,
         color: accent ? colors.accent : colors.text, align: "left", shadow: true });
     };
-    const backdrop = menuBackdrop(context), originalPanel = menuPanel(context, active === main);
+    const backdrop = menuBackdrop(context), originalPanel = menuPanel(context, active === main, appearance.menuScale);
     const panel = appearance.highContrast && originalPanel.kind === "fill" ? { ...originalPanel, color: colors.panel } : originalPanel;
     const title = active === main ? "QUAKE" : active === session ? "Custom game" : active === hostingMenu ? "Host a game"
       : active === libraryMenu ? "Library" : active === nativeFamilyMenu ? "Play a game"

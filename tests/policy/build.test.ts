@@ -1,8 +1,9 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { buildWorkspace, parseBuildKind } from "../../tools/build.ts";
+import { buildWorkspace, parseBuildKind, parseBuildOptions } from "../../tools/build.ts";
+import { isCredentialFileName, WorkspaceSnapshot } from "../../tools/verify/snapshot.ts";
 
 const temporary = await mkdtemp(join(tmpdir(), "quake-unified-build-"));
 const buildTool = resolve(import.meta.dir, "../../tools/build.ts");
@@ -14,6 +15,8 @@ test("build CLI rejects unsupported flags and missing real application entries",
   expect(parseBuildKind(["--tools"])).toBe("tools");
   expect(() => parseBuildKind(["--tools", "--tools"])).toThrow("Usage:");
   expect(() => parseBuildKind(["--skip-checks"])).toThrow("Usage:");
+  expect(parseBuildOptions(["--keep-snapshot", "--keep-builds=5"]).options).toEqual({ keepSnapshot: true, keepBuilds: 5 });
+  expect(() => parseBuildOptions(["--keep-builds=0"])).toThrow("Usage:");
   const project = join(temporary, "missing-runtime");
   await Bun.write(join(project, "package.json"), "{}\n");
   await expect(buildWorkspace(project, "runtime")).rejects.toThrow("src/main.ts is not implemented");
@@ -49,7 +52,13 @@ test("compiled output runs away from sources and rejected builds preserve publis
   expect(evidence.entries).toHaveLength(1);
   const entry = evidence.entries[0];
   if (entry === undefined) throw new Error("Build omitted its entry");
-  const binary = join(evidence.directory, entry.executable);
+  expect(evidence.schemaVersion).toBe(2);
+  expect(evidence.commit).toBeNull();
+  expect(evidence.directory).toStartWith("dist/");
+  expect(JSON.stringify(evidence)).not.toContain(temporary);
+  expect(evidence.snapshotPath).toBeNull();
+  expect(await readdir(join(project, ".artifacts/snapshots"))).toEqual([]);
+  const binary = join(project, evidence.directory, entry.executable);
   const beforeHash = Bun.CryptoHasher.hash("sha256", await Bun.file(binary).bytes(), "hex");
   expect(entry.sha256).toBe(beforeHash);
   const launched = Bun.spawn([binary], { cwd: temporary, stdout: "pipe", stderr: "pipe" });
@@ -68,3 +77,14 @@ test("compiled output runs away from sources and rejected builds preserve publis
   expect(await Bun.file(pointer).text()).toBe(previousEvidence);
   expect(Bun.CryptoHasher.hash("sha256", await Bun.file(binary).bytes(), "hex")).toBe(beforeHash);
 }, 30_000);
+
+test("AUDIT-006 snapshots refuse the credential files that .gitignore lists", async () => {
+  for (const name of [".env", ".env.local", "chatgpt.key", "other.key", "other.service", "llm.json", "llm.json.tmp", "q3key"]) {
+    expect(isCredentialFileName(name)).toBe(true);
+  }
+  for (const name of [".env.example", ".env.sample", "llm.ts", "keys.ts"]) expect(isCredentialFileName(name)).toBe(false);
+  const project = join(temporary, "credential project");
+  await Bun.write(join(project, "src/main.ts"), "export {};\n");
+  await Bun.write(join(project, "llm.json"), "{}\n");
+  await expect(WorkspaceSnapshot.capture(project)).rejects.toThrow("credential filename: llm.json");
+});

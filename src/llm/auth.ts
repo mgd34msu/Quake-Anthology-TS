@@ -71,7 +71,7 @@ async function tokenRequest(options: SubscriptionAuthOptions, form: URLSearchPar
     if (typeof expires !== "number" || !Number.isFinite(expires) || expires <= 0) throw new LlmSettingsError("Invalid subscription token response.");
     const scope = item["scope"], expiresAt = Date.now() + expires * 1000;
     if (!Number.isFinite(expiresAt)) throw new LlmSettingsError("Invalid subscription token response.");
-    return { accessToken: nonempty(item["access_token"]), refreshToken: nonempty(item["refresh_token"]),
+    return { accessToken: nonempty(item["access_token"]), refreshToken: previous !== undefined && item["refresh_token"] === undefined ? previous.refreshToken : nonempty(item["refresh_token"]),
       tokenType: nonempty(item["token_type"] ?? "Bearer"), expiresAt,
       scopes: typeof scope === "string" ? scope.split(/\s+/).filter(Boolean) : previous?.scopes ?? [] };
   } catch {

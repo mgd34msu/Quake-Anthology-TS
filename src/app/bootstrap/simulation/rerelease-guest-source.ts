@@ -101,6 +101,7 @@ export class RereleaseGuestSource {
         if (this.host.options.runner.depth !== 0) throw new Error("Native guest shutdown requires a completed game call");
         this.closed = true;
         const errors: unknown[] = [];
+        this.host.options.runner.recover();
         try { this.host.shutdown(); } catch (error) { errors.push(error); }
         try { this.runtime.detach(this.image, { context: this.context, instructionBudget: this.budget }); } catch (error) { errors.push(error); }
         try { releaseMemory(this.memory); } catch (error) { errors.push(error); }

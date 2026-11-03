@@ -1,13 +1,13 @@
+import { writeCapture } from "../support/capture.ts";
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Application } from "../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { encodePng } from "../../src/formats/images/png.ts";
 
 for (const backend of ["cpu", "gl"]) test.skipIf(process.env["QUAKE_FLARE_RENDER"] !== "1")(`unchanged q64/rtest ${backend} draws authored flares for two seats`, async () => {
-  const root = await mkdtemp(join(tmpdir(), "quake-flare-"));
+  const root = await tempDirectory("quake-flare-");
   const parsed = parseApplicationCommand(["--game", "q2-rerelease-baseq2", "--map", "q64/rtest", "--mode", "coop", "--seats", "2", "--renderer", backend,
     "--width", "640", "--height", "480", "--hidden", "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Expected application launch");
@@ -20,13 +20,13 @@ for (const backend of ["cpu", "gl"]) test.skipIf(process.env["QUAKE_FLARE_RENDER
     expect(flares.length).toBeGreaterThan(0);
     const capture = async (name: string): Promise<Uint8Array> => {
       const pending = app.captureNextFrame(); await app.step(0.001); const pixels = await pending;
-      await Bun.write(`/tmp/quake-flare-${backend}-${name}.png`, encodePng(640, 480, pixels)); return pixels;
+      await writeCapture(`quake-flare-${backend}-${name}.png`, encodePng(640, 480, pixels)); return pixels;
     };
     await capture("spawn");
     const first = flares[0];
     if (first === undefined) throw new Error("Missing authored flare");
     const origin = source.game.body(first).origin;
-    await Bun.write(`/tmp/quake-flare-${backend}-origins.json`, JSON.stringify(flares.map(entity => ({ origin: source.game.body(entity).origin, flare: entity.flare }))));
+    await writeCapture(`quake-flare-${backend}-origins.json`, JSON.stringify(flares.map(entity => ({ origin: source.game.body(entity).origin, flare: entity.flare }))));
     for (const [index, player] of app.localPlayers.entries()) {
       source.players.hooks.setMovement(player.actor, { kind: "freeze", origin: { x: origin.x - (index === 0 ? 240 : 80), y: origin.y, z: origin.z - 22 }, angles: { x: 0, y: 0, z: 0 } });
     }
@@ -42,7 +42,7 @@ for (const backend of ["cpu", "gl"]) test.skipIf(process.env["QUAKE_FLARE_RENDER
         const seat = y < 240 ? 0 : 1; changes[seat] = (changes[seat] ?? 0) + 1;
       }
     }
-    await Bun.write(`/tmp/quake-flare-${backend}-changes.json`, JSON.stringify(changes));
+    await writeCapture(`quake-flare-${backend}-changes.json`, JSON.stringify(changes));
     expect(changes[0]).toBeGreaterThan(0);
     expect(changes[1]).toBe(0);
     const fallback = source.game.spawn({ ...first.spawn, ordinal: 100001, values: new Map([...first.spawn.values, ["image", "missing-flare-test.tga"]]) });
@@ -60,6 +60,8 @@ import type { DrawBatch, RendererImage, RendererResourceOwner, RenderVertex } fr
 import { SdlWindow } from "../../src/platform/sdl.ts";
 import { GlRenderer } from "../../src/render/gl/renderer.ts";
 import { SoftwareRenderer } from "../../src/render/cpu/index.ts";
+import { trackedTempDirectories } from "../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 test.skipIf(process.env["QUAKE_FLARE_RENDER"] !== "1")("CPU and GL apply flare luminance after bilinear sampling and reset the ordinary draw", () => {
   using window = SdlWindow.open({ title: "Flare sampling proof", width: 8, height: 8, backend: "gl", hidden: true });

@@ -1,11 +1,16 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { ProviderId } from "../../contracts/identity.ts";
 import { isRecord, isUnknownArray } from "../../network/common/value.ts";
 
 export type PlayerProgressEvent =
   | { readonly kind: "achievement"; readonly source: "q1" | "q2"; readonly participant: string; readonly event: string; readonly award: string }
   | { readonly kind: "level-completed"; readonly source: "q1" | "q2"; readonly participant: string; readonly event: string; readonly map: string }
-  | { readonly kind: "match-completed"; readonly source: "q1" | "q2" | "q3"; readonly participant: string; readonly event: string; readonly map: string; readonly score: number };
+  | { readonly kind: "match-completed"; readonly source: "q1" | "q2" | "q3"; readonly participant: string; readonly event: string; readonly map: string; readonly score: number }
+  /** One ranked player's result in a finished match; the participant is the local ranking account name. Added in file version 2. */
+  | { readonly kind: "ranked-match"; readonly source: "q1" | "q2" | "q3"; readonly participant: string; readonly event: string; readonly map: string; readonly score: number; readonly won: boolean; readonly rules: ProviderId };
+
+function isProviderId(value: unknown): value is ProviderId { return typeof value === "string" && value.includes(":"); }
 
 function decode(value: unknown): PlayerProgressEvent {
   if (!isRecord(value) || (value["source"] !== "q1" && value["source"] !== "q2" && value["source"] !== "q3")
@@ -18,6 +23,8 @@ function decode(value: unknown): PlayerProgressEvent {
   if (value["kind"] === "level-completed" && source !== "q3") return { kind: "level-completed", source, participant, event, map: value["map"] };
   if (value["kind"] === "match-completed" && typeof value["score"] === "number" && Number.isFinite(value["score"]))
     return { kind: "match-completed", source, participant, event, map: value["map"], score: value["score"] };
+  if (value["kind"] === "ranked-match" && typeof value["score"] === "number" && Number.isFinite(value["score"]) && typeof value["won"] === "boolean" && isProviderId(value["rules"]))
+    return { kind: "ranked-match", source, participant, event, map: value["map"], score: value["score"], won: value["won"], rules: value["rules"] };
   throw new Error("Invalid player progress event");
 }
 function identity(event: PlayerProgressEvent): string { return JSON.stringify([event.source, event.participant, event.event]); }
@@ -36,14 +43,17 @@ export class PlayerProgressStore {
     // parsed documents still face the shape checks below.
     let value: unknown;
     try { value = JSON.parse(text); } catch { return store; }
-    if (!isRecord(value) || value["version"] !== 1 || !isUnknownArray(value["events"])) throw new Error("Invalid player progress file");
-    for (const item of value["events"]) {
-      const event = decode(item), key = identity(event);
-      if (store.events.has(key)) throw new Error("Duplicate player progress event");
-      store.events.set(key, event);
-    }
+    try {
+      if (!isRecord(value) || (value["version"] !== 1 && value["version"] !== 2) || !isUnknownArray(value["events"])) throw new Error("Invalid player progress file");
+      for (const item of value["events"]) {
+        const event = decode(item), key = identity(event);
+        if (store.events.has(key)) throw new Error("Duplicate player progress event");
+        store.events.set(key, event);
+      }
+    } catch { store.events.clear(); } // Unreadable progress starts empty, like the absent file; it is rewritten on the next event.
     return store;
   }
+  all(): readonly PlayerProgressEvent[] { return [...this.events.values()]; }
   list(participant: string): readonly PlayerProgressEvent[] { return [...this.events.values()].filter(event => event.participant === participant); }
   record(input: PlayerProgressEvent): Promise<boolean> {
     const event = decode(input);
@@ -53,7 +63,7 @@ export class PlayerProgressStore {
       const pending = [...this.events.values(), event];
       await mkdir(dirname(this.file), { recursive: true });
       const temporary = `${this.file}.pending`;
-      await writeFile(temporary, JSON.stringify({ version: 1, events: pending }) + "\n", { mode: 0o600 });
+      await writeFile(temporary, JSON.stringify({ version: 2, events: pending }) + "\n", { mode: 0o600 });
       await rename(temporary, this.file);
       this.events.set(key, event);
       return true;

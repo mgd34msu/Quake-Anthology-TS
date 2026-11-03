@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
-import { KEY_CHAR_FLAG, KeyCode } from "../../../input/key-codes.ts";
+import { KEY_CHAR_FLAG, KeyCode } from "../../../core/key-codes.ts";
 import { CommonParseCursor, CommonParseState } from "../../../core/common-parse.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
 import type { PcmSound } from "../../../audio/wav.ts";
@@ -15,7 +15,7 @@ import type { Vec4 } from "../../../contracts/math.ts";
 import { Draw2D, type PictureAsset } from "../../../text/draw2d.ts";
 import { textHeight, textPaint, textPaintWithCursor, textWidth, type FontSet } from "../../../text/q3-font.ts";
 import { DEFAULT_MODEL, type SceneModel } from "../../../content/q3/presentation/ref-entity.ts";
-import type { SourceLocation } from "./script/lexer.ts";
+import type { SourceLocation } from "../../../content/legacy-script/lexer.ts";
 import { gameFormat } from "../../../content/q3/base/game/format.ts";
 import { gameAtof, gameAtoi } from "../../../core/game-numeric.ts";
 import { drawCgRect, drawCgSides, drawCgTopBottom } from "./borders.ts";
@@ -35,6 +35,8 @@ import {
   type UiWindowDefinition,
 } from "./menu.ts";
 
+/** Menu scripts nest through open/close/transition; the original recursed without a bound. */
+const MAX_SCRIPT_DEPTH = 64;
 const MAX_OPEN_MENUS = 16;
 const SCROLLBAR_SIZE = 16;
 const SLIDER_WIDTH = 96;
@@ -122,14 +124,6 @@ export interface UiOwnerDrawPaintRequest {
   readonly textStyle: number;
 }
 
-export interface UiRuntimeBindings {
-  keyName(key: number): string;
-  getBinding(key: number): string;
-  setBinding(key: number, command: string): void;
-  getOverstrike(): boolean;
-  setOverstrike(enabled: boolean): void;
-}
-
 export interface UiRuntimeFeederItem {
   readonly text: string | null;
   readonly picture: PictureAsset | undefined;
@@ -178,8 +172,6 @@ export interface UiRuntimeOptions {
   readonly print?: (text: string) => void;
   readonly cvarValue?: (name: string) => number;
   readonly cvars: Pick<CvarRegistry, "get" | "set" | "reset">;
-  readonly commands: Pick<CommandBuffer, "append">;
-  readonly commandContext: CommandContext;
   readonly resources: UiRuntimeResources;
   readonly fonts: FontSet;
   readonly widgetAssets: UiWidgetAssets;
@@ -187,16 +179,11 @@ export interface UiRuntimeOptions {
   readonly audio: UiRuntimeAudio;
   readonly cinematics: UiRuntimeCinematics;
   readonly paintModel: (request: UiModelPaintRequest) => void;
-  readonly context: UiRuntimeContext;
   readonly feeder: UiRuntimeFeeder;
   readonly ownerDraw: UiRuntimeOwnerDraw;
   readonly externalScript: UiExternalScriptHost;
   readonly getTeamColor: () => Vec4;
 }
-
-export type UiRuntimeContext =
-  | { readonly kind: "ui"; readonly bindings: UiRuntimeBindings; readonly pause: (paused: boolean) => void | Promise<void> }
-  | { readonly kind: "cgame" };
 
 export interface UiCapturedMenu {
   readonly definition: UiMenuDefinition;
@@ -352,8 +339,17 @@ function equalName(left: string | undefined, right: string): boolean {
   return left !== undefined && asciiLower(left) === asciiLower(right);
 }
 
+const resourceKeys = new Map<string, string>();
 function resourceKey(path: string | null): string {
-  return path === null ? "null" : `name:${asciiLower(quakeString(path))}`;
+  if (path === null) return "null";
+  let key = resourceKeys.get(path);
+  if (key === undefined) {
+    key = `name:${asciiLower(quakeString(path))}`;
+    // Paths come from menu scripts and repeat every frame; the bound keeps a hostile script from growing the table.
+    if (resourceKeys.size >= 4096) resourceKeys.clear();
+    resourceKeys.set(path, key);
+  }
+  return key;
 }
 
 function quakeString(value: string, location?: SourceLocation): string {
@@ -490,36 +486,6 @@ function matchesItem(item: ItemState, name: string): boolean {
   return equalName(item.definition.window.name, name) || equalName(item.definition.window.group, name);
 }
 
-const BIND_COMMANDS: readonly string[] = [
-  "+scores", "+button2", "+speed", "+forward", "+back", "+moveleft", "+moveright", "+moveup", "+movedown",
-  "+left", "+right", "+strafe", "+lookup", "+lookdown", "+mlook", "centerview", "+zoom",
-  "weapon 1", "weapon 2", "weapon 3", "weapon 4", "weapon 5", "weapon 6", "weapon 7", "weapon 8", "weapon 9",
-  "weapon 10", "weapon 11", "weapon 12", "weapon 13", "+attack", "weapprev", "weapnext", "+button3", "+button4",
-  "prevTeamMember", "nextTeamMember", "nextOrder", "confirmOrder", "denyOrder", "taskOffense", "taskDefense",
-  "taskPatrol", "taskCamp", "taskFollow", "taskRetrieve", "taskEscort", "taskOwnFlag", "taskSuicide",
-  "tauntKillInsult", "tauntPraise", "tauntTaunt", "tauntDeathInsult", "tauntGauntlet", "scoresUp", "scoresDown",
-  "messagemode", "messagemode2", "messagemode3", "messagemode4",
-];
-
-interface BindingState {
-  readonly command: string;
-  first: number;
-  second: number;
-}
-
-function loadBindings(host: UiRuntimeBindings): BindingState[] {
-  const bindings = BIND_COMMANDS.map(command => ({ command, first: -1, second: -1 }));
-  for (const binding of bindings) {
-    for (let key = 0; key < 256; key++) {
-      if (equalName(quakeString(host.getBinding(key)).slice(0, 255), binding.command)) {
-        if (binding.first === -1) binding.first = key;
-        else { binding.second = key; break; }
-      }
-    }
-  }
-  return bindings;
-}
-
 function rectContains(rect: UiRect, x: number, y: number): boolean {
   return x > rect.x && x < f(rect.x + rect.width) && y > rect.y && y < f(rect.y + rect.height);
 }
@@ -542,7 +508,6 @@ export class UiRuntime {
   private readonly cinematics: Map<string, UiCinematicAsset>;
   private readonly capturedMenus = new Map<UiCapturedMenu, MenuState>();
   private readonly openStack: MenuState[] = [];
-  private readonly bindings: BindingState[];
   private readonly itemArena: ItemState[] = [];
   private readonly itemSlots = new Map<number, ItemState>();
   private itemAllocationPoint = 0;
@@ -560,9 +525,6 @@ export class UiRuntime {
   private displayCursorY = 0;
   private realTime = 0;
   private lastListBoxClickTime = 0;
-  private editingItem: ItemState | undefined;
-  private bindingItem: ItemState | undefined;
-  private waitingForKey = false;
   private capture: CaptureState = { kind: "idle" };
   private nextScrollTime = 0;
   private nextScrollAdjustTime = 0;
@@ -585,9 +547,6 @@ export class UiRuntime {
     this.sounds = sounds;
     this.models = models;
     this.cinematics = cinematics;
-    this.bindings = options.context.kind === "ui"
-      ? loadBindings(options.context.bindings)
-      : BIND_COMMANDS.map(command => ({ command, first: -1, second: -1 }));
     for (const menu of this.activeMenus()) {
       this.capturedMenus.set(menu.captureHandle, menu);
       for (let index = 0; index < menu.itemCount; index++) menu.itemAt(index);
@@ -660,7 +619,6 @@ export class UiRuntime {
     if (reset === "strings") {
       this.itemAllocationPoint = 0;
       this.openStack.length = 0;
-      if (this.options.context.kind === "ui") this.reloadBindings();
     }
   }
 
@@ -1001,24 +959,6 @@ export class UiRuntime {
     if (item !== undefined) await this.handleListKey(item, down ? KeyCode.Down : KeyCode.Up, true);
   }
 
-  bindingPending(): boolean { this.opened(); return this.waitingForKey; }
-
-  reloadBindings(): void {
-    this.opened();
-    const loaded = loadBindings(this.bindingHost("reload bindings"));
-    for (let index = 0; index < this.bindings.length; index++) {
-      const target = this.bindings[index], source = loaded[index];
-      if (target !== undefined && source !== undefined) { target.first = source.first; target.second = source.second; }
-    }
-  }
-
-  resetBindings(): void {
-    this.opened();
-    for (const binding of this.bindings) { binding.first = -1; binding.second = -1; }
-  }
-
-  applyBindings(): void { this.opened(); this.writeBindings(); }
-
   cursorType(x: number, y: number): "arrow" | "sizer" {
     this.opened();
     for (const menu of this.activeMenus()) {
@@ -1089,9 +1029,6 @@ export class UiRuntime {
   retire(): void {
     this.disposed = true;
     this.capture = { kind: "idle" };
-    this.editingItem = undefined;
-    this.bindingItem = undefined;
-    this.waitingForKey = false;
   }
 
   private opened(): void {
@@ -1150,12 +1087,6 @@ export class UiRuntime {
   private setFrameTime(frame: UiRuntimeFrame): void {
     if (!Number.isInteger(frame.frameTime) || frame.frameTime < -0x8000_0000 || frame.frameTime > 0x7fff_ffff) throw new RangeError("UI frameTime must be a signed 32-bit value");
     this.setDisplayTime(frame.time);
-  }
-
-  private bindingHost(operation: string): UiRuntimeBindings {
-    const context = this.options.context;
-    if (context.kind === "cgame") throw new Error(`UI ${operation} is unavailable in cgame context`);
-    return context.bindings;
   }
 
   private findMenu(name: string): MenuState | undefined {
@@ -1232,21 +1163,27 @@ export class UiRuntime {
     this.opened();
   }
 
+  private scriptDepth = 0;
+
   private async runScript(owner: ScriptOwner, script: UiScript): Promise<void> {
     if (script.text.length === 0) return;
-    const cursor = new RuntimeScriptCursor(script.text, this.sourceParser, this.definitions.memory);
-    while (true) {
-      const command = cursor.string();
-      if (command === undefined) return;
-      if (command === null) throw new Error("Item_RunScript dereferences NULL command after String_Alloc");
-      if (command === ";") continue;
-      if (!await this.runSharedCommand(owner, asciiLower(command), cursor)) {
-        await this.options.externalScript.run(cursor, {
-          menuName: this.scriptMenu(owner)?.definition.window.name,
-          itemName: owner.item?.definition.window.name,
-        });
+    if (this.scriptDepth >= MAX_SCRIPT_DEPTH) { this.options.print?.("menu script nesting limit reached\n"); return; }
+    this.scriptDepth++;
+    try {
+      const cursor = new RuntimeScriptCursor(script.text, this.sourceParser, this.definitions.memory);
+      while (true) {
+        const command = cursor.string();
+        if (command === undefined) return;
+        if (command === null) throw new Error("Item_RunScript dereferences NULL command after String_Alloc");
+        if (command === ";") continue;
+        if (!await this.runSharedCommand(owner, asciiLower(command), cursor)) {
+          await this.options.externalScript.run(cursor, {
+            menuName: this.scriptMenu(owner)?.definition.window.name,
+            itemName: owner.item?.definition.window.name,
+          });
+        }
       }
-    }
+    } finally { this.scriptDepth--; }
   }
 
   private async runSharedCommand(owner: ScriptOwner, command: string, cursor: RuntimeScriptCursor): Promise<boolean> {
@@ -1440,8 +1377,7 @@ export class UiRuntime {
   }
 
   private scriptExec(cursor: RuntimeScriptCursor): void {
-    const value = cursor.string();
-    if (value !== undefined) this.executeText(gameFormat("%s ; ", [value]));
+    if (cursor.string() !== undefined) throw new Error("UI exec is unavailable in the cgame menu runtime");
   }
 
   private async scriptPlay(cursor: RuntimeScriptCursor): Promise<void> {
@@ -1530,7 +1466,7 @@ export class UiRuntime {
 
   private async mouseMoveMenu(menu: MenuState, x: number, y: number): Promise<void> {
     if ((menu.window.flags & (UiWindowFlag.Visible | UiWindowFlag.Forced)) === 0) return;
-    if (this.capture.kind !== "idle" || this.waitingForKey || this.editingItem !== undefined) return;
+    if (this.capture.kind !== "idle") return;
     let focusSet = false;
     for (let pass = 0; pass < 2; pass++) {
       for (const item of menuItems(menu)) {
@@ -1647,6 +1583,7 @@ export class UiRuntime {
         wrapped = true;
         menu.cursorItem = direction < 0 ? menu.itemCount - 1 : 0;
       }
+      if (menu.cursorItem < 0 || menu.cursorItem >= menu.itemCount) break; // Already wrapped once and nothing took focus.
       const item = menu.itemAt(menu.cursorItem);
       if (item !== undefined && await this.setItemFocus(menu, item, this.displayCursorX, this.displayCursorY)) {
         await this.mouseMoveMenu(menu, f(item.window.rect.x + 1), f(item.window.rect.y + 1));
@@ -1658,21 +1595,6 @@ export class UiRuntime {
   }
 
   private async handleMenuKey(menu: MenuState, key: number, down: boolean): Promise<boolean> {
-    if (this.waitingForKey && down) {
-      const item = this.bindingItem;
-      return item === undefined ? true : this.handleBindKey(item, key, down);
-    }
-    if (this.editingItem !== undefined && down) {
-      const editing = this.editingItem;
-      if (!await this.handleTextKey(editing, key)) {
-        this.editingItem = undefined;
-        return true;
-      }
-      if (isMouseKey(key)) {
-        this.editingItem = undefined;
-        await this.pointerMove(this.displayCursorX, this.displayCursorY);
-      } else if (key === KeyCode.Tab || key === KeyCode.Up || key === KeyCode.Down) return true;
-    }
     if (down && (menu.window.flags & UiWindowFlag.Popup) === 0 && !rectContains(menu.window.rect, this.displayCursorX, this.displayCursorY) && isMouseKey(key)) {
       await this.handleOutOfBounds(menu, key, down);
       return true;
@@ -1688,38 +1610,27 @@ export class UiRuntime {
       if (this.cvarValue("developer") !== 0) this.debug = !this.debug;
       return true;
     }
-    if (key === KeyCode.F12) {
-      if (this.cvarValue("developer") !== 0) this.executeText("screenshot\n");
-      return true;
-    }
     if (key === KeyCode.Up || key === KeyCode.KeypadUp) { await this.focusRelative(menu, -1); return true; }
     if (key === KeyCode.Down || key === KeyCode.KeypadDown || key === KeyCode.Tab) { await this.focusRelative(menu, 1); return true; }
     if (key === KeyCode.Escape) {
-      if (!this.waitingForKey && menu.definition.onEscape !== undefined) await this.runScript({ menu, item: undefined }, menu.definition.onEscape);
+      if (menu.definition.onEscape !== undefined) await this.runScript({ menu, item: undefined }, menu.definition.onEscape);
       return true;
     }
     if ((key === KeyCode.Mouse1 || key === KeyCode.Mouse2) && item !== undefined) {
       if (item.definition.behavior.kind === "text") {
         if (rectContains(this.correctedTextRect(item), this.displayCursorX, this.displayCursorY) && item.definition.action !== undefined) await this.runScript({ menu, item }, item.definition.action);
       } else if (item.definition.behavior.kind === "edit-field" || item.definition.behavior.kind === "numeric-field") {
-        if (rectContains(item.window.rect, this.displayCursorX, this.displayCursorY)) this.beginEditing(item);
+        // Edit fields are inert in the cgame menu runtime: no key-binding or overstrike host exists.
       } else if (rectContains(item.window.rect, this.displayCursorX, this.displayCursorY) && item.definition.action !== undefined) {
         await this.runScript({ menu, item }, item.definition.action);
       }
       return true;
     }
     if ((key === KeyCode.Enter || key === KeyCode.KeypadEnter) && item !== undefined) {
-      if (item.definition.behavior.kind === "edit-field" || item.definition.behavior.kind === "numeric-field") this.beginEditing(item);
-      else if (item.definition.action !== undefined) await this.runScript({ menu, item }, item.definition.action);
+      if (item.definition.behavior.kind !== "edit-field" && item.definition.behavior.kind !== "numeric-field" && item.definition.action !== undefined) await this.runScript({ menu, item }, item.definition.action);
       return true;
     }
     return false;
-  }
-
-  private beginEditing(item: ItemState): void {
-    item.cursorPosition = 0;
-    this.editingItem = item;
-    this.bindingHost("edit overstrike").setOverstrike(true);
   }
 
   private async handleOutOfBounds(menu: MenuState, key: number, down: boolean): Promise<void> {
@@ -1730,10 +1641,6 @@ export class UiRuntime {
       await this.activateMenu(candidate);
       await this.mouseMoveMenu(candidate, this.displayCursorX, this.displayCursorY);
       await this.handleMenuKey(candidate, key, down);
-    }
-    const context = this.options.context;
-    if (!this.activeMenus().some(candidate => (candidate.window.flags & (UiWindowFlag.Forced | UiWindowFlag.Visible)) !== 0) && context.kind === "ui") {
-      await context.pause(false); this.opened();
     }
     this.closeCinematics();
   }
@@ -1762,15 +1669,20 @@ export class UiRuntime {
         item.special = f(result.special);
         return result.handled;
       }
-      case "bind": return this.handleBindKey(item, key, down);
+      case "bind": return false;
       case "slider": return this.handleSliderKey(item, key);
       default: return false;
     }
   }
 
+  /** id requires the pointer over a widget; Enter on the focused widget also activates it so keyboard and pad players can operate it. */
+  private activatesAtPointer(item: ItemState, key: number): boolean {
+    return isActivateKey(key) && (key === KeyCode.Enter || rectContains(item.window.rect, this.displayCursorX, this.displayCursorY));
+  }
+
   private handleYesNoKey(item: ItemState, key: number): boolean {
     const cvar = item.definition.cvar;
-    if (cvar === undefined || (item.window.flags & UiWindowFlag.HasFocus) === 0 || !rectContains(item.window.rect, this.displayCursorX, this.displayCursorY) || !isActivateKey(key)) return false;
+    if (cvar === undefined || (item.window.flags & UiWindowFlag.HasFocus) === 0 || !this.activatesAtPointer(item, key)) return false;
     const value = this.cvarValue(cvar);
     this.options.cvars.set(cvar, value === 0 ? "1" : "0", true);
     return true;
@@ -1778,7 +1690,7 @@ export class UiRuntime {
 
   private handleMultiKey(item: ItemState, key: number): boolean {
     const cvar = item.definition.cvar, behavior = item.definition.behavior;
-    if (behavior.kind !== "multi" || cvar === undefined || (item.window.flags & UiWindowFlag.HasFocus) === 0 || !rectContains(item.window.rect, this.displayCursorX, this.displayCursorY) || !isActivateKey(key)) return false;
+    if (behavior.kind !== "multi" || cvar === undefined || (item.window.flags & UiWindowFlag.HasFocus) === 0 || !this.activatesAtPointer(item, key)) return false;
     const multi = behavior.multi;
     if (multi === undefined) return false;
     const count = multi.count;
@@ -1811,92 +1723,6 @@ export class UiRuntime {
   private cvarBuffer(name: string): string {
     const value = quakeString(this.options.cvars.get(name)?.value ?? "");
     return value.length > 1023 ? value.slice(0, 1023) : value;
-  }
-
-  private async handleTextKey(item: ItemState, key: number): Promise<boolean> {
-    const edit = item.definition.editData(), cvar = item.definition.cvar;
-    if (cvar === undefined) return false;
-    const value = this.cvarBuffer(cvar);
-    const buffer = new Uint8Array(1024);
-    for (let index = 0; index < value.length; index++) buffer[index] = value.charCodeAt(index);
-    const move = (destination: number, source: number, count: number): void => {
-      if (destination < 0 || source < 0 || count < 0 || destination + count > buffer.length || source + count > buffer.length) {
-        throw new RangeError("Item_TextField_HandleKey memmove exceeds local char[1024]");
-      }
-      buffer.copyWithin(destination, source, source + count);
-    };
-    const publish = (): void => {
-      const end = buffer.indexOf(0);
-      if (end === -1) throw new RangeError("Item_TextField_HandleKey passes unterminated local char[1024]");
-      let text = "";
-      for (const byte of buffer.subarray(0, end)) text += String.fromCharCode(byte);
-      this.setCvar(item.definition.cvar ?? null, text, true);
-    };
-    let length = value.length;
-    if (edit === undefined) throw new Error("Item_TextField_HandleKey dereferences NULL typeData at maxChars");
-    if (edit.maxChars !== 0 && length > edit.maxChars) length = edit.maxChars;
-    if ((key & KEY_CHAR_FLAG) !== 0) {
-      key &= ~KEY_CHAR_FLAG;
-      if (key === 8) {
-        if (item.cursorPosition > 0) {
-          move(item.cursorPosition - 1, item.cursorPosition, length + 1 - item.cursorPosition);
-          item.cursorPosition--;
-          if (item.cursorPosition < edit.paintOffset) edit.paintOffset--;
-        }
-        publish();
-        return true;
-      }
-      if (key < 32 || item.definition.cvar === undefined) return true;
-      if (item.definition.behavior.kind === "numeric-field" && (key < 48 || key > 57)) return false;
-      if (!this.bindingHost("edit overstrike").getOverstrike()) {
-        if (length === 255 || (edit.maxChars !== 0 && length >= edit.maxChars)) return true;
-        move(item.cursorPosition + 1, item.cursorPosition, length + 1 - item.cursorPosition);
-      } else {
-        if (edit.maxChars !== 0 && item.cursorPosition >= edit.maxChars) return true;
-      }
-      if (item.cursorPosition < 0 || item.cursorPosition >= buffer.length) throw new RangeError("Item_TextField_HandleKey writes outside local char[1024]");
-      buffer[item.cursorPosition] = key;
-      publish();
-      if (item.cursorPosition < length + 1) {
-        item.cursorPosition++;
-        if (edit.maxPaintChars !== 0 && item.cursorPosition > edit.maxPaintChars) edit.paintOffset++;
-      }
-    } else if (key === KeyCode.Delete || key === KeyCode.KeypadDelete) {
-      if (item.cursorPosition < length) {
-        move(item.cursorPosition, item.cursorPosition + 1, length - item.cursorPosition);
-        publish();
-      }
-      return true;
-    } else if (key === KeyCode.Right || key === KeyCode.KeypadRight) {
-      if (edit.maxPaintChars !== 0 && item.cursorPosition >= edit.maxPaintChars && item.cursorPosition < length) {
-        item.cursorPosition++; edit.paintOffset++; return true;
-      }
-      if (item.cursorPosition < length) item.cursorPosition++;
-      return true;
-    } else if (key === KeyCode.Left || key === KeyCode.KeypadLeft) {
-      if (item.cursorPosition > 0) item.cursorPosition--;
-      if (item.cursorPosition < edit.paintOffset) edit.paintOffset--;
-      return true;
-    } else if (key === KeyCode.Home || key === KeyCode.KeypadHome) {
-      item.cursorPosition = 0; edit.paintOffset = 0; return true;
-    } else if (key === KeyCode.End || key === KeyCode.KeypadEnd) {
-      item.cursorPosition = length;
-      if (item.cursorPosition > edit.maxPaintChars) edit.paintOffset = length - edit.maxPaintChars;
-      return true;
-    } else if (key === KeyCode.Insert || key === KeyCode.KeypadInsert) {
-      const bindings = this.bindingHost("edit overstrike");
-      bindings.setOverstrike(!bindings.getOverstrike());
-      return true;
-    }
-    if (key === KeyCode.Tab || key === KeyCode.Down || key === KeyCode.KeypadDown) {
-      const next = await this.focusRelative(this.menuFor(item), 1);
-      if (next?.definition.behavior.kind === "edit-field" || next?.definition.behavior.kind === "numeric-field") this.editingItem = next;
-    }
-    if (key === KeyCode.Up || key === KeyCode.KeypadUp) {
-      const previous = await this.focusRelative(this.menuFor(item), -1);
-      if (previous?.definition.behavior.kind === "edit-field" || previous?.definition.behavior.kind === "numeric-field") this.editingItem = previous;
-    }
-    return key !== KeyCode.Enter && key !== KeyCode.KeypadEnter && key !== KeyCode.Escape;
   }
 
   private listMaximum(item: ItemState): number {
@@ -2111,6 +1937,14 @@ export class UiRuntime {
 
   private handleSliderKey(item: ItemState, key: number): boolean {
     const cvar = item.definition.cvar;
+    if (cvar !== undefined && (item.window.flags & UiWindowFlag.HasFocus) !== 0 && (key === KeyCode.Left || key === KeyCode.Right)) {
+      const edit = item.definition.editData();
+      if (edit !== undefined && edit.maximum > edit.minimum) {
+        const step = f(f(edit.maximum - edit.minimum) / 20), value = f(this.cvarValue(cvar) + (key === KeyCode.Right ? step : -step));
+        this.options.cvars.set(cvar, gameFormat("%f", [Math.max(edit.minimum, Math.min(edit.maximum, value))]), true);
+        return true;
+      }
+    }
     if (cvar !== undefined && (item.window.flags & UiWindowFlag.HasFocus) !== 0 && rectContains(item.window.rect, this.displayCursorX, this.displayCursorY) && isActivateKey(key)) {
       const edit = item.definition.editData();
       if (edit !== undefined) {
@@ -2146,72 +1980,6 @@ export class UiRuntime {
         this.capture = { kind: "slider-thumb", item, key, xStart: this.displayCursorX, yStart: this.displayCursorY };
       }
     }
-  }
-
-  private bindingByName(name: string | undefined): BindingState | undefined {
-    return name === undefined ? undefined : this.bindings.find(binding => equalName(binding.command, name));
-  }
-
-  private writeBindings(): void {
-    const host = this.bindingHost("write bindings");
-    for (const binding of this.bindings) {
-      if (binding.first !== -1) {
-        host.setBinding(binding.first, binding.command);
-        if (binding.second !== -1) host.setBinding(binding.second, binding.command);
-      }
-    }
-    this.options.commands.append("in_restart\n", this.options.commandContext);
-  }
-
-  private executeText(text: string): void {
-    if (this.options.context.kind === "cgame") throw new Error("UI executeText is unavailable in cgame context");
-    this.options.commands.append(text, this.options.commandContext);
-  }
-
-  private handleBindKey(item: ItemState, key: number, down: boolean): boolean {
-    if (rectContains(item.window.rect, this.displayCursorX, this.displayCursorY) && !this.waitingForKey) {
-      if (down && (key === KeyCode.Mouse1 || key === KeyCode.Enter)) {
-        this.waitingForKey = true;
-        this.bindingItem = item;
-      }
-      return true;
-    }
-    if (!this.waitingForKey || this.bindingItem === undefined) return true;
-    if ((key & KEY_CHAR_FLAG) !== 0) return true;
-    if (key === KeyCode.Escape) { this.waitingForKey = false; return true; }
-    const target = this.bindingByName(item.definition.cvar);
-    if (key === KeyCode.Backspace) {
-      if (target !== undefined) { target.first = -1; target.second = -1; }
-      this.writeBindings();
-      this.waitingForKey = false;
-      this.bindingItem = undefined;
-      return true;
-    }
-    if (key === 96) return true;
-    if (key !== -1) {
-      for (const binding of this.bindings) {
-        if (binding.second === key) binding.second = -1;
-        if (binding.first === key) { binding.first = binding.second; binding.second = -1; }
-      }
-    }
-    if (target !== undefined) {
-      if (key === -1) {
-        const host = this.bindingHost("clear binding");
-        if (target.first !== -1) { host.setBinding(target.first, ""); target.first = -1; }
-        if (target.second !== -1) { host.setBinding(target.second, ""); target.second = -1; }
-      } else if (target.first === -1) target.first = key;
-      else if (target.first !== key && target.second === -1) target.second = key;
-      else {
-        const host = this.bindingHost("replace binding");
-        host.setBinding(target.first, "");
-        host.setBinding(target.second, "");
-        target.first = key;
-        target.second = -1;
-      }
-    }
-    this.writeBindings();
-    this.waitingForKey = false;
-    return true;
   }
 
   private async runCapture(): Promise<void> {
@@ -2523,14 +2291,21 @@ export class UiRuntime {
     let buffer = "", length = 0, position = 0, width = 0;
     let lineBreak = 0, nextLine = 0, lineWidth = 0;
     let y = item.definition.textAlignY;
+    // The source measures the growing buffer every character; the width is only read at a break character (from the previous measurement), once a break exists, and at a line end, so earlier measurements are deferred.
+    let measured = "", stale = false;
+    const measure = (value: string): number => textWidth(this.options.fonts, value, item.definition.textScale, 0);
     while (true) {
       const character = text.charAt(position);
-      if (character === " " || character === "\t" || character === "\n" || character === "") {
+      const atBreak = character === " " || character === "\t" || character === "\n" || character === "";
+      if (atBreak) {
         lineBreak = length;
         nextLine = position + 1;
+        if (stale) width = measure(measured);
         lineWidth = width;
       }
-      width = textWidth(this.options.fonts, buffer, item.definition.textScale, 0);
+      stale = false;
+      if (lineBreak !== 0 || character === "\n" || character === "") width = measure(buffer);
+      else { measured = buffer; stale = true; }
       if ((lineBreak !== 0 && width > item.window.rect.width) || character === "\n" || character === "") {
         if (length !== 0) {
           let x = item.textRect.x;
@@ -2577,13 +2352,7 @@ export class UiRuntime {
     if (edit === undefined) throw new Error("Item_TextField_Paint dereferences NULL edit data");
     const options = { x: f(f(item.textRect.x + item.textRect.width) + offset), y: item.textRect.y, scale: item.definition.textScale,
       color, text: value.slice(edit.paintOffset), limit: edit.maxPaintChars, style: item.definition.textStyle };
-    if ((item.window.flags & UiWindowFlag.HasFocus) !== 0 && this.editingItem !== undefined) {
-      textPaintWithCursor(draw, this.options.fonts, options, {
-        position: (item.cursorPosition - edit.paintOffset) | 0,
-        character: this.bindingHost("paint edit cursor").getOverstrike() ? 95 : 124,
-        time: this.realTime,
-      });
-    } else textPaint(draw, this.options.fonts, { ...options, adjust: 0 });
+    textPaint(draw, this.options.fonts, { ...options, adjust: 0 });
   }
 
   private paintYesNo(item: ItemState, draw: Draw2D): void {
@@ -2629,30 +2398,17 @@ export class UiRuntime {
       text, adjust: 0, limit: 0, style: item.definition.textStyle });
   }
 
-  private bindingText(item: ItemState): string {
-    const host = this.bindingHost("paint binding");
-    const binding = this.bindingByName(item.definition.cvar);
-    if (binding === undefined || binding.first === -1) return "???";
-    const first = quakeString(host.keyName(binding.first)).toUpperCase().slice(0, 31);
-    if (binding.second === -1) return first;
-    const second = quakeString(host.keyName(binding.second)).toUpperCase().slice(0, 31);
-    return `${first} or ${second}`.slice(0, 31);
-  }
-
   private paintBind(item: ItemState, draw: Draw2D): void {
     const edit = item.definition.editData();
     const maxChars = edit?.maxPaintChars ?? 0;
     const cvar = item.definition.cvar;
     if (cvar !== undefined) this.cvarValue(cvar);
-    let color = this.valueColor(item);
-    if ((item.window.flags & UiWindowFlag.HasFocus) !== 0 && this.bindingItem === item) {
-      const menu = this.menuFor(item);
-      color = this.lerpColor(menu.definition.focusColor, { x: f(.8), y: 0, z: 0, w: f(.8) });
-    }
+    const color = this.valueColor(item);
+    // "FIXME" is id's literal in Item_Bind_Paint (ui_shared.c) for a bind item without text; it is not a leftover.
     let x = item.textRect.x, text = "FIXME";
     if (item.definition.text !== undefined) {
       this.paintText(item, draw);
-      text = this.bindingText(item);
+      text = "???";
       x = f(f(item.textRect.x + item.textRect.width) + 8);
     }
     textPaint(draw, this.options.fonts, { x, y: item.textRect.y, scale: item.definition.textScale, color,
@@ -2754,7 +2510,7 @@ export class UiRuntime {
     const thumb = Math.min(f(this.listThumbDrawPosition(item)), f(f(y - SCROLLBAR_SIZE) - 1));
     draw.drawHandlePic({ x, y: thumb, width: SCROLLBAR_SIZE, height: SCROLLBAR_SIZE }, this.options.widgetAssets.scrollBarThumb);
     size = f(item.window.rect.height - 2); x = f(item.window.rect.x + 1); y = f(item.window.rect.y + 1);
-    const imageStyle = list.elementStyle === 1;
+    const imageStyle = list.elementStyle === 1, columns = list.columns;
     for (let i = f(list.startPosition); i < count; i = f(i + 1)) {
       if (imageStyle) {
         const picture = await this.options.feeder.image(item.special, qvmFloatToInt(i)); this.opened();
@@ -2763,9 +2519,9 @@ export class UiRuntime {
         list.endPosition++;
         size = f(size - list.elementWidth);
       } else {
-        if (list.columns.length > 0) {
-          for (let columnIndex = 0; columnIndex < list.columns.length; columnIndex++) {
-            const column = list.columns[columnIndex], entry = await this.options.feeder.item(item.special, qvmFloatToInt(i), columnIndex);
+        if (columns.length > 0) {
+          for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+            const column = columns[columnIndex], entry = await this.options.feeder.item(item.special, qvmFloatToInt(i), columnIndex);
             this.opened();
             if (column === undefined || entry === undefined) continue;
             if (entry.picture !== undefined) draw.drawHandlePic({ x: f(f(x + 4) + f(column.position)), y: f(f(y - 1) + f(list.elementHeight / 2)), width: f(column.width), height: f(column.width) }, entry.picture);
@@ -2791,6 +2547,8 @@ export class UiRuntime {
     return this.options.cvarValue === undefined ? this.options.cvars.get(name)?.numericValue ?? 0 : this.options.cvarValue(name);
   }
 
+  private readonly cvarScriptTokens = new Map<string, (string | null)[]>();
+
   private itemPassesCvar(item: ItemState, purpose: "enable" | "show"): boolean {
     const flag = purpose === "enable" ? 1 : 4;
     if ((item.definition.cvarFlags & (flag | flag << 1)) === 0) return true;
@@ -2798,10 +2556,18 @@ export class UiRuntime {
     if (script === undefined || script.text.length === 0 || item.definition.cvarTest === undefined
       || item.definition.cvarTest.length === 0) return true;
     const current = this.cvarBuffer(item.definition.cvarTest);
-    const cursor = new RuntimeScriptCursor(script.text, this.sourceParser, this.definitions.memory);
-    while (true) {
-      const value = cursor.string();
-      if (value === undefined) break;
+    let tokens = this.cvarScriptTokens.get(script.text);
+    if (tokens === undefined) {
+      tokens = [];
+      const cursor = new RuntimeScriptCursor(script.text, this.sourceParser, this.definitions.memory);
+      while (true) {
+        const value = cursor.string();
+        if (value === undefined) break;
+        tokens.push(value);
+      }
+      this.cvarScriptTokens.set(script.text, tokens);
+    }
+    for (const value of tokens) {
       if (value === null) throw new Error("Item_EnableShowViaCvar dereferences NULL token after String_Alloc");
       if (value !== ";" && equalName(value, current)) return (item.definition.cvarFlags & flag) !== 0;
     }

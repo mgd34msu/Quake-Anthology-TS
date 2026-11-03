@@ -5,8 +5,7 @@ import { ConfigStore } from "../../../src/settings/config.ts";
 import { encodePng } from "../../../src/formats/images/png-encoder.ts";
 import { expect, spyOn, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -24,6 +23,8 @@ import { readSaveImage } from "../../../src/persistence/save-image.ts";
 import { SourceBotDirector } from "../../../src/bots/behavior/index.ts";
 import { userProductDirectory } from "../../../src/content/user-data.ts";
 import { providerTiming } from "../../../src/app/bootstrap/simulation/players.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 
 async function captureArtifact(name: string, width: number, height: number, pixels: Uint8Array): Promise<void> {
@@ -35,7 +36,7 @@ async function captureArtifact(name: string, width: number, height: number, pixe
 
 const corpus = testCorpusRoot();
 test.skipIf(!existsSync(join(corpus, "q3a/missionpack/pak0.pk3")))("native Team Arena preset launches authored teams, restores without setup replay, and presents transactional match progression", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "team-arena-application-"));
+  const directory = await tempDirectory("team-arena-application-");
   const parsed = parseApplicationCommand(["--content-root", corpus, "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", directory]);
   if (parsed.kind !== "menu" && parsed.kind !== "run") throw new Error("Missing launch options");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });

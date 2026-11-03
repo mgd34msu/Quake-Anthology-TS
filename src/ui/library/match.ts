@@ -24,7 +24,7 @@ export function registerMatchMenu(controller: NativeUiController, command: (name
         rect: { x: 64, y: 402, width: 496, height: 30 }, enabled: true, visible: true, select: (_seat, value) => { skill = value; return undefined; } },
       button("addbot", "Add bot", 10, () => command("addbot", [bot, skill, team]), bot.trim() !== ""),
       button("removebot", "Remove named bot", 11, () => command("kick", [bot]), bot.trim() !== ""),
-      button("back", "Back", 10, () => controller.closeMenu()),
+      { ...button("back", "Back", 10, () => controller.closeMenu()), rect: { x: 64, y: 414, width: 496, height: 30 } },
     ], open: () => undefined, close: () => undefined }));
   return { root, dispose };
 }

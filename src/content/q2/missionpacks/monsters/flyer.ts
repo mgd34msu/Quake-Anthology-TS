@@ -46,7 +46,7 @@ export function createRogueFlyerDefinitions(monsters: Q2Monsters, source: Q2Miss
     },
     pain(context, reaction) { return monsterMass(context) === 50 ? flyerDefinition.pain?.(context, reaction) : undefined; },
     blocked(context) {
-      if (monsterMass(context) !== 100) return rogueBlockedCheckShot(context, 0.25 + 0.05 * context.game.options.skill, source);
+      if (monsterMass(context) !== 100) return context.game.options.edition === "rerelease" ? false : rogueBlockedCheckShot(context, 0.25 + 0.05 * context.game.options.skill, source);
       kamikazeCheck(context);
       if (context.game.host.actors.isLive(context.entity.actor.id)) {
         returnSlot(context);

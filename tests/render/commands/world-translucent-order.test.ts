@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
-import type { Q2WorldGeometry } from "../../../src/contracts/scene.ts";
+import type { BspEdge, Q2WorldGeometry } from "../../../src/contracts/scene.ts";
 import type { DrawBatch, RendererImage, RendererResourceOwner, SceneCamera } from "../../../src/contracts/render.ts";
 import { anglesToAxis } from "../../../src/core/math.ts";
 import { SceneImageRegistry, SceneTextureLoader, SceneShaderRegistry, WorldScene, perspectiveProjection } from "../../../src/render/scene/index.ts";
@@ -47,5 +47,41 @@ test("legacy translucent world surfaces draw after supplied opaque entity operat
     expect(opaqueIndex).toBeGreaterThanOrEqual(0);
     expect(translucentIndex).toBeGreaterThanOrEqual(0);
     expect(opaqueIndex).toBeLessThan(translucentIndex);
+  } finally { scene.close(); }
+});
+
+test("overlapping legacy translucent surfaces draw back to front", async () => {
+  const identity = createIdentityOwner("world-translucent-sort");
+  const owner: RendererResourceOwner = { identity: Symbol("world-translucent-sort"), session: identity.session, generation: 0 };
+  const images = new SceneImageRegistry(owner), textures = new SceneTextureLoader(images, { read: async () => null });
+  const shaders = new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider("q3:classic:retail:sort"));
+  const bounds = { min: { x: 32, y: -8, z: -8 }, max: { x: 128, y: 8, z: 8 } };
+  const projection = { s: { x: 0, y: 1, z: 0, w: 0 }, t: { x: 0, y: 0, z: -1, w: 0 } };
+  const pane = (x: number) => [{ x, y: -8, z: -8 }, { x, y: 8, z: -8 }, { x, y: 0, z: 8 }];
+  const plane = (x: number) => ({ normal: { x: -1, y: 0, z: 0 }, distance: -x, type: 0, signbits: 0 });
+  const map: Q2WorldGeometry = {
+    kind: "q2-bsp", format: "ibsp38", entities: "",
+    planes: [plane(32), plane(128)],
+    vertices: [...pane(32), ...pane(128)],
+    edges: [0, 3].flatMap((base): BspEdge[] => [{ vertices: [base, base + 1] }, { vertices: [base + 1, base + 2] }, { vertices: [base + 2, base] }]),
+    surfaceEdges: [0, 1, 2, 3, 4, 5],
+    nodes: [], leaves: [{ contents: 0, mergedContents: 0, cluster: -1, area: 0, bounds, faces: { first: 0, count: 2 }, brushes: { first: 0, count: 0 } }],
+    leafFaces: [0, 1], leafBrushes: [],
+    textureInfo: [{ projection, name: "glass", flags: 32, value: 0, material: "", next: null }],
+    faces: [0, 1].map(index => ({ plane: index, back: false, edges: { first: index * 3, count: 3 }, textureInfo: 0, styles: [255, 255, 255, 255], lightingOffset: null })),
+    brushes: [], brushSides: [], models: [{ bounds, origin: { x: 0, y: 0, z: 0 }, headnode: -1, faces: { first: 0, count: 2 } }],
+    areas: [], areaPortals: [], visibility: null,
+    lighting: { kind: "rgb8", source: "bsp", samples: new Uint8Array() }, lightgrid: null, decoupledLightmaps: null, extensions: [],
+  };
+  const scene = await WorldScene.load(map, shaders);
+  try {
+    const camera: SceneCamera = { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
+      viewport: { x: 0, y: 0, width: 32, height: 32 }, projection: perspectiveProjection(90, 90, 4096), clip: { kind: "none" } };
+    const input: WorldViewInput = { camera, target: { kind: "seat", seat: identity.seat(0) }, time: { kind: "seconds", value: 0 } };
+    const xs = scene.prepareView(input).view.operations.flatMap(operation => operation.kind === "draw" ? operation.batches : [])
+      .filter(batch => batch.state.blend.source === "src-alpha" && batch.state.depthWrite === false)
+      .flatMap(batch => batch.vertices.map(vertex => vertex.position.w));
+    expect(xs.length).toBeGreaterThan(0);
+    expect(xs[0]).toBeGreaterThan(xs[xs.length - 1] ?? 0);
   } finally { scene.close(); }
 });

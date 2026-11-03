@@ -39,8 +39,11 @@ export function registerRogueTime(game: Q1EntityServices): undefined {
     const stop = g.create("time_stop_shake"); stop.target = e.target; return later(g, stop, 0.7, "rogue:time_stop_shake");
   } });
   game.named.register("rogue:time_fall", { action: (g, e) => {
-    const body = g.body(e); if (e.number("pain_finished") === 0) { if (body.origin.z < -20) { g.effect("lava-splash", vadd(body.origin, { x: 0, y: 0, z: -80 })); number(e, "pain_finished", 1); } }
-    else if (g.host.random() < 0.3) g.effect("explosion", body.origin);
+    const body = g.body(e);
+    if (e.number("pain_finished") === 0) {
+      if (body.origin.z < -20) { g.effect("lava-splash", vadd(body.origin, { x: 0, y: 0, z: -80 })); number(e, "pain_finished", 1); }
+      else if (g.host.random() < 0.3) g.effect("explosion", body.origin);
+    }
     g.setBody(e, { velocity: { ...body.velocity, z: body.velocity.z - 5 } }); return later(g, e, 0.1, "rogue:time_fall");
   } });
   game.named.register("rogue:time_crash", { action: g => crashTimeMachine(g), use: g => crashTimeMachine(g), pain: g => crashTimeMachine(g), die: g => crashTimeMachine(g) });

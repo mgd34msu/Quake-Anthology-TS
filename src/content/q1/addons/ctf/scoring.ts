@@ -30,6 +30,13 @@ export function registerCombat(state: CtfState): undefined {
 export function scoreDeath(state: CtfState, victim: ActorId, attacker: ActorId | null): undefined {
   const { game, services } = state;
   if (!game.isPlayer(victim)) return undefined;
+  // EXPERT CTF: a dead carrier clears the opposing players' carrier-hurt timers.
+  if (state.carried(victim) !== null) for (const player of game.host.players()) if (state.team(player) !== state.team(victim)) state.set(player, "lastHurtCarrier", -10);
+  // client.qc ClientObituary: a telefrag credits the owner of the teledeath and charges the victim nothing.
+  if (attacker !== null && game.host.classname(attacker) === "teledeath") {
+    const owner = game.entity(attacker)?.owner ?? null; if (owner !== null && game.isPlayer(owner)) services.addScore(owner, 1);
+    return undefined;
+  }
   if (attacker === null || !game.isPlayer(attacker) || sameActor(attacker, victim)) { services.addScore(victim, -1); return undefined; }
   const team = state.team(attacker), teammates = friendly(state, victim, attacker);
   if (state.teamplay === 2 && team !== null && team === state.team(victim)) { services.addScore(attacker, -1); return undefined; }

@@ -1,4 +1,5 @@
 import { prepareNativeQ2Map } from "./simulation/native-q2-map.ts";
+import { cacheEvictingRejection } from "./cached-promise.ts";
 import { prepareApplicationMods } from "./mod-selection.ts";
 import { prepareApplicationQvmGrapple, type PreparedQvmGrapple } from "./qvm-grapple-selection.ts";
 import { prepareApplicationWeaponBehavior, prepareConfiguredApplicationRecipe, type PreparedWeaponBehavior } from "./weapon-behavior-selection.ts";
@@ -9,7 +10,7 @@ import { prepareQ2Guest } from "./simulation/q2-native-world.ts";
 import type { DemoFamily } from "./demo-playback.ts";
 export interface ApplicationContentSource { readonly kind: "recorded" | "unified"; readonly family: DemoFamily; }
 import { mkdir } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { findContentPath } from "../../content/mounts/paths.ts";
 import { userProductDirectory } from "../../content/user-data.ts";
 import { defaultAddonContentRoots, defaultUserContentRoot } from "../../content/user-data.ts";
@@ -18,7 +19,7 @@ import { assertQ3GuestRecipe, prepareQ3Game } from "./simulation/q3/guest-artifa
 import type { PreparedQ3Game } from "./simulation/q3/guest-artifact.ts";
 import { resolveLaunchResource, prepareLaunchMountPlan } from "../../content/catalog/launch.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
-import type { ContentId, ResolvedResourceReference, ExecutableRecipe, ExecutionSelection, GameFamily, ProviderReference, LaunchChoice, ProviderTiming } from "../../contracts/content.ts";
+import type { ContentId, ContentMount, ResolvedResourceReference, ExecutableRecipe, ExecutionSelection, GameFamily, ProviderReference, LaunchChoice, ProviderTiming } from "../../contracts/content.ts";
 import { createMountPlanId, createRecipeId } from "../../contracts/content.ts";
 import type { Q3WorldGeometry } from "../../contracts/scene.ts";
 import { discoverInstalledContent, remoteContentProduct, remoteContentSelection, expectedProducts, nativeEquipment, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
@@ -137,7 +138,6 @@ export function applicationSourceSelection(catalog: InstalledCatalog, options: P
   const rerelease = program.edition === "rerelease";
   const rules = options.rules ?? (family === "q2" && (program.campaign === "ctf" || program.campaign === "lmctf") ? program.campaign
     : family === "q3" && (program.campaign === "ctf" || program.campaign === "lrctf") ? "ctf" : "standard");
-{}
   if (rules === "horde" && family !== "q1" && family !== "q2" && family !== "q3") throw new Error("Horde requires a Quake, Quake II or Quake III game provider");
   // Tag/DeathBall ship their tokens/models in Ground Zero content, so the
   // match role mounts the same-edition Rogue product on any Q2 program.
@@ -379,8 +379,7 @@ export class LoadedApplicationContent {
       this.opened.add(opened);
       return opened;
     })();
-    this.scoped.set(content, pending);
-    return pending;
+    return cacheEvictingRejection(this.scoped, content, pending);
   }
 
   async close(): Promise<void> {
@@ -426,6 +425,28 @@ async function openMapContent(catalog: InstalledCatalog, recipe: ExecutableRecip
   const mounts = await catalog.mountsFor(recipe.map.geometryContent);
   return openMountPlan({ id: createMountPlanId("map-sidecars", Buffer.from(recipe.map.geometryContent).toString("hex")),
     mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] }, q3Product?.restriction.kind === "demo" ? { q3Restriction: "demo" } : {});
+}
+
+/** A restored recipe may only mount what the installed catalog offers; saved host paths and digests are never trusted on their own. */
+async function assertRecipeInstalled(catalog: InstalledCatalog, recipe: ExecutableRecipe): Promise<void> {
+  const offered = new Map<ContentId, readonly ContentMount[]>();
+  const known = async (content: ContentId): Promise<readonly ContentMount[]> => {
+    const cached = offered.get(content);
+    if (cached !== undefined) return cached;
+    const mounts = await catalog.mountsFor(content).catch(() => []);
+    offered.set(content, mounts);
+    return mounts;
+  };
+  const same = (saved: ContentMount, installed: ContentMount): boolean => saved.identity.id === installed.identity.id && saved.kind === installed.kind
+    && (saved.kind === "loose" ? installed.kind === "loose" && resolve(saved.rootPath) === resolve(installed.rootPath)
+      : installed.kind === "archive" && resolve(saved.archivePath) === resolve(installed.archivePath) && saved.archiveDigest === installed.archiveDigest);
+  for (const mount of recipe.mounts.mounts)
+    if (!(await known(mount.identity.content)).some(installed => same(mount, installed)))
+      throw new Error(`Saved content mount ${mount.identity.id} is not offered by the installed catalog`);
+  const mountIds = new Set(recipe.mounts.mounts.map(mount => mount.identity.id));
+  for (const module of recipe.execution)
+    if ("artifact" in module && !mountIds.has(module.artifact.provenance.mount.identity.id))
+      throw new Error(`Saved execution module ${module.owner.provider} uses a mount outside the restored content`);
 }
 
 export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe, pure?: PureMountPolicy, installedCatalog?: InstalledCatalog, presentationSource?: ApplicationContentSource): Promise<LoadedApplicationContent> {
@@ -481,6 +502,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     }
     if (module.kind !== "typescript") throw new Error(`Application cannot execute ${module.kind} ${module.role} module ${module.owner.provider} (${module.artifact.requestedPath}): this executor is not joined to the shared simulation. Select a supported TypeScript execution module.`);
   }
+  if (restoredRecipe !== undefined && pure === undefined) await assertRecipeInstalled(catalog, recipe);
   const mounts = await openMountPlan(recipe.mounts, mountOptions);
   try {
     if (pure !== undefined) {
@@ -522,7 +544,6 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
       using sourceContent = mounts.borrowMountPlan(plan) ?? await openMountPlan(plan);
       prepared = await prepareQuakeCSource(execution, mounts, world.entities, sourceContent);
     } else if (presentationSource?.kind !== "unified" && execution?.kind === "quakec") prepared = await prepareQuakeCSource(execution, mounts, world.entities);
-{}
     const q3Execution = recipe.execution.find(module => module.kind === "qvm" && module.role === "server-game");
     const q3Prepared = presentationSource?.kind !== "unified" && q3Execution?.kind === "qvm" && q3Execution.role === "server-game" ? await prepareQ3Game(q3Execution, mounts) : null;
     const q2Execution = recipe.execution.find(module => module.kind === "native" && module.role === "server-game");

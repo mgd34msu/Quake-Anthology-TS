@@ -1,5 +1,7 @@
 # Unified feature coverage
 
+> **Dated record, not current status.** A feature inventory from September 2026; the dependency graph it relies on was deleted. The maintained status is [status.md](status.md). Where this page disagrees with it or with the code, trust those. 
+
 This ledger preserves the union of player, server, and runtime functionality identified in the Q1, Q2, and Q3 source assessments. It is a planning artifact, not a certification. No tests or game sessions ran for this document. The source revisions are pinned in [source-assessment.md](source-assessment.md).
 
 All requested runtime and game features remain mandatory for complete single-player and multiplayer support. A missing or partial donor creates implementation work. It does not remove the feature from the target. Splitscreen is one example among these obligations.

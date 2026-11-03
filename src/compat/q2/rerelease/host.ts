@@ -15,6 +15,7 @@ import { integer, pointer, requiredPointer } from "../../../guest/runtime/common
 import type { BodyStateBinding } from "../../../world/actors/body.ts";
 import type { CombatStateBinding, PowerArmorCellBinding } from "../../../world/gameplay/authority.ts";
 import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
+import { SparseGuestMemory } from "../../../guest/core/memory.ts";
 import { edictLayout, fieldOffset, surfaceLayout, traceLayout } from "./layouts.ts";
 import { signature, type GameExportName } from "./api.ts";
 import { RereleaseCoreImports, readGuestString } from "./imports.ts";
@@ -86,6 +87,8 @@ export interface RereleaseQ2HostOptions extends Omit<RereleaseModuleOptions, "in
   /** Explicit component capability policy runs before imports can publish source side effects. */
   readonly interceptImport?: (call: RereleaseImportCall, host: RereleaseQ2GuestHost) => GuestCallResult | undefined;
 }
+
+const inuseOffset = fieldOffset(edictLayout, "inuse");
 
 /** Source bytes back the shared actor authorities. This class owns no simulation clock. */
 export class RereleaseQ2GuestHost {
@@ -205,7 +208,22 @@ export class RereleaseQ2GuestHost {
   reconcile(): void {
     const table = this.module.entities();
     for (const [slot, entry] of this.#lifetimes) if (slot >= table.count) { this.#lifetimes.delete(slot); if (this.options.engine.actors.isLive(entry.actor.id)) this.options.engine.actors.release(entry.actor); }
-    for (let slot = 0; slot < table.count; slot++) this.actor(table.atSlot(slot));
+    const semantics = this.options.semantics, memory = this.module.memory;
+    const scalar = SparseGuestMemory.managed(memory) ? memory : null;
+    const direct = scalar !== null && semantics.project === undefined && semantics.generation === undefined;
+    const base = Number(table.base.byteOffset);
+    for (let slot = 0; slot < table.count; slot++) {
+      // A slot whose state cannot have changed an actor binding needs no view: one scalar read decides it.
+      if (direct && this.foreignActors?.engaged(slot) !== true) {
+        const address = base + slot * table.strideBytes;
+        const inuse = scalar?.scalarRead(address + inuseOffset, 1) ?? -1;
+        const entry = this.#lifetimes.get(slot);
+        if (inuse === 0 && entry === undefined && !this.#reservedClients.has(slot)) continue;
+        if (inuse > 0 && entry !== undefined && Number(entry.address) === address && this.options.engine.actors.isLive(entry.actor.id)
+          && !this.#retiredInputClients.has(slot)) continue;
+      }
+      this.actor(table.atSlot(slot));
+    }
   }
   /** Bot registration indexes the same live actors and raw server records. */
   botEntities(): readonly RawEntityView[] { return [...this.#botEntities.values()]; }
@@ -372,6 +390,7 @@ export class RereleaseQ2GuestHost {
         if (maximum < 0n || maximum > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Invalid Q2 BoxEdicts capacity");
         if (maximum > 0n && list === null) throw new Error("Q2 BoxEdicts output is null with nonzero capacity");
         let count = 0n;
+        // The candidate list is a snapshot, so filters may link or unlink entities (M_CheckDodge reaches monsterinfo.dodge from here).
         for (const candidate of this.options.spatial.boxEdicts(min, max, area)) {
           const address = this.addressForActor(candidate);
           let outcome = 0;
@@ -404,7 +423,6 @@ export class RereleaseQ2GuestHost {
         return this.encodeTrace(trace);
       }
       case "linkentity": case "unlinkentity": {
-        if (this.#filterDepth !== 0) throw new Error("Q2 BoxEdicts filter cannot modify world links");
         const view = this.module.entities().fromPointer(requiredPointer(args, 0));
         if (view.slot === 0) return { kind: "void" };
         if (this.foreignActors?.lookup(view) !== undefined) return { kind: "void" };
@@ -431,7 +449,6 @@ export class RereleaseQ2GuestHost {
         return { kind: "void" };
       }
       case "setmodel": {
-        if (this.#filterDepth !== 0) throw new Error("Q2 BoxEdicts filter cannot modify world links");
         const view = this.module.entities().fromPointer(requiredPointer(args, 0));
         const name = readGuestString(memory, requiredPointer(args, 1));
         memory.writeInt32(this.#at(view, "s.modelindex"), this.options.services.resourceIndex("model", name));

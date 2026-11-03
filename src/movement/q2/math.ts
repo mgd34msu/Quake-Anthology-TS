@@ -2,7 +2,16 @@
 import type { NumericOperations } from "../../contracts/numeric.ts";
 import { axes, type Vec3, type Vec4 } from "./types.ts";
 
-export function createMovementMath(n: NumericOperations, edition: "classic" | "rerelease" = "classic") {
+export type MovementMath = ReturnType<typeof buildMovementMath>;
+const classicMath = new WeakMap<NumericOperations, MovementMath>(), rereleaseMath = new WeakMap<NumericOperations, MovementMath>();
+/** Operations are cached per numeric profile, so the helper set is built once per profile and edition. */
+export function createMovementMath(n: NumericOperations, edition: "classic" | "rerelease" = "classic"): MovementMath {
+  const cache = edition === "classic" ? classicMath : rereleaseMath;
+  let math = cache.get(n);
+  if (math === undefined) { math = buildMovementMath(n, edition); cache.set(n, math); }
+  return math;
+}
+function buildMovementMath(n: NumericOperations, edition: "classic" | "rerelease") {
   const scalar = (value: number): number => n.profile.arithmetic.kind === "donor-binary64" ? value : n.store(value);
   const vec3 = (x = 0, y = 0, z = 0): Vec3 => [n.store(x), n.store(y), n.store(z)];
   const DotProduct = (a: Vec3, b: Vec3): number => n.add(n.add(n.multiply(a[0], b[0]), n.multiply(a[1], b[1])), n.multiply(a[2], b[2]));

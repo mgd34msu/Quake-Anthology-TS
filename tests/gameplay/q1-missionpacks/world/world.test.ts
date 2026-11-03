@@ -1,24 +1,26 @@
 import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../../support/corpus.ts";
+import { corpusFile } from "../../../support/corpus.ts";
 
 import { existsSync } from "node:fs";
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
 import { Q1_DONOR_PROFILE } from "../../../../src/core/numeric.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ1Bsp } from "../../../../src/formats/q1-map/index.ts";
 import { spawnMapActor } from "../../../../src/content/q1/foundation/spawns.ts";
-import { Q1Foundation } from "../../../../src/content/q1/foundation/index.ts";
-import type { Q1Event, Q1FoundationHost } from "../../../../src/content/q1/foundation/index.ts";
+import { Q1Foundation } from "../../../../src/content/q1/foundation/runtime.ts";
+import type { Q1Event, Q1FoundationHost } from "../../../../src/content/q1/foundation/types.ts";
 import { PLAYER_BOUNDS, ZERO, vadd } from "../../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base } from "../../../../src/content/q1/base/index.ts";
-import { registerQ1MissionPack } from "../../../../src/content/q1/missionpacks/index.ts";
-import type { Q1MissionPack } from "../../../../src/content/q1/missionpacks/index.ts";
+import { registerQ1CampaignAddons } from "../../../../src/content/q1/addons/index.ts";
+import { registerQ1MissionPack } from "../../../../src/content/q1/missionpacks/runtime.ts";
+import type { Q1MissionPack } from "../../../../src/content/q1/missionpacks/types.ts";
+import { impulseAuthority } from "../../../support/authority.ts";
 
-const root = `${testCorpusRoot()}/q1/rerelease`;
+const root = corpusFile("q1/rerelease");
 async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "rerelease", deathmatch = 0, teamplay = 0, mapName = pack === "hipnotic" ? "hip1m1" : "r2m8", atWorldSpawn?: (game: Q1Foundation) => undefined) {
   const archive = await openArchive(`${root}/${pack}/pak0.pak`);
   const entry = archive.findEntries(`maps/${mapName}.bsp`)[0]; if (entry === undefined) throw new Error("Retail start.bsp missing");
@@ -32,7 +34,7 @@ async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "
     const model = entity.model.startsWith("*") ? Number(entity.model.slice(1)) : null;
     scene.link(body, { family: "q1", shape: model === null ? { kind: "box" } : { kind: "model", model }, contents: -2, owner: entity.owner, role: entity.solid === "trigger" ? "trigger" : "solid", monster: entity.monster !== null, deadMonster: false }); return undefined;
   } });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: (actor, impulse) => { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, velocity: vadd(body.velocity, impulse) }); return undefined; }, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = impulseAuthority(actors, callbacks, bodies);
   const inventory = new SharedInventoryTable(actors);
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4, trace: request => {
     const trace = scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" }, policy: { kind: "q1", move: request.monsters ? "normal" : "no-monsters", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: request.ignore });
@@ -88,7 +90,7 @@ test.skipIf(!existsSync(`${root}/rogue/pak0.pak`))("Rogue retail ending world, t
   expect(token.owner?.equals(target.actor.id)).toBe(true);
   runtime.world.crashTimeMachine(); expect(machine.movement).toBe("fly"); expect(machine.solid).toBe("none");
   think(machine); expect(game.body(machine).velocity.z).toBe(-55);
-  expect(game.capture()).toBeDefined(); actors.close();
+  expect(game.capture().entities).toHaveLength(game.entities.size); actors.close();
 });
 
 test.skipIf(!existsSync(`${root}/hipnotic/pak0.pak`))("Hipnotic static wallsprite preserves source angle correction and wall offset", async () => {
@@ -133,4 +135,11 @@ test.skipIf(!existsSync(`${root}/rogue/pak0.pak`))("Rogue authored candle and so
       origin: { x: 1.125, y: 2.25, z: 3.5 }, angles: ZERO });
     expect([...state.game.entities.values()].some(entity => entity.classname === "light_lantern" || entity.classname === "light_candle")).toBe(false);
   } finally { state.actors.close(); }
+});
+
+test.skipIf(!existsSync(`${root}/rogue/pak0.pak`))("Rogue accepts the MG1 horde adjunct without re-registering its owned spawn handlers", async () => {
+  const { game, base, actors } = await session("rogue");
+  const services = { emit: () => undefined, isMonster: () => false, cvar: () => 0, setCvar: () => undefined };
+  expect(() => game.adjoin(() => registerQ1CampaignAddons(base, "mg1", services))).not.toThrow();
+  actors.close();
 });

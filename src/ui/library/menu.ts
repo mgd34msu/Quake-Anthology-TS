@@ -1,5 +1,6 @@
 import type { UiControl, UiMenuId } from "../../contracts/ui.ts";
 import type { NativeUiController } from "../common/controller.ts";
+import { buttonControl } from "../common/controls.ts";
 
 export interface LibraryEntry { readonly id: string; readonly label: string; readonly detail?: string; readonly unavailable?: string; }
 export interface LibraryMenuService {
@@ -27,9 +28,8 @@ export function registerLibraryMenu(controller: NativeUiController, id: UiMenuId
     }
     const entries = service.entries().filter(entry => `${entry.label} ${entry.detail ?? ""}`.toLowerCase().includes(query.toLowerCase()));
     if (!entries.some(entry => entry.id === selected)) selected = entries[0]?.id ?? null;
-    const button = (suffix: string, label: string, x: number, y: number, width: number, action: () => void, enabled = true): UiControl => ({
-      id: `ui:library:${suffix}`, kind: "button", label, rect: { x, y, width, height: 28 }, enabled, visible: true,
-      activate: () => { action(); return undefined; } });
+    const button = (suffix: string, label: string, x: number, y: number, width: number, action: () => void, enabled = true): UiControl =>
+      buttonControl(`ui:library:${suffix}`, label, { x, y, width, height: 28 }, action, enabled);
     return { id, title, fullScreen: true, controls: [
       { id: "ui:library:search", kind: "text-entry", label: "Search", text: query, maximumLength: 80,
         rect: { x: 48, y: 88, width: 544, height: 28 }, enabled: true, visible: true,

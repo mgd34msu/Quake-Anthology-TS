@@ -7,7 +7,9 @@ import type { ModClientPresentationSource } from "../../../world/session/mod-cli
 import type { PreparedMod } from "../../../world/session/mods.ts";
 import { borrowModFileMounts } from "../../../world/session/mod-files.ts";
 import { resolveQvmArtifact } from "../../../compat/qvm/artifacts.ts";
-import { QvmModProvider, validateQvmMod, validateQvmModCheckpoint } from "../../../compat/qvm/mod-provider.ts";
+import { QvmModProvider } from "../../../compat/qvm/mod-provider.ts";
+import { validateQvmModCheckpoint } from "../../../compat/qvm/mod-checkpoint.ts";
+import { validateQvmMod } from "../../../compat/qvm/mod-validation.ts";
 import { validateQvmModPresentation } from "../../../compat/qvm/mod-presentation.ts";
 import { registerModCallbacks } from "./mod-callbacks.ts";
 

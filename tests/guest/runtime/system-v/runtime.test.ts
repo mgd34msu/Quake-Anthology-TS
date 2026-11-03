@@ -185,7 +185,7 @@ for (const width of [4, 8] satisfies readonly (4 | 8)[]) test(`System V ${width 
   expect(memory.readUint8(guard)).toBe(1);
   expect(call("libstdc++.so.6", "__cxa_guard_acquire", null, [{ kind: "pointer", value: guard }])).toEqual({ kind: "int32", value: 0 });
   call("libc.so.6", "free", null, [{ kind: "pointer", value: allocation }]);
-  expect(() => memory.copy(allocation, 1)).toThrow();
+  expect(() => memory.copy(allocation, 1)).toThrow("range includes unmapped bytes");
 });
 
 for (const name of ["qagamei386.so", "qagamex64.so"] satisfies readonly ("qagamei386.so" | "qagamex64.so")[]) test.skipIf(!existsSync(archivePath))(`real ${name} completes all ELF initializers and finalizers`, async () => {

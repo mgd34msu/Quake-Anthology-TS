@@ -55,20 +55,31 @@ export class SeatSourceHud {
       else this.apply(source);
     }
     for (const poi of this.pois) if (poi.image === null) {
-      poi.image = await icons.load({ kind: "image", resource: { content: poi.content, path: `pics/${poi.path}.pcx` } });
-      const picture = icons.picture(poi.image);
+      const image = await this.loadOptional(icons, poi.content, poi.path.startsWith("/") ? poi.path.slice(1) : `pics/${poi.path}.pcx`);
+      if (image === null) continue;
+      poi.image = image;
+      const picture = icons.picture(image);
       if (picture?.kind === "image") { poi.width = picture.image.width; poi.height = picture.image.height; }
       const palette = (await icons.assets.provider(poi.content)).palette;
       if (palette !== null) poi.tint = { x: (palette.colors[poi.color * 3] ?? 255) / 255, y: (palette.colors[poi.color * 3 + 1] ?? 255) / 255, z: (palette.colors[poi.color * 3 + 2] ?? 255) / 255, w: 1 };
     }
     const damagePicture = this.damagePicture;
     if (damagePicture !== null && damagePicture.image === null) {
-      damagePicture.image = await icons.load({ kind: "image", resource: { content: damagePicture.content, path: "pics/damage_indicator.pcx" } });
-      const picture = icons.picture(damagePicture.image);
+      const image = await this.loadOptional(icons, damagePicture.content, "pics/damage_indicator.pcx");
+      const picture = image === null ? undefined : icons.picture(image);
+      damagePicture.image = image;
       if (picture?.kind === "image") { damagePicture.width = picture.image.width; damagePicture.height = picture.image.height; }
     }
     const pickup = this.pickup;
-    if (pickup !== null && pickup.icon === null && pickup.path !== "") pickup.icon = await icons.load({ kind: "image", resource: { content: pickup.content, path: `pics/${pickup.path}.pcx` } });
+    if (pickup !== null && pickup.icon === null && pickup.path !== "") pickup.icon = await this.loadOptional(icons, pickup.content, pickup.path.startsWith("/") ? pickup.path.slice(1) : `pics/${pickup.path}.pcx`);
+  }
+  private readonly missingPictures = new Set<string>();
+  /** Pictures named by the game or server are cosmetic: an absent one draws nothing instead of failing the frame. */
+  private async loadOptional(icons: HudAssets, content: ContentId, path: string): Promise<ResourceId | null> {
+    const key = `${content}/${path}`;
+    if (this.missingPictures.has(key)) return null;
+    try { return await icons.load({ kind: "image", resource: { content, path } }); }
+    catch { this.missingPictures.add(key); return null; }
   }
   points(): readonly HudPointOfInterest[] {
     return this.pois.flatMap(poi => poi.image === null ? [] : [{ id: poi.key, origin: poi.origin, image: poi.image, width: poi.width, height: poi.height,

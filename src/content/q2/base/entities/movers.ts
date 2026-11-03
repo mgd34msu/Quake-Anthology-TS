@@ -26,7 +26,7 @@ export interface Q2BaseMoversCheckpoint {
 
 function loop(entity: Q2Entity, game: Q2GameServices, path: string, start: boolean): undefined {
   return game.host.emit({ kind: "sound", actor: entity.actor.id, origin: game.body(entity).origin, path,
-    channel: 2, volume: 1, attenuation: 3, reliable: false, loop: start ? "start" : "stop" });
+    channel: 2, volume: 1, attenuation: game.options.edition === "rerelease" ? 3 : 1, reliable: false, loop: start ? "start" : "stop" });
 }
 
 function portals(entity: Q2Entity, game: Q2GameServices, open: boolean): undefined {
@@ -140,7 +140,7 @@ export class Q2BaseMoverEntities {
   private readonly secretTouch: Q2Touch = (self, game, contact) => {
     const state = this.secret(self);
     if (!game.host.isPlayer(contact.other) || state.messageTime > game.host.now()) return undefined;
-    state.messageTime = game.host.now() + 5; game.host.emit({ kind: "centerprint", actor: contact.other, text: self.message }); return game.sound(self, "misc/talk1.wav", 0);
+    state.messageTime = game.host.now() + 5; game.host.emit({ kind: "centerprint", actor: contact.other, text: self.message }); return game.sound(game.entity(contact.other) ?? self, "misc/talk1.wav", 0);
   };
   private readonly secretBlocked: NonNullable<Q2Entity["blocked"]> = (self, game, other) => {
     if (!game.host.isPlayer(other) && !game.host.isMonster(other)) { crush(self, game, other); return undefined; }
@@ -271,7 +271,7 @@ export class Q2BaseMoverEntities {
         else { entity.visible = false; game.solid(entity, "none"); entity.use = this.objectUse; }
         if ((entity.spawnflags & 2) !== 0) entity.effects |= 0x1000;
         if ((entity.spawnflags & 4) !== 0) entity.effects |= 0x2000;
-        entity.clipMask = 0x2010003; game.move(entity, { bounds }); game.show(entity);
+        entity.clipMask = 0x2020003; game.move(entity, { bounds }); game.show(entity);
         return true;
       }
       default: return false;

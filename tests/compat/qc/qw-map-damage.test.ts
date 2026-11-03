@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { afterEach, expect } from "bun:test";
+import { corpusTest, corpusFile } from "../../support/corpus.ts";
 
 import { readFileSync } from 'node:fs';
 import { loadQcProgram, QcEntityMemory, QcMachine, classicQcEntityLayout, createQcBuiltins, createQcSourceSlotStorage } from '../../../src/compat/qc/index.ts';
@@ -9,16 +9,22 @@ import { SessionActorRegistry, SourceActorSlots, quakeEdictLifetime } from '../.
 import { Q1_DONOR_PROFILE, createNumericOperations } from '../../../src/core/numeric.ts';
 import type { Id1PhysicsCallback } from '../../../src/content/q1/quakec/id1-environment.ts';
 import { Id1Environment } from '../../../src/content/q1/quakec/id1-environment.ts';
+const test = corpusTest("q1/qw/qwprogs.dat");
+
+const registries: SessionActorRegistry[] = [];
+afterEach(() => { for (const registry of registries.splice(0)) registry.close(); });
 
 test('native QW teledeath executes both invulnerability reversals with exact victim provenance', () => {
-  const program = loadQcProgram(readFileSync(`${testCorpusRoot()}/q1/qw/qwprogs.dat`));
+  const program = loadQcProgram(readFileSync(corpusFile("q1/qw/qwprogs.dat")));
   const entities = new QcEntityMemory(classicQcEntityLayout(program), 8, 4);
   const actors = new SessionActorRegistry(createIdentityOwner('qw-map-damage'));
+  registries.push(actors);
   const slots = new SourceActorSlots(actors, { provider: 'test:qc', capacity: 8, lifetime: quakeEdictLifetime(1),
     storage: createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: 100 }),
     now: () => ({ kind: 'seconds', value: 10 }), unlink: () => undefined, exhausted: () => { throw new Error('No slots'); } });
   slots.bindExisting(0, 'test:world');
-  const owner = slots.bindExisting(1, 'test:player'), trigger = slots.bindExisting(2, 'test:trigger'), other = slots.bindExisting(3, 'test:player');
+  slots.bindExisting(1, 'test:player');
+  const trigger = slots.bindExisting(2, 'test:trigger'), other = slots.bindExisting(3, 'test:player');
   const host = new Map<QcHostBuiltinName, QcBuiltin>([['infokey', vm => { vm.returnInt(0); return undefined; }], ['remove', () => { slots.free(trigger); return undefined; }]]);
   const observed: { readonly target: number; readonly cause: string; readonly statement: number }[] = [];
   let callback: Id1PhysicsCallback = { kind: 'touch', actor: trigger.id, other: other.id, functionIndex: program.functionNamed('tdeath_touch').index };
@@ -68,5 +74,4 @@ test('native QW teledeath executes both invulnerability reversals with exact vic
   expect(observed).toEqual([{ target: 3, cause: '', statement: 10926 }]);
   expect(entities.at(3).float(field('health'))).toBe(80);
   expect(actors.isLive(trigger.id)).toBe(false);
-  expect(owner.id.equals(other.id)).toBe(false);
 });

@@ -16,12 +16,19 @@ export interface NativeUiArt {
   close(): void;
 }
 /** The application supplies its installed-asset reader; the renderer owns all uploads. */
-export async function loadNativeUiArt(font: ResourceId, images: SceneImageRegistry, read: (path: string) => Promise<ImageLevel>): Promise<NativeUiArt> {
+export interface NativeUiArtSelection {
+  /** The full-screen background and the panel and focus frames. Production menus use the flat menuSkin and never draw them. */
+  readonly frames?: boolean;
+  /** The startup menu's backdrop. */
+  readonly mainBackground?: boolean;
+}
+export async function loadNativeUiArt(font: ResourceId, images: SceneImageRegistry, read: (path: string) => Promise<ImageLevel>,
+  selection: NativeUiArtSelection = {}): Promise<NativeUiArt> {
+  const { frames = true, mainBackground = true } = selection;
   const assets: readonly { readonly resource: ResourceId; readonly file: MenuArtFile }[] = [
-    { resource: "resource:engine-menu:background", file: menuBackground },
-    { resource: "resource:engine-menu:main-background", file: mainMenuBackground },
-    { resource: "resource:engine-menu:panel", file: menuPanel },
-    { resource: "resource:engine-menu:focus", file: menuFocus },
+    ...(frames ? [{ resource: "resource:engine-menu:background" as const, file: menuBackground }] : []),
+    ...(mainBackground ? [{ resource: "resource:engine-menu:main-background" as const, file: mainMenuBackground }] : []),
+    ...(frames ? [{ resource: "resource:engine-menu:panel" as const, file: menuPanel }, { resource: "resource:engine-menu:focus" as const, file: menuFocus }] : []),
   ];
   const decoded = await Promise.all(assets.map(async asset => ({ ...asset, image: await read(asset.file.file) })));
   const pictures = new Map<ResourceId, ImagePicture>(), owned: RendererImage[] = [];
@@ -36,8 +43,9 @@ export async function loadNativeUiArt(font: ResourceId, images: SceneImageRegist
     const slice = (resource: ResourceId, frame: MenuArtFrame): UiImageSlice => ({ resource, width: frame.region.width, height: frame.region.height,
       uv: frame.region.uv, border: frame.border, borderScale: frame.borderScale });
     let closed = false;
-    return { skin: { ...defaultUiSkin(font), background: "resource:engine-menu:background", panel: slice("resource:engine-menu:panel", menuPanel),
-      focus: slice("resource:engine-menu:focus", menuFocus) }, white: { kind: "image", name: "menu-white", image: whiteImage },
+    const skin = frames ? { ...defaultUiSkin(font), background: "resource:engine-menu:background" as const, panel: slice("resource:engine-menu:panel", menuPanel),
+      focus: slice("resource:engine-menu:focus", menuFocus) } : { ...defaultUiSkin(font), background: null, panel: null, focus: null };
+    return { skin, white: { kind: "image", name: "menu-white", image: whiteImage },
       picture(resource) { const picture = pictures.get(resource); if (picture === undefined || closed) throw new Error(`Unregistered native UI image: ${resource}`); return picture; },
       close() { if (closed) return; closed = true; for (const image of owned) images.release(image); pictures.clear(); },
     };

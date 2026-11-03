@@ -121,6 +121,9 @@ export function createQcBuiltins(services: QcBuiltinServices): QcBuiltinRegistry
     const value = machine.argVector(0);
     machine.returnInt(machine.strings.setEngine("pr_string_temp", `'${formatFloat(value.x)} ${formatFloat(value.y)} ${formatFloat(value.z)}'`));
   });
+  // PF_objerror reports the failing QuakeC function and message; break, coredump and eprint only print diagnostics in the original, so a host without a console ignores them.
+  numbered.set(11, machine => { machine.fail(`OBJECT ERROR in ${machine.program.functions[machine.currentFunction]?.name ?? "?"}: ${machine.varString(0)}`); });
+  for (const diagnostic of [6, 28, 31]) numbered.set(diagnostic, () => undefined);
   numbered.set(29, machine => { machine.traceEnabled = true; });
   numbered.set(30, machine => { machine.traceEnabled = false; });
   numbered.set(36, machine => { const value = machine.argFloat(0); machine.returnFloat(Math.trunc(value > 0 ? value + 0.5 : value - 0.5)); });
@@ -140,16 +143,21 @@ export function createQcBuiltins(services: QcBuiltinServices): QcBuiltinRegistry
   });
   const isFree = services.isFreeEntity;
   if (isFree !== undefined) {
+    const stringFields = new Map<number, string>();
     numbered.set(18, machine => {
       services.prepareEntities?.();
       const start = machine.entities.slot(machine.argInt(0)); const field = machine.argInt(1); const match = machine.argString(2);
-      const definition = machine.program.fields.find(definition => definition.offset === field && definition.type === "string");
-      if (definition === undefined) return machine.fail("find requires a source string field");
+      let name = stringFields.get(field);
+      if (name === undefined) {
+        name = machine.program.fields.find(definition => definition.offset === field && definition.type === "string")?.name;
+        if (name !== undefined) stringFields.set(field, name);
+      }
+      if (name === undefined) return machine.fail("find requires a source string field");
       for (let slot = start + 1; slot < machine.entities.count; slot++) {
         if (isFree(slot)) continue;
         const reference = machine.entities.reference(slot);
-        const text = machine.entityInt(reference, definition.name);
-        if (text !== 0 && machine.strings.get(text) === match) { machine.returnInt(machine.entities.reference(slot)); return; }
+        const text = machine.entityInt(reference, name);
+        if (machine.strings.get(text) === match) { machine.returnInt(machine.entities.reference(slot)); return; }
       }
       machine.returnInt(0);
     });

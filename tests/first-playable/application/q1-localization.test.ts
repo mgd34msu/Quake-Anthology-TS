@@ -1,14 +1,15 @@
+import { writeCapture } from "../../support/capture.ts";
 import { expect, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rm } from 'node:fs/promises';
 import { Application } from '../../../src/app/bootstrap/application.ts';
 import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
 import { WorldSeatPresentation } from '../../../src/app/bootstrap/presentation.ts';
 import { encodePng } from '../../../src/formats/images/png.ts';
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 for (const { edition, character } of [{ edition: 'classic', character: 'q1' }, { edition: 'rerelease', character: 'q1' }, { edition: 'rerelease', character: 'q3' }]) test(`Q1 ${edition} ${character} actual entry localizes source notice before console and HUD`, async () => {
-  const users = await mkdtemp(join(tmpdir(), 'q1-localization-'));
+  const users = await tempDirectory('q1-localization-');
   const parsed = parseApplicationCommand(['--game', `q1-${edition}-id1`, '--map', 'e1m1', '--movement', 'q1', '--character', character, '--renderer', 'cpu', '--width', '640', '--height', '480', '--hidden']);
   if (parsed.kind !== 'run') throw new Error('Missing options');
   const app = await Application.open({...parsed.options,userContentRoot:users},{print:()=>undefined});
@@ -29,7 +30,7 @@ for (const { edition, character } of [{ edition: 'classic', character: 'q1' }, {
       if (catalog === null) throw new Error('Missing installed localization');
       expect(new TextDecoder().decode(catalog.bytes).toLowerCase()).toContain('qc_entered');
       const pending = app.captureNextFrame(); await app.step(1);
-      await Bun.write('/tmp/q1-localized-entry.png', encodePng(640, 480, await pending));
+      await writeCapture('q1-localized-entry.png', encodePng(640, 480, await pending));
     }
   } finally {await app.close();await rm(users,{recursive:true,force:true});}
 },30000);

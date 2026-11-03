@@ -1,19 +1,38 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress } from "../../contracts/execution.ts";
 import type { GuestCpu, GuestExecutionStop, GuestProcessorState, MappedGuestMemory } from "../core/contracts.ts";
+import type { GuestCallbackTable } from "../core/callbacks.ts";
+import { virtualCpuid } from "../core/cpuid.ts";
 import { GuestMemoryFault } from "../core/memory.ts";
 import type { NumericExecutionContext, NumericExecutionResult, NumericOperand } from "../floating-point/contracts.ts";
 import { executeNumericInstruction } from "../floating-point/index.ts";
 import { alu, condition, resultFlags, shift, signedMultiply } from "./arithmetic.ts";
 import type { AluOperation, ShiftOperation } from "./arithmetic.ts";
 import { guestAddress, registerOperand, UnsupportedX86Instruction, X86Decoder, X86ProcessorFault } from "./decoder.ts";
+import { I386Fast } from "./fast.ts";
+import type { I386Step } from "./fast.ts";
 import type { SegmentName, X86Operand, X86Width } from "./decoder.ts";
 
 export interface I386CpuOptions {
   readonly state: GuestProcessorState;
   readonly memory: MappedGuestMemory;
+  /** Called before each instruction; true stops the run at that instruction. Mutually exclusive with `callbacks`. */
   readonly hostCall?: (address: GuestAddress) => boolean;
+  /** Entry hooks for the same purpose; lets the predecoded fast path skip unhooked instructions without a call. */
+  readonly callbacks?: GuestCallbackTable;
+  /** False keeps every instruction on the generic interpreter (differential testing). */
+  readonly fastPath?: boolean;
   readonly numeric?: (context: NumericExecutionContext) => NumericExecutionResult;
+}
+
+interface RetainedInstruction {
+  readonly address: GuestAddress;
+  readonly bytes: readonly number[];
+  readonly unchanged: () => boolean;
+  /** Undefined until first needed; null when this instruction always takes the generic path. */
+  step?: I386Step | null;
+  hookRevision?: symbol;
+  hooked?: boolean;
 }
 
 function arithmeticOperation(index: number): AluOperation {
@@ -36,13 +55,25 @@ export class I386Cpu implements GuestCpu {
   readonly state: GuestProcessorState;
   readonly memory: MappedGuestMemory;
   readonly #hostCall: (address: GuestAddress) => boolean;
+  readonly #callbacks: GuestCallbackTable | null;
+  readonly #hasHostCall: boolean;
+  readonly #fast: I386Fast | null;
   readonly #numeric: (context: NumericExecutionContext) => NumericExecutionResult;
+  readonly #checkpoint: Uint8Array = new Uint8Array(64);
+  /** Decoded bytes by linear address, guarded against any later change to the executable bytes. */
+  readonly #instructions = new Map<number, RetainedInstruction>();
+  #decodeCacheClears = 0;
   constructor(options: I386CpuOptions) {
     if (options.state.architecture !== "i386" || options.memory.pointerBytes !== 4) throw new RangeError("I386Cpu requires i386 state and a 32-bit guest address space");
+    if (options.callbacks !== undefined && (options.callbacks.memory !== options.memory || options.hostCall !== undefined)) throw new RangeError("I386Cpu callbacks must belong to its memory and replace hostCall");
     this.state = options.state;
     this.memory = options.memory;
-    this.#hostCall = options.hostCall ?? (() => false);
+    const callbacks = options.callbacks;
+    this.#callbacks = callbacks ?? null;
+    this.#hasHostCall = options.hostCall !== undefined;
+    this.#hostCall = options.hostCall ?? (callbacks === undefined ? () => false : address => callbacks.enter(address));
     this.#numeric = options.numeric ?? executeNumericInstruction;
+    this.#fast = options.fastPath === false ? null : I386Fast.create(options.state, options.memory, this.#numeric);
   }
 
   /** Each REP iteration consumes one budget unit and leaves restartable IP/count/index state. */
@@ -50,40 +81,93 @@ export class I386Cpu implements GuestCpu {
     if (!Number.isSafeInteger(options.instructionBudget) || options.instructionBudget < 0) throw new RangeError("Instruction budget must be a nonnegative safe integer");
     if (options.returnAddress !== null && options.returnAddress.addressSpace !== this.memory.addressSpace) throw new RangeError("Return address belongs to another guest address space");
     let instructions = 0;
-    while (instructions < options.instructionBudget) {
+    const registers = this.#checkpoint, budget = options.instructionBudget, fast = this.#fast !== null && this.#fast.flat() ? this.#fast : null;
+    const returnOffset = options.returnAddress === null || options.returnAddress.byteOffset > 0xffffffffn ? -1 : Number(options.returnAddress.byteOffset);
+    while (instructions < budget) {
+      if (fast !== null && this.state.instructionPointer <= 0xffffffffn) {
+        let ip = Number(this.state.instructionPointer), failed: unknown, reason: "none" | "fault" | "stop" = "none", stop: GuestExecutionStop | null = null;
+        try {
+          while (instructions < budget) {
+            const entry = this.#instructions.get(ip);
+            if (entry === undefined) break;
+            if (!entry.unchanged()) { this.#instructions.delete(ip); break; }
+            if (ip === returnOffset) { stop = { kind: "return", instructions, address: entry.address }; break; }
+            let step = entry.step;
+            if (step === undefined) step = entry.step = fast.build(entry.bytes, ip);
+            if (step === null) break;
+            if (this.#callbacks !== null) {
+              if (entry.hookRevision !== this.#callbacks.entryRevision) {
+                entry.hooked = !this.#callbacks.instructionUnhooked(entry.address.byteOffset);
+                entry.hookRevision = this.#callbacks.entryRevision;
+              }
+              if (entry.hooked === true) break;
+            } else if (this.#hasHostCall) {
+              this.state.instructionPointer = BigInt(ip);
+              if (this.#hostCall(entry.address)) { stop = { kind: "host-call", instructions, address: entry.address }; break; }
+            }
+            ip = step();
+            instructions++;
+          }
+        } catch (error) { failed = error; reason = "fault"; }
+        this.state.instructionPointer = BigInt(ip);
+        if (reason === "fault") return this.#stopFor(failed, BigInt(ip), undefined, this.#instructions.get(ip)?.bytes, instructions);
+        if (stop !== null) return stop;
+        if (instructions >= budget) break;
+      }
       let decoder: X86Decoder | undefined;
-      const originalIP = this.state.instructionPointer, registers = this.state.registers.checkpoint(), flags = this.state.flags.value;
+      const originalIP = this.state.instructionPointer, flags = this.state.flags.value;
+      let checkpointed = false;
       try {
-        const address = guestAddress(this.memory, BigInt.asUintN(32, this.state.segments.cs.base + originalIP), "execute");
+        const linear = BigInt.asUintN(32, this.state.segments.cs.base + originalIP);
+        let retained = this.#instructions.get(Number(linear));
+        if (retained !== undefined && !retained.unchanged()) { this.#instructions.delete(Number(linear)); retained = undefined; }
+        const address = retained?.address ?? guestAddress(this.memory, linear, "execute");
         if (options.returnAddress !== null && address.byteOffset === options.returnAddress.byteOffset) return { kind: "return", instructions, address };
         if (this.#hostCall(address)) return { kind: "host-call", instructions, address };
-        decoder = new X86Decoder(this.state, this.memory);
+        // Taken after the host-call hook, which can run nested guest calls through this same CPU.
+        this.state.registers.checkpoint(registers); checkpointed = true;
+        decoder = new X86Decoder(this.state, this.memory, retained?.bytes);
         const halt = this.#execute(decoder);
         this.state.instructionPointer = decoder.cursor;
+        if (retained === undefined) this.#retain(linear, address, decoder.bytes);
         instructions++;
         if (halt) return { kind: "halt", instructions, address };
       } catch (error) {
-        this.state.registers.restore(registers);
+        if (checkpointed) this.state.registers.restore(registers);
         this.state.flags.value = flags;
         this.state.instructionPointer = originalIP;
-        const instructionAddress: GuestAddress = { kind: "guest-address", addressSpace: this.memory.addressSpace,
-          byteOffset: BigInt.asUintN(32, this.state.segments.cs.base + originalIP) };
-        if (error instanceof GuestMemoryFault) return { kind: "exception", instructions, exception: { kind: "memory",
-          access: error.access === "execute" || error.access === "write" ? error.access : "read",
-          address: { kind: "guest-address", addressSpace: this.memory.addressSpace, byteOffset: error.address }, byteLength: error.byteLength, detail: error.message } };
-        if (error instanceof X86ProcessorFault) {
-          if ((error.vector === 3 || error.vector === 4) && decoder !== undefined) { this.state.instructionPointer = decoder.cursor; instructions++; }
-          return { kind: "exception", instructions, exception: { kind: "processor",
-            vector: error.vector, errorCode: error.errorCode, instruction: instructionAddress, detail: error.message } };
-        }
-        if (error instanceof UnsupportedX86Instruction) return { kind: "unsupported", instructions,
-          instruction: { address: instructionAddress, bytes: new Uint8Array(decoder?.bytes ?? []), mnemonic: "unsupported" }, detail: error.message };
-        throw error;
+        return this.#stopFor(error, originalIP, decoder, decoder?.bytes, instructions);
       }
     }
     return { kind: "budget", instructions };
   }
 
+  #stopFor(error: unknown, originalIP: bigint, decoder: X86Decoder | undefined, bytes: readonly number[] | undefined, instructions: number): GuestExecutionStop {
+    const instructionAddress: GuestAddress = { kind: "guest-address", addressSpace: this.memory.addressSpace,
+      byteOffset: BigInt.asUintN(32, this.state.segments.cs.base + originalIP) };
+    if (error instanceof GuestMemoryFault) return { kind: "exception", instructions, exception: { kind: "memory",
+      access: error.access === "execute" || error.access === "write" ? error.access : "read",
+      address: { kind: "guest-address", addressSpace: this.memory.addressSpace, byteOffset: error.address }, byteLength: error.byteLength, detail: error.message } };
+    if (error instanceof X86ProcessorFault) {
+      if ((error.vector === 3 || error.vector === 4) && decoder !== undefined) { this.state.instructionPointer = decoder.cursor; instructions++; }
+      return { kind: "exception", instructions, exception: { kind: "processor",
+        vector: error.vector, errorCode: error.errorCode, instruction: instructionAddress, detail: error.message } };
+    }
+    if (error instanceof UnsupportedX86Instruction) return { kind: "unsupported", instructions,
+      instruction: { address: instructionAddress, bytes: new Uint8Array(bytes ?? []), mnemonic: "unsupported" }, detail: error.message };
+    throw error;
+  }
+
+  /** Times the decode cache reached its limit and was discarded. */
+  get decodeCacheClears(): number { return this.#decodeCacheClears; }
+
+  #retain(linear: bigint, address: GuestAddress, bytes: readonly number[]): undefined {
+    const unchanged = this.memory.retainExecutableBytes(linear, bytes);
+    if (unchanged === null) return undefined;
+    if (this.#instructions.size >= 262144) { this.#instructions.clear(); this.#decodeCacheClears++; }
+    this.#instructions.set(Number(linear), { address, bytes: bytes.slice(), unchanged });
+    return undefined;
+  }
   #stackOperand(offset: bigint): X86Operand { return { kind: "memory", offset: BigInt.asUintN(32, offset), segment: "ss", stackPointerBase: true }; }
   #push(d: X86Decoder, width: 16 | 32, value: bigint): undefined {
     const pointer = BigInt.asUintN(32, this.state.registers.read("rsp", 32) - BigInt(width / 8));
@@ -377,6 +461,12 @@ export class I386Cpu implements GuestCpu {
     }
     switch (op) {
       case 0x0b: throw new X86ProcessorFault(6, "UD2 invalid opcode");
+      case 0xa2: {
+        const { eax, ebx, ecx, edx } = virtualCpuid(this.state.registers.read("rax", 32), true);
+        this.state.registers.write("rax", 32, eax); this.state.registers.write("rbx", 32, ebx);
+        this.state.registers.write("rcx", 32, ecx); this.state.registers.write("rdx", 32, edx);
+        return undefined;
+      }
       case 0x1f: { const decoded = d.modrm(width); if (decoded.group !== 0) throw new X86ProcessorFault(6, "Invalid multi-byte NOP selector"); return undefined; }
       case 0xa0: this.#push(d, width, BigInt(this.state.segments.fs.selector)); return undefined;
       case 0xa1: return this.#popSegment(d, "fs");

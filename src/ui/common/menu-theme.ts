@@ -1,4 +1,5 @@
 import type { ResourceId } from "../../contracts/content.ts";
+import { mainMenuBackground } from "./art-manifest.ts";
 import type { UiDrawCommand, UiDrawContext } from "../../contracts/ui.ts";
 import type { UiSkin } from "./skin.ts";
 import { fitUi, transformUi } from "./layout.ts";
@@ -28,14 +29,16 @@ export function menuSkin(font: ResourceId): UiSkin {
       control: { x: 0.06, y: 0.08, z: 0.1, w: 0.83 }, focused: { x: 0.23, y: 0.16, z: 0.09, w: 0.97 } } };
 }
 export function menuBackdrop(context: UiDrawContext): UiDrawCommand {
-  const viewport = context.binding.viewport, ratio = viewport.width / viewport.height, artRatio = 1672 / 941;
+  const viewport = context.binding.viewport, ratio = viewport.width / viewport.height, artRatio = mainMenuBackground.width / mainMenuBackground.height;
   const cropX = ratio < artRatio ? (1 - ratio / artRatio) / 2 : 0, cropY = ratio > artRatio ? (1 - artRatio / ratio) / 2 : 0;
   return { kind: "image", resource: "resource:engine-menu:main-background", rect: viewport,
     texCoords: [{ x: cropX, y: cropY }, { x: 1 - cropX, y: 1 - cropY }], color: { x: 1, y: 1, z: 1, w: 1 } };
 }
 /** The one menu box in 640x480 UI space; the controller draws its panel on the same rect. */
 export const menuPanelRect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } = { x: 32, y: 24, width: 576, height: 432 };
-export function menuPanel(context: UiDrawContext, narrow = false): UiDrawCommand {
+export function menuPanel(context: UiDrawContext, narrow = false, menuScale = 1): UiDrawCommand {
+  const area = context.binding.safeArea;
+  if (area.width <= 0 || area.height <= 0) return { kind: "fill", rect: { x: area.x, y: area.y, width: 0, height: 0 }, color: { x: 0, y: 0, z: 0, w: 0 } };
   return transformUi({ kind: "fill", rect: { x: 32, y: 24, width: narrow ? 272 : 576, height: 432 },
-    color: { x: 0.025, y: 0.035, z: 0.045, w: narrow ? 0.86 : 0.96 } }, fitUi(context.binding.safeArea));
+    color: { x: 0.025, y: 0.035, z: 0.045, w: narrow ? 0.86 : 0.96 } }, fitUi(area, menuScale));
 }

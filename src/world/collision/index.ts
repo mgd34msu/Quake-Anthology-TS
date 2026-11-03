@@ -157,19 +157,22 @@ export class SharedSceneQueries implements SceneQueries {
     }
     #trace(query: TraceQuery, excluded: readonly ActorId[]): TraceResult {
         let result = this.geometryTrace(query);
-        if (query.target.kind === 'model' || result.allSolid || query.policy.kind === 'q3' && result.fraction === 0)
+        if (query.target.kind === 'model' || result.allSolid || query.policy.kind !== 'q1' && result.fraction === 0)
             return result;
         const pass = query.passActor === null ? null : this.spatial.get(query.passActor);
         const passCollision = query.passActor === null ? null : this.#readActorCollision === null
             ? pass?.collision ?? null : this.#readActorCollision(query.passActor);
+        // SV_ClipToLinks: points never interact with a sized mover.
+        const passState = query.policy.kind === 'q1' && pass !== null && pass !== undefined ? this.#currentActor(pass)?.body.state.bounds : undefined;
+        const passSized = passState !== undefined && passState.max.x !== passState.min.x;
         let envelope = sweptBounds(query);
         if (query.policy.kind === 'q1' && query.policy.move === 'missile')
             envelope = sweptBounds({ ...query, shape: { kind: 'box', bounds: { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 15 } } } });
-        for (const linked of this.spatial.query(envelope, this.#readActorCollision === null ? 'solid' : 'both')) {
-            const refresh = this.#actorStates !== null || this.#readActorCollision !== null;
+        const refresh = this.#actorStates !== null || this.#readActorCollision !== null;
+        this.spatial.visit(envelope, linked => {
             const id = linked.body.actor, collision = this.#readActorCollision === null ? linked.collision : this.#readActorCollision(id);
-            if (collision === null || collision.role !== 'solid') continue;
-            if (excluded.some(actor => sameActor(actor, id))) continue;
+            if (collision === null || collision.role !== 'solid') return 'continue';
+            if (excluded.some(actor => sameActor(actor, id))) return 'continue';
             // Corpses never block movement (box traces), but point weapon traces
             // must hit them in every family or foreign corpses cannot be gibbed.
             // Corpse ownership is body provenance, not projectile ownership, so
@@ -178,29 +181,32 @@ export class SharedSceneQueries implements SceneQueries {
                 || collision.family !== 'q1' && (collision.contents & 0x04000000) !== 0;
             const pointLike = query.shape.kind === 'point'
                 || query.shape.bounds.min.x === query.shape.bounds.max.x && query.shape.bounds.min.y === query.shape.bounds.max.y && query.shape.bounds.min.z === query.shape.bounds.max.z;
-            const corpsePoint = corpse && pointLike;
+            // sv_world.c skips corpses unless the mask carries DEADMONSTER, so the exception is only for other families' corpses.
+            const corpsePoint = corpse && pointLike && collision.family !== query.policy.kind;
             if (query.passActor !== null) {
-                if (sameActor(query.passActor, id)) continue;
+                if (sameActor(query.passActor, id)) return 'continue';
                 const rawPass = passCollision?.q3Owner, rawCandidate = collision.q3Owner;
                 if (query.policy.kind === 'q3' && rawPass !== undefined && rawCandidate !== undefined) {
                     const passOwner = rawPass.ownerNumber === 1023 ? -1 : rawPass.ownerNumber;
-                    if (!corpsePoint && (rawCandidate.ownerNumber === rawPass.entityNumber || rawCandidate.ownerNumber === passOwner)) continue;
+                    if (!corpsePoint && (rawCandidate.ownerNumber === rawPass.entityNumber || rawCandidate.ownerNumber === passOwner)) return 'continue';
                 } else if (!corpsePoint) {
-                    if (collision.owner !== null && sameActor(query.passActor, collision.owner)) continue;
+                    if (collision.owner !== null && sameActor(query.passActor, collision.owner)) return 'continue';
                     const owner = passCollision?.owner;
                     if (owner !== null && owner !== undefined && (query.policy.kind === 'q3'
-                        ? collision.owner !== null && sameActor(owner, collision.owner) : sameActor(owner, id))) continue;
+                        ? collision.owner !== null && sameActor(owner, collision.owner) : sameActor(owner, id))) return 'continue';
                 }
             }
             if (collision.q1Corpse === true && query.shape.kind !== 'point'
                 && (query.shape.bounds.min.x !== query.shape.bounds.max.x || query.shape.bounds.min.y !== query.shape.bounds.max.y || query.shape.bounds.min.z !== query.shape.bounds.max.z))
-                continue;
+                return 'continue';
             if (query.policy.kind === 'q1' && query.policy.move === 'no-monsters' && collision.shape.kind !== 'model')
-                continue;
+                return 'continue';
             if (!corpsePoint && (query.policy.kind === 'q1' ? actorContents(collision, 'q1') !== -2 : (actorContents(collision, query.policy.kind) & query.policy.contentsMask) === 0))
-                continue;
+                return 'continue';
             const actor = refresh ? this.#snapshotActor(linked, collision) : linked;
-            if (actor === null) continue;
+            if (actor === null) return 'continue';
+            if (passSized && collision.shape.kind === 'box' && actor.body.state.bounds.max.x === actor.body.state.bounds.min.x)
+                return 'continue';
             const moving: TraceQuery = query.policy.kind === 'q1' && query.policy.move === 'missile' && collision.monster ? { ...query, shape: { kind: 'box', bounds: { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 15 } } } } : query;
             let hit: TraceResult;
             if (collision.shape.kind === 'model') {
@@ -215,13 +221,12 @@ export class SharedSceneQueries implements SceneQueries {
                 if (hit.fraction < result.fraction) result = { ...hit, startSolid: hit.startSolid || result.startSolid };
                 else result = { ...result, allSolid: result.allSolid || hit.allSolid, startSolid: result.startSolid || (!hit.allSolid && hit.startSolid) };
             }
-            else if (hit.allSolid || hit.fraction < result.fraction || query.policy.kind === 'q1' && hit.startSolid)
+            else if (hit.allSolid || hit.fraction < result.fraction || (query.policy.kind === 'q1' || query.policy.kind === 'q2') && hit.startSolid)
                 result = { ...hit, startSolid: hit.startSolid || result.startSolid };
             else if (hit.startSolid)
                 result = { ...result, startSolid: true };
-            if (result.allSolid)
-                break;
-        }
+            return result.allSolid ? 'stop' : 'continue';
+        });
         return result;
     }
     pointContents(query: PointContentsQuery): PointContentsResult {

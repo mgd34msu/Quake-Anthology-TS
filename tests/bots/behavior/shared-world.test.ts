@@ -19,7 +19,7 @@ import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { BotModelIndex } from "../../../src/bots/behavior/q3/ai-definitions.ts";
 
 const corpus = testCorpusRoot();
-const retail = test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")) || !existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")));
+const retail = test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")) || !existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(resolve(corpus, "q1/rerelease/id1/pak0.pak")));
 
 retail("Q3 map bots pursue mapped Q2 supplies and fire the actual selected arsenal", async () => {
   const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map", "q3dm1",
@@ -395,9 +395,12 @@ retail("Q1 map bots collect mapped Q3 weapons and fire through the selected arse
     expect(world.inventory.count(bot.actor.id, "q1:weapon/rocketlauncher")).toBe(0);
     const humanClient = application.session.createClient(1), human = world.admitPlayer(humanClient.id);
     // Retail weapons.txt keeps the rocket launcher out of fights under 128
-    // units, so the engagement starts one lane-length farther back.
-    source.composition.services.teleport(bot.actor.id, { x: -56, y: 200, z: start.z }, { x: 0, y: 315, z: 0 }, { x: 0, y: 0, z: 0 }, world.timeSeconds);
-    source.composition.services.teleport(human.actor, { x: 80, y: 64, z: start.z }, { x: 0, y: 135, z: 0 }, { x: 0, y: 0, z: 0 }, world.timeSeconds);
+    // units and a weapon switch takes a few frames, so the engagement starts at
+    // the far ends of the straight dm4 corridor at y=-240 (480 units of clear
+    // line). The old pocket near the launcher had no line of sight beyond 128
+    // units; a bot only fired there by chance while it hopped.
+    source.composition.services.teleport(bot.actor.id, { x: 40, y: -240, z: start.z }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, world.timeSeconds);
+    source.composition.services.teleport(human.actor, { x: 520, y: -240, z: start.z }, { x: 0, y: 180, z: 0 }, { x: 0, y: 0, z: 0 }, world.timeSeconds);
     for (const ammo of ["q3:ammo/machinegun", "q3:ammo/shotgun"] satisfies readonly import("../../../src/contracts/gameplay.ts").ItemId[]) world.inventory.consume(bot.actor, ammo, world.inventory.count(bot.actor.id, ammo));
     const rockets = world.inventory.count(bot.actor.id, "q3:ammo/rocketlauncher");
     let rocketHit = false;

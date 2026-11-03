@@ -116,9 +116,15 @@ export class QuakeCWeaponBehaviorSource implements WeaponBehaviorSource {
       live.add(target.actor); const slot = this.entities.slot(this.reference(target.actor)), fields = this.entities.at(slot);
       if (this.projectiles.has(slot)) continue;
       this.projectBody(slot, target.body); fields.setFloat(this.field('health'), target.health); fields.setFloat(this.field('solid'), target.solid ? 2 : 0);
-      fields.setInt(this.field('classname'), this.machine.strings.allocate(target.classname)); fields.setInt(this.field('netname'), this.machine.strings.allocate(target.name));
+      fields.setInt(this.field('classname'), this.machine.strings.intern(target.classname)); fields.setInt(this.field('netname'), this.machine.strings.intern(target.name));
     }
-    for (const [actor, slot] of this.slots) if (!live.has(actor)) { this.entities.at(slot).setFloat(this.field('health'), 0); this.entities.at(slot).setFloat(this.field('solid'), 0); }
+    for (const [actor, slot] of this.slots) {
+      if (live.has(actor)) continue;
+      this.entities.at(slot).setFloat(this.field('health'), 0); this.entities.at(slot).setFloat(this.field('solid'), 0);
+      // A target that left the world returns its slot, or long maps exhaust the 8192-entity table.
+      if (actor === excluded || this.projectiles.has(slot) || this.bound.has(slot)) continue;
+      this.slots.delete(actor); this.actors.delete(slot); this.free.add(slot);
+    }
   }
   private invoke(functionIndex: number, slot: number, time: number): void {
     const vm = this.machine, self = vm.globalOffset('self'), other = vm.globalOffset('other'), priorSelf = vm.globals.int(self), priorOther = vm.globals.int(other);

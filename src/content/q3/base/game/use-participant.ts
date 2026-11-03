@@ -18,8 +18,8 @@ export function requireUseParticipant(participant: UseParticipant | null): UsePa
   return participant;
 }
 
-export function useClient(participant: UseParticipant, services?: UseParticipantServices): GameEntity | null {
-  requireUseParticipant(participant);
+export function useClient(participant: UseParticipant | null, services?: UseParticipantServices): GameEntity | null {
+  if (participant === null) return null;
   if (participant instanceof GameEntity) return participant.client === null ? null : participant;
   if (services === undefined) throw new Error("Shared target activator requires actor observations");
   if (!services.live(participant.actor) || !services.isPlayer(participant.actor)) return null;

@@ -12,10 +12,10 @@ import { SharedQvmClientClipModels } from './guest-collision.ts';
 import type { QvmClientClipModels } from '../../../compat/qvm/client-collision-syscalls.ts';
 import type { ApplicationKeyProfile } from "../keys.ts";
 import { qvmUiKeySyscall } from "../../../compat/qvm/ui-key-syscalls.ts";
-import { ScriptGlobalDefines } from "../../../ui/common/legacy/script/preprocessor.ts";
+import { ScriptGlobalDefines } from "../../../content/legacy-script/preprocessor.ts";
 import { QvmClientScripts, qvmClientScriptSyscall } from "../../../compat/qvm/client-script-syscalls.ts";
 import { QvmUiExport } from '../../../compat/qvm/abi.ts';
-import { qvmArguments } from '../../../compat/qvm/module.ts';
+import { qvmArguments, qvmSemanticsFromCvar } from '../../../compat/qvm/module.ts';
 import { worldMarkProjector } from '../../../content/q3/presentation/mark-projector.ts';
 import { qvmClientMarkSyscall } from '../../../compat/qvm/client-mark-syscalls.ts';
 import type { SeatId } from '../../../contracts/identity.ts';
@@ -45,7 +45,7 @@ import type { QvmModuleOptions } from '../../../compat/qvm/module.ts';
 import type { ApplicationQ3Assets } from './assets.ts';
 import type { ApplicationQ3Services } from './services.ts';
 import type { SharedSceneQueries } from '../../../world/collision/index.ts';
-import { UserFileStore } from '../../../platform/files/writable.ts';
+import { UserFileStore } from '../../../core/files/writable.ts';
 import { q3EquipmentCommand, type Q3EquipmentPresentation } from './equipment.ts';
 import type { QvmEquipmentPresentationProfile } from '../../../content/q3/equipment/cgame-weapon-hud.ts';
 import { readQvmEquipmentPresentation } from "../../../compat/qvm/primary-presentation-profile.ts";
@@ -173,7 +173,11 @@ export class ApplicationQvmClient {
       ?? qvmClientStateSyscall(call, { connection: o.connection, snapshots: {
         current: () => session.snapshots.current(), read: number => session.snapshots.read(number),
       }, userCommand: number => { const command = o.connection.commands.read(number); return command === null ? null : q3EquipmentCommand(command, this.equipment); }, snapshotPing: number => o.connection.snapshotPing(number),
-        getServerCommand: async number => { const argv = await o.connection.getServerCommand(number); this.assertCurrent(); if (argv !== null) this.arguments = legacyClientCommand(argv, call.abiProfile ?? "q3-modern"); return argv; },
+        getServerCommand: async number => { const argv = await o.connection.getServerCommand(number); this.assertCurrent();
+          if (argv === null) return argv;
+          const translated = legacyClientCommand(argv, call.abiProfile ?? "q3-modern");
+          if (translated === null) { session.print(`Dropped server command "cs ${argv[1] ?? ""}": no legacy client mapping\n`); this.arguments = []; return null; }
+          this.arguments = translated; return argv; },
         setUserCommandValue: session.setUserCommandValue })
       ?? qvmClientCollisionSyscall(call, { models: () => this.collisionModels, loadMap: name => { if (name !== o.map) throw new Error(`Cgame requested a different collision map: ${name}`); this.assertCurrent(); } })
       ?? qvmClientMarkSyscall(call, this.marks)
@@ -187,7 +191,7 @@ export class ApplicationQvmClient {
     if (retained !== undefined) {
       if (retained.role !== role) throw new Error('Retained presentation artifact has the wrong role');
       this.artifacts.set(role, retained);
-      return { artifact: retained, host: call => this.host(call) };
+      return { artifact: retained, host: call => this.host(call), semantics: qvmSemanticsFromCvar(this.options.cvars, role) };
     }
     const path = `vm/${role}.qvm`, opened = await this.options.media.provider.mounts.open(path);
     this.assertCurrent();
@@ -198,7 +202,7 @@ export class ApplicationQvmClient {
       revision: `${opened.reference.provenance.mount.identity.id}:${opened.reference.provenance.mount.identity.generation}` }, role, bytes: opened.bytes });
     if (artifact.kind !== 'bytecode' || artifact.known !== null && artifact.known.product !== 'baseq3') throw new Error(`Unsupported native baseq3 module: ${path}`);
     this.artifacts.set(role, artifact);
-    return { artifact, host: call => this.host(call) };
+    return { artifact, host: call => this.host(call), semantics: qvmSemanticsFromCvar(this.options.cvars, role) };
   }
   static async create(options: ApplicationQvmClientOptions): Promise<ApplicationQvmClient> {
     const owner = new ApplicationQvmClient(options);

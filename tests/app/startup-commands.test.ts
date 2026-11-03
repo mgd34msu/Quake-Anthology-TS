@@ -60,7 +60,8 @@ for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelea
     await prepared.advanceFrame(); await prepared.advanceFrame();
     expect(source.variableString("marker")).toBe(dialect === "q1-quakeworld" ? "config" : "tail");
     expect(prepared.pending).toBe(false);
-    expect(seen[0]).toBe(dialect === "q1-netquake" ? "initial" : "tail");
+    // Every dialect's scripts call `record` more than once; the whole ordered list is pinned, not just the first entry.
+    expect(seen).toEqual(dialect === "q1-netquake" ? ["initial"] : dialect === "q1-quakeworld" ? ["tail"] : dialect === "q3" ? ["tail", "config"] : ["tail", "tail"]);
   });
 }
 

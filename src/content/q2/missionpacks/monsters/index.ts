@@ -2,6 +2,7 @@ import type { Q2Entity, Q2GameServices, Q2SpawnModule } from "../../foundation/h
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import type { Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
 import { withBossExplosionCallbacks } from "../../base/monsters/boss-common.ts";
+import { rereleaseMissionPackMoves } from "../../rerelease/monsters/tables/missionpack.ts";
 import { boss5Definition } from "./boss5.ts";
 import { createChickHeatDefinition } from "./chick-heat.ts";
 import { createFixbotDefinition } from "./fixbot.ts";
@@ -37,7 +38,7 @@ export function q2RogueMonsterDefinitions(monsters: Q2Monsters, weapons: Q2Missi
     ...createRogueHoverDefinitions(weapons, state), createRogueTurretDefinition(monsters, services.movers, state), createCarrierDefinition(monsters, services), ...createRogueMedicDefinitions(monsters, weapons, state), ...createRogueBaseVariants(monsters, state), ...createRogueArsenalMonsters(monsters, state), ...createRogueJumpingMonsters(monsters, state), createWidowDefinition(monsters, weapons, services, state), createWidow2Definition(monsters, weapons, services, state), createRogueGunnerDefinition(monsters, state)];
 }
 
-export const q2OriginalMissionPackFallbacks: ReadonlySet<string> = new Set(["monster_gekk", "monster_fixbot", "monster_gladb", "monster_boss5", "monster_chick_heat", "monster_soldier_ripper", "monster_soldier_hypergun", "monster_soldier_lasergun", "monster_stalker", "monster_kamikaze", "monster_daedalus", "monster_turret", "monster_carrier", "monster_medic_commander", "monster_widow", "monster_widow2"]);
+export const q2OriginalMissionPackFallbacks: ReadonlySet<string> = new Set(["monster_gekk", "monster_fixbot", "monster_gladb", "monster_boss5", "monster_chick_heat", "monster_stalker", "monster_kamikaze", "monster_daedalus", "monster_turret", "monster_carrier", "monster_medic_commander", "monster_widow", "monster_widow2"]);
 
 export class Q2MissionPackMonsters implements Q2SpawnModule {
   readonly source = new Q2MissionPackMonsterState();
@@ -50,15 +51,15 @@ export class Q2MissionPackMonsters implements Q2SpawnModule {
     this.originalSourceFallbacks = definitions.filter(definition => q2OriginalMissionPackFallbacks.has(definition.classname)).map(definition => definition.classname);
     for (const definition of definitions) {
       if (edition === "classic") monsters.register(definition, "classic");
-      if (q2OriginalMissionPackFallbacks.has(definition.classname)) monsters.register(definition);
+      if (q2OriginalMissionPackFallbacks.has(definition.classname)) monsters.register(edition === "rerelease" ? { ...definition, moves: rereleaseMissionPackMoves(definition.classname, definition.moves) } : definition);
     }
     monsters.setSourceCombatRules(pack === "rogue" ? "rogue" : "base", pack === "rogue" ? createRogueCombatHooks(monsters, this.source, services) : null);
   }
   get callbacks() { const callbacks = this.monsters.callbacks; return { ...callbacks, think: { ...callbacks.think, ...monsterDabeamCallbacks.think }, touch: { ...callbacks.touch, ...this.hints?.callbacks.touch } }; }
-  spawn(entity: Q2Entity, game: Q2GameServices): boolean { return this.hints?.spawn(entity, game) === true || this.monsters.spawn(entity, game); }
+  spawn(entity: Q2Entity, game: Q2GameServices): boolean { this.source.bind(game); return this.hints?.spawn(entity, game) === true || this.monsters.spawn(entity, game); }
   capture(game: Q2GameServices): Q2MissionPackMonstersCheckpoint { return { ...this.source.capture(game), hints: this.hints?.capture(game) ?? null }; }
   restore(game: Q2GameServices, checkpoint: Q2MissionPackMonstersCheckpoint): undefined {
-    this.source.restore(game, checkpoint);
+    this.source.bind(game); this.source.restore(game, checkpoint);
     if (checkpoint.hints !== null) {
       if (this.hints === null) throw new Error("Rogue hint paths restored without their selected source module");
       this.hints.restore(game, checkpoint.hints);

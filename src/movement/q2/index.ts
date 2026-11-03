@@ -10,7 +10,7 @@ import { pmoveRerelease } from "./rerelease.ts";
 import type { Q2RereleaseMovementContext } from "./rerelease.ts";
 import { Q2_PLAYER_BOUNDS } from "./dimensions.ts";
 import { createMovementMath } from "./math.ts";
-import { MASK_CLASSIC_PLAYERSOLID, PmTypeT, KexPmTypeT, PMF_DUCKED, PmflagsT, plane, type ClassicPmove, type CplaneT, type CsurfaceT, type KexPmoveT, type MovementEntity, type TraceT, type Vec3 as SourceVec3 } from "./types.ts";
+import { MASK_CLASSIC_PLAYERSOLID, MASK_DEADSOLID, PmTypeT, KexPmTypeT, PMF_DUCKED, PmflagsT, plane, type ClassicPmove, type CplaneT, type CsurfaceT, type KexPmoveT, type MovementEntity, type TraceT, type Vec3 as SourceVec3 } from "./types.ts";
 
 export { pmoveClassic } from "./classic.ts";
 export { createRereleaseMovement, pmoveRerelease, Q2RereleaseMovementContext } from "./rerelease.ts";
@@ -123,6 +123,8 @@ function moveQ2ClassicPhysics(input: Q2MovementInput, services: MovementServices
   const { vec3 } = createMovementMath(services.numeric);
   const scene = traceAdapter(input, services);
   const pose = input.environment.pose, body = pose?.bounds ?? bodyBounds(input.shape);
+  // PM_trace in p_client.c lets dead players pass monsters; client prediction always uses the live mask.
+  const traceMask = input.execution === "authoritative" && input.environment.health <= 0 ? MASK_DEADSOLID : MASK_CLASSIC_PLAYERSOLID;
   const pm: ClassicPmove = {
     s: { pm_type: pose === undefined ? mode === undefined ? input.state.type : clientMovementType(input.kind, mode) : PmTypeT.PM_FREEZE, origin: [...input.state.originEighths], velocity: pose === undefined ? [...input.state.velocityEighths] : [0, 0, 0], pm_flags: input.state.flags,
       pm_time: input.state.timeEightMilliseconds, gravity: input.state.gravity, delta_angles: [...input.state.deltaAngleShorts] },
@@ -131,7 +133,7 @@ function moveQ2ClassicPhysics(input: Q2MovementInput, services: MovementServices
     snapinitial: input.profile.snapInitial, numtouch: 0, touchents: [], touchtraces: [], viewangles: vec3(), viewheight: 0,
     mins: sourceVector(body.min), maxs: sourceVector(body.max), groundentity: null, watertype: 0, waterlevel: 0, characterBounds: body, previousBounds: input.currentBounds ?? body,
     ...(pose !== undefined || output?.bodyBounds === undefined ? {} : { bodyBounds: output.bodyBounds }),
-    trace: (start, mins, maxs, end) => scene.trace(start, mins, maxs, end, MASK_CLASSIC_PLAYERSOLID), pointcontents: scene.pointcontents,
+    trace: (start, mins, maxs, end) => scene.trace(start, mins, maxs, end, traceMask), pointcontents: scene.pointcontents,
   };
   pmoveClassic(pm, services.numeric, input.profile.airAccelerate, input.profile.strafejumpHack ?? false, input.environment.flight && input.environment.health > 0, input.environment.speedMultiplier ?? 1);
   if (pose !== undefined) { pm.s.pm_type = input.state.type; pm.viewheight = pose.viewHeight;

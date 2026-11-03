@@ -62,6 +62,11 @@ export function spectatorThink(context: ClientPolicyContext, entity: GameEntity,
   }
 }
 
+/** A follower's own body and stores stay untouched, so a snapshot takes position, velocity, stats and ammo from the followed client. */
+export function snapshotViewSource(own: GameClient["ps"], clientAt: (number: number) => GameClient): GameClient["ps"] {
+  return (own.pmFlags & MoveFlags.FOLLOW) === 0 ? own : clientAt(own.clientNum).ps;
+}
+
 export function spectatorClientEndFrame(context: ClientPolicyContext, entity: GameEntity): void {
   const client = clientOf(entity);
   if (client.sess.spectatorState === SpectatorState.FOLLOW) {

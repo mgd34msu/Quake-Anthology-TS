@@ -10,7 +10,7 @@ import { StartupApplication } from "../../../src/app/bootstrap/startup.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.ts";
 import { NativeUiController } from "../../../src/ui/common/controller.ts";
-import { KeyCode } from "../../../src/input/key-codes.ts";
+import { KeyCode } from "../../../src/core/key-codes.ts";
 
 
 async function captureArtifact(name: string, width: number, height: number, pixels: Uint8Array): Promise<void> {

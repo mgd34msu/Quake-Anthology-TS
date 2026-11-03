@@ -152,8 +152,8 @@ export function soldierDie(context: MonsterContext, reaction: DeathReaction): un
       throwGib(entity, game, "models/monsters/soldier/gibs/chest.md2", reaction.damage, { skinned: true });
       throwGib(entity, game, "models/monsters/soldier/gibs/head.md2", reaction.damage, { head: true, skinned: true });
     } else {
-      for (let i = 0; i < 2; i++) throwGib(entity, game, "models/objects/gibs/bone/tris.md2", reaction.damage);
-      for (let i = 0; i < 4; i++) throwGib(entity, game, "models/objects/gibs/sm_meat/tris.md2", reaction.damage);
+      for (let i = 0; i < 3; i++) throwGib(entity, game, "models/objects/gibs/sm_meat/tris.md2", reaction.damage);
+      throwGib(entity, game, "models/objects/gibs/chest/tris.md2", reaction.damage);
       throwHead(entity, game, "models/objects/gibs/head2/tris.md2", reaction.damage);
     }
     state.dead = true; state.gibbed = true;
@@ -161,6 +161,7 @@ export function soldierDie(context: MonsterContext, reaction: DeathReaction): un
   }
   if (state.dead) return undefined;
   state.dead = true;
+  if (!rerelease) entity.skin |= 1;
   game.host.combat.setTraits(entity.actor, { canTakeDamage: true });
   game.sound(entity, state.weapon === "blaster" ? "soldier/soldeth2.wav" : state.weapon === "shotgun" ? "soldier/soldeth1.wav" : "soldier/soldeth3.wav", 2);
   const body = game.body(entity);

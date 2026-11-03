@@ -41,7 +41,7 @@ function safeFlow(program: QcProgram, start: number, limit: number, dirty: Set<n
   const ends = new Map<number, number>(), entered = new Map<number, Set<number>>();
   const functionEnd = (start: number): number => {
     const known = ends.get(start); if (known !== undefined) return known;
-    const end = program.functions.reduce((limit, fn) => fn.firstStatement > start ? Math.min(limit, fn.firstStatement) : limit, program.statements.length);
+    const end = program.functionEnd({ firstStatement: start });
     ends.set(start, end); return end;
   };
   const pending = [{ index: start, remaining: dirty, limit, called: false, localStart: 0, localEnd: 0 }], seen = new Map<number, Set<number>>();
@@ -101,7 +101,7 @@ function replacementSafe(program: QcProgram, source: ModQcArmorStage, end: numbe
       if (fn.namedBuiltin || fn.firstStatement < 0) { if (!returnOnlyBuiltins.has(fn.firstStatement)) return false; continue; }
       if (visiting.has(entry)) return false;
       visiting.add(entry);
-      const stop = program.functions.reduce((limit, other) => other.firstStatement > fn.firstStatement ? Math.min(limit, other.firstStatement) : limit, program.statements.length);
+      const stop = program.functionEnd(fn);
       if (!collect(fn.firstStatement, stop, fn.parameterStart, fn.parameterStart + fn.localWords)) return false;
       visiting.delete(entry);
     }
@@ -165,7 +165,7 @@ export function qcArmorStage(program: QcProgram, declared?: ModQcArmorStage): Qc
   if (source === undefined) throw new QcProgramError("Missing declared QC armor stage");
   const reject = (reason: string): never => { throw new QcProgramError(`Unsupported QC armor stage: ${reason}`, program.source); };
   const fn = program.functionNamed(source.function);
-  const end = program.functions.reduce((limit, other) => other.firstStatement > fn.firstStatement ? Math.min(limit, other.firstStatement) : limit, program.statements.length);
+  const end = program.functionEnd(fn);
   if (fn.namedBuiltin || fn.firstStatement <= 0 || !Number.isInteger(source.entry) || !Number.isInteger(source.exit)
     || source.entry < fn.firstStatement || source.exit <= source.entry || source.exit >= end) reject("region bounds");
   const local = (word: number, type: "entity" | "float"): void => {
@@ -176,7 +176,7 @@ export function qcArmorStage(program: QcProgram, declared?: ModQcArmorStage): Qc
   const scaleSites = new Set<number>();
   for (const scale of source.regularScale ?? []) {
     const caller = program.functionNamed(scale.caller), statement = program.statements[scale.statement];
-    const end = program.functions.reduce((limit, fn) => fn.firstStatement > caller.firstStatement ? Math.min(limit, fn.firstStatement) : limit, program.statements.length);
+    const end = program.functionEnd(caller);
     if (!Number.isInteger(scale.statement) || scale.statement < caller.firstStatement || scale.statement >= end
       || statement?.opcode !== QcOpcode.Call4 || statement.a !== program.globalsByName.get("T_Damage")?.offset
       || !Number.isFinite(scale.scale) || scale.scale < 0 || scaleSites.has(scale.statement)) reject("original regular armor scale call site");

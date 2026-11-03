@@ -1,5 +1,7 @@
 # Verification and completion plan
 
+> **Dated record, not current status.** This was the completion plan. The machine-readable work graph it names as the dependency authority was deleted. The maintained status is [status.md](status.md). Where this page disagrees with it or with the code, trust those. Paths such as `verification/`, `work-packages.json`, `completion-status.json` and `../the Q1 reference port/...` name files deleted or scrubbed in commit `949c337c`; bare `src/...` paths may name donor-project files.
+
 This planning document defines completion evidence for the unified Bun TypeScript engine. It includes all games, expansions, singleplayer, multiplayer, inherited modes, and declared cross-game combinations. It introduces no implementation or completed verification claim. The separate machine work graph is the dependency authority. [Source assessment](source-assessment.md) records the source and binary inventory behind these requirements.
 
 Completion means playable behavior on the final Linux executable, with traceable source fidelity and complete required-case accounting. Compilation, registered classnames, successful boots, and unchanged residual counts provide useful evidence but do not establish that outcome.

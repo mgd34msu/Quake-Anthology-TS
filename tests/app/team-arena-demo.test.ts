@@ -8,5 +8,5 @@ test("postgame demo availability follows the mounted exact map/mode/protocol fil
   expect(await teamArenaDemo("mpteam1", 3, 68, exists)).toBeNull();
   expect(await teamArenaDemo("mpteam1", 4, 67, exists)).toBeNull();
   expect(paths).toEqual(["demos/mpteam1_4.dm_68", "demos/mpteam1_3.dm_68", "demos/mpteam1_4.dm_67"]);
-  await expect(teamArenaDemo("../escape", 4, 68, exists)).rejects.toThrow();
+  await expect(teamArenaDemo("../escape", 4, 68, exists)).rejects.toThrow("Invalid Team Arena demo selection");
 });

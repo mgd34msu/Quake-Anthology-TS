@@ -9,7 +9,7 @@ test("rerelease brain save boundary reconstructs every memory field without live
   behavior.requestMoveToPoint({ x: 32, y: 64, z: 16 });
   const before = behavior.checkpoint(), decoded = readRereleaseBehavior(decodeCheckpointValue(encodeCheckpointValue(before)));
   expect(decoded).toEqual(before); behavior.restore(decoded); expect(behavior.checkpoint()).toEqual(before);
-  expect(() => readRereleaseBehavior({ ...before, rng: "wrong" })).toThrow();
+  expect(() => readRereleaseBehavior({ ...before, rng: "wrong" })).toThrow("bot.rerelease.rng");
 });
 
 function fixture() {
@@ -55,5 +55,5 @@ test("legacy saved explicit orders remain externally owned and malformed owners 
   const legacy = { ...saved, brain: { ...saved.brain, memory: { ...saved.brain.memory, explicitGoal: legacyGoal } } };
   behavior.restore(readRereleaseBehavior(legacy)); behavior.setObjectiveGoal(null);
   expect(behavior.checkpoint().brain.memory.explicitGoal?.owner).toBe("external");
-  expect(() => readRereleaseBehavior({ ...saved, brain: { ...saved.brain, memory: { ...saved.brain.memory, explicitGoal: { ...goal, owner: "unknown" } } } })).toThrow();
+  expect(() => readRereleaseBehavior({ ...saved, brain: { ...saved.brain, memory: { ...saved.brain.memory, explicitGoal: { ...goal, owner: "unknown" } } } })).toThrow("expected external or objective");
 });

@@ -55,8 +55,14 @@ export function loadPreparedNavigation(options: NavigationConstruction, prepared
   const { map, geometry, profile, world } = options;
   if (map.format !== geometry.kind || map.digest !== prepared.map.digest || map.name !== prepared.map.name || map.format !== prepared.map.format)
     throw new TypeError("Navigation map identity and prepared geometry disagree");
-  return { runtime: new NavigationRuntime(prepared.asset === null ? constructNavigation(options)
-    : navigationFromAsset(map, prepared.asset, profile, world), world), resource: prepared.resource };
+  if (prepared.asset !== null) {
+    try {
+      return { runtime: new NavigationRuntime(navigationFromAsset(map, prepared.asset, profile, world), world), resource: prepared.resource };
+    } catch {
+      // A supplied asset whose graph cannot be built counts as absent, like one that fails to parse.
+    }
+  }
+  return { runtime: new NavigationRuntime(constructNavigation(options), world), resource: null };
 }
 
 /** Supplied navigation wins; absent assets construct through the selected shared collision world. */

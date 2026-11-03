@@ -8,13 +8,13 @@ import { StartupApplication } from "../../../src/app/bootstrap/startup.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.ts";
 import { NativeUiController } from "../../../src/ui/common/controller.ts";
-import { KeyCode } from "../../../src/input/key-codes.ts";
+import { KeyCode } from "../../../src/core/key-codes.ts";
 import { ConnectionState } from "../../../src/content/q3/base/game/state.ts";
 import { encodePng } from "../../../src/formats/images/png-encoder.ts";
 import { infoValueForKey } from "../../../src/core/info-string.ts";
 
 const enabled = process.env["QUAKE_ARENA_PUBLIC_TEST"] === "1";
-const corpus = process.env["QUAKE_CONTENT_ROOT"] ?? testCorpusRoot();
+const corpus = testCorpusRoot();
 
 test.skipIf(!enabled)("public Q3 training selection launches skill four Crash and accepts live controls", async () => {
   const directory = await mkdtemp(join(tmpdir(), "q3-arena-public-"));
@@ -100,7 +100,7 @@ test.skipIf(!enabled)("public Q3 training selection launches skill four Crash an
     expect(observed.controller?.activeMenu).toBe("menu:startup:main");
     expect(owner.inputSeat).toBe(retained);
     await choose("ui:startup:quit");
-    console.log("Q3 training End game returned to retained Main menu; public Quit accepted");
+    expect(owner.quitRequested).toBe(true);
   } catch (error) { console.error(messages.join("\n")); throw error; }
   finally { startup?.requestQuit(); await startup?.close(); observer.mockRestore(); await rm(directory, { recursive: true, force: true }); }
 }, 240000);

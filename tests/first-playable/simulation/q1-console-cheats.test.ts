@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
@@ -11,6 +11,7 @@ import { SeatInput, registerInputCommands } from "../../../src/input/seat.ts";
 import { InputCommandBuilder, type UserCommandFrame } from "../../../src/input/user-command.ts";
 import { registerQ1ClientCommands } from "../../../src/app/bootstrap/q1-client-commands.ts";
 import type { CommandContext } from "../../../src/contracts/common.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q3a/baseq3/pak0.pk3");
 
 test("native Q1 console god and impulse 9 affect actual damage and selected inventory", async () => {
   const corpus = testCorpusRoot();

@@ -347,11 +347,11 @@ export function createQ2ProContext(net_message: SizeBuf) {
         if (bits & CM_ANGLE3)
             bw.writeSigned(readElement(cmd.angles, 2), 16);
         if (bits & CM_FORWARD)
-            bw.writeSigned(cmd.forwardmove, 10);
+            bw.writeSigned(Math.max(-512, Math.min(511, cmd.forwardmove)), 10);
         if (bits & CM_SIDE)
-            bw.writeSigned(cmd.sidemove, 10);
+            bw.writeSigned(Math.max(-512, Math.min(511, cmd.sidemove)), 10);
         if (bits & CM_UP)
-            bw.writeSigned(cmd.upmove, 10);
+            bw.writeSigned(Math.max(-512, Math.min(511, cmd.upmove)), 10);
         if (bits & CM_BUTTONS)
             bw.writeUnsigned((cmd.buttons & 3) | ((cmd.buttons >> 5) & 4), 3);
         if (bits & CM_IMPULSE)

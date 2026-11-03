@@ -4,14 +4,12 @@ import { vec3, add3, sub3, scale3, dot3, length3, lerp3, dot3Double, cross3Store
 import { CommonError } from "../../../core/common-error.ts";
 import type { Vec3, Plane, Bounds } from "../../../core/math.ts";
 import type { CvarRegistry, CvarSnapshot } from "../../../core/cvars/index.ts";
-import type { HunkAllocation } from "./allocation.ts";
 import { CollisionWindingLibrary, windingBounds } from "./polylib.ts";
 import type { CollisionWinding, CollisionWindingMemory } from "./polylib.ts";
 
 interface Border { readonly plane: number; readonly inward: boolean; readonly noAdjust: boolean }
 interface Facet { readonly surface: number; readonly borders: readonly Border[] }
 export interface PatchCollide { readonly planes: readonly Plane[]; readonly facets: readonly Facet[]; readonly bounds: Bounds }
-export type PatchAllocator = (source: "CM_GeneratePatchCollide" | "CM_PatchCollideFromGrid:facets" | "CM_PatchCollideFromGrid:planes", bytes: number) => HunkAllocation;
 export type PatchShape = { readonly kind: "point"; readonly mins: Vec3; readonly extents: Vec3 }
   | { readonly kind: "box"; readonly mins: Vec3; readonly extents: Vec3 }
   | { readonly kind: "capsule"; readonly extents: Vec3; readonly radius: number; readonly offset: Vec3 };
@@ -136,22 +134,6 @@ function planeEqual(a: Plane, b: Plane): boolean {
   return Math.abs(a.normal.x - b.normal.x) < 0.0001 && Math.abs(a.normal.y - b.normal.y) < 0.0001
     && Math.abs(a.normal.z - b.normal.z) < 0.0001 && Math.abs(a.distance - b.distance) < 0.02;
 }
-const storageViews = new WeakMap<HunkAllocation, { readonly bytes: Uint8Array; readonly view: DataView }>();
-function storageView(allocation: HunkAllocation): DataView {
-  const bytes = allocation.bytes;
-  const cached = storageViews.get(allocation);
-  if (cached !== undefined && cached.bytes === bytes) return cached.view;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  storageViews.set(allocation, { bytes, view });
-  return view;
-}
-function storedVector(allocation: HunkAllocation, offset: number): Vec3 {
-  return {
-    get x(): number { return storageView(allocation).getFloat32(offset, true); },
-    get y(): number { return storageView(allocation).getFloat32(offset + 4, true); },
-    get z(): number { return storageView(allocation).getFloat32(offset + 8, true); },
-  };
-}
 function normalSignbits(normal: Vec3): number {
   return Number(normal.x < 0) | (Number(normal.y < 0) << 1) | (Number(normal.z < 0) << 2);
 }
@@ -160,84 +142,12 @@ class GeneratedPatchPlane implements Plane {
   constructor(readonly normal: Vec3, readonly distance: number) { this.#signbits = normalSignbits(normal); }
   get signbits(): number { return this.#signbits; }
 }
-class AllocatedPatchPlane implements Plane {
-  readonly normal: Vec3;
-  readonly #allocation: HunkAllocation;
-  readonly #offset: number;
-  constructor(allocation: HunkAllocation, offset: number) {
-    this.#allocation = allocation; this.#offset = offset;
-    this.normal = storedVector(allocation, offset);
-  }
-  get distance(): number { return storageView(this.#allocation).getFloat32(this.#offset + 12, true); }
-  get signbits(): number { return storageView(this.#allocation).getInt32(this.#offset + 16, true); }
-}
 function planeSignbits(plane: Plane): number {
-  if (plane instanceof GeneratedPatchPlane || plane instanceof AllocatedPatchPlane) return plane.signbits;
+  if (plane instanceof GeneratedPatchPlane) return plane.signbits;
   // Diagnostic Plane literals have geometry only; generated patches retain the source field.
   return normalSignbits(plane.normal);
 }
-function storedRows<T>(rows: readonly T[], count: number): readonly T[] {
-  if (count < 0 || count > rows.length) throw new RangeError("Patch count outside source allocation");
-  return count === rows.length ? rows : rows.slice(0, count);
-}
-function storePatch(allocate: PatchAllocator, allocation: HunkAllocation, planes: readonly GeneratedPatchPlane[], facets: readonly Facet[]): PatchCollide {
-  const record = storageView(allocation);
-  record.setInt32(24, planes.length, true);
-  record.setInt32(32, facets.length, true);
-  const facetAllocation = allocate("CM_PatchCollideFromGrid:facets", facets.length * 320);
-  record.setUint32(36, facetAllocation.byteOffset, true);
-  const facetData = storageView(facetAllocation);
-  for (const [index, facet] of facets.entries()) {
-    const offset = index * 320;
-    facetData.setInt32(offset, facet.surface, true);
-    facetData.setInt32(offset + 4, facet.borders.length, true);
-    for (const [borderIndex, border] of facet.borders.entries()) {
-      if (borderIndex >= 26) throw new RangeError("Patch border outside source facet allocation");
-      facetData.setInt32(offset + 8 + borderIndex * 4, border.plane, true);
-      facetData.setInt32(offset + 112 + borderIndex * 4, Number(border.inward), true);
-      facetData.setInt32(offset + 216 + borderIndex * 4, Number(border.noAdjust), true);
-    }
-  }
-  const planeAllocation = allocate("CM_PatchCollideFromGrid:planes", planes.length * 20);
-  record.setUint32(28, planeAllocation.byteOffset, true);
-  const planeData = storageView(planeAllocation);
-  for (const [index, plane] of planes.entries()) {
-    const offset = index * 20, normal = plane.normal;
-    planeData.setFloat32(offset, normal.x, true);
-    planeData.setFloat32(offset + 4, normal.y, true);
-    planeData.setFloat32(offset + 8, normal.z, true);
-    planeData.setFloat32(offset + 12, plane.distance, true);
-    planeData.setInt32(offset + 16, plane.signbits, true);
-  }
-  const storedPlanes = planes.map((_, index) => new AllocatedPatchPlane(planeAllocation, index * 20));
-  const storedFacets = facets.map((_, index) => {
-    const borders = Array.from({ length: 26 }, (_, border) => ({
-      get plane(): number { return storageView(facetAllocation).getInt32(index * 320 + 8 + border * 4, true); },
-      get inward(): boolean { return storageView(facetAllocation).getInt32(index * 320 + 112 + border * 4, true) !== 0; },
-      get noAdjust(): boolean { return storageView(facetAllocation).getInt32(index * 320 + 216 + border * 4, true) !== 0; },
-    }));
-    return {
-      get surface(): number { return storageView(facetAllocation).getInt32(index * 320, true); },
-      get borders(): readonly Border[] { return storedRows(borders, storageView(facetAllocation).getInt32(index * 320 + 4, true)); },
-    };
-  });
-  return {
-    bounds: { min: storedVector(allocation, 0), max: storedVector(allocation, 12) },
-    get planes(): readonly Plane[] {
-      const data = storageView(allocation);
-      if (data.getUint32(28, true) !== planeAllocation.byteOffset) throw new RangeError("Patch plane pointer outside source allocation");
-      return storedRows(storedPlanes, data.getInt32(24, true));
-    },
-    get facets(): readonly Facet[] {
-      const data = storageView(allocation);
-      if (data.getUint32(36, true) !== facetAllocation.byteOffset) throw new RangeError("Patch facet pointer outside source allocation");
-      return storedRows(storedFacets, data.getInt32(32, true));
-    },
-  };
-}
-
-export function generatePatchCollide(width: number, height: number, points: readonly Vec3[], debug: CollisionDebugSurface | null = null,
-  allocate: PatchAllocator | null = null): PatchCollide {
+export function generatePatchCollide(width: number, height: number, points: readonly Vec3[], debug: CollisionDebugSurface | null = null): PatchCollide {
   if (!Number.isInteger(width) || !Number.isInteger(height)) throw new RangeError("collision patch requires integer dimensions");
   if (width <= 2 || height <= 2) throw new CommonError("drop", `CM_GeneratePatchFacets: bad parameters: (${width}, ${height}, managed points)`);
   if (width % 2 === 0 || height % 2 === 0) throw new CommonError("drop", "CM_GeneratePatchFacets: even sizes are invalid for quadratic meshes");
@@ -268,14 +178,7 @@ export function generatePatchCollide(width: number, height: number, points: read
   const wrapWidth = wrapped();
   subdivide();
   width = columns.length; height = at(columns, 0).length;
-  const allocation = allocate === null ? null : allocate("CM_GeneratePatchCollide", 40);
   const bounds = windingBounds(columns.flat());
-  if (allocation !== null) {
-    const target = storageView(allocation);
-    for (const [index, value] of [bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z].entries()) {
-      target.setFloat32(index * 4, value, true);
-    }
-  }
   if (debug !== null) debug.c_totalPatchBlocks = (debug.c_totalPatchBlocks + (width - 1) * (height - 1)) | 0;
   const windings = debug?.windings ?? new CollisionWindingLibrary();
   const p = (x: number, y: number): Vec3 => at(at(columns, x), y);
@@ -414,13 +317,6 @@ export function generatePatchCollide(width: number, height: number, points: read
       if (facets.length === 1024) throw new CommonError("drop", "MAX_FACETS");
       makeFacet(second, [bottom, left, first !== -1 ? first : top !== -1 ? top : edgePlane(x, y, 5)], [noBottom, noLeft, false], [p(x + 1, y + 1), p(x, y + 1), p(x, y)], block);
     }
-  }
-  if (allocation !== null && allocate !== null) {
-    const patch = storePatch(allocate, allocation, planes, facets);
-    const target = storageView(allocation);
-    for (let axis = 0; axis < 3; axis++) target.setFloat32(axis * 4, target.getFloat32(axis * 4, true) - 1, true);
-    for (let axis = 0; axis < 3; axis++) target.setFloat32(12 + axis * 4, target.getFloat32(12 + axis * 4, true) + 1, true);
-    return patch;
   }
   return { planes, facets, bounds: { min: sub3(bounds.min, vec3(1, 1, 1)), max: add3(bounds.max, vec3(1, 1, 1)) } };
 }

@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
-import { LoopbackHub } from "../../../src/network/common/loopback.ts";
+import { LoopbackHub } from "../../support/loopback.ts";
 import { Q3ClientAdmission, Q3ServerAdmission } from "../../../src/network/q3/admission.ts";
 import type { Q3AcceptedConnect, Q3OutgoingDatagram } from "../../../src/network/q3/admission.ts";
 import { Q3ClientConnection } from "../../../src/network/q3/client.ts";
@@ -12,7 +12,6 @@ import { ClientMessageReader, encodeClientMessage } from "../../../src/network/q
 import { encodeConnectionlessText, encodeConnect } from "../../../src/network/q3/connectionless.ts";
 import { Q3ServerConfigStrings } from "../../../src/network/q3/configstrings.ts";
 import { Q3ServerNetwork } from "../../../src/app/bootstrap/network/q3.ts";
-import { Q3GameCallbackError } from "../../../src/app/bootstrap/network/q3-types.ts";
 import type { Q3ApplicationServerHost } from "../../../src/app/bootstrap/network/q3-types.ts";
 import type { WireUserCommand } from "../../../src/network/q3/message.ts";
 import { Netchannel, xorClientMessage } from "../../../src/network/q3/netchan.ts";
@@ -219,7 +218,7 @@ test("source pure verification retains signed checksums and rejects duplicate re
   expect(verifyQ3PureCommand(server, ["cp", "41"])).toEqual({ kind: "ignored", reason: "outdated" });
 });
 
-const retailPak = `${testCorpusRoot()}/q3a/baseq3/pak0.pk3`;
+const retailPak = corpusFile("q3a/baseq3/pak0.pk3");
 test.skipIf(!await Bun.file(retailPak).exists())("retail Q3 pak0 source checksum and keyed pure checksum match donor", async () => {
   const archive = await openArchive(retailPak);
   try { expect(q3ArchiveChecksums(archive, 0x12345678)).toEqual({ checksum: 1566731103, pureChecksum: 3017657714 }); }
@@ -405,7 +404,7 @@ test("Q3 callback drops stop the packet without a false error and leave the serv
 });
 
 
-test("Q3 packet recovery handles malformed bytes but propagates an awaited game failure", async () => {
+test("Q3 packet recovery handles malformed bytes and an awaited game failure drops only that peer", async () => {
   const hub = new LoopbackHub(), transport = hub.bind("failure-server"), client = hub.bind("failure-client");
   const owner = createIdentityOwner("q3-failure"), player = { client: owner.client(0, 0), actor: owner.actor(0, 0), sourceEntity: 0 };
   const failure = new RangeError("guest memory access failed"), calls: string[] = [], printed: string[] = [];
@@ -436,13 +435,10 @@ test("Q3 packet recovery handles malformed bytes but propagates an awaited game 
     send([]); await network.poll(2);
     send([10, 20]);
     client.send(transport.address, Uint8Array.of(255, 255, 255, 255, ...new TextEncoder().encode("getinfo")));
-    let caught: unknown;
-    try { await network.poll(3); } catch (error) { caught = error; }
-    expect(caught).toBeInstanceOf(Q3GameCallbackError);
-    if (!(caught instanceof Q3GameCallbackError)) throw new Error("Missing authoritative callback failure");
-    expect(caught.cause).toBe(failure);
-    expect(calls).toEqual(["begin"]);
-    expect(printed.some(text => text.includes(failure.message))).toBe(false);
+    await network.poll(3);
+    expect(network.clients).toEqual([]); expect(network.phase).toBe("active");
+    expect(calls).toEqual(["begin", "status"]);
+    expect(printed.some(text => text.includes(failure.message))).toBe(true);
   } finally { await network.close(); hub.close(); }
 });
 

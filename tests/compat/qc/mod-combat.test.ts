@@ -1,8 +1,8 @@
 import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
-import { homedir } from "node:os";
 
 import { ModMatchState } from "../../../src/world/session/mod-match.ts";
 import { expect, test } from "bun:test";
+import { copperAvailable, copperProgramPath } from "../../support/corpus.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { DamageOutcome, DamageRequest } from "../../../src/contracts/gameplay.ts";
 import type { ModActorField, ModCallbackDeclaration, ModCallbackInput, ModRuntimeValue } from "../../../src/contracts/mod-callbacks.ts";
@@ -19,8 +19,8 @@ import { QcModProvider } from "../../../src/compat/qc/mod-provider.ts";
 import { loadQcProgram } from "../../../src/compat/qc/program.ts";
 import { parseEntities } from "../../../src/core/common-parse.ts";
 
-const path = `${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`;
-test.skipIf(!await Bun.file(path).exists())("original Copper combat owns health and authored pain/death callbacks inside shared Q2 authority", async () => {
+const path = copperProgramPath();
+test.skipIf(!copperAvailable())("original Copper combat owns health and authored pain/death callbacks inside shared Q2 authority", async () => {
   const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1"]);
   if (command.kind !== "run") throw new Error("Missing Q2 destination");
   const content = await loadApplicationContent(command.options), program = loadQcProgram(await Bun.file(path).bytes());
@@ -139,7 +139,7 @@ test.skipIf(!await Bun.file(path).exists())("original Copper combat owns health 
     expect(sounds).toContain("knight/kdeath.wav");
     expect(kills).toEqual([1]); expect(match.gates()).toEqual([{ objective: "test:monsters", satisfied: true }]);
     borrowed.invoke({ function: "killed_monster", arguments: [], globals: [] }, new Map<ModCallbackInput, ModRuntimeValue>());
-    expect(match.objective("test:monsters")?.stage).toBe("twice"); expect(kills).toEqual([1, 2, 1]);
+    expect(match.objective("test:monsters")?.stage).toBe("twice"); expect(kills).toEqual([1, 2]); // the writable borrower's client kill event is suppressed; only the objective owner publishes
     expect(borrowed.machine.globals.float(borrowed.machine.globalOffset("killed_monsters"))).toBe(2);
     expect(source.machine.globals.float(source.machine.globalOffset("killed_monsters"))).toBe(2);
     const borrowedWords = borrowed.machine.entities.at(borrowerSlot), borrowedLinked = borrowedWords.int(borrowed.machine.fieldOffset("owner"));
@@ -153,7 +153,7 @@ test.skipIf(!await Bun.file(path).exists())("original Copper combat owns health 
     callbacks.use(target, world.id, world.id);
     source.advance({ frame: 1, time: { kind: "seconds", value: 3.2 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" });
     expect(actors.isLive(target.id)).toBe(false); expect(combat.read(target.id)).toBeNull();
-  } finally { source.close(); expect(match.objective("test:monsters")).toBeNull();
+    source.close(); expect(match.objective("test:monsters")).toBeNull();
     expect(() => borrowed.invoke({ function: "killed_monster", arguments: [], globals: [] }, new Map<ModCallbackInput, ModRuntimeValue>())).toThrow();
-    borrowed.close(); match.close(); actors.close(); await content.close(); }
+  } finally { source.close(); borrowed.close(); match.close(); actors.close(); await content.close(); }
 }, 30000);

@@ -122,7 +122,7 @@ function validGameType(value: number): GameType {
   switch (value) {
     case GameType.GT_FFA: case GameType.GT_TOURNAMENT: case GameType.GT_SINGLE_PLAYER: case GameType.GT_TEAM:
     case GameType.GT_CTF: case GameType.GT_1FCTF: case GameType.GT_OBELISK: case GameType.GT_HARVESTER: return value;
-    default: throw new RangeError(`Invalid server game type ${value}`);
+    default: return value;
   }
 }
 function emptyScore(): ClientScore {
@@ -205,8 +205,7 @@ export class ClientServerCommandRuntime {
   private flagStatus(): void {
     const value = this.config(23), state = this.host.staticState;
     if (state.gameType === GameType.GT_CTF) {
-      if (value.length < 1) throw new RangeError("CTF flag status leaves source bytes uninitialized");
-      state.redflag = value.charCodeAt(0) - 48;
+      state.redflag = (value.length === 0 ? 0 : value.charCodeAt(0)) - 48;
       state.blueflag = (value.length === 1 ? 0 : value.charCodeAt(1)) - 48;
     } else if (this.host.state.product === "missionpack" && state.gameType === GameType.GT_1FCTF) state.flagStatus = (value.length === 0 ? 0 : value.charCodeAt(0)) - 48;
   }
@@ -238,11 +237,13 @@ export class ClientServerCommandRuntime {
     if (state.product === "missionpack") this.host.setScoreSelection();
   }
   private parseTeamInfo(command: readonly string[]): void {
-    const count = integer(command, 1), state = this.host.state;
-    if (count > 8) throw new RangeError("Team overlay exceeds TEAM_MAXOVERLAY");
+    // TEAM_MAXOVERLAY is 32. A server chooses these numbers, so anything outside the tables is ignored.
+    const count = Math.max(0, Math.min(32, integer(command, 1))), state = this.host.state;
     state.numSortedTeamPlayers = count;
     for (let i = 0; i < count; i++) {
-      const client = integer(command, i * 6 + 2), info = this.host.clients.clientInfo(client);
+      const client = integer(command, i * 6 + 2);
+      if (client < 0 || client >= 64) { state.numSortedTeamPlayers = i; return; }
+      const info = this.host.clients.clientInfo(client);
       state.sortedTeamPlayers[i] = client;
       info.location = integer(command, i * 6 + 3); info.health = integer(command, i * 6 + 4);
       info.armor = integer(command, i * 6 + 5); info.curWeapon = integer(command, i * 6 + 6); info.powerups = integer(command, i * 6 + 7);
@@ -490,7 +491,7 @@ export class ClientServerCommandRuntime {
     at(this.voices, state.voiceChatBufferIn);
     this.voices[state.voiceChatBufferIn] = { ...voice };
     state.voiceChatBufferIn = (state.voiceChatBufferIn + 1) % 32;
-    if (state.voiceChatBufferIn === state.voiceChatBufferOut) { await this.playVoiceChat(at(this.voices, state.voiceChatBufferOut)); state.voiceChatBufferOut++; }
+    if (state.voiceChatBufferIn === state.voiceChatBufferOut) { await this.playVoiceChat(at(this.voices, state.voiceChatBufferOut)); state.voiceChatBufferOut = (state.voiceChatBufferOut + 1) % 32; }
   }
   private async playVoiceChat(voice: BufferedVoice): Promise<void> {
     const state = this.host.state, cgs = this.host.staticState;

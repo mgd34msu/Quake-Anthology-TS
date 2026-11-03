@@ -19,7 +19,7 @@ export class LmctfVote {
   }
   start(actor: ActorId, game: Q2GameServices): undefined {
     const players = this.players(game);
-    for (const [, player] of players) player.extraFlags &= ~192;
+    if (this.startedAt === null) for (const [, player] of players) player.extraFlags &= ~192;
     if (players.length < 4) lmctfPrint(game, "You need at least four players on the server to initiate a vote\n", actor);
     else if (this.startedAt !== null) lmctfPrint(game, "Vote has already been started\n", actor);
     else {

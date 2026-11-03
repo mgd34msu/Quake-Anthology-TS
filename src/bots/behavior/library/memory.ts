@@ -2,7 +2,18 @@ import { SaveReader } from "../../../persistence/value.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // botlib/l_memory.c release32 allocation IDs and heap/hunk lifetime.
 
-export interface BotMemoryAllocation { readonly bytes: Uint8Array }
+export interface BotMemoryAllocation {
+  readonly bytes: Uint8Array;
+  /** A cached DataView over `bytes`, present on manager-owned allocations; it throws once freed like `bytes`. */
+  readonly view?: DataView;
+}
+
+/** The DataView over an allocation's payload, reused while the backing buffer is unchanged. */
+export function allocationView(allocation: BotMemoryAllocation): DataView {
+  if (allocation.view !== undefined) return allocation.view;
+  const bytes = allocation.bytes;
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
 export interface BotMemoryProvenance { readonly file: string; readonly line: number; readonly label: string }
 export interface BotMemoryDebugProfile {
   readonly kind: "manager" | "debug";
@@ -85,10 +96,20 @@ export class BotMemory {
     new DataView(bytes.buffer, bytes.byteOffset, prefixBytes).setUint32(0, kind === "heap" ? heapId : hunkId, true);
     if (clear) bytes.fill(0, prefixBytes);
     const record: AllocationRecord = { backing, kind, size, provenance, live: true };
+    let cachedSource: Uint8Array | null = null, cachedView: DataView | null = null;
     const allocation: BotMemoryAllocation = {
       get bytes(): Uint8Array {
         if (!record.live) throw new Error("Bot memory allocation has been freed");
         return record.backing.bytes.subarray(prefixBytes);
+      },
+      get view(): DataView {
+        if (!record.live) throw new Error("Bot memory allocation has been freed");
+        const source = record.backing.bytes;
+        if (cachedView === null || cachedSource !== source || cachedView.buffer !== source.buffer) {
+          cachedSource = source;
+          cachedView = new DataView(source.buffer, source.byteOffset + prefixBytes, source.byteLength - prefixBytes);
+        }
+        return cachedView;
       },
     };
     this.records.set(allocation, record); this.live.set(allocation, record);
@@ -135,25 +156,9 @@ export class BotMemory {
     debug.print("message", `total botlib memory: ${(this.allocatedBytes + prefixBytes * this.live.size) >> 10} KB\n`);
     debug.print("message", `total memory blocks: ${this.live.size}\n`);
   }
-  printMemoryLabels(): void {
-    const debug = this.options.debug;
-    if (debug === undefined) return;
-    this.printUsedMemorySize(); debug.writeLog("============= Botlib memory log ==============\r\n\r\n");
-    if (debug.kind !== "debug") return;
-    let index = 0;
-    for (const record of [...this.live.values()].reverse()) {
-      const source = record.provenance;
-      const location = source === null ? "<unattributed>" : `${source.file.padStart(24)} line ${String(source.line).padStart(6)}: ${source.label}`;
-      debug.writeLog(`${String(index++).padStart(6)}, ${record.kind}, ${String(record.size + prefixBytes).padStart(8)}: ${location}\r\n`);
-    }
-  }
   memoryByteSize(allocation: BotMemoryAllocation | null): number {
     if (this.options.debug === undefined) throw new Error("MemoryByteSize requires the bot memory manager profile");
     const record = allocation === null ? undefined : this.records.get(allocation);
     return record === undefined || !record.live ? 0 : record.size + prefixBytes;
-  }
-  dumpMemory(): void {
-    if (this.options.debug === undefined) throw new Error("DumpMemory requires the bot memory manager profile");
-    for (const allocation of [...this.live.keys()].reverse()) this.free(allocation);
   }
 }

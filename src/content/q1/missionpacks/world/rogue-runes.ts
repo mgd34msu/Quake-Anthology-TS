@@ -68,7 +68,8 @@ export class RogueRunes {
     game.sound(owner, "runes/end4.wav", "item"); game.host.combat.setHealth(owner, Math.min(100, game.health(actor) + 5)); state.regeneration = game.time + 1; return undefined;
   }
   drop(actor: ActorId): undefined { const state = this.state(actor), body = this.game.host.bodies.read(actor); if (body === null) return undefined; for (const rune of [1, 2, 4, 8]) if ((state.rune & rune) !== 0) this.spawn(rune, body.origin); state.rune = 0; return undefined; }
-  damage(actor: ActorId, amount: number): number { return (this.state(actor).rune & 2) !== 0 ? Math.fround(amount * 2) : amount; }
+  damage(actor: ActorId, amount: number): number { if (this.game.host.actors.resolveOwned(actor) === null) return amount; // A projectile can outlive its owner.
+    return (this.state(actor).rune & 2) !== 0 ? Math.fround(amount * 2) : amount; }
   resistance(actor: ActorId, amount: number): number {
     const state = this.state(actor); if ((state.rune & 1) === 0) return amount;
     if (state.earthNoise < this.game.time) { this.noise(actor, 1); state.earthNoise = this.game.time + 1; } return Math.fround(amount / 2);

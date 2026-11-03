@@ -4,13 +4,17 @@ import type { NavigationEstimateResult } from "../../navigation/types.ts";
 import { aasAreaTravelFlags, navigationEdgeTravelFlag } from "../../navigation/graph.ts";
 import { aasEstimateAreaTime } from "../../navigation/estimate-aas.ts";
 import { NavigationRuntime } from "../../navigation/runtime.ts";
+import { aasTraceClientBBox } from "../../navigation/aas.ts";
 import type { BotGoal } from "../library/goals.ts";
 import type { BotActionBuffer } from "../library/actions.ts";
 import type { ServerTraceResult } from "../../../content/q3/base/world.ts";
-import { add3, sub3, length3, scale3, normalize3 } from "../../../core/math.ts";
+import { add3, sub3, length3, scale3, normalize3, vec3 } from "../../../core/math.ts";
+import { nativeAtoi } from "../../../core/numeric.ts";
+import type { AasBspEntities } from "../library/bsp-entities.ts";
 import type { BotMoveStateStore, BotMoveResult } from "./movement-state.ts";
 import type { BotRandom } from "../library/weights.ts";
 import { SourceBotTravel } from "./travel/index.ts";
+import { TravelGraph } from "./travel/routing.ts";
 import type { BotTravelPredictionResult, BotTravelModel } from "./travel/types.ts";
 import { AlternativeRouteType, RouteStopEvent, TravelType } from "./navigation-types.ts";
 import type { AreaTravelTimeQuery, AlternativeGoal, AlternativeRouteQuery, BotMovementPrediction, BotNavigation,
@@ -18,6 +22,7 @@ import type { AreaTravelTimeQuery, AlternativeGoal, AlternativeRouteQuery, BotMo
 
 export interface SourceBotNavigationHost {
   readonly runtime: NavigationRuntime;
+  readonly bspEntities: AasBspEntities;
   forClient(client: number): NavigationRuntime;
   readonly moveStates: BotMoveStateStore;
   readonly actions: BotActionBuffer;
@@ -29,6 +34,8 @@ export interface SourceBotNavigationHost {
   trace(start: Vec3, end: Vec3, bounds: Bounds | null, passEntity: number, mask: number): ServerTraceResult;
   /** Executes the selected actor movement provider on detached state. */
   predictClientMovement(query: BotMovementPrediction): BotTravelPredictionResult;
+  /** Absolute bounds of a brush model, including models the game never sends to the bots. */
+  modelBounds(model: number): Bounds | null;
   modelInfo(model: number): BotTravelModel | null;
   nextEntity(after: number): number;
   entityType(entity: number): number;
@@ -38,9 +45,6 @@ export interface SourceBotNavigationHost {
 
 const f = Math.fround;
 const zero = { x: 0, y: 0, z: 0 };
-function overlap(a: Bounds, b: Bounds): boolean {
-  return a.min.x <= b.max.x && a.max.x >= b.min.x && a.min.y <= b.max.y && a.max.y >= b.min.y && a.min.z <= b.max.z && a.max.z >= b.min.z;
-}
 /** Source area zero remains invalid even when a foreign navigation graph uses node zero. */
 export class SourceBotNavigation implements BotNavigation {
   private readonly offset: number;
@@ -79,6 +83,8 @@ export class SourceBotNavigation implements BotNavigation {
   }
   setAreaEnabled(area: number, enabled: boolean): void { if (area !== 0) this.runtime.enableArea(this.node(area), enabled); }
   private selectedEstimate(query: AreaTravelTimeQuery): NavigationEstimateResult {
+    // AAS_AreaRouteToGoalArea answers 1 for equal areas before it range-tests either.
+    if (query.area === query.goalArea && this.runtime.graph.asset?.kind === "aas") return { kind: "estimate", travelTime: 1, firstEdge: null };
     if (query.area === 0 || query.goalArea === 0) return { kind: "unreachable" };
     return this.runtime.estimate({ startNode: this.node(query.area), goalNode: this.node(query.goalArea), origin: query.origin, travelFlags: query.travelFlags });
   }
@@ -174,15 +180,19 @@ export class SourceBotNavigation implements BotNavigation {
         visited.add(current); cluster.push(current);
         for (const neighbor of this.neighbors(current).reverse()) stack.push(neighbor);
       }
+      const centerOf = (area: number): Vec3 | null => {
+        const asset = this.runtime.graph.asset, node = this.runtime.node(this.node(area));
+        return asset?.kind === "aas" ? asset.areas[area]?.center ?? null : node?.origin ?? null;
+      };
       let center = { ...zero };
-      for (const area of cluster) { const node = this.runtime.node(this.node(area)); if (node !== null) center = add3(center, node.origin); }
+      for (const area of cluster) { const origin = centerOf(area); if (origin !== null) center = add3(center, origin); }
       center = scale3(center, 1 / cluster.length);
       let bestArea = first, bestDistance = 999999;
-      for (const area of cluster) { const node = this.runtime.node(this.node(area)); if (node === null) continue;
-        const distance = length3(sub3(node.origin, center)); if (distance < bestDistance) { bestArea = area; bestDistance = distance; } }
-      const node = this.runtime.node(this.node(bestArea)), times = candidates.get(bestArea);
-      if (node === null || times === undefined) throw new Error("Alternative route candidate vanished");
-      goals.push({ origin: node.origin, area: bestArea, startTravelTime: times.start, goalTravelTime: times.goal,
+      for (const area of cluster) { const origin = centerOf(area); if (origin === null) continue;
+        const distance = length3(sub3(origin, center)); if (distance < bestDistance) { bestArea = area; bestDistance = distance; } }
+      const origin = centerOf(bestArea), times = candidates.get(bestArea);
+      if (origin === null || times === undefined) throw new Error("Alternative route candidate vanished");
+      goals.push({ origin, area: bestArea, startTravelTime: times.start, goalTravelTime: times.goal,
         extraTravelTime: (times.start + times.goal - direct) & 65535 });
       if (goals.length >= query.maximumGoals) break;
     }
@@ -230,14 +240,24 @@ export class SourceBotNavigation implements BotNavigation {
     if (area !== 0) {
       const end = { ...start, z: start.z - 50 };
       start = { ...start, z: start.z + 0.25 };
-      const trace = this.host.trace(start, end, this.presenceBounds(4), -1, 1 | 0x10000);
-      if (trace.solidity !== "clear") return { area, origin: start };
-      area = this.pointArea(trace.end);
-      if (area !== 0) return { area, origin: trace.end };
+      // AAS_TraceClientBBox walks the area tree and ignores entities, so a door or plat linked over the floor cannot change the answer.
+      const asset = this.runtime.graph.asset;
+      const trace = asset?.kind === "aas" ? aasTraceClientBBox(asset, start, end, 4) : null;
+      const floor = trace !== null ? trace.startSolid ? null : trace.end : this.floorBelow(start, end);
+      if (floor === null) return { area, origin: start };
+      area = this.pointArea(floor);
+      if (area !== 0) return { area, origin: floor };
     }
-    const areas = this.bboxAreas({ min: add3(origin, bounds.min), max: add3(origin, bounds.max) });
+    // AAS_LinkEntityClientBBox grows the box by the crouch hull, so a box that touches no area itself still finds one.
+    const hull = this.presenceBounds(4);
+    const areas = this.bboxAreas({ min: sub3(add3(origin, bounds.min), hull.max), max: sub3(add3(origin, bounds.max), hull.min) });
     for (const number of areas) if ((this.area(number).flags & 5) !== 0) return { area: number, origin };
     return { area: areas[0] ?? 0, origin };
+  }
+  /** The hull-sized drop for graphs with no area tree to walk; null when the start is solid. */
+  private floorBelow(start: Vec3, end: Vec3): Vec3 | null {
+    const trace = this.host.trace(start, end, this.presenceBounds(4), -1, 1 | 0x10000);
+    return trace.solidity === "clear" ? trace.end : null;
   }
   fuzzyPointReachabilityArea(origin: Vec3): number {
     let first = this.pointArea(origin);
@@ -265,7 +285,8 @@ export class SourceBotNavigation implements BotNavigation {
     if (trace.solidity === "clear" && trace.fraction < 1 && trace.entityNum !== 1023) {
       if (trace.entityNum === 1022) return this.fuzzyPointReachabilityArea(origin);
       const model = this.host.entityModelIndex(trace.entityNum);
-      for (const edge of this.runtime.graph.edges) if (edge.mode === "mover" && edge.entity?.model === model) return this.source(edge.to);
+      const mover = this.runtime.moverEdge(model);
+      if (mover !== null) return this.source(mover.to);
       if (this.swimming(origin)) return this.fuzzyPointReachabilityArea(origin);
       const area = this.fuzzyPointReachabilityArea(origin);
       if (area !== 0 && this.area(area).reachableAreaCount !== 0) return area;
@@ -274,20 +295,51 @@ export class SourceBotNavigation implements BotNavigation {
     }
     return this.fuzzyPointReachabilityArea(origin);
   }
+  /** AAS_GetJumpPadInfo for one trigger_push: the launch point on the floor of its brush, the brush bounds and the launch velocity toward its target. */
+  private jumpPadInfo(entity: number): { readonly start: Vec3; readonly bounds: Bounds; readonly velocity: Vec3 } | null {
+    const entities = this.host.bspEntities, text = (bytes: Uint8Array): string => new TextDecoder().decode(bytes.subarray(0, Math.max(0, bytes.indexOf(0))));
+    const model = new Uint8Array(128), target = new Uint8Array(128), name = new Uint8Array(128);
+    entities.value(entity, "model", model);
+    const bounds = this.host.modelBounds(model[0] === 0 ? 0 : nativeAtoi(text(model).slice(1)));
+    if (bounds === null) return null;
+    const center = scale3(add3(bounds.min, bounds.max), 0.5);
+    const floor = this.host.trace(vec3(center.x, center.y, center.z + 64), center, this.presenceBounds(4), -1, 1 | 0x10000);
+    const bottom = floor.solidity !== "clear" ? center : floor.end, start = vec3(bottom.x, bottom.y, bottom.z + 0.125);
+    entities.value(entity, "target", target);
+    const targetName = text(target);
+    let destination = entities.nextEntity(0);
+    for (; destination !== 0; destination = entities.nextEntity(destination)) if (entities.value(destination, "targetname", name) && text(name) === targetName) break;
+    if (destination === 0) return null;
+    const gravity = this.host.moveStates.svGravity?.value ?? 800, point = entities.vector(destination, "origin").value;
+    const time = f(Math.sqrt(f(f(point.z - center.z) / f(0.5 * gravity))));
+    if (!(time > 0)) return null;
+    const delta = sub3(point, center), push = scale3(normalize3(delta), f(f(length3(delta) / time) * f(1.1)));
+    return { start, bounds, velocity: vec3(push.x, push.y, f(time * gravity)) };
+  }
+  /** AAS_BestReachableFromJumpPadArea: the largest jump-pad area of the first trigger_push whose launch flight hits the item box. */
   bestReachableFromJumpPadArea(origin: Vec3, bounds: Bounds): number {
-    const target = { min: add3(origin, bounds.min), max: add3(origin, bounds.max) };
-    let best = 0, volume = 0;
-    for (const edge of this.runtime.graph.edges) {
-      if (edge.mode !== "jump-pad") continue;
-      const result = this.runtime.world.admit({ from: edge.start, to: edge.end, mode: edge.mode, hint: edge.hint, entity: edge.entity }, this.runtime.graph.profile);
-      if (!result.admitted || !result.trajectory.some(point => overlap(target, {
-        min: add3(point, this.presenceBounds(4).min), max: add3(point, this.presenceBounds(4).max) }))) continue;
-      const area = this.source(edge.from), node = this.runtime.node(edge.from);
-      if (node === null) continue;
-      const size = sub3(node.bounds.max, node.bounds.min), candidate = f(f(size.x * size.y) * size.z);
-      if (candidate >= volume) { best = area; volume = candidate; }
+    const entities = this.host.bspEntities, box = { min: add3(origin, bounds.min), max: add3(origin, bounds.max) }, hull = this.presenceBounds(4);
+    const classname = new Uint8Array(128);
+    for (let entity = entities.nextEntity(0); entity !== 0; entity = entities.nextEntity(entity)) {
+      if (!entities.value(entity, "classname", classname) || new TextDecoder().decode(classname.subarray(0, Math.max(0, classname.indexOf(0)))) !== "trigger_push") continue;
+      const pad = this.jumpPadInfo(entity);
+      if (pad === null) continue;
+      const areas = this.bboxAreas({ min: sub3(pad.bounds.min, hull.max), max: sub3(pad.bounds.max, hull.min) }).filter(area => (this.area(area).contents & 128) !== 0);
+      if (areas.length === 0) continue;
+      const move = this.host.predictClientMovement({ entityNum: -1, origin: pad.start, presence: 2, onGround: false, velocity: pad.velocity,
+        commandMove: vec3(pad.velocity.x, pad.velocity.y, 0), commandFrames: 0, maxFrames: 30, frameTime: f(0.1), stopEvents: 2048, stopArea: 0, hitBox: box, visualize: false });
+      if ((move.stopEvent & 2048) === 0) continue;
+      // The loaded graph keeps area boxes but not the faces AAS_AreaVolume sums, so the box volume ranks the pad areas.
+      let best = 0, volume = 0;
+      for (const area of areas) {
+        const node = this.runtime.node(this.node(area));
+        if (node === null) continue;
+        const size = sub3(node.bounds.max, node.bounds.min), candidate = f(f(size.x * size.y) * size.z);
+        if (candidate >= volume) { best = area; volume = candidate; }
+      }
+      return best;
     }
-    return best;
+    return 0;
   }
   swimming(origin: Vec3): boolean { return (this.host.pointContents(add3(origin, { x: 0, y: 0, z: -2 })) & (8 | 16 | 32)) !== 0; }
   predictClientMovement(query: BotMovementPrediction): { readonly move: { readonly end: Vec3 } } { return { move: { end: this.host.predictClientMovement(query).end } }; }
@@ -300,36 +352,47 @@ export class SourceBotNavigation implements BotNavigation {
     if (state === null) { result.failure = true; return; }
     this.withClient(state.client, () => this.travel.moveToGoal(result, handle, goal, travelFlags));
   }
-  private estimatedPoints(query: RouteQuery): readonly Vec3[] | null {
-    const points: Vec3[] = [query.origin], visited = new Set<number>();
-    let area = query.area, origin = query.origin;
-    while (area !== query.goalArea) {
-      const result = this.selectedEstimate({ area, origin, goalArea: query.goalArea, travelFlags: query.travelFlags });
-      if (result.kind === "unreachable" || result.firstEdge === null || visited.has(result.firstEdge.id)) return null;
-      const edge = result.firstEdge; visited.add(edge.id); points.push(edge.start, edge.end);
-      area = this.source(edge.to); origin = edge.end;
-    }
-    return points;
+  /** BotAddToTarget: walks `start` to `end` while the look-ahead budget lasts and reports whether the budget ran out. */
+  private addToTarget(start: Vec3, end: Vec3, maximum: number, travelled: { value: number }, target: { value: Vec3 }): boolean {
+    const direction = sub3(end, start), length = length3(direction), unit = normalize3(direction);
+    if (f(travelled.value + length) < maximum) { target.value = end; travelled.value = f(travelled.value + length); return false; }
+    target.value = add3(start, scale3(unit, f(maximum - travelled.value))); travelled.value = maximum; return true;
   }
   movementViewTarget(handle: number, goal: BotGoal, travelFlags: number, lookAhead: number, output: { value: Vec3 }): boolean {
     const state = this.host.moveStates.fromHandle(handle);
-    if (state === null) return false;
-    const route = this.estimatedPoints({ area: this.pointArea(state.origin), origin: state.origin, goalArea: goal.area, travelFlags });
-    if (route === null) return false;
-    let start = state.origin, remaining = lookAhead;
-    for (const point of [...route, goal.origin]) {
-      const delta = sub3(point, start), distance = length3(delta);
-      if (distance >= remaining) { output.value = add3(start, scale3(normalize3(delta), remaining)); return true; }
-      remaining -= distance; start = point;
+    if (state === null || state.lastReachability === 0) return false;
+    const graph = new TravelGraph(this.runtime); graph.time = f(this.host.time());
+    const travelled = { value: 0 };
+    let end = state.origin, number = state.lastReachability;
+    while (number !== 0 && travelled.value < lookAhead) {
+      const reach = graph.reach(number);
+      if (reach === null) break;
+      if (this.addToTarget(end, reach.start, lookAhead, travelled, output)) return true;
+      const type = reach.travelType & TravelType.MASK;
+      // Never look beyond a teleporter or a weapon jump.
+      if (type === TravelType.TELEPORT || type === TravelType.ROCKETJUMP || type === TravelType.BFGJUMP) return true;
+      if (type !== TravelType.JUMPPAD && type !== TravelType.ELEVATOR && type !== TravelType.FUNCBOB
+        && this.addToTarget(reach.start, reach.end, lookAhead, travelled, output)) return true;
+      number = graph.select(state, goal, travelFlags, travelFlags,
+        { area: reach.area, origin: reach.end, lastGoalArea: state.lastGoalArea, lastArea: state.lastArea, avoid: state }).reachability;
+      end = reach.end;
     }
-    output.value = goal.origin; return true;
+    return false;
   }
   predictVisiblePosition(origin: Vec3, area: number, goal: BotGoal, travelFlags: number, output: { value: Vec3 }): boolean {
-    const route = this.estimatedPoints({ area, origin, goalArea: goal.area, travelFlags });
-    if (route === null) return false;
-    for (const point of route) {
-      const trace = this.host.trace(point, goal.origin, null, -1, 1);
-      if (trace.fraction === 1 && trace.solidity === "clear") { output.value = point; return true; }
+    if (area === 0) return false;
+    if (area === goal.area) { output.value = goal.origin; return true; }
+    const graph = new TravelGraph(this.runtime); graph.time = f(this.host.time());
+    const start = (position: Vec3, areaNumber: number) => graph.select(null, goal, travelFlags, travelFlags,
+      { area: areaNumber, origin: position, lastGoalArea: -1, lastArea: -1, avoid: null }).reachability;
+    let number = start(origin, area);
+    for (let hop = 0; hop < 20 && number !== 0; hop++) {
+      const reach = graph.reach(number);
+      if (reach === null) break;
+      if (reach.area === goal.area) { output.value = reach.end; return true; }
+      const trace = this.host.trace(reach.end, goal.origin, null, -1, 1);
+      if (trace.fraction === 1 && trace.solidity === "clear") { output.value = reach.end; return true; }
+      number = start(reach.end, reach.area);
     }
     return false;
   }

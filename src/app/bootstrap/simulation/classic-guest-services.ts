@@ -73,6 +73,8 @@ export class ClassicGuestServices {
   /** Guest edict stand-ins for shared TS monsters (see spawnProxyEdict). */
   readonly #pendingProxies = new Map<number, import("../../../contracts/execution.ts").RawEntityView>();
   readonly #monsterProxies = new Map<ActorId, { readonly view: import("../../../contracts/execution.ts").RawEntityView; health: number }>();
+  /** Guest slot to shared monster, for routing guest T_Damage on a stand-in to shared combat. */
+  readonly #proxyActors: (ActorId | undefined)[] = [];
   withInputMovement<T>(actor: ActorId, projection: NativeInputMotion, run: () => T): T {
     const previous = this.inputMotion.get(actor); this.inputMotion.set(actor, projection);
     try { return run(); }
@@ -105,6 +107,7 @@ export class ClassicGuestServices {
       get engine() { return owner.options.engine; }, cvars: options.cvars,
       bindEntity: (record, actor) => this.bindEntity(record, actor),
       linkBody: (record, actor) => this.linkBody(record, actor),
+      standInActor: record => this.#proxyActors[record.slot] ?? null,
       print: (destination, entity, level, text) => this.print(destination, entity, level, text),
       configstring: (index, value) => this.setConfigstring(index, value),
       resourceIndex: (kind, name) => this.resourceIndex(kind, name),
@@ -128,6 +131,8 @@ export class ClassicGuestServices {
     const { engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance, pickups } = binding;
     this.#options = { ...this.#options, engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance, pickups };
     this.#loading = true; this.#configstrings.clear(); this.#messages.reset(); SZ_Clear(this.#buffer);
+    // spawnEntities reinitializes every edict, so stale proxies are dropped without calling the DLL's G_FreeEdict
+    this.#monsterProxies.clear(); this.#proxyActors.length = 0; this.#pendingProxies.clear();
     for (const kind of resourceKinds) this.#resourceNames[kind].clear();
     this.storeConfigstring(33, binding.mapPath);
     for (let model = 1; model < binding.scene.geometry.models.length; model++) this.storeConfigstring(33 + model, `*${model}`);
@@ -180,7 +185,8 @@ export class ClassicGuestServices {
     const previous = this.#playerMovement; this.#playerMovement = movement;
     try { return run(); } finally { this.#playerMovement = previous; }
   }
-  configstrings(): ReadonlyMap<number, string> { return new Map(this.#configstrings); }
+  /** The live table: callers read it in place and copy it only when they retain it across a mutation. */
+  configstrings(): ReadonlyMap<number, string> { return this.#configstrings; }
   drainMessages(): readonly ClassicGuestMessage[] { const taken = this.#messages.take(this.#messageCursor); this.#messages.retire(); return taken; }
   resource(kind: "model" | "sound" | "image", index: number): string { return this.#configstrings.get(resourceBases[kind] + index) ?? ""; }
   resourceIndex(kind: "model" | "sound" | "image", name: string): number {
@@ -361,6 +367,7 @@ export class ClassicGuestServices {
     this.#pendingProxies.delete(slot);
     const combat = this.options.engine.combat.read(actor.id);
     this.#monsterProxies.set(actor.id, { view, health: combat?.health ?? 0 });
+    this.#proxyActors[view.slot] = actor.id;
     this.#syncMonsterProxy(actor.id);
   }
   #syncMonsterProxy(actor: ActorId): void {
@@ -381,7 +388,7 @@ export class ClassicGuestServices {
     const engine = this.options.engine, provenance = this.options.damageProvenance;
     for (const [actor, entry] of [...this.#monsterProxies]) {
       if (!engine.actors.isLive(actor)) {
-        try { combat.freeProxyEdict(entry.view); } finally { this.#monsterProxies.delete(actor); }
+        try { combat.freeProxyEdict(entry.view); } finally { this.#monsterProxies.delete(actor); this.#proxyActors[entry.view.slot] = undefined; }
         continue;
       }
       const health = combat.proxyHealth(entry.view), body = engine.bodies.read(actor);
@@ -394,8 +401,8 @@ export class ClassicGuestServices {
       const amount = entry.health - health;
       entry.health = health;
       if (provenance === undefined || this.#host === null) continue;
-      // The guest applied this damage internally; its attacker is not
-      // observable at this boundary, so the world takes credit.
+      // T_Damage on a stand-in reaches shared combat with its real attacker (standInActor); this covers
+      // health the guest changed without T_Damage, which has no attacker, so the world takes credit.
       const world = engine.actors.atSource(this.#host.options.provider, 0)?.id ?? actor;
       engine.combat.apply({ target: actor, amount, knockback: 0, direction: { x: 0, y: 0, z: 0 }, point: body?.origin ?? { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 1 }, delivery: "direct",
         attack: { ...provenance(world, world, actor), attacker: world, inflictor: world, cause: { kind: "q2", meansOfDeath: 0, damageFlags: 0 } } });

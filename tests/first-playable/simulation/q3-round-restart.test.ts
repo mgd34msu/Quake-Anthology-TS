@@ -1,13 +1,14 @@
 import { CommandBuffer } from "../../../src/core/commands/index.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
-import { expect, spyOn, test } from "bun:test";
+import { expect, spyOn } from "bun:test";
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { createSimulation } from "../../../src/app/bootstrap/simulation/index.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q3a/baseq3/pak0.pk3", "q3a/missionpack/pak0.pk3");
 
 test("Q3 rounds retain shared services and retire actors and listeners", async () => {
  const launch = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3", "--dedicated", "--mode", "deathmatch"]);

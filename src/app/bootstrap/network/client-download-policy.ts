@@ -23,6 +23,8 @@ export function createClientDownloadPermission(cvars: CvarRegistry, family: 'q2'
     }
     cvars.register('allow_download', '1', archive);
     cvars.register('cl_http_downloads', '1', archive);
+    // Packages stay mounted in later sessions, so they have their own switch (on, as in Q2PRO; see SECURITY.md).
+    cvars.register('cl_http_package_downloads', '1', archive);
     for (const category of ['maps', 'models', 'sounds', 'players']) cvars.register(`allow_download_${category}`, '1', archive);
     const categoryAllowed = (category: ClientDownloadCategory): boolean => {
         switch (category) {
@@ -37,7 +39,8 @@ export function createClientDownloadPermission(cvars: CvarRegistry, family: 'q2'
     };
     // Correct the donor's -1 inconsistency: nonpositive disables HTTP and native automatic transfers.
     return request => cvars.variableValue('allow_download') > 0
-        && (request.transport !== 'http' || cvars.variableValue('cl_http_downloads') !== 0) && categoryAllowed(request.category);
+        && (request.transport !== 'http' || cvars.variableValue('cl_http_downloads') !== 0 && (request.category !== 'package' || cvars.variableValue('cl_http_package_downloads') !== 0))
+        && categoryAllowed(request.category);
 }
 
 export interface ClientDownloadProgress {

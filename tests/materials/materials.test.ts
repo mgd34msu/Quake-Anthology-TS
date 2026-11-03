@@ -15,8 +15,8 @@ import type { MaterialDrawContext } from "../../src/materials/evaluate.ts";
 import type { MaterialGeometry } from "../../src/materials/geometry.ts";
 import { buildQ1Lightmap, buildQ2Lightmap, directLightmapPixels, lightmapCoordinates, q1LightStyle, q2LightStyle } from "../../src/materials/lighting.ts";
 import type { LightmapFace, Q1LightmapEncoding } from "../../src/materials/lighting.ts";
-import { evaluateTexCoords, evaluateWaveform, parseShaderScript } from "../../src/materials/material.ts";
-import type { RegisteredImage, ShaderRegistrationHost } from "../../src/materials/material.ts";
+import { evaluateTexCoords, evaluateWaveform, inspectShaderScript, parseShaderScript } from "../../src/materials/material.ts";
+import type { RegisteredImage, ShaderRegistrationHost, Waveform } from "../../src/materials/material.ts";
 import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches, q1AnimatedTexture, q1TextureAnimations } from "../../src/materials/legacy.ts";
 import { q2LightGridPoint } from "../../src/materials/q2-lightgrid.ts";
 import type { Q2Lightgrid } from "../../src/contracts/scene.ts";
@@ -331,4 +331,28 @@ test('Q1 world fog respects authored Q3 filter groups and transparent stage atte
     renderer.draw({ ...first, state: { ...first.state, alphaTest: 'ge128' } });
     expect(renderer.pixels[0]).toBe(0);
   } finally { renderer.close(); }
+});
+
+describe("shader numeric edge cases", () => {
+  test("out-of-range wave phase wraps to table index zero instead of throwing", () => {
+    const wave: Waveform = { kind: "sin", base: 0, amplitude: 1, phase: 0, frequency: 1e30 };
+    expect(evaluateWaveform(wave, 1)).toBe(evaluateWaveform({ ...wave, frequency: 0 }, 0));
+    expect(Number.isFinite(evaluateWaveform({ ...wave, frequency: 0.5 }, 21600 * 1e4))).toBe(true);
+  });
+
+  test("non-finite texture coordinate modifiers produce finite coordinates", () => {
+    const stage = parseShaderScript("t\n{\n{\nmap a.tga\ntcMod stretch sin 0 1 0 1\ntcMod scale 1e39 1e39\n}\n}\n")[0]?.stages[0];
+    if (stage === undefined) throw new Error("Missing stage");
+    const uv = evaluateTexCoords(stage, { x: 0, y: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }, 0);
+    expect(Number.isFinite(uv.x) && Number.isFinite(uv.y)).toBe(true);
+  });
+});
+
+describe("shader script recovery", () => {
+  test("a stray closing brace between shaders keeps its siblings", () => {
+    const entries = inspectShaderScript("a\n{\n{\nmap x.tga\n}\n}\n}\nb\n{\n{\nmap y.tga\n}\n}\n").entries;
+    expect(entries.map(entry => entry.name)).toEqual(["a", "b"]);
+    const braced = inspectShaderScript("a\n{\n{\nmap x.tga\n}\n}\n{\nmap z.tga\n}\nb\n{\n{\nmap y.tga\n}\n}\n").entries;
+    expect(braced.map(entry => entry.name)).toEqual(["a", "b"]);
+  });
 });

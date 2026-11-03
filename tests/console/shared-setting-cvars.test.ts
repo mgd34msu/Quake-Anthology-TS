@@ -169,3 +169,20 @@ test("live cvar preferences survive disk archives and the existing view JSON", a
     expect(saved).toEqual({ version: 1, fieldOfView: 120 });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("QuakeWorld serverinfo sets server info keys and localinfo keeps a server-only store, QuakeWorld only", () => {
+  const identity = createIdentityOwner("qw-info"), output: string[] = [];
+  const context: CommandContext = { session: identity.session, origin: { kind: "server-console" } };
+  const registry = new CvarRegistry({ dialect: "q1-quakeworld", context });
+  const commands = new CommandBuffer({ dialect: "q1-quakeworld", context, cvars: registry, print: text => { output.push(text); } });
+  commands.append("serverinfo dq 1\nlocalinfo secret abc\nlocalinfo *bad 1\n"); commands.execute();
+  expect(registry.find("dq")?.value).toBe("1"); expect(registry.infoString(4)).toContain("\\dq\\1");
+  expect(registry.localInfo.get("secret")).toBe("abc"); expect(registry.localInfo.has("*bad")).toBe(false);
+  expect(output.join("")).toContain("Can't set * keys");
+  commands.append("localinfo secret \"\"\n"); commands.execute();
+  expect(registry.localInfo.has("secret")).toBe(false);
+  const other = new CvarRegistry({ dialect: "q1-netquake", context });
+  const netquake = new CommandBuffer({ dialect: "q1-netquake", context, cvars: other, print: text => { output.push(text); } });
+  netquake.append("serverinfo dq 1\n"); netquake.execute();
+  expect(other.find("dq")).toBeUndefined();
+});

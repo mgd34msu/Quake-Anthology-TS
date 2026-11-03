@@ -1,4 +1,5 @@
 import { EventRing } from "../../foundation/event-ring.ts";
+import { q3RendererSettings } from "./render-settings.ts";
 import type { ApplicationModPresentationsOptions } from "./mod-presentations.ts";
 import type { SystemCinematicHost } from "./q3-client/cinematics.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
@@ -41,7 +42,7 @@ import { defaultAudioOutputFormat } from "../../audio/output.ts";
 import { applyAudioOutputSettings } from "./shared-setting-cvars.ts";
 import { ApplicationVideoRestart, prepareVideoGuests, type PreparedVideoPresentation } from "./video-restart.ts";
 import { MusicControls } from "../../audio/music.ts";
-import { legacyConfigurationOptions, prepareProfileConfiguration, type ConfigurationCommandRequest, type PreparedProfileConfiguration } from "./configuration.ts";
+import { sourceConsoleScripts, prepareProfileConfiguration, type ConfigurationCommandRequest, type PreparedProfileConfiguration } from "./configuration.ts";
 import { PreparedStartup } from "./prepared-startup.ts";
 import { RecordedRemoteSource, demoTimingText } from "./network/recorded-source.ts";
 import type { DemoResource, DemoFamily } from "./demo-playback.ts";
@@ -55,6 +56,7 @@ import { readFrameTimeControls, registerFrameTimeCvars, sourceFrameMilliseconds 
 import { initializeQ3ClientCvars, q3ClientModel } from "./q3-client/userinfo.ts";
 import { remoteContentSelection, remoteContentProduct, expectedProducts } from "../../content/catalog/index.ts";
 import { setImmediate } from "node:timers/promises";
+import { runFrameLoop } from "./frame-loop.ts";
 import type { CommandContext } from "../../contracts/common.ts";
 import { ClientSocksSettings } from "./network/socks-settings.ts";
 import { ApplicationViewSettings } from "./view-settings.ts";
@@ -66,15 +68,14 @@ import type { ClientBootstrap, ClientRecordingFeed } from "./client-bootstrap.ts
 import type { SessionConnection } from "../../world/session/session.ts";
 import type { CommandBuffer, CommandCvarRouting, CommandHandler } from "../../core/commands/index.ts";
 import type { CommandDocumentation } from "../../core/commands/documentation.ts";
-import { consoleConfigRoot, ConsoleScriptFiles, sourceScriptReader } from "./config-scripts.ts";
+import { consoleConfigRoot, ConsoleScriptFiles } from "./config-scripts.ts";
 import { CvarFlag, CvarRegistry } from "../../core/cvars/index.ts";
 import { ConfigStore } from "../../settings/config.ts";
 import { StartupServerBrowser } from "./server-browser.ts";
-import { homedir } from "node:os";
 import { compareQ3Packages } from "../../network/q3/pure.ts";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
+import { defaultUserContentRoot, userDataDirectory, userProductDirectory } from "../../content/user-data.ts";
 import { existsSync } from "node:fs";
 import { ServerPakSet } from "../../network/q3/pak-references.ts";
 import { Q3ApplicationPackages } from "./network/q3-downloads.ts";
@@ -99,7 +100,7 @@ import type { NativeUiArt } from "../../ui/common/index.ts";
 import type { SessionSeat } from "../../world/session/index.ts";
 import { EngineSession } from "../../world/session/index.ts";
 import type { ApplicationHost } from "./application.ts";
-import { ApplicationAssets } from "./assets.ts";
+import { ApplicationAssets, createWorldAssets } from "./assets.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
 import { ApplicationAudio } from "./audio.ts";
 import { loadApplicationContent, openRemoteApplicationContent, openRemoteContent, remoteConfigurationContent } from "./content.ts";
@@ -126,7 +127,7 @@ import type { Q1RemoteWorld } from "./network/remote-q1.ts";
 import { Q2ClientNetwork } from "./network/q2.ts";
 import { Q2RemotePresentation } from "./network/remote.ts";
 import type { ApplicationNetworkPhase, Q2ApplicationGameState } from "./network/types.ts";
-import { mapResourcePath } from "./options.ts";
+import { serverMapPath } from "./server-map.ts";
 import type { ApplicationOptions } from "./options.ts";
 import { WorldSeatPresentation } from "./presentation.ts";
 import { NativeRenderer } from "./renderer.ts";
@@ -231,9 +232,12 @@ export class RemoteApplication {
   private primaryPeer: RemoteSeatPeer | null = null;
   get remote() { return this.primaryPeer?.source.remote ?? this.initialRemote; }
   private readonly initialSource: RemoteSource;
+  private promotedSource: { readonly peer: RemoteSeatPeer; readonly value: RemoteSource } | null = null;
   private get source(): RemoteSource {
     const peer = this.primaryPeer;
-    return peer === null ? this.initialSource : { kind: "live", network: peer.source.network, transport: peer.source.transport };
+    if (peer === null) return this.initialSource;
+    if (this.promotedSource?.peer !== peer) this.promotedSource = { peer, value: { kind: "live", network: peer.source.network, transport: peer.source.transport } };
+    return this.promotedSource.value;
   }
   private family: DemoFamily;
   private get network(): LiveNetwork | null { return this.source.kind === "live" ? this.source.network : null; }
@@ -530,7 +534,7 @@ export class RemoteApplication {
       if (ownership.kind === "owned") await imageSettings.refreshDisplay(renderer);
       if (address !== null) transport = await openApplicationTransport({ selection: options.networkTransport ?? { kind: "udp" }, family: qw ? "qw" : family, host: address.kind === "ipv6" ? "::" : "0.0.0.0", port: 0, limits: unified || q1 || q3 ? UNIFIED_DATAGRAM_LIMITS : Q2_DATAGRAM_LIMITS });
       const browserSettings = host.saveDirectory !== undefined ? join(host.saveDirectory, "..", "settings")
-        : join(homedir(), ".local", "share", "quake-typescript", "settings");
+        : userDataDirectory("settings", options.userContentRoot);
       browser = host.serverBrowser === undefined
         ? { kind: "owned", browser: await StartupServerBrowser.open(new ConfigStore(browserSettings)) }
         : { kind: "borrowed", browser: host.serverBrowser };
@@ -996,13 +1000,13 @@ export class RemoteApplication {
   }
 
   private async loadFrontend(content: LoadedApplicationContent): Promise<RemoteWorldFrontend> {
-    const assets = new ApplicationAssets(content, this.renderer.owner, undefined, { imageRegistry: this.renderer.images, imagePolicy: this.imageSettings.policy, modelPolicy: this.imageSettings.modelPolicy });
+    const assets = createWorldAssets(content, this.renderer, text => { this.host.print(text); }, this.imageSettings);
     let art: NativeUiArt | null = null, audio: ApplicationAudio | null = null, effects: ApplicationEffects | null = null;
     try {
       await assets.loadWorld();
       const font = await assets.loadConsoleFont(), source = font.classic.picture.image.source;
       if (source.kind !== "resource") throw new Error("Remote console font has no mounted resource identity");
-      art = await loadNativeUiArt(source.resource.id, assets.images, loadMenuArtImage);
+      art = await loadNativeUiArt(source.resource.id, assets.images, loadMenuArtImage, { frames: false, mainBackground: false });
       audio = new ApplicationAudio(content, () => this.elapsed, this.options.seed, this.options.characterModel, text => { this.print(text); return undefined; }, { ...await loadAudioSettings(this.inputConfig), musicControls: this.musicControls, ...(this.ownership.kind === "borrowed" ? { deferOutput: true } : {}) });
       const scene: SceneQueries = {
         trace: query => this.remote.scene.trace(query), pointContents: query => this.remote.scene.pointContents(query),
@@ -1030,7 +1034,7 @@ export class RemoteApplication {
   private async refreshImages(): Promise<void> {
     const frontend = this.frontend;
     if (frontend === null) return;
-    await this.imageSettings.refresh(frontend.assets, [...(this.presentation === null ? [] : [this.presentation]),...this.remoteSeats.flatMap(peer=>peer === this.primaryPeer || peer.view===null?[]:[peer.view.presentation])], null, this.renderer);
+    await this.imageSettings.refresh(frontend.assets, [...(this.presentation === null ? [] : [this.presentation]),...this.remoteSeats.flatMap(peer=>peer === this.primaryPeer || peer.view===null || peer.view.assets!==frontend.assets?[]:[peer.view.presentation])], null, this.renderer);
     frontend.font = await frontend.assets.loadConsoleFont();
     for(const peer of this.remoteSeats)if(peer.view!==null && peer.view.assets!==frontend.assets)await this.imageSettings.refresh(peer.view.assets,[peer.view.presentation],null,this.renderer);
   }
@@ -1152,7 +1156,7 @@ export class RemoteApplication {
         throw new Error("Remote Q3 content loading was cancelled");
     };
     assertCurrent();
-    const prepared = await Q3ClientContent.open({ ...this.options, map: mapResourcePath(world.map) }, connection.gameState.get(1) ?? "", connection.checksumFeed, seed, this.source.kind === "recorded" ? { kind: "recorded", family: this.family } : undefined);
+    const prepared = await Q3ClientContent.open({ ...this.options, map: serverMapPath(world.map) }, connection.gameState.get(1) ?? "", connection.checksumFeed, seed, this.source.kind === "recorded" ? { kind: "recorded", family: this.family } : undefined);
     try {
       assertCurrent();
       const content = await this.loadServerWorld(world, prepared.content);
@@ -1164,7 +1168,7 @@ export class RemoteApplication {
 
   private async loadServerWorld(world: Q1RemoteWorld & { readonly images?: readonly string[] }, preparedContent?: LoadedApplicationContent, refreshContent = false): Promise<LoadedApplicationContent> {
     const generation = ++this.worldLoadGeneration;
-    const options = { ...this.options, map: mapResourcePath(world.map) }, pending = this.remoteContent;
+    const options = { ...this.options, map: serverMapPath(world.map) }, pending = this.remoteContent;
     const assertCurrent = (): void => { if (this.closing || this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote world loading was cancelled"); };
     assertCurrent();
     await this.capture?.beforeWorldChange();
@@ -1173,7 +1177,7 @@ export class RemoteApplication {
     assertCurrent();
     this.controls?.stopHaptics();
     const path = world.map;
-    const map = mapResourcePath(path);
+    const map = serverMapPath(path);
     if (this.presentation !== null) this.uiPreferences = { ...this.presentation.ui.preferences.values };
     const differentMap = map !== this.loadedContent?.recipe.map.geometry.requestedPath;
     const replaceContent = differentMap || preparedContent !== undefined || refreshContent || pending !== null;
@@ -1229,14 +1233,13 @@ export class RemoteApplication {
       const resource = await provider.mounts.resolve(path);
       assertCurrent();
       if (resource === null) {
-        if (this.remote instanceof QwRemotePresentation) { this.print(`QW sound is unavailable: ${path}\n`); continue; }
-        throw new Error(`Server sound is absent from mounted content: ${path}`);
+        this.print(`Server sound is unavailable: ${path}\n`); continue;
       }
       this.remote.registerResource(this.content.recipe.map.entities.content, path, resource);
     }
     for (const image of world.images ?? []) {
       const path = image.startsWith("/") || image.startsWith("\\") ? image.slice(1) : `pics/${image}.pcx`;
-      if (await provider.textures.load(path, { mipmap: false, wrap: "clamp" }) === null) throw new Error(`Server image is absent from mounted content: ${path}`);
+      if (await provider.textures.load(path, { mipmap: false, wrap: "clamp" }) === null) this.print(`Server image is unavailable: ${path}\n`);
     }
     assertCurrent();
     this.sourceEvents = [];
@@ -1284,13 +1287,7 @@ export class RemoteApplication {
     let input: ApplicationInput | null = null, ui: ApplicationSeatUi | null = null, q3: ApplicationQ3Client | null = null;
     let candidateCinematic: RemoteCinematic | null = null;
     try {
-      const mounts = this.content.mounts, releaseMounts = this.content.retainMainMounts();
-      const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(this.options, this.content.catalog, this.content.recipe.engineBehavior.content),
-        consoleRoot: consoleConfigRoot(this.options.userContentRoot), settings: this.inputConfig,
-        mountedScript: sourceScriptReader(this.content.catalog, mounts, this.content.recipe.engineBehavior.content),
-        mountedResource: name => mounts.open(name),
-      mountedFiles: (directory, extension) => mounts.listFiles(directory, extension),
-      mounted: name => mounts.open(name).then(resource => resource?.bytes) }, async () => { releaseMounts(); });
+      const scripts = sourceConsoleScripts(this.content, this.options, this.inputConfig);
       candidateScripts = scripts;
       const q3Scene = remote instanceof Q3RemotePresentation ? { remote, queries: remote.scene } : null;
       const image = this.imageSettings.prepareClientSettings();
@@ -1346,7 +1343,7 @@ export class RemoteApplication {
         if (connection === undefined) throw new Error("Q3 guest seat must initialize with its gamestate");
         if (this.q3Browser === null) throw new Error("Q3 guest seat requires its application browser");
         if (this.keyProfile === null) throw new Error("Q3 remote guest requires its published key profile");
-        q3 = await ApplicationQ3Client.create({ keys: this.keyProfile, saveFontData: () => (controls.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0, kind: "qvm", assertCurrent, source: remote.cgameSource, connection,
+        q3 = await ApplicationQ3Client.create({ keys: this.keyProfile, saveFontData: () => (controls.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0, renderSettings: () => q3RendererSettings(controls.sharedCvars), kind: "qvm", assertCurrent, source: remote.cgameSource, connection,
           commandBuffer: controls.guestCommands, guestCvars: controls.guestCvars(seat.id), guestInput: controls.guestInput(seat.id), cvars: controls.cvars,
           systemCinematics: this.systemCinematicHost({ audio: frontend.audio.engine, mounts: this.mounts, seat: seat.id, cvars: controls.cvars,
             current: () => !this.closed && !this.closing && !this.stopping && generation === this.worldLoadGeneration,
@@ -1416,6 +1413,7 @@ export class RemoteApplication {
           controls.publishClientPlatform(borrowed, "retain");
           publishAudio?.(); borrowed.output.current = frontend.audio.engine;
         } else if (previous === null) controls.activatePreparedPlatform(); else previous.transferPlatformTo(controls);
+        this.reportedEffectGaps.clear();
         if (candidateCinematic !== null) { this.activateCinematic(candidateCinematic); candidateCinematic = null; }
         applyAudioOutputSettings(this.imageSettings.cvars, frontend.audio);
         retiredScripts = borrowed === null ? owner.scripts : borrowed.configuration.current.scripts;
@@ -1964,11 +1962,11 @@ export class RemoteApplication {
         const load = (world: Q1RemoteWorld & { readonly images?: readonly string[] }, prepared?: LoadedApplicationContent): Promise<LoadedApplicationContent> => current().pump.enqueue(async () => {
             const peer = current();
             await peer.view?.close(); peer.view = null;
-            peer.map = mapResourcePath(world.map);
+            peer.map = serverMapPath(world.map);
             peer.loadedContent = peer === this.primaryPeer ? await this.loadServerWorld(world, prepared) : prepared ?? this.content;
             if (peer === this.primaryPeer && this.remoteContent === null) peer.content = null;
             return peer.loadedContent;
-          }, () => current() === this.primaryPeer || this.primaryViewCurrent && this.loadedContent?.recipe.map.geometry.requestedPath === mapResourcePath(world.map));
+          }, () => current() === this.primaryPeer || this.primaryViewCurrent && this.loadedContent?.recipe.map.geometry.requestedPath === serverMapPath(world.map));
         const common = { identity: this.identity, session: this.session, seat, cvars: () => this.configuration.seatSources.get(seat.id) ?? cvars, clock, transport, address, qport: qport = this.allocateQport(),
           downloadPermission: configuration.downloadPermissions.get(seat.id) ?? null,
           hooks: {
@@ -2027,13 +2025,13 @@ export class RemoteApplication {
   }
 
   private peerWorldCurrent(peer:RemoteSeatPeer):boolean {
-    if(peer.map!==this.options.map)return false;
+    if(peer.map!==this.options.map || peer.loadedContent!==this.loadedContent)return false;
     if(!(peer.source.remote instanceof UnifiedRemotePresentation))return true;
-    return this.remote instanceof UnifiedRemotePresentation && peer.source.remote.epoch===this.remote.epoch && peer.loadedContent===this.loadedContent;
+    return this.remote instanceof UnifiedRemotePresentation && peer.source.remote.epoch===this.remote.epoch;
   }
 
   private async bindRemoteSeat(peer: RemoteSeatPeer, connection?: Q3ClientConnection): Promise<void> {
-    if(peer.source.remote instanceof UnifiedRemotePresentation && !this.peerWorldCurrent(peer))return;
+    if(peer.source.remote instanceof UnifiedRemotePresentation ? !this.peerWorldCurrent(peer) : peer.loadedContent!==this.loadedContent)return;
     const controls = this.controls, frontend = this.frontend, remote = peer.source.remote;
     const content=peer.loadedContent;
     if (peer.closed || peer.view !== null || controls === null || frontend === null || content===null || this.primaryPeer !== peer && this.presentation === null) return;
@@ -2312,17 +2310,13 @@ export class RemoteApplication {
   }
 
   requestQuit(): undefined { this.stopping = true; return undefined; }
-  async run(): Promise<void> {
-    let previous = performance.now();
-    while (!this.stopping && !this.closed && (this.options.frameLimit === null || this.frames < this.options.frameLimit)) {
-      const now = performance.now(), elapsed = now - previous;
-      if (elapsed < 4) { await Bun.sleep(4 - elapsed); continue; }
-      previous = now;
-      const generation = this.videoRestart?.generation;
-      await this.step(elapsed);
-      if (this.videoRestart?.generation !== generation) previous = performance.now();
-      await setImmediate();
-    }
+  run(): Promise<void> {
+    return runFrameLoop({
+      alive: () => !this.stopping && !this.closed && (this.options.frameLimit === null || this.frames < this.options.frameLimit),
+      minimumMilliseconds: () => 4,
+      step: elapsed => this.step(elapsed).then(() => undefined),
+      clockState: () => String(this.videoRestart?.generation),
+    });
   }
   readPixels(): Uint8Array { return this.renderer.readPixels(); }
   captureNextFrame(): Promise<Uint8Array> { return this.renderer.captureNextFrame().then(frame => frame.pixels); }

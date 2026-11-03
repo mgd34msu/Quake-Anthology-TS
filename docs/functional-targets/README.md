@@ -1,5 +1,7 @@
 # Functional integration targets
 
+> **Dated record, not current status.** The T01 to T23 plan with 1.0.0-era status. T20 lists Q1 VCR and Q3 journal obligations that are not implemented, and the 184-row ledger it cites is frozen at 2026-09-15. The maintained status is [status.md](../status.md). Where this page disagrees with it or with the code, trust those. 
+
 This plan groups remaining work by engine function. Each target defines the shared service, the source behavior that must survive, and the user-visible result needed for completion. It covers Quake, QuakeWorld, both rereleases, Quake II, Quake III Arena, their required expansions, and the already requested mod integrations.
 
 **Functional targets: 22 of 23 complete in accepted source; T10 mod interoperability remains active. T19 is accepted with the explicitly approved ranking backend extension point.** Source implementation and executable delivery are tracked separately. See [target status](status.md), [current integration evidence](integration-20260918.md), and [installed executable identity](../execution-status.md#installed-executable-and-recent-fixes).
@@ -108,9 +110,9 @@ Performance work remains active across rendering, simulation, native gamecode an
 
 The historical source-row checklist remains unchanged. Subsequent functional work includes active source-owned HUD timers, per-seat language and captions, retained media/demo ownership, original save formats, campaign transitions and mod component execution. Their production consumers and evidence are recorded against the original T01–T23 targets.
 
-Remaining work follows these priorities:
+Remaining work followed these priorities in September 2026 (historical; see [../status.md](../status.md) for what is open now, and the release notes for delivered builds):
 
-1. Continue from delivered `07d54ae`, preserving the accepted lifetime and source contracts and recording actual executable workflows.
+1. Continue from the then-delivered build, preserving the accepted lifetime and source contracts and recording actual executable workflows.
 2. Fix measured frame-time, loading and hitch causes without reducing required visual, audio or gameplay behavior.
 3. Resolve the external ranking-provider boundary if a compatible documented implementation becomes available.
 4. Address defects exposed by live playthroughs and new mod/map inputs through shared adapters; keep native-peer, physical-device and full-campaign coverage limits explicit.
@@ -121,4 +123,4 @@ For each source requirement assigned to a target, record: the exact remaining be
 
 Historical open reasons that say no browser, no QVM execution, no configuration persistence, no Q3 saves, or no Team Arena progression must first be reconciled with later accepted work. Reuse those accepted implementations. Do not rebuild them from an obsolete sentence, and do not close the broader requirement merely because one constituent now works.
 
-Regenerate the retained functional inventory from the repository root with `bun docs/functional-targets/group-remaining.ts`.
+The retained inventory in `remaining-source-rows.md` was produced by a one-off script that is no longer in the tree and cannot be regenerated.

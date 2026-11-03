@@ -19,6 +19,7 @@ import type { PlayerUi, PlayerView, SimulationPresentation, SimulationPresentati
 import type { Q1Event, Q1SoundChannel } from '../../../content/q1/foundation/types.ts';
 import type { Q1ApplicationClientHost } from './q1-client.ts';
 import type { RemotePresentationAccess } from './types.ts';
+import { decodeLocalizationKey, plainLocalizationText } from '../../../text/localization-key.ts';
 export interface Q1RemoteWorld {
     readonly map: string;
     readonly models: readonly string[];
@@ -52,6 +53,8 @@ function soundChannel(value: number): Q1SoundChannel {
 }
 const lerp = lerp3Double;
 const angles = lerpAnglesWrapped;
+// Native Quake stops at 128 statics; extended protocols raise the figure, so this is a generous ceiling rather than the native one.
+const MAX_STATIC_ENTITIES = 1024;
 export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePresentationAccess {
     readonly client;
     private readonly world: RemoteWorldContent;
@@ -164,6 +167,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                     this.current.set(message.state.number, message.state);
                     break;
                 case 'static':
+                    if (this.statics.length >= MAX_STATIC_ENTITIES) throw new Error('Too many static entities');
                     this.statics.push(message.state);
                     break;
                 case 'set-view':
@@ -193,12 +197,19 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                 case 'skybox':
                     this.events.admit({kind:'q1-sky',event:{kind:'skybox',name:message.text},content:this.sourceContent(),seconds:this.seconds,sequence:this.sequence++});
                     break;
-                case 'print':
-                    this.options.print(message.text);
+                case 'print': {
+                    const localized = decodeLocalizationKey(message.text);
+                    if (localized !== null && this.player !== null)
+                        this.emit({ kind: 'message', player: this.player.actor, text: localized.key, center: false, args: localized.args });
+                    else
+                        this.options.print(plainLocalizationText(message.text));
                     break;
+                }
                 case 'center-print':
-                    if (this.player !== null)
-                        this.emit({ kind: 'message', player: this.player.actor, text: message.text, center: true });
+                    if (this.player !== null) {
+                        const localized = decodeLocalizationKey(message.text);
+                        this.emit({ kind: 'message', player: this.player.actor, text: localized?.key ?? plainLocalizationText(message.text), center: true, ...(localized === null ? {} : { args: localized.args }) });
+                    }
                     break;
                 case 'sound':
                 case 'static-sound': {

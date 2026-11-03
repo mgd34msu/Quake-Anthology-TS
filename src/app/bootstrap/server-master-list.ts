@@ -2,7 +2,8 @@ import { directServerText } from "./server-browser-addresses.ts";
 import { isReadableStream } from "../../network/common/value.ts";
 
 /** q2 client/cl_servers.ts ParseMasterPlain, with bounded response ownership. */
-export async function fetchServerMasterList(url: string, signal: AbortSignal): Promise<readonly string[]> {
+/** Lines that are not valid addresses are skipped and counted through `skipped`, not allowed to discard the list. */
+export async function fetchServerMasterList(url: string, signal: AbortSignal, skipped?: (count: number) => void): Promise<readonly string[]> {
   const target = new URL(url);
   if (target.protocol !== "http:" && target.protocol !== "https:") throw new Error("Master lists require HTTP or HTTPS");
   const response = await fetch(target, { signal });
@@ -23,5 +24,8 @@ export async function fetchServerMasterList(url: string, signal: AbortSignal): P
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
   const servers = [...new Set(new TextDecoder("utf-8", { fatal: true }).decode(bytes).split(/\r?\n/).map(line => line.trim()).filter(line => line !== "" && !line.startsWith("#")))];
   if (servers.length > 4096) throw new Error("Master list exceeds 4096 servers");
-  return servers.map(directServerText);
+  const valid: string[] = [];
+  for (const server of servers) { try { valid.push(directServerText(server)); } catch { /* counted below */ } }
+  if (valid.length !== servers.length) skipped?.(servers.length - valid.length);
+  return valid;
 }

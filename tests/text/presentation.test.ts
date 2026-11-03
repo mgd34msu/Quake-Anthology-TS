@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../support/corpus.ts";
+import { corpusFile, corpusHasFile, testCorpusRoot } from "../support/corpus.ts";
 
-import { existsSync } from "node:fs";
 import { openArchive } from "../../src/content/archive/index.ts";
 import type { ArchiveHandle } from "../../src/content/archive/index.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
@@ -16,7 +15,6 @@ import { loadMenuTypography } from "../../src/app/bootstrap/menu-font.ts";
 import { discoverInstalledContent } from "../../src/content/catalog/index.ts";
 import { SceneImageRegistry } from "../../src/render/scene/resources.ts";
 
-const corpus = testCorpusRoot();
 async function member(archive: ArchiveHandle, path: string): Promise<Uint8Array> {
   const entry = archive.findEntries(path)[0];
   if (entry === undefined) throw new Error(`Missing fixture ${path}`);
@@ -24,11 +22,11 @@ async function member(archive: ArchiveHandle, path: string): Promise<Uint8Array>
 }
 const encode = (text: string) => new TextEncoder().encode(text);
 
-test.skipIf(!existsSync(`${corpus}q1/rerelease/QuakeEX.kpf`))("mounted menu typography preserves Unicode punctuation in actual labels", async () => {
+test.skipIf(!corpusHasFile("q1/rerelease/QuakeEX.kpf"))("mounted menu typography preserves Unicode punctuation in actual labels", async () => {
   const identity = createIdentityOwner("menu-punctuation");
   const images = new SceneImageRegistry({ identity: Symbol("menu-punctuation"), session: identity.session, generation: 0 });
   const image = images.register("classic", { kind: "rgba8", levels: [{ width: 128, height: 128, pixels: new Uint8Array(128 * 128 * 4) }], borderColor: { x: 0, y: 0, z: 0, w: 0 } }, { wrap: "clamp", filter: "nearest" });
-  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const catalog = await discoverInstalledContent({ corpusRoot: testCorpusRoot(), discoverMods: false });
   const typography = await loadMenuTypography(catalog, images, classicCharset(image));
   try {
     const operations = images.drainOperations();
@@ -59,12 +57,12 @@ test.skipIf(!existsSync(`${corpus}q1/rerelease/QuakeEX.kpf`))("mounted menu typo
       }
     }
   } finally { typography.close(); images.release(image); }
-});
+}, 30000);
 
-test.skipIf(!existsSync(`${corpus}q1/rerelease/id1/pak0.pak`))("real rerelease localization loads Unicode and overlays with independent seats", async () => {
+test.skipIf(!corpusHasFile("q1/rerelease/id1/pak0.pak"))("real rerelease localization loads Unicode and overlays with independent seats", async () => {
   const owner = createIdentityOwner("text-localization"), q1 = new LocalizationCatalog(owner.seat(0));
   const q2 = new LocalizationCatalog(owner.seat(1), "q2-rerelease");
-  const first = await openArchive(`${corpus}q1/rerelease/id1/pak0.pak`), second = await openArchive(`${corpus}q2/rerelease/Q2Game.kpf`);
+  const first = await openArchive(corpusFile("q1/rerelease/id1/pak0.pak")), second = await openArchive(corpusFile("q2/rerelease/Q2Game.kpf"));
   try {
     expect(q1.reload(await member(first, "localization/loc_russian.txt"))).toBeGreaterThan(1500);
     expect(q1.localize("$m_single_player")).toBe("Один игрок");
@@ -82,8 +80,8 @@ test.skipIf(!existsSync(`${corpus}q1/rerelease/id1/pak0.pak`))("real rerelease l
   } finally { first.close(); second.close(); }
 });
 
-test.skipIf(!existsSync(`${corpus}q1/rerelease/QuakeEX.kpf`))("real kfonts produce positioned image commands and wrap Unicode", async () => {
-  const archive = await openArchive(`${corpus}q1/rerelease/QuakeEX.kpf`), identity = createIdentityOwner("text-atlas");
+test.skipIf(!corpusHasFile("q1/rerelease/QuakeEX.kpf"))("real kfonts produce positioned image commands and wrap Unicode", async () => {
+  const archive = await openArchive(corpusFile("q1/rerelease/QuakeEX.kpf")), identity = createIdentityOwner("text-atlas");
   const owner: RendererResourceOwner = { identity: Symbol("text-atlas"), session: identity.session, generation: 0 };
   const images = new Map<RendererImage, RenderImage>();
   let nextImage = 0;
@@ -135,8 +133,8 @@ test("captions follow a paused or sought logical clock and keep seat language", 
   expect(a.activeAt(1000)).toHaveLength(1);
 });
 
-test.skipIf(!existsSync(`${corpus}q3a/missionpack/pak0.pk3`))("real Q3 font DAT retains all glyph records and proportional metrics", async () => {
-  const archive = await openArchive(`${corpus}q3a/missionpack/pak0.pk3`);
+test.skipIf(!corpusHasFile("q3a/missionpack/pak0.pk3"))("real Q3 font DAT retains all glyph records and proportional metrics", async () => {
+  const archive = await openArchive(corpusFile("q3a/missionpack/pak0.pk3"));
   try {
     const entry = archive.entries.find(item => /^fonts\/fontImage_\d+\.dat$/.test(item.path));
     if (entry === undefined) throw new Error("Missing Q3 font DAT");

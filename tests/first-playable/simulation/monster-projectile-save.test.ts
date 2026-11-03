@@ -73,6 +73,13 @@ test.skipIf(!existsSync(join(corpus, "q2/baseq2/pak0.pak")))("selected Q2 soldie
       bolt = selected(original).entities.entities.find(entity => entity.values.classname === "bolt" && entity.links.owner?.slot === soldier.actor.slot && !stale.has(`${entity.actor.slot}:${entity.actor.generation}`));
     }
     if (bolt === undefined) throw new Error("Selected soldier did not fire a live blaster bolt");
+    // The soldier's blaster spreads its aim, so the bolt can miss the player by
+    // design; stand the player on the bolt's line so the restored bolt must hit.
+    const liveBolt = original.actors.resolveSaved(bolt.actor), boltBody = liveBolt === null ? null : original.bodies.read(liveBolt.id), settledPlayer = original.bodies.read(player.id);
+    if (liveBolt === null || boltBody === null || settledPlayer === null) throw new Error("Missing live bolt");
+    const heading = Math.hypot(boltBody.velocity.x, boltBody.velocity.y);
+    original.bodies.write(player, { ...settledPlayer, origin: { x: boltBody.origin.x + boltBody.velocity.x / heading * 150, y: boltBody.origin.y + boltBody.velocity.y / heading * 150, z: settledPlayer.origin.z }, velocity: { x: 0, y: 0, z: 0 } });
+    original.bodies.link(player);
     expect(bolt.links.owner).toEqual(soldier.actor);
     expect(bolt.callbacks.touch).toBe("blaster_touch");
     expect(selected(original).ballistics.blasterCauses).toContainEqual({ actor: bolt.actor, meansOfDeath: 1 });
@@ -105,6 +112,6 @@ test.skipIf(!existsSync(join(corpus, "q2/baseq2/pak0.pak")))("selected Q2 soldie
 }, 30000);
 
 test("selected monster save explicitly rejects the old version without projectile state", () => {
-  expect(() => readSelectedMonstersCheckpoint(new SaveReader({ version: 1, authored: [], sources: [] }))).toThrow();
+  expect(() => readSelectedMonstersCheckpoint(new SaveReader({ version: 1, authored: [], sources: [] }))).toThrow("save.version: expected 2");
   expect(readSelectedMonstersCheckpoint(new SaveReader({ version: 2, authored: [], sources: [] }))).toEqual({ version: 2, authored: [], sources: [] });
 });

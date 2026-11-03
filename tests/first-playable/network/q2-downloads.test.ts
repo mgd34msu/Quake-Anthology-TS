@@ -8,7 +8,7 @@ import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createQ2ApplicationDownloads, Q2PeerDownload, Q2DownloadReceiver } from '../../../src/app/bootstrap/network/q2-downloads.ts';
+import { createQ2ApplicationDownloads, Q2PeerDownload, Q2DownloadReceiver, Q2ServerDropError } from '../../../src/app/bootstrap/network/q2-downloads.ts';
 import { createMountIdentity } from '../../../src/contracts/content.ts';
 import type { LooseMount } from '../../../src/contracts/content.ts';
 import { createIdentityOwner } from '../../../src/contracts/identity.ts';
@@ -29,6 +29,16 @@ import { blockChecksum } from '../../../src/core/md4.ts';
 import { readQ2Bsp, toQ2WorldGeometry } from '../../../src/formats/q2-map/index.ts';
 import { encodePng } from '../../../src/formats/images/png.ts';
 import { parseMd2 } from '../../../src/formats/q12-model/md2.ts';
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
+
+async function settle(receiver: Q2DownloadReceiver, state: Q2ApplicationGameState): Promise<void> {
+    for (let attempt = 0; attempt < 5000; attempt++) {
+        if (await receiver.prepare(state) !== 'waiting') return;
+        await Bun.sleep(1);
+    }
+    throw new Error('Q2 download receiver never settled');
+}
 
 function downloadOwner(content: LoadedApplicationContent): RemoteContentMounts {
     const product = content.catalog.product(content.recipe.map.entities.content);
@@ -89,7 +99,7 @@ test('protocol-completion staging stays bounded and cannot overwrite installed f
         expect(sink.finish().startsWith('sha256:')).toBe(true);
         const duplicate = DownloadSink.create(root, 'sound/test.wav', { kind: 'protocol-completion', maximumBytes: 3 });
         duplicate.append(new Uint8Array([4]));
-        expect(() => duplicate.finish()).toThrow();
+        expect(() => duplicate.finish()).toThrow("EEXIST");
         expect(new Uint8Array(await Bun.file(join(root, 'sound/test.wav')).arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
     } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -97,7 +107,7 @@ test('protocol-completion staging stays bounded and cannot overwrite installed f
 for (const mode of ['native', 'http', 'http-off']) { const httpEnabled = mode === 'http'; test(`native Q2 client receives missing map and dependencies before loading its remote world (${mode})`, async () => {
     const command = parseApplicationCommand(['--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2', '--dedicated']);
     if (command.kind !== 'run') throw new Error('Missing Q2 launch');
-    const temporary = await mkdtemp(join(tmpdir(), 'q2-client-assets-')), root = join(temporary, 'q2/baseq2');
+    const temporary = await tempDirectory('q2-client-assets-'), root = join(temporary, 'q2/baseq2');
     await mkdir(root, { recursive: true });
     const installed = await loadApplicationContent({ ...command.options, userContentRoot: temporary });
     const identity = createIdentityOwner('Q2 client download'), session = new EngineSession(identity, { kind: 'headless' });
@@ -208,9 +218,9 @@ for (const mode of ['native', 'http', 'http-off']) { const httpEnabled = mode ==
         const nextState = (sound: string): Q2ApplicationGameState => ({ ...state,
             configStrings: new Map([[31, String(blockChecksum(map))], [33, mapName], [289, sound]]) });
         expect(await remote.downloads.prepare(nextState('cancel.wav'))).toBe('waiting');
-        expect((await readdir(join(root, 'sound'))).filter(name => name.startsWith('.download-'))).toHaveLength(1);
+        expect((await readdir(join(root, 'sound'))).filter(name => name.endsWith('.part'))).toHaveLength(1);
         remote.downloads.close();
-        expect((await readdir(join(root, 'sound'))).filter(name => name.startsWith('.download-'))).toHaveLength(0);
+        expect((await readdir(join(root, 'sound'))).filter(name => name.endsWith('.part'))).toHaveLength(0);
         expect(await Bun.file(join(root, 'sound/cancel.wav')).exists()).toBe(false);
         const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
         const exists = mounts.exists.bind(mounts);
@@ -218,10 +228,12 @@ for (const mode of ['native', 'http', 'http-off']) { const httpEnabled = mode ==
         const late = remote.downloads.prepare(nextState('late.wav'));
         await entered.promise; remote.downloads.close(); release.resolve();
         expect(await late).toBe('canceled');
-        expect((await readdir(join(root, 'sound'))).filter(name => name.startsWith('.download-'))).toHaveLength(0);
+        expect((await readdir(join(root, 'sound'))).filter(name => name.endsWith('.part'))).toHaveLength(0);
         expect(await Bun.file(join(root, 'sound/late.wav')).exists()).toBe(false);
         const unsafe = { ...state, configStrings: new Map([[31, String(blockChecksum(map))], [33, mapName], [34, '../escape.md2']]) };
-        await expect(remote.downloads.prepare(unsafe)).rejects.toThrow('relative and stay inside its storage directory');
+        // cl_parse.c refuses a `..` name with a message and carries on, so the client no longer ends here.
+        expect(await remote.downloads.prepare(unsafe)).toBe('ready');
+        expect(await Bun.file(join(root, '../escape.md2')).exists()).toBe(false);
         remote.downloads.close();
         const checksumEntered = Promise.withResolvers<void>(), checksumRelease = Promise.withResolvers<void>();
         const read = mounts.read.bind(mounts), playerBeforeCancel = remote.player, sceneBeforeCancel = remote.scene;
@@ -243,7 +255,7 @@ for (const mode of ['native', 'http', 'http-off']) { const httpEnabled = mode ==
 }, 30000); }
 
  test('Q2 local permission skips requests and writes but validates installed maps', async () => {
-    const temporary = await mkdtemp(join(tmpdir(), 'q2-client-policy-'));
+    const temporary = await tempDirectory('q2-client-policy-');
     const command = parseApplicationCommand(['--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2', '--dedicated']);
     if (command.kind !== 'run') throw new Error('launch');
     const content = await loadApplicationContent({ ...command.options, userContentRoot: temporary });
@@ -258,27 +270,30 @@ for (const mode of ['native', 'http', 'http-off']) { const httpEnabled = mode ==
             configStrings: new Map([[31, String(blockChecksum(map))], [33, mapName], [289, 'forbidden.wav']]), baselines: new Map<number, EntityStateT>() };
         for (const value of ['0', '-1']) {
             cvars.set('allow_download', value); receiver.setHttpServer(new URL('http://127.0.0.1:'+server.port+'/'));
-            while (await receiver.prepare(state) === 'waiting') await Bun.sleep(1);
+            await settle(receiver, state);
             expect(requests).toEqual([]); expect(httpPaths).toEqual([]);
             expect(await Bun.file(join(temporary, 'q2/baseq2/sound/forbidden.wav')).exists()).toBe(false);
         }
         cvars.set('allow_download', '1'); cvars.set('allow_download_sounds', '0'); receiver.setHttpServer(new URL('http://127.0.0.1:'+server.port+'/'));
-        while (await receiver.prepare(state) === 'waiting') await Bun.sleep(1);
+        await settle(receiver, state);
         expect(requests).toEqual([]); expect(httpPaths.length).toBeGreaterThan(0); expect(httpPaths.every(path => path.endsWith('.filelist'))).toBe(true);
         expect(await Bun.file(join(temporary, 'q2/baseq2/sound/forbidden.wav')).exists()).toBe(false);
         expect(await Bun.file(join(temporary, 'q2/baseq2/pak98.pak')).exists()).toBe(false);
         expect(permission({transport:'http',category:'package'})).toBe(false);
         expect(permission({transport:'native',category:'map'})).toBe(true);
         cvars.set('allow_download_maps','0'); expect(permission({transport:'http',category:'map'})).toBe(false);
-        receiver.setHttpServer(null); await expect(receiver.prepare({...state, configStrings:new Map([[31,'0'],[33,mapName]])})).rejects.toThrow('checksum');
+        receiver.setHttpServer(null); const differing = receiver.prepare({...state, configStrings:new Map([[31,'0'],[33,mapName]])});
+        await expect(differing).rejects.toBeInstanceOf(Q2ServerDropError); await expect(differing).rejects.toThrow("Local map version differs from server");
+        // A map the client lacks is also a drop (Com_Error ERR_DROP), never a process-ending fault.
+        await expect(receiver.prepare({...state, configStrings:new Map([[31,'0'],[33,'maps/not_installed.bsp']])})).rejects.toBeInstanceOf(Q2ServerDropError);
     } finally { receiver.close(); await server.stop(true); await content.close(); await rm(temporary,{recursive:true,force:true}); }
- });
+ }, 60000);
 
 
 for (const transport of ['native', 'http']) test(`Q2 prepared mod content keeps ${transport} players in baseq2 and ordinary assets in the selected directory`, async () => {
     const command = parseApplicationCommand(['--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2', '--dedicated']);
     if (command.kind !== 'run') throw new Error('Missing Q2 launch');
-    const temporary = await mkdtemp(join(tmpdir(), 'q2-mod-downloads-'));
+    const temporary = await tempDirectory('q2-mod-downloads-');
     await mkdir(join(temporary, 'q2/+Arena'), { recursive: true });
     const installed = await loadApplicationContent({ ...command.options, userContentRoot: temporary });
     const roots = { corpusRoot: installed.catalog.corpusRoot, userContentRoot: temporary };
@@ -347,7 +362,7 @@ for (const transport of ['native', 'http']) test(`Q2 prepared mod content keeps 
 }, 30000);
 
 test('RemoteApplication selects stock and unknown Q2 directories before precache and replaces same-map content', async () => {
-    const temporary = await mkdtemp(join(tmpdir(), 'q2-remote-context-'));
+    const temporary = await tempDirectory('q2-remote-context-');
     const transport = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
     const parsed = parseApplicationCommand(['--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2',
         '--connect-q2', `127.0.0.1:${transport.address.port}`, '--user-content-root', temporary,
@@ -392,3 +407,50 @@ test('RemoteApplication selects stock and unknown Q2 directories before precache
         expect(requests).toEqual(['ctf/sound/context-fixture.wav', '+Arena/sound/context-fixture.wav', 'baseq2/sound/context-fixture.wav']);
     } finally { await app?.close(); server.close(); await installed.close(); await rm(temporary, { recursive: true, force: true }); }
 }, 40000);
+
+test('a model list with a sprite and an unnameable resource is skipped, not fatal', async () => {
+    const temporary = await tempDirectory('q2-client-skip-');
+    const command = parseApplicationCommand(['--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2', '--dedicated']);
+    if (command.kind !== 'run') throw new Error('launch');
+    const content = await loadApplicationContent({ ...command.options, userContentRoot: temporary });
+    const requests: string[] = [], prints: string[] = [];
+    const receiver = new Q2DownloadReceiver(() => downloadOwner(content), text => requests.push(text), text => prints.push(text));
+    try {
+        const map = await content.mounts.read(content.recipe.map.geometry), mapName = content.recipe.map.geometry.requestedPath;
+        // Weapon_BFG precaches sprites/s_bfg1.sp2 in the model list; a skin with a space cannot be a legal name.
+        const state: Q2ApplicationGameState = { data: { servercount: 1, attractloop: false, gamedir: 'baseq2', clientnum: 0, levelname: 'Skip', serverState: 2 },
+            configStrings: new Map([[31, String(blockChecksum(map))], [33, mapName], [34, 'sprites/s_bfg1.sp2'], [35, 'models/bad name/tris.md2']]), baselines: new Map<number, EntityStateT>() };
+        expect(await receiver.prepare(state)).toBe('ready');
+        expect(requests).toEqual([]);
+        expect(prints.some(text => text.includes('bad name'))).toBe(true);
+    } finally { receiver.close(); await content.close(); await rm(temporary, { recursive: true, force: true }); }
+}, 30000);
+
+test('a deliberate close keeps a resumable native partial and a receive fault discards it', async () => {
+    const temporary = await tempDirectory('q2-client-resume-');
+    const command = parseApplicationCommand(['--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2', '--dedicated']);
+    if (command.kind !== 'run') throw new Error('launch');
+    const content = await loadApplicationContent({ ...command.options, userContentRoot: temporary });
+    const requests: string[] = [];
+    const make = (): Q2DownloadReceiver => new Q2DownloadReceiver(() => downloadOwner(content), text => requests.push(text), () => undefined);
+    const parts = async (): Promise<string[]> => (await readdir(join(temporary, 'q2/baseq2/sound'))).filter(name => name.endsWith('.part'));
+    const receivers: Q2DownloadReceiver[] = [];
+    try {
+        const map = await content.mounts.read(content.recipe.map.geometry), mapName = content.recipe.map.geometry.requestedPath;
+        const state: Q2ApplicationGameState = { data: { servercount: 1, attractloop: false, gamedir: 'baseq2', clientnum: 0, levelname: 'Resume', serverState: 2 },
+            configStrings: new Map([[31, String(blockChecksum(map))], [33, mapName], [289, 'resume.wav']]), baselines: new Map<number, EntityStateT>() };
+        const first = make(); receivers.push(first);
+        expect(await first.prepare(state)).toBe('waiting');
+        expect(requests).toEqual(['download sound/resume.wav']);
+        expect(first.receive({ bytes: Uint8Array.of(1, 2, 3, 4), percent: 40 })).toBe('waiting');
+        first.close();
+        expect(await parts()).toEqual(['resume.wav.part']);
+
+        const second = make(); receivers.push(second);
+        expect(await second.prepare(state)).toBe('waiting');
+        expect(requests.at(-1)).toBe('download sound/resume.wav 4');
+        expect(() => second.receive({ bytes: Uint8Array.of(5), percent: 100 + 1 })).toThrow('Invalid Q2 download progress');
+        expect(await parts()).toHaveLength(0);
+        expect((await readdir(join(temporary, 'q2/baseq2/sound')))).toEqual([]);
+    } finally { for (const receiver of receivers) receiver.close(); await content.close(); await rm(temporary, { recursive: true, force: true }); }
+}, 30000);

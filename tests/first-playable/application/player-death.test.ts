@@ -1,3 +1,4 @@
+import { writeCapture } from "../../support/capture.ts";
 import { expect, test } from "bun:test";
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -7,7 +8,9 @@ import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { NativeUiController, defaultUiSkin } from "../../../src/ui/common/index.ts";
 import { registerSavedGameMenus, type SavedGameMenuService } from "../../../src/ui/saves/menu.ts";
 import { encodeSaveImage, decodeSaveImage } from "../../../src/persistence/index.ts";
-import { KeyCode } from "../../../src/input/key-codes.ts";
+import { KeyCode } from "../../../src/core/key-codes.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 for (const movement of ["q1", "q2", "q3"]) for (const character of ["q1", "q2", "q3"]) {
   test(`Q2 lethal damage opens common recovery and restores save: ${movement} movement, ${character} character`, async () => {
@@ -85,14 +88,12 @@ test("multiplayer death leaves gameplay focus and native respawn input available
 test.skipIf(process.env["QUAKE_DEATH_APPLICATION_TEST"] !== "1")("actual application death stays animated, pauses load browser and recovers through queued world replacement", async () => {
   const { Application } = await import("../../../src/app/bootstrap/application.ts");
   const { WorldSeatPresentation } = await import("../../../src/app/bootstrap/presentation.ts");
-  const { mkdtemp, mkdir, rm } = await import("node:fs/promises");
+  const { rm } = await import("node:fs/promises");
   const { join } = await import("node:path");
-  const { tmpdir } = await import("node:os");
   const { encodePng } = await import("../../../src/formats/images/png.ts");
   const renderer = process.env["QUAKE_DEATH_RENDERER"] === "gl" ? "gl" : "cpu";
-  const captures = join(".artifacts", "resume-20260913", "player-death-flow", `application-${renderer}`);
-  await mkdir(captures, { recursive: true });
-  const root = await mkdtemp(join(tmpdir(), "quake-death-application-"));
+  const captures = join("player-death-flow", `application-${renderer}`);
+  const root = await tempDirectory("quake-death-application-");
   const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q1", "--character", "q2", "--renderer", renderer, "--hidden", "--width", "640", "--height", "480", "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const app = await Application.open(parsed.options, { print: () => undefined, saveDirectory: join(root, "saves") });
@@ -104,10 +105,10 @@ test.skipIf(process.env["QUAKE_DEATH_APPLICATION_TEST"] !== "1")("actual applica
   const capture = async (name: string): Promise<void> => {
     const pending = app.captureNextFrame(); await app.step(1);
     const pixels = await pending;
-    await Bun.write(join(captures, `${name}.png`), encodePng(640, 480, pixels));
+    await writeCapture(join(captures, `${name}.png`), encodePng(640, 480, pixels));
     const local = app.localPlayers[0];
     if (local === undefined || !(local.seat.presentation instanceof WorldSeatPresentation)) throw new Error("Missing capture presentation");
-    await Bun.write(join(captures, `${name}.json`), JSON.stringify({ renderer, width: 640, height: 480, timeMilliseconds: app.timeMilliseconds,
+    await writeCapture(join(captures, `${name}.json`), JSON.stringify({ renderer, width: 640, height: 480, timeMilliseconds: app.timeMilliseconds,
       menu: ui().controller.activeMenu, focus: ui().local.input.focus.kind, health: app.simulation.playerUi(local.actor).health,
       view: app.simulation.playerView(local.actor), camera: local.seat.presentation.camera(), recipe: app.content.recipe }, null, 2));
   };
@@ -152,10 +153,9 @@ test.skipIf(process.env["QUAKE_DEATH_APPLICATION_TEST"] !== "1")("actual applica
 test("native Q3 singleplayer death retains match input and attack respawns without a recovery menu", async () => {
   const { Application } = await import("../../../src/app/bootstrap/application.ts");
   const { WorldSeatPresentation } = await import("../../../src/app/bootstrap/presentation.ts");
-  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { rm } = await import("node:fs/promises");
   const { join } = await import("node:path");
-  const { tmpdir } = await import("node:os");
-  const root = await mkdtemp(join(tmpdir(), "quake-q3-match-death-")), saves = join(root, "saves");
+  const root = await tempDirectory("quake-q3-match-death-"), saves = join(root, "saves");
   const parsed = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3",
     "--mode", "singleplayer", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Missing native Q3 match launch");

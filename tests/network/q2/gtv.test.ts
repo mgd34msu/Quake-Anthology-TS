@@ -24,7 +24,7 @@ test('GTV magic, hello transition and persistent compression across fragmented p
         const payload = new TextEncoder().encode('repeated native dictionary payload '.repeat(100));
         const first = await server.message(GtvServerOpT.GTS_STREAM_DATA, payload), second = await server.message(GtvServerOpT.GTS_STREAM_DATA, payload);
         expect(second.length).toBeLessThan(first.length);
-        expect(() => inflateSync(second)).toThrow();
+        expect(() => inflateSync(second)).toThrow("incorrect header check");
         const events: GtvEvent[] = [];
         for (const byte of join(started, first, second)) events.push(...await client.receive(Uint8Array.of(byte)));
         expect(events).toEqual([{ kind: 'started' }, { kind: 'data', bytes: payload }, { kind: 'data', bytes: payload }]);

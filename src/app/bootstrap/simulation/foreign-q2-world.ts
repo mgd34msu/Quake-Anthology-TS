@@ -7,6 +7,7 @@ import type { Q2WeaponHooks } from "../../../content/q2/foundation/weapons/types
 import { Q2MoverModule } from "../../../content/q2/foundation/movers.ts";
 import { createQ2TargetModule } from "../../../content/q2/foundation/targets.ts";
 import { createQ2SceneryModule } from "../../../content/q2/foundation/scenery.ts";
+import { q3ForeignItemDefinitions } from "../../../content/composition/q2-q3-items.ts";
 import { createQ2ItemModule, type Q2ItemHooks, type Q2ItemModule } from "../../../content/q2/foundation/items.ts";
 import { createQ2BaseEntityModule, type Q2BaseEntityModule } from "../../../content/q2/base/entities/index.ts";
 import { registerQ2ClassicBaseMonsters } from "../../../content/q2/base/monsters/index.ts";
@@ -77,7 +78,7 @@ export function createForeignQ2WorldModules(options: {
     monsterContext: actor => monsters.context(actor),
     resumeMonster: (entity, resumeGame) => monsters.resumeMonster(entity, resumeGame),
   });
-  const items = createQ2ItemModule(options.itemHooks);
+  const items = createQ2ItemModule({ ...options.itemHooks, edition: options.edition, foreignItems: q3ForeignItemDefinitions });
   const modules: Q2SpawnModule[] = [...packs.map(pack => pack.entities), baseEntities, createQ2TargetModule(), movers, createQ2SceneryModule(), items, base, ...packs.map(pack => pack.monsters)];
   if (options.edition === "rerelease") {
     const source = packs.find(pack => pack.pack === "rogue")?.monsters.source;

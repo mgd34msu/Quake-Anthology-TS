@@ -12,6 +12,10 @@ Install Bun 1.3.14 or newer and these native libraries:
 - libvorbisfile for Ogg Vorbis audio
 - libtheoradec for OGV video playback
 
+FreeType, libvorbisfile and libtheoradec parse font, Ogg and OGV data from
+mounted content inside the game process, so keep them on current distribution
+releases. No minimum versions are enforced at load.
+
 A compiled executable includes the Bun runtime. It still needs the native
 libraries used by the selected renderer and media, plus your game data.
 
@@ -24,7 +28,7 @@ preserve original archives and loose companion files, including music.
 ## Run the release executable
 
 Download the Linux x64 tarball from
-[GitHub Releases](https://github.com/mgd34msu/Quake-Anthology-TS/releases),
+[GitHub Releases](https://github.com/mgd34msu/quake-anthology-ts/releases),
 extract it, and run `./quake-typescript`. Steam installs are detected
 automatically; for anything else pass `--content-root /path/to/games`
 (see [content discovery](content-layout.md)). Verify detection with

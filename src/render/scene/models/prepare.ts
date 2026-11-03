@@ -3,7 +3,7 @@ import { md3WorldEnvelope } from "./md3-bounds.ts";
  * Q3 tr_mesh.c/tr_surface.c. Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import { GameRandom } from "../../../core/game-numeric.ts";
 import type { Bounds, Vec2, Vec3, Vec4 } from "../../../contracts/math.ts";
-import type { SceneModelGroup } from "../submissions.ts";
+import type { SceneModelGroup, SceneShadowGroup } from "../submissions.ts";
 import type { DecodedModel, ModelVertex, Q2AliasModel, SceneEntity } from "../../../contracts/scene.ts";
 import { anglesToAxis, vectorToAngles, add3, addPointToBounds, dot3, emptyBounds, length3, radiusFromBounds, scale3, sub3 } from "../../../core/math.ts";
 import { mapMd2Geometry, buildMdlGeometry, interpolateAliasFrames, sampleTimedFrame } from "../../../formats/q12-model/animation.ts";
@@ -19,7 +19,9 @@ import { byteColor } from "./types.ts";
 import { md5ShadowEnvelope } from "./shadow-bounds.ts";
 import { q2BeamGeometry } from "../particles/legacy.ts";
 import type { ModelGroupContext, ModelImageSelection, ModelPreparationContext, ModelSourceOptions, PreparedModelEntity, PreparedModelSurface, PreparedVertexLighting } from "./types.ts";
+import { PoseLru } from "../../../formats/q12-model/pose-lru.ts";
 
+const MAX_MODEL_BEAM_SEGMENTS = 512;
 const ZERO_LIGHTMAP_COORD = { x: 0, y: 0 };
 
 function countFrames(model: DecodedModel): number {
@@ -74,7 +76,7 @@ function lodIndex(entity: SceneEntity, count: number, radius: number, context: M
   return Math.max(0, Math.min(count - 1, lod + (options.lodBias ?? 0)));
 }
 
-const md2InterpolationCache = new WeakMap<Q2AliasModel, Map<string, readonly ModelVertex[]>>();
+const md2InterpolationCache = new PoseLru<readonly ModelVertex[]>(256);
 
 /** Pose-geometry sharing for one skinning frame: the camera and shadow
  * passes prepare the same entity poses, and interpolation/skinning is a
@@ -82,9 +84,9 @@ const md2InterpolationCache = new WeakMap<Q2AliasModel, Map<string, readonly Mod
  * sharing a pose) reuse one result. Keyed by the frame object itself, so
  * entries die with the frame. */
 interface PoseGeometryCaches {
-  readonly mdl: WeakMap<object, WeakMap<object, Map<string, ReturnType<typeof buildMdlGeometry>>>>;
-  readonly md3: WeakMap<object, Map<string, ReturnType<typeof interpolateMd3Frames>>>;
-  readonly md4: WeakMap<object, Map<string, ReturnType<typeof skinMd4Surface>>>;
+  readonly mdl: PoseLru<ReturnType<typeof buildMdlGeometry>>;
+  readonly md3: PoseLru<ReturnType<typeof interpolateMd3Frames>>;
+  readonly md4: PoseLru<ReturnType<typeof skinMd4Surface>>;
   /** World-transformed positions/normals per pose array + transform:
    * the camera and shadow passes transform identical poses with the same
    * transform, so the fround-heavy world step runs once per frame. */
@@ -97,12 +99,14 @@ interface PoseGeometryCaches {
 /** Persistent across presented frames, like the MD2 interpolation cache:
  * pose interpolation is a pure function of the sampled frame pair and
  * backLerp, and world transforms are keyed by transform object identity
- * (fresh objects each frame simply miss and are garbage-collected). */
-const persistentPoseCaches: PoseGeometryCaches = { mdl: new WeakMap(), md3: new WeakMap(), md4: new WeakMap(), world: new WeakMap(), lit: new WeakMap() };
+ * (fresh objects each frame simply miss and are garbage-collected). The
+ * lit layer is keyed by transform values, so it keeps only a few entries per pose. */
+const persistentPoseCaches: PoseGeometryCaches = { mdl: new PoseLru(256), md3: new PoseLru(512), md4: new PoseLru(512), world: new WeakMap(), lit: new WeakMap() };
 function poseCaches(context: ModelPreparationContext): PoseGeometryCaches | null {
   void context;
   return persistentPoseCaches;
 }
+const LIT_RETENTION_LIMIT = 16;
 function lerpKey(backLerp: number): string { return Object.is(backLerp, -0) ? "-0" : `${backLerp}`; }
 function transformKey(transform: SceneEntity["transform"]): string {
   const [forward, left, up] = transform.axis;
@@ -119,8 +123,8 @@ export function interpolateSceneMd2(model: Q2AliasModel, entity: SceneEntity, fr
   // Interpolation is a pure function of these inputs; many entities share
   // a model pose in the same frame (and static poses repeat every frame).
   const cacheKey = `${frame}|${oldFrame}|${backLerp}|${shell ? 1 : 0}|${delta.x}|${delta.y}|${delta.z}`;
-  let cache = md2InterpolationCache.get(model);
-  const cached = cache?.get(cacheKey);
+  const poseKey = md2InterpolationCache.key([model], cacheKey);
+  const cached = md2InterpolationCache.get(poseKey);
   if (cached !== undefined) return cached;
   const front = 1 - backLerp;
   const move = { x: backLerp * (delta.x + old.translation.x) + front * current.translation.x,
@@ -142,9 +146,7 @@ export function interpolateSceneMd2(model: Q2AliasModel, entity: SceneEntity, fr
       z: Math.fround(move.z + previous.position[2] * backZ + vertex.position[2] * frontZ + (shell ? normal.z * 4 : 0)),
     } };
   }
-  if (cache === undefined) { cache = new Map<string, readonly ModelVertex[]>(); md2InterpolationCache.set(model, cache); }
-  if (cache.size >= 512) cache.clear();
-  cache.set(cacheKey, result);
+  md2InterpolationCache.set(poseKey, result);
   return result;
 }
 
@@ -172,7 +174,7 @@ export function prepareSceneEntity(entity: SceneEntity, context: ModelPreparatio
   const direction = distance === 0 ? delta : scale3(delta, 1 / distance), angles = vectorToAngles(direction);
   const random = new GameRandom(Math.trunc(context.timeSeconds * 1000) + (entity.actor?.slot ?? 0));
   const segments: PreparedModelEntity[] = [];
-  for (let offset = 0; offset < distance; offset += segmentLength) {
+  for (let offset = 0, count = 0; offset < distance && count < MAX_MODEL_BEAM_SEGMENTS; offset += segmentLength, count++) {
     const length = Math.min(distance - offset, segmentLength), frame = random.rand() % countFrames(entity.model);
     const segment: SceneEntity = { ...entity,
       transform: { origin: add3(entity.transform.origin, scale3(direction, offset + length * 0.5)),
@@ -276,7 +278,8 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       if (byIndices === undefined) { byIndices = new WeakMap<object, Map<string, { readonly local: MaterialGeometry; readonly world: MaterialGeometry }>>(); caches.lit.set(poseKey, byIndices); }
       let byKey = byIndices.get(indices);
       if (byKey === undefined) { byKey = new Map<string, { readonly local: MaterialGeometry; readonly world: MaterialGeometry }>(); byIndices.set(indices, byKey); }
-      if (byKey.size >= 512) byKey.clear();
+      // Moving or rotating entities never repeat a transform, so keep only a few recent entries per pose and surface.
+      if (byKey.size >= LIT_RETENTION_LIMIT) { const oldest = byKey.keys().next(); if (oldest.done !== true) byKey.delete(oldest.value); }
       byKey.set(retentionKey, { local: localGeometry, world: worldGeometry });
     }
     pushSurface(name, image, localGeometry, worldGeometry, unlit);
@@ -360,17 +363,11 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       const current = sampleTimedFrame(at(model.frames, frame, "MDL frame"), context.timeSeconds, options.syncBase ?? 0);
       const previous = sampleTimedFrame(at(model.frames, previousFrame, "MDL old frame"), context.timeSeconds, options.syncBase ?? 0);
       const mdlCache = poseCaches(context)?.mdl;
-      let geometry = mdlCache?.get(current)?.get(previous)?.get(lerpKey(backLerp));
+      const mdlKey = mdlCache?.key([current, previous], lerpKey(backLerp));
+      let geometry = mdlKey === undefined ? undefined : mdlCache?.get(mdlKey);
       if (geometry === undefined) {
         geometry = buildMdlGeometry(model, interpolateAliasFrames(current, previous, backLerp));
-        if (mdlCache !== undefined) {
-          let byPrevious = mdlCache.get(current);
-          if (byPrevious === undefined) { byPrevious = new WeakMap(); mdlCache.set(current, byPrevious); }
-          let byLerp = byPrevious.get(previous);
-          if (byLerp === undefined) { byLerp = new Map<string, ReturnType<typeof buildMdlGeometry>>(); byPrevious.set(previous, byLerp); }
-          if (byLerp.size >= 512) byLerp.clear();
-          byLerp.set(lerpKey(backLerp), geometry);
-        }
+        if (mdlCache !== undefined && mdlKey !== undefined) mdlCache.set(mdlKey, geometry);
       }
       const skin = entity.skin >= 0 && entity.skin < model.skins.length ? entity.skin : 0;
       const skinFrames = at(model.skins, skin, "MDL skin");
@@ -406,13 +403,9 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
         let vertices: typeof current | ReturnType<typeof interpolateMd3Frames> = current;
         if (backLerp !== 0) {
           const key = `${frame}|${previousFrame}|${lerpKey(backLerp)}`;
-          vertices = md3Cache?.get(surface)?.get(key) ?? interpolateMd3Frames(current, at(surface.frames, previousFrame, "MD3 old frame"), backLerp);
-          if (md3Cache !== undefined) {
-            let byKey = md3Cache.get(surface);
-            if (byKey === undefined) { byKey = new Map<string, ReturnType<typeof interpolateMd3Frames>>(); md3Cache.set(surface, byKey); }
-            if (byKey.size >= 512) byKey.clear();
-            byKey.set(key, vertices);
-          }
+          const poseKey = md3Cache?.key([surface], key);
+          vertices = (poseKey === undefined ? undefined : md3Cache?.get(poseKey)) ?? interpolateMd3Frames(current, at(surface.frames, previousFrame, "MD3 old frame"), backLerp);
+          if (md3Cache !== undefined && poseKey !== undefined) md3Cache.set(poseKey, vertices);
         }
         append(surface.name, selectedShader(surface.name, surface.shaders, entity, options),
           vertices.map((vertex, index) => ({ ...vertex, texCoord: at(surface.textureCoordinates, index, "MD3 UV") })), surface.indices, false, false, vertices);
@@ -424,15 +417,11 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       const md4Cache = poseCaches(context)?.md4;
       for (const surface of at(model.lods, lod, "MD4 LOD").surfaces) {
         const key = `${frame}|${previousFrame}|${lerpKey(backLerp)}`;
-        let vertices = md4Cache?.get(surface)?.get(key);
+        const poseKey = md4Cache?.key([surface], key);
+        let vertices = poseKey === undefined ? undefined : md4Cache?.get(poseKey);
         if (vertices === undefined) {
           vertices = skinMd4Surface(model, surface, frame, previousFrame, backLerp);
-          if (md4Cache !== undefined) {
-            let byKey = md4Cache.get(surface);
-            if (byKey === undefined) { byKey = new Map<string, ReturnType<typeof skinMd4Surface>>(); md4Cache.set(surface, byKey); }
-            if (byKey.size >= 512) byKey.clear();
-            byKey.set(key, vertices);
-          }
+          if (md4Cache !== undefined && poseKey !== undefined) md4Cache.set(poseKey, vertices);
         }
         append(surface.name, selectedShader(surface.name, [surface.shader], entity, options),
           vertices.map((vertex, index) => ({ ...vertex, texCoord: at(surface.vertices, index, "MD4 UV").texCoords })), surface.triangles.flatMap(triangle => triangle.indices), false, false, vertices);
@@ -522,12 +511,13 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       : model.kind === "md5" && model.skinSelection.kind === "q1-mdl-replacement" ? model.skinSelection.flags : 0 };
 }
 
-export function prepareSceneEntityGroups(entity: SceneEntity, context: ModelPreparationContext, material: ModelGroupContext): readonly SceneModelGroup[] {
+export function prepareSceneEntityGroups(entity: SceneEntity, context: ModelPreparationContext, material: ModelGroupContext): readonly (SceneModelGroup | SceneShadowGroup)[] {
   return preparedModelGroups(prepareSceneEntity(entity, context), material);
 }
 
-export function preparedModelGroups(model: PreparedModelEntity, material: ModelGroupContext): readonly SceneModelGroup[] {
-  const own = model.cull === "out" || model.personalModel ? [] : model.surfaces.flatMap(surface => material.draw(surface));
+/** R_AddMD3Surfaces: a personal model skips its colour surfaces, but projection shadows still use it. */
+export function preparedModelGroups(model: PreparedModelEntity, material: ModelGroupContext): readonly (SceneModelGroup | SceneShadowGroup)[] {
+  const own = model.cull === "out" ? [] : model.surfaces.flatMap(surface => material.draw(surface, model.personalModel));
   return [...own, ...model.attachments.flatMap(attachment => preparedModelGroups(attachment, material))];
 }
 

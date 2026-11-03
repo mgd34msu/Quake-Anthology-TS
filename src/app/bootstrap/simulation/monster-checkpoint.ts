@@ -83,13 +83,18 @@ export interface ForeignQ1WorldCheckpoint {
   readonly frame: FrameContext;
   readonly random: ReturnType<SourceRandom["checkpoint"]>;
   readonly entities: Q1FoundationCheckpoint;
+  /** Server flags, skill and cvars that adjunct logic reads; absent from older saves. */
+  readonly adjunct?: { readonly flags: number; readonly skill: 0 | 1 | 2 | 3; readonly cvars: readonly { readonly name: string; readonly value: string }[] };
 }
 export function readForeignQ1WorldCheckpoint(reader: SaveReader): ForeignQ1WorldCheckpoint {
   const random = readRandom(reader.field("random"));
   if (random.kind !== "glibc-random" && random.kind !== "q2-rerelease-mt19937") return reader.field("random").fail("Unsupported foreign world random stream");
   return { version: reader.field("version").literal(1), reference: readProvider(reader.field("reference")),
     edition: reader.field("edition").choice("classic", "rerelease"), program: reader.field("program").choice("id1", "hipnotic", "rogue", "dopa", "mg1", "mg3", "ctf"),
-    frame: readFrame(reader.field("frame")), random, entities: readQ1FoundationCheckpoint(reader.field("entities")) };
+    frame: readFrame(reader.field("frame")), random, entities: readQ1FoundationCheckpoint(reader.field("entities")),
+    ...(reader.field("adjunct").value === undefined ? {} : { adjunct: { flags: reader.field("adjunct").field("flags").integer(),
+      skill: reader.field("adjunct").field("skill").choice(0, 1, 2, 3),
+      cvars: reader.field("adjunct").field("cvars").list(entry => ({ name: entry.field("name").string(), value: entry.field("value").string() })) } }) };
 }
 export function readSelectedMonstersCheckpoint(reader: SaveReader): SelectedMonstersCheckpoint {
   return { version: reader.field("version").literal(2), authored: reader.field("authored").list(value => {

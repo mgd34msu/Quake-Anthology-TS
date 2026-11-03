@@ -16,7 +16,7 @@ Implementation | Source behavior
 `callbacks.ts`, `checkpoint.ts` | Named source continuations, entity/player fields and saved actor references; `subs.qc` pending moves and delayed uses retain their source deadlines
 `monsters.ts` | `monsters/grunt.qc`, `monsters/rottweiler.qc`, `ai.qc`, `fight.qc`; model-frame sequences, attacks, pain/death, gib/backpack behavior, target acquisition and patrols
 
-The implementation authorities are `quake-rerelease-qc/quakec` and `quake/progs106`. Engine builtin comparisons use `../the Q1 reference port/src/server/sv_move.ts` and `src/progs/pr_cmds.ts`. The movement implementation is shared through `src/movement/q1`; its original random integer branches and step/bottom logic are not duplicated here. Rerelease id1 leaves `USE_ADVANCED_PATHING` disabled in `ai_run`.
+The implementation authorities are `quake-rerelease-qc/quakec` and `quake/progs106`. Engine builtin comparisons use `src/server/sv_move.ts` and `src/progs/pr_cmds.ts` in the Q1 reference port, a separate project that is not part of this tree. The movement implementation is shared through `src/movement/q1`; its original random integer branches and step/bottom logic are not duplicated here. Rerelease id1 leaves `USE_ADVANCED_PATHING` disabled in `ai_run`.
 
 ## Session integration
 

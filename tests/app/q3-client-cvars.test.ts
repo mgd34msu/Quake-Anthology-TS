@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CvarFlag, CvarRegistry } from "../../src/core/cvars/index.ts";
-import { initializeQ3ClientCvars } from "../../src/app/bootstrap/q3-client/userinfo.ts";
+import { applyServerSystemInfo, initializeQ3ClientCvars } from "../../src/app/bootstrap/q3-client/userinfo.ts";
 import { Q3ClientClock } from "../../src/network/q3/clock.ts";
 import { PlayerStateRecord } from "../../src/network/q3/state/player.ts";
 import type { Snapshot } from "../../src/network/q3/server-message.ts";
@@ -52,4 +52,15 @@ test("live client timing uses existing clock clamp, monotonicity, and snapshot d
   expect(advance(200)).toBe(1230);
   expect(clock.delta).toBe(998);
   expect(snapshot.serverTime).toBe(1000);
+});
+
+test("server systeminfo sets server cvars but never the player's archived settings or cl_allowdownload", () => {
+  const cvars = registry();
+  cvars.register("cl_fov_pref", "90", CvarFlag.Archive); cvars.register("cl_allowdownload", "0", CvarFlag.Archive);
+  applyServerSystemInfo(cvars, "\\sv_hostname\\Arena\\cl_fov_pref\\140\\cl_allowdownload\\1\\timescale\\3\\\\ignored\\", name => name === "timescale");
+  expect(cvars.variableString("sv_hostname")).toBe("Arena");
+  expect(cvars.variableString("cl_fov_pref")).toBe("90");
+  expect(cvars.variableString("cl_allowdownload")).toBe("0");
+  expect(cvars.find("timescale")).toBeUndefined();
+  expect(cvars.find("ignored")).toBeUndefined();
 });

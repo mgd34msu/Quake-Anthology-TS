@@ -1,5 +1,5 @@
 // Ported from Quake III cl_keys.c. GPL-2.0-or-later.
-import { KeyCode } from "./key-codes.ts";
+import { KeyCode } from "../core/key-codes.ts";
 import { sourceCommandText } from "../core/commands/index.ts";
 const keyNames: readonly (readonly [string, number])[] = [
   ["TAB", KeyCode.Tab], ["ENTER", KeyCode.Enter], ["ESCAPE", KeyCode.Escape], ["SPACE", KeyCode.Space], ["BACKSPACE", KeyCode.Backspace],

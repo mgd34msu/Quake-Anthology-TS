@@ -53,3 +53,16 @@ test("actual command dispatch loads, starts, applies and saves a source camera",
   commands.executeNow("stopcamera"); expect(camera.apply(source)).toBe(source);
   await camera.close(); expect(commands.exists("loadcamera")).toBe(false);
 });
+
+import { CommandBuffer as PlatformCommandBuffer } from "../../src/core/commands/index.ts";
+import { createIdentityOwner as platformIdentityOwner } from "../../src/contracts/identity.ts";
+
+test("PLATFORM-004 camera usage errors are printed instead of thrown through the command buffer", () => {
+  const owner = platformIdentityOwner("camera-usage"), context: ConstructorParameters<typeof PlatformCommandBuffer>[0]["context"] = { session: owner.session, origin: { kind: "local-seat", seat: owner.seat(0), client: owner.client(0, 0) } };
+  const commands = new PlatformCommandBuffer({ dialect: "q3", context }), printed: string[] = [];
+  commands.bindOutput(text => { printed.push(text); });
+  new ApplicationSplineCamera({ commands, read: async () => null, write: async () => {}, milliseconds: () => 0, print: () => {} }).activate();
+  commands.append("startcamera\nloadcamera\nsavecamera x\n");
+  expect(() => commands.execute()).not.toThrow();
+  expect(printed).toEqual(["Camera: No camera loaded\n", "Camera: Usage: loadcamera <file.camera>\n", "Camera: No camera loaded\n"]);
+});

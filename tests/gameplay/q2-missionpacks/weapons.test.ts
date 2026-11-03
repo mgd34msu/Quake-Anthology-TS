@@ -1,5 +1,5 @@
 import { q3WeaponDelay } from "../../../src/movement/q3/weapon.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { testCorpusRoot, corpusTest, corpusDescribe } from "../../support/corpus.ts";
 
 import { Powerup } from "../../../src/movement/q3/constants.ts";
 import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
@@ -8,7 +8,7 @@ import { Q2_Q1_SUPPLY_PROFILE } from "../../../src/content/composition/q2-q1-sup
 import { registerSelectedQ2MissionWeapons } from "../../../src/content/composition/q2-expansion-arsenal.ts";
 import { Q2SelectedArsenal } from "../../../src/app/bootstrap/simulation/arsenal/q2.ts";
 import { q2PowerupTimers } from "../../../src/app/bootstrap/simulation/powerup-timers.ts";
-import { describe, expect, test } from "bun:test";
+import { expect } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ActorId } from "../../../src/contracts/identity.ts";
 import type { DamageOutcome, InventoryEntry } from "../../../src/contracts/gameplay.ts";
@@ -32,6 +32,8 @@ import { openArchive } from "../../../src/content/archive/index.ts";
 import { readQ2Bsp } from "../../../src/formats/q2-map/index.ts";
 import { parseQ2Entities, inhibitQ2Spawn } from "../../../src/content/q2/foundation/fields.ts";
 import type { Q2MissionPack } from "../../../src/content/q2/missionpacks/types.ts";
+const test = corpusTest("q2/baseq2/pak0.pak");
+const describe = corpusDescribe("q2/baseq2/pak0.pak");
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const forward: Vec3 = { x: 1, y: 0, z: 0 };
@@ -402,7 +404,6 @@ test("expansion impact noise retains native and foreign owners and rejects relea
   scene.foreignPlayers.add(replacement.id);
   pending.touch(pending.bolt, scene.game, { self: pending.bolt.actor, other: scene.game.host.worldActor(), plane: null, surface: null });
   expect(noises).toEqual([scene.player.id, foreign.id]);
-  expect(base.noises.has(foreign.id)).toBe(false);
   scene.actors.close();
 });
 

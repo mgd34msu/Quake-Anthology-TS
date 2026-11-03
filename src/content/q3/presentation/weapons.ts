@@ -444,7 +444,6 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
     }
     hand.renderFlags = RF_DEPTHHACK | RF_FIRST_PERSON | RF_MINLIGHT;
     const team = ps.persistant.get(PersistentIndex.PERS_TEAM);
-    if (team !== Team.TEAM_FREE && team !== Team.TEAM_RED && team !== Team.TEAM_BLUE && team !== Team.TEAM_SPECTATOR) throw new RangeError("Invalid view weapon team");
     this.addPlayerWeapon(hand, ps, cent, team);
   }
   drawWeaponSelect(): void {
@@ -521,17 +520,26 @@ export class ClientWeaponMediaRegistry {
     if (weapon === undefined) throw new RangeError(`Invalid weapon media index ${number}`);
     return weapon;
   }
+  /** Server-supplied weapon numbers may be out of range; cgame reads a neighboring record, so this falls back to the empty one. */
+  weaponOrEmpty(number: number): ClientWeaponInfo { return this.weaponRecords[number] ?? this.weaponRecords[0] ?? emptyWeapon(); }
   requireWeapon(number: number): ClientWeaponInfo {
     if (number !== 0 && !this.readyWeapons.has(number)) throw new Error(`Weapon ${number} must finish registration before synchronous presentation`);
     return this.weapon(number);
   }
+  /** A number with no weapon item is left unregistered; cgame only indexes cg_weapons for it, so a peer-supplied byte cannot fault the chain. */
   registerWeapon(number: number): Promise<void> {
-    this.registration = this.registration.then(() => this.registerWeaponNow(number));
-    return this.registration;
+    if (!Number.isInteger(number) || number < 0 || number >= this.weaponRecords.length || this.readyWeapons.has(number)) return Promise.resolve();
+    if (number !== 0 && !itemList(this.product).some(item => item.type === ItemType.IT_WEAPON && item.tag === number)) return Promise.resolve();
+    return this.enqueue(() => this.registerWeaponNow(number));
   }
   registerItemVisuals(number: number): Promise<void> {
-    this.registration = this.registration.then(() => this.registerItemNow(number));
-    return this.registration;
+    return this.enqueue(() => this.registerItemNow(number));
+  }
+  /** One failed registration stays with its own caller instead of rejecting every later link. */
+  private enqueue(task: () => Promise<void>): Promise<void> {
+    const run = this.registration.catch(() => undefined).then(task);
+    this.registration = run;
+    return run;
   }
   private async registerItemNow(number: number): Promise<void> {
     const count = itemList(this.product).length;
@@ -539,6 +547,9 @@ export class ClientWeaponMediaRegistry {
     const item = itemAt(this.product, number);
     if (this.registeredItems.has(number)) return;
     this.registeredItems.add(number);
+    try { await this.loadItemVisuals(number, item); } catch (error) { this.registeredItems.delete(number); throw error; }
+  }
+  private async loadItemVisuals(number: number, item: ReturnType<typeof itemAt>): Promise<void> {
     const model = item.worldModels[0] === null ? DEFAULT_MODEL : await this.resources.registerModel(item.worldModels[0]);
     const icon = item.icon === null ? null : await this.resources.registerShader(item.icon);
     this.itemRecords[number] = { models: [model, null], icon };
@@ -552,6 +563,9 @@ export class ClientWeaponMediaRegistry {
     this.weapon(number);
     if (number === 0 || this.registeredWeapons.has(number)) return;
     this.registeredWeapons.add(number);
+    try { await this.loadWeapon(number); } catch (error) { this.registeredWeapons.delete(number); throw error; }
+  }
+  private async loadWeapon(number: number): Promise<void> {
     const items = itemList(this.product);
     const index = items.findIndex(item => item.type === ItemType.IT_WEAPON && item.tag === number);
     if (index < 0) throw new CommonError("drop", `Couldn't find weapon ${number}`);

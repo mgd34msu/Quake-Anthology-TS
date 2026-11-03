@@ -51,6 +51,7 @@ export class Q3ServerConnection {
   readonly reliable = new ServerReliableCommands();
   readonly sourceState: SourceMessageState;
   private readonly queuedMessages = new EventRing<Uint8Array>(4096);
+  private lastResend: number | null = null;
   phase: "connected" | "primed" | "active" | "zombie" = "connected";
   lastClientCommand = 0;
   lastClientCommandString = "";
@@ -88,7 +89,9 @@ export class Q3ServerConnection {
     }
     if (header.serverId !== host.serverId() && host.downloadName().length === 0 && !this.lastClientCommandString.includes("nextdl")) {
       if (header.serverId >= host.restartedServerId() && header.serverId < host.serverId()) return;
-      if (this.messageAcknowledge > this.gamestateMessageNumber) await host.resendGamestate();
+      // The client picks both fields, so rebuilding the gamestate is limited to once per second.
+      const now = this.bindings.time();
+      if (this.messageAcknowledge > this.gamestateMessageNumber && (this.lastResend === null || ((now - this.lastResend) | 0) >= 1000)) { this.lastResend = now; await host.resendGamestate(); }
       return;
     }
     while (true) {

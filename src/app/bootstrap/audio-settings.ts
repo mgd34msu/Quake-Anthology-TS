@@ -19,14 +19,16 @@ function preferences(value: unknown): AudioPreferences {
   if (typeof musicShuffle !== "boolean" || typeof menuTrack !== "string" || !validMenuTrack(menuTrack)) throw new Error("Invalid music preferences");
   return { ...("musicShuffle" in value ? { musicShuffle } : {}), ...("menuTrack" in value ? { menuTrack } : {}), outputFormat: "outputFormat" in value ? audioOutputFormat(value.outputFormat) : defaultAudioOutputFormat, deviceName: value.deviceName, effectsVolume: value.effectsVolume, musicVolume: value.musicVolume };
 }
-export async function loadAudioSettings(store: ConfigStore): Promise<Partial<AudioPreferences>> {
+export async function loadAudioSettings(store: ConfigStore, warn: (text: string) => void = () => {}): Promise<Partial<AudioPreferences>> {
   const text = await store.loadText('audio.json');
   if (text === null) return {};
   // Text that is not JSON behaves like the absent document; parsed
   // values still face the preferences validation below.
   let value: unknown;
   try { value = JSON.parse(text); } catch { return {}; }
-  return preferences(value);
+  // A hand-edited or foreign file falls back to defaults instead of stopping the launch.
+  try { return preferences(value); }
+  catch (error) { warn(`Ignoring audio.json: ${error instanceof Error ? error.message : String(error)}\n`); return {}; }
 }
 export async function saveAudioSettings(store: ConfigStore, audio: { readonly musicPreferences?: MusicPreferences; readonly outputFormat?: AudioOutputFormat; readonly selectedOutput: string | null; readonly effectsVolume: number; readonly musicVolume: number }): Promise<void> {
   const saved = audio.musicPreferences ?? await loadAudioSettings(store);

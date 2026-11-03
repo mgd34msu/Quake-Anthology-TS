@@ -21,8 +21,3 @@ export interface CommandContext {
 
 export type CvarInfoTarget = "client-userinfo" | "server-info";
 
-export type CvarPolicy =
-  | { readonly kind: "q1-netquake"; readonly nameComparison: "exact"; readonly registrationOrder: "newest-first" }
-  | { readonly kind: "q1-quakeworld"; readonly nameComparison: "exact"; readonly registrationOrder: "newest-first"; readonly infoTargets: readonly CvarInfoTarget[] }
-  | { readonly kind: "q2-classic" | "q2-rerelease"; readonly nameComparison: "exact"; readonly registrationOrder: "newest-first" }
-  | { readonly kind: "q3"; readonly nameComparison: "ascii-insensitive"; readonly registrationOrder: "newest-first" };

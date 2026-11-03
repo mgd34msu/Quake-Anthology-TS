@@ -2,7 +2,7 @@
 // Source: quake2-rerelease-dll/rerelease/game.h. Windows x64 default packing.
 import type { GuestFieldLayout, GuestLayout, GuestStorage } from "../../../contracts/execution.ts";
 
-const fieldOffsets = new WeakMap<GuestLayout, ReadonlyMap<string, number>>();
+const fieldOffsets = new WeakMap<GuestLayout, Map<string, number>>();
 
 interface Member { readonly name: string; readonly type: GuestStorage | GuestLayout; readonly count: number; }
 function member(name: string, type: Member["type"], count = 1): Member { return { name, type, count }; }
@@ -38,8 +38,14 @@ function structure(name: string, members: readonly Member[]): GuestLayout {
   return layout;
 }
 export function fieldOffset(layout: GuestLayout, name: string): number {
-  const offsets = fieldOffsets.get(layout);
-  const offset = offsets === undefined ? layout.fields.find(value => value.name === name)?.byteOffset : offsets.get(name);
+  let offsets = fieldOffsets.get(layout);
+  if (offsets === undefined) {
+    // Layouts rebuilt by spreading (the retail profile) miss the table filled by structure(); index them once.
+    offsets = new Map<string, number>();
+    for (const field of layout.fields) if (!offsets.has(field.name)) offsets.set(field.name, field.byteOffset);
+    fieldOffsets.set(layout, offsets);
+  }
+  const offset = offsets.get(name);
   if (offset === undefined) throw new Error(`Unknown ${layout.id} field ${name}`);
   return offset;
 }
@@ -82,7 +88,6 @@ const saveFunctionLayout = structure("save_data_t", [m("value", "pointer"), m("l
 // source-private record stays opaque and uses the exported runtime stride.
 export const privateEdictPrefixLayout = structure("edict_t_private_prefix", [m("shared", edictLayout), m("spawn_count", "int32"), m("movetype", "int32"), m("flags", "uint64"), m("model", "pointer"), m("freetime", "int64"), m("message", "pointer"), m("classname", "pointer"), m("spawnflags", "uint32"), m("timestamp", "int64"), m("angle", "float32"), ...["target", "targetname", "killtarget", "team", "pathtarget", "deathtarget", "healthtarget", "itemtarget", "combattarget", "target_ent"].map(name => m(name, "pointer")), ...["speed", "accel", "decel"].map(name => m(name, "float32")), ...["movedir", "pos1", "pos2", "pos3", "velocity", "avelocity"].map(name => m(name, "float32", 3)), m("mass", "int32"), m("air_finished", "int64"), m("gravity", "float32"), m("goalentity", "pointer"), m("movetarget", "pointer"), m("yaw_speed", "float32"), m("ideal_yaw", "float32"), m("nextthink", "int64"), ...["prethink", "postthink", "think", "touch", "use", "pain", "die"].map(name => m(name, saveFunctionLayout)), ...["touch_debounce_time", "pain_debounce_time", "damage_debounce_time", "fly_sound_debounce_time", "last_move_time"].map(name => m(name, "int64")), m("health", "int32"), m("max_health", "int32"), m("gib_health", "int32"), m("show_hostile", "int64"), m("powerarmor_time", "int64"), m("map", "pointer"), m("viewheight", "int32"), m("deadflag", "uint8"), m("takedamage", "uint8"), m("dmg", "int32"), m("radius_dmg", "int32"), m("dmg_radius", "float32"), m("sounds", "int32"), m("count", "int32"), ...["chain", "enemy", "oldenemy", "activator", "groundentity"].map(name => m(name, "pointer")), m("groundentity_linkcount", "int32")]);
 export const rectangleLayout = structure("vrect_t", [m("x", "int32"), m("y", "int32"), m("width", "int32"), m("height", "int32")]);
-export const cgameServerDataLayout = structure("cg_server_data_t", [m("layout", "uint8", 1024), m("inventory", "int16", 256)]);
 
 export function importTableLayout(kind: "game" | "cgame", names: readonly string[]): GuestLayout {
   return structure(`${kind}_import_t`, [m("tick_rate", "uint32"), m("frame_time_s", "float32"), m("frame_time_ms", "uint32"), ...names.map(name => m(name, "pointer"))]);

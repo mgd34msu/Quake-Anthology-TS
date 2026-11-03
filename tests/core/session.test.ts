@@ -7,7 +7,7 @@ import type { ExecutableRecipe } from "../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { InputBatch, SeatPresentation, Simulation, SimulationEvent, SimulationOutput } from "../../src/contracts/session.ts";
 import { Q3Random } from "../../src/core/numeric.ts";
-import { EngineSession, ProviderRuntimeState, ResourceScope, SourceClock, eventTargetsSeat } from "../../src/world/session/index.ts";
+import { EngineSession, ResourceScope, SourceClock, eventTargetsSeat } from "../../src/world/session/index.ts";
 
 test("resources close once in reverse acquisition order, including after an error", () => {
   const closed: string[] = [];
@@ -77,22 +77,16 @@ test("events target only their client or seat and world events reach both views"
 });
 
 test("provider clocks preserve units and snapshots do not consume random draws", () => {
-  const state = new ProviderRuntimeState();
   const clock = new SourceClock({ kind: "seconds", value: 1 });
   const random = new Q3Random(7);
-  state.register("q1:game", clock, random);
   const oldFrame = clock.frame;
   expect(clock.advance({ kind: "seconds", value: 0.05 }).time.value).toBe(1.05);
   expect(oldFrame.time.value).toBe(1);
   expect(() => clock.advance({ kind: "milliseconds", value: 50 })).toThrow("unit conversion");
   const before = random.checkpoint();
-  expect(state.checkpoint().random[0]?.state).toEqual(before);
   expect(random.checkpoint()).toEqual(before);
   random.nextInteger();
   expect(random.checkpoint().draws).toBe(before.draws + 1);
-  expect(() => state.register("q3:game", new SourceClock({ kind: "milliseconds", value: 0 }), random)).toThrow("distinct");
-  state.close();
-  expect(() => state.clock("q1:game")).toThrow("closed");
 });
 
 function stepFixture(mode: "headless" | "local" = "headless") {

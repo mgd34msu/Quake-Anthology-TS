@@ -1,5 +1,5 @@
 import { BoundedQueue } from "../foundation/bounded-queue.ts";
-import { KeyCode } from "../input/key-codes.ts";
+import { KeyCode } from "../core/key-codes.ts";
 export { EditField, type FieldControls, type FieldClipboard } from "./source-field.ts";
 
 /** Native menus and rerelease console edit Unicode by code point; source byte fields remain separate. */

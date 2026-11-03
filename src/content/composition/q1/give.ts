@@ -9,7 +9,7 @@ import type { Q1SourceComposition } from "./runtime.ts";
 export function giveQ1(source: Q1SourceComposition, actor: ActorId, args: readonly string[]): undefined {
   const { game, services } = source, player = game.player(actor);
   if (player === null) throw new Error("Q1 give requires an admitted player");
-  const input = args[0]?.toLowerCase(); if (input === undefined) throw new Error("Usage: give <all|weapons|ammo|health|armor|keys|item> [amount]");
+  const input = args[0]?.toLowerCase(); if (input === undefined) return game.message(actor, "Usage: give <all|weapons|ammo|health|armor|keys|item> [amount]\n", false);
   const amount = args[1] === undefined ? undefined : nativeAtoi(args[1]), all = input === "all";
   const weapons = [...new Set([...WEAPONS, ...game.registeredWeapons.keys()])];
   const configure = (item: ItemId, count: number, capacity = count) => {
@@ -53,7 +53,7 @@ export function giveQ1(source: Q1SourceComposition, actor: ActorId, args: readon
   const shorthand = input === "s" ? "q1:ammo/shells" : input === "n" ? "q1:ammo/nails" : input === "r" ? "q1:ammo/rockets" : input === "c" ? "q1:ammo/cells"
     : input === "l" ? "rogue:ammo/lava-nails" : input === "m" ? "rogue:ammo/multi-rockets" : input === "p" ? "rogue:ammo/plasma" : null;
   if (shorthand !== null) {
-    if (!weapons.some(weapon => game.weaponAmmo(weapon) === shorthand)) throw new Error(`Ammo ${input} is unavailable in this arsenal`);
+    if (!weapons.some(weapon => game.weaponAmmo(weapon) === shorthand)) return game.message(actor, `Ammo ${input} is unavailable in this arsenal\n`, false);
     return ammoCount(shorthand, amount ?? 0);
   }
   const hipnotic = game.registeredWeapons.has("hipnotic:laser");
@@ -73,11 +73,11 @@ export function giveQ1(source: Q1SourceComposition, actor: ActorId, args: readon
   const classname = input === "quad" ? "item_artifact_super_damage" : input === "pent" ? "item_artifact_invulnerability"
     : input === "ring" ? "item_artifact_invisibility" : input === "suit" ? "item_artifact_envirosuit" : input;
   if (services.giveSelectedItem?.(actor, args) === true) return undefined;
-  if (!classname.startsWith("item_") && !classname.startsWith("weapon_")) throw new Error(`Unknown Q1 item: ${args.join(" ")}`);
+  if (!classname.startsWith("item_") && !classname.startsWith("weapon_")) return game.message(actor, `Unknown Q1 item: ${args.join(" ")}\n`, false);
   const item = game.create(classname);
   try {
     if (givePickup(game, item, actor)) return undefined;
-    game.spawnEntity(item); if (!game.live(item) || item.touch === null) throw new Error(`Item is not giveable: ${classname}`);
+    game.spawnEntity(item); if (!game.live(item) || item.touch === null) return game.message(actor, `Item is not giveable: ${classname}\n`, false);
     game.cancel(item); item.solid = "trigger";
     game.host.callbacks.touch({ self: item.actor, other: actor, plane: null, surface: null });
   } finally { if (game.live(item)) game.remove(item); }

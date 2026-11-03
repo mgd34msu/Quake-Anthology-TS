@@ -51,7 +51,12 @@ export class VorbisPcmStream implements PcmStream {
         try {
             const path = join(directory, "source.ogg");
             writeFileSync(path, bytes);
-            return new VorbisPcmStream(VorbisDecoder.open(path), directory);
+            const decoder = VorbisDecoder.open(path);
+            // The open descriptor keeps the data alive on POSIX, so an abnormal exit leaves nothing behind.
+            if (process.platform === "win32")
+                return new VorbisPcmStream(decoder, directory);
+            rmSync(directory, { recursive: true, force: true });
+            return new VorbisPcmStream(decoder, null);
         }
         catch (error) {
             rmSync(directory, { recursive: true, force: true });

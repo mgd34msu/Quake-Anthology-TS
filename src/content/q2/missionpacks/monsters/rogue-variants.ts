@@ -87,8 +87,16 @@ export function createRogueBaseVariants(monsters: Q2Monsters, source: Q2MissionP
     context.weapons.fireBullet(context.entity, context.game, aim.start, aim.direction, 6, 4, 900, 500, 0);
     return monsterFlash(context, right ? 133 : 73, aim.start, aim.direction);
   }
+  // Rogue's m_boss2.c changed these distances ("normally all 8's"; rocket frame 12 "was -20").
+  const rogueBoss2Distances: Readonly<Record<string, number>> = { boss2_move_walk: 10, boss2_move_run: 10,
+    boss2_move_attack_pre_mg: 2, boss2_move_attack_mg: 2, boss2_move_attack_post_mg: 2, boss2_move_attack_rocket: 2 };
   const boss2: Q2MonsterDefinition = {
     ...boss2Definition, yawSpeed: 50,
+    moves: boss2Definition.moves.map(table => {
+      const distance = rogueBoss2Distances[table.name];
+      return distance === undefined ? table : { ...table, frames: table.frames.map((frame, index) =>
+        ({ ...frame, distance: table.name === "boss2_move_attack_rocket" && index === 12 ? -5 : distance })) };
+    }),
     checkAttack: context => bossCheckAttack(context, true, true),
     callbacks: { ...boss2Definition.callbacks,
       Boss2PredictiveRocket: context => bossRockets(context, true),

@@ -524,7 +524,8 @@ export function botGetActivateGoal(context: GameAiContext, state: BotState, enti
     if (activatorClass === "target_relay" || activatorClass === "target_delay") {
       const target = bspValue(context, activator, "targetname");
       if (target !== null) {
-        if (depth + 1 >= 10) throw new RangeError("BotGetActivateGoal activation chain exceeds the source ten-level target allocation");
+        // The source writes one row past its ten-level arrays here and then leaves the loop; the port stops without the overrun.
+        if (depth + 1 >= 10) break;
         targets[++depth] = target;
         nextEntities[depth] = bsp.nextEntity(0);
       }

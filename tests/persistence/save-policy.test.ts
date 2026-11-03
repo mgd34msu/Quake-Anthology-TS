@@ -41,10 +41,10 @@ test("contained atomic save cannot follow a linked parent or overwrite reserved 
     await writeContainedSave(directory, path, Uint8Array.of(1, 2));
     await writeContainedSave(directory, path, Uint8Array.of(3, 4));
     expect(new Uint8Array(await readFile(path))).toEqual(Uint8Array.of(3, 4));
-    expect(() => containedSaveName(directory, join(outside, "bad.sav"))).toThrow();
+    expect(() => containedSaveName(directory, join(outside, "bad.sav"))).toThrow("Save path is outside the save directory");
     expect(() => containedSaveName(directory, join(directory, "current.sav"))).toThrow("reserved");
     await symlink(outside, join(directory, "escape"));
-    await expect(writeContainedSave(directory, join(directory, "escape", "bad.sav"), Uint8Array.of(9))).rejects.toThrow();
+    await expect(writeContainedSave(directory, join(directory, "escape", "bad.sav"), Uint8Array.of(9))).rejects.toThrow("ENOTDIR");
     expect(await Bun.file(join(outside, "bad.sav")).exists()).toBe(false);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

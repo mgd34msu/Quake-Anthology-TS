@@ -1,7 +1,8 @@
 // Quake Host_Savegame_f / Host_Loadgame_f, version 5; Ironwail's KEX version 6 header.
-import type { QcTextPair } from "../compat/qc/save.ts";
 import { byteText, textBytes } from "./source-bytes.ts";
 import { SaveFormatError } from "./value.ts";
+
+export interface QcTextPair { readonly key: string; readonly value: string; }
 
 export interface Q1SaveData {
   readonly format: { readonly version: 5 } | { readonly version: 6; readonly gameDirectories: string };

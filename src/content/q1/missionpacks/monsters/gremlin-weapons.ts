@@ -81,7 +81,7 @@ export function gremlinFireLightning(monster: MissionMonster): undefined {
   for (const offset of [ZERO, side, vscale(side, -1)]) {
     const trace = game.host.trace({ start: vadd(start, offset), end: vadd(end, offset), bounds: POINT, ignore: entity.actor.id, monsters: true }), target = trace.actor;
     if (target === null || hit.includes(target)) continue;
-    hit.push(target); if (game.host.combat.read(target)?.canTakeDamage) { game.effect("blood", trace.end, target, 120); game.damage(target, entity.actor.id, entity.actor.id, 30, "lightning", "direct", "electric"); }
+    hit.push(target); if (game.host.combat.read(target)?.canTakeDamage) { game.host.emit({ kind: "particles", origin: trace.end, direction: { x: 0, y: 0, z: 100 }, color: 225, count: 120 }); game.damage(target, entity.actor.id, entity.actor.id, 30, "lightning", "direct", "electric"); }
   }
   return undefined;
 }

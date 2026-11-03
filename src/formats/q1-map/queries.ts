@@ -29,7 +29,12 @@ export function q1LeafPvs(map: Q1WorldGeometry, leafIndex: number): Uint8Array {
   if (leaf === undefined) throw new RangeError("Missing Quake leaf");
   const world = map.models[0];
   const count = world?.visibleLeaves ?? Math.max(0, map.leaves.length - 1);
-  return decompressQ1Pvs(map.visibility, leafIndex === 0 ? null : leaf.visibilityOffset, count);
+  try { return decompressQ1Pvs(map.visibility, leafIndex === 0 ? null : leaf.visibilityOffset, count); }
+  catch (error) {
+    // A corrupt or truncated row degrades to "everything visible", as tolerant source ports do, instead of failing mid-frame.
+    if (!(error instanceof BinaryError)) throw error;
+    return new Uint8Array(Math.ceil(count / 8)).fill(255);
+  }
 }
 
 export function findQ1Leaf(map: Q1WorldGeometry, point: Vec3, modelIndex = 0): number {

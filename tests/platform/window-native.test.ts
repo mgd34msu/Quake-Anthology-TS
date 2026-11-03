@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test";
 import { SdlWindow, decodeSdlEvent, type SdlInjectedEvent } from "../../src/platform/sdl.ts";
 import { loadGl } from "../../src/platform/gl.ts";
 import { loadGlPrograms } from "../../src/platform/gl-programs.ts";
-import { openPlatform } from "../../src/platform/runtime.ts";
 import { SdlControllers, VirtualSdlController } from "../../src/platform/controller.ts";
 import { SdlAudioDevice } from "../../src/platform/audio.ts";
 
@@ -96,17 +95,14 @@ describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL w
     expect(() => window.drawableSize).toThrow("closed");
   });
 
-  test("repeated graphical runtime startup releases all window resources", () => {
+  test("repeated window startup releases all window resources", () => {
     for (let iteration = 0; iteration < 12; iteration++) {
-      const platform = openPlatform({ kind: "graphical", window: {
-        title: "repeat open", width: 3, height: 2, backend: "cpu", hidden: true,
-      } });
+      const window = SdlWindow.open({ title: "repeat open", width: 3, height: 2, backend: "cpu", hidden: true });
       try {
-        if (platform.kind !== "graphical") throw new Error("Expected graphical runtime");
-        platform.window.present(frame(3, 2));
-        expect(platform.window.readPixels()).toEqual(frame(3, 2));
-      } finally { platform.close(); platform.close(); }
-      expect(platform.closed).toBe(true);
+        window.present(frame(3, 2));
+        expect(window.readPixels()).toEqual(frame(3, 2));
+      } finally { window.close(); window.close(); }
+      expect(window.closed).toBe(true);
     }
   });
 

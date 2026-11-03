@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { missionPackMonsterFixture } from "../monsters.test.ts";
+import { missionPackMonsterFixture } from "../monster-fixture.ts";
 import { widowFrame } from "../../../../../src/content/q2/missionpacks/monsters/tables/rogue-widow.ts";
 import { widow2Frame } from "../../../../../src/content/q2/missionpacks/monsters/tables/rogue-widow2.ts";
 import { widowPowerups } from "../../../../../src/content/q2/missionpacks/monsters/widow/common.ts";

@@ -245,7 +245,7 @@ export function createNq15Codec(reader: MessageReader): ProtocolCodec {
             out.clear();
         },
         readSoundHeader(_fieldMask: number, out: SoundHeaderT): void {
-            const channel = reader.Short();
+            const channel = reader.Short() & 0xffff;
             out.ent = channel >> 3;
             out.channel = channel & 7;
             out.soundNum = reader.Byte();

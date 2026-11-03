@@ -11,6 +11,7 @@ export interface SoundRegistration { readonly path: string; readonly compressed:
 export class Q3PresentationSoundBank implements ClientSoundBank {
   private readonly registered: SoundAsset[] = [];
   private operations = 0;
+  private failedSounds = 0;
   private readonly requests = new Map<string, SoundRegistration>();
   constructor(readonly bank: SoundBank, readonly zeroSound: SoundAsset | null, private readonly loadSync: (path: string, compressed: boolean) => SoundAsset | null) {}
   captureCheckpoint() {
@@ -35,7 +36,8 @@ export class Q3PresentationSoundBank implements ClientSoundBank {
     this.operations++;
     let sound: SoundAsset | null;
     try { sound = await this.bank.register(path, "q3"); } finally { this.operations--; }
-    this.requests.set(path, { path, compressed, sound });
+    const missing = sound === null || sound.pcm === this.zeroSound?.pcm;
+    if (!missing || this.failedSounds++ < 256) this.requests.set(path, { path, compressed, sound });
     if (sound !== null && sound.pcm !== this.zeroSound?.pcm && !this.registered.includes(sound)) this.registered.push(sound);
     return sound === null || sound.pcm === this.zeroSound?.pcm ? null : sound.pcm;
   }

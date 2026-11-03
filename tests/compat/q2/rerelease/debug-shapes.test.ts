@@ -1,6 +1,6 @@
 import { RereleaseQ2GuestHost } from "../../../../src/compat/q2/rerelease/host.ts";
-import { expect, test } from 'bun:test';
-import { available, nativeFixture } from './native.test.ts';
+import { afterEach, expect, test } from "bun:test";
+import { closeNativeSources, available, nativeFixture } from "./native-fixture.ts";
 import type { GuestCallValue } from '../../../../src/contracts/execution.ts';
 import type { RereleaseDebugShapesEvent } from '../../../../src/compat/q2/rerelease/debug-shapes.ts';
 import { gameImports, gameImportLayout } from '../../../../src/compat/q2/rerelease/api.ts';
@@ -8,6 +8,8 @@ import type { GameImportName } from '../../../../src/compat/q2/rerelease/api.ts'
 import { fieldOffset } from '../../../../src/compat/q2/rerelease/layouts.ts';
 import { guestBool, guestPointer } from '../../../../src/compat/q2/rerelease/module.ts';
 import { WorldDebugLineStore } from '../../../../src/debug/world.ts';
+
+afterEach(closeNativeSources);
 
 test.skipIf(!available || process.env['QUAKE_DEBUG_SHAPES_NATIVE'] !== '1')('initialized native guest debug imports reach the shared line owner through Microsoft x64 ABI', async () => {
   const events: RereleaseDebugShapesEvent[] = [], store = new WorldDebugLineStore();

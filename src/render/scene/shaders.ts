@@ -62,6 +62,8 @@ export class SceneShaderRegistry {
   private sourcePreparations: Promise<void> = Promise.resolve();
   private sourcePending = 0;
   private sourceRecords: SourceMaterialRecord[] = [];
+  /** Registration to record lookup for sourceWorldMaterial; dropped whenever sourceRecords changes. */
+  private sourceRecordIndex: Map<unknown, SourceMaterialRecord> | null = null;
   private readonly pendingSourceWorlds: SourceMaterialRecord[] = [];
   private sourceReplacementCount: number | null = null;
 
@@ -69,14 +71,19 @@ export class SceneShaderRegistry {
     private readonly playCinematic: (name: string) => Promise<RegisteredShaderVideo | null> = async () => null,
     private readonly family: "q1" | "q2" | "q3" = "q3", private stage: ShaderReplacementStage | null = null) {}
 
+  private pushSourceRecord(record: SourceMaterialRecord): void { this.sourceRecords.push(record); this.sourceRecordIndex = null; }
+
   get sourceMaterials(): SourceSceneMaterials {
     if (this.sourceMaterialsValue === null) throw new Error("Source materials have not finished initialization");
     return this.sourceMaterialsValue;
   }
   get preparingReplacement(): boolean { return this.stage !== null; }
   sourceWorldMaterial(material: RegisteredSceneMaterial): RegisteredSceneMaterial {
-    const record = this.sourceRecords.find(value => value.material.registration === material.registration);
-    return record?.defaulted === true ? this.sourceMaterials.default : material;
+    if (this.sourceRecordIndex === null) {
+      this.sourceRecordIndex = new Map<unknown, SourceMaterialRecord>();
+      for (const value of this.sourceRecords) if (!this.sourceRecordIndex.has(value.material.registration)) this.sourceRecordIndex.set(value.material.registration, value);
+    }
+    return this.sourceRecordIndex.get(material.registration)?.defaulted === true ? this.sourceMaterials.default : material;
   }
 
   initializeSourceMaterials(loadScripts: () => Promise<void>): Promise<void> {
@@ -84,7 +91,7 @@ export class SceneShaderRegistry {
     const publish = (name: string, kind: "default" | "stencil-shadow"): RegisteredSceneMaterial => {
       const request = this.sourceRequest++, logical: ShaderLogicalKey = { name: this.key(name), binding: { kind: "source", request } };
       const publisher = this.stage ?? this.registrations, material = publisher.publish(publisher.reserve(logical), this.compileInternal(kind));
-      this.sourceRecords.push({ logical, order: this.sourceRecords.length, name, kind, binding: { kind: "unlit", lightmapIndex: -1, mipmap: true }, material, defaulted: false });
+      this.pushSourceRecord({ logical, order: this.sourceRecords.length, name, kind, binding: { kind: "unlit", lightmapIndex: -1, mipmap: true }, material, defaulted: false });
       return material;
     };
     const defaultMaterial = publish("<default>", "default");
@@ -100,13 +107,24 @@ export class SceneShaderRegistry {
     return this.sourceInitialization;
   }
 
-  addScript(text: string, source = "<shader>"): void {
-    // A script file that cannot be lexed at all (foreign encoding, binary
-    // garbage) contributes no shaders, as in the source engines -- it must
-    // not abort loading the remaining scripts or the game.
-    let entries: ReturnType<typeof inspectShaderScript>["entries"];
-    try { entries = inspectShaderScript(text, source).entries; } catch { return; }
-    for (const entry of entries) {
+  addScript(text: string, source = "<shader>"): void { this.addScriptFiles([{ text, source }]); }
+
+  /**
+   * Files arrive in FS_ListFilteredFiles order. id (tr_shader.c ScanAndLoadShaderFiles) hashes the first shader of every
+   * file but the last-listed ahead of the concatenation, which is built in reverse; the first hashed name wins.
+   */
+  addScriptFiles(files: readonly { readonly text: string; readonly source: string }[]): void {
+    const parsed = files.map(file => {
+      // A script whose lexing throws (for example pathological nesting) contributes
+      // no shaders and must not abort loading the remaining scripts or the game.
+      // Arbitrary binary bytes do lex, as tokens, and can register a shader named
+      // by their first token.
+      try { return inspectShaderScript(file.text, file.source).entries; } catch { return []; }
+    });
+    const ordered: (typeof parsed)[number][number][] = [];
+    for (let index = 0; index < parsed.length - 1; index++) { const head = parsed[index]?.[0]; if (head !== undefined) ordered.push(head); }
+    for (let index = parsed.length - 1; index >= 0; index--) ordered.push(...parsed[index] ?? []);
+    for (const entry of ordered) {
       const name = this.key(entry.name);
       if (!this.programs.has(name)) {
         this.programs.set(name, entry.program);
@@ -226,7 +244,7 @@ export class SceneShaderRegistry {
         publisher.cancel(logical, reservation);
         const prepared = await this.prepareSource(name, binding), material = publisher.publish(publisher.reserve(rebound.logical), prepared.compiled);
         this.pendingSourceWorlds.splice(reboundIndex, 1);
-        this.sourceRecords.push({ ...rebound, binding, material, defaulted: prepared.defaulted });
+        this.pushSourceRecord({ ...rebound, binding, material, defaulted: prepared.defaulted });
         return material;
       }
       let previous: SourceMaterialRecord | undefined;
@@ -243,12 +261,13 @@ export class SceneShaderRegistry {
           const material = publisher.publish(publisher.reserve(previous.logical), prepared.compiled);
           const index = this.sourceRecords.indexOf(previous);
           this.sourceRecords[index] = { ...previous, binding, material, defaulted: prepared.defaulted };
+          this.sourceRecordIndex = null;
           return material;
         }
         return previous.material;
       }
       const prepared = await this.prepareSource(name, binding), material = publisher.publish(reservation, prepared.compiled);
-      this.sourceRecords.push({ logical, order: this.sourceRecords.length + this.pendingSourceWorlds.length, name, kind: "ordinary", binding, material, defaulted: prepared.defaulted });
+      this.pushSourceRecord({ logical, order: this.sourceRecords.length + this.pendingSourceWorlds.length, name, kind: "ordinary", binding, material, defaulted: prepared.defaulted });
       return material;
     });
     const completed = pending.finally(() => { this.sourcePending--; });
@@ -277,7 +296,7 @@ export class SceneShaderRegistry {
         const prepared = record.kind === "ordinary" ? await replacement.prepareSource(record.name, record.binding)
           : { compiled: replacement.compileInternal(record.kind), defaulted: false };
         const material = publisher.publish(registration, prepared.compiled);
-        replacement.sourceRecords.push({ ...record, material, defaulted: prepared.defaulted });
+        replacement.pushSourceRecord({ ...record, material, defaulted: prepared.defaulted });
         replacement.bindings.set(material.registration, { material, binding: record.binding });
       }
       const rebound = (material: RegisteredSceneMaterial): RegisteredSceneMaterial => {
@@ -317,6 +336,7 @@ export class SceneShaderRegistry {
       this.sourceRecords = [...replacement.sourceRecords].sort((a, b) => a.order - b.order)
         .map((record, order) => ({ ...record, order, material: retained(record.material) }));
       replacement.sourceRecords = [...this.sourceRecords]; replacement.sourceRequest = this.sourceRequest;
+      this.sourceRecordIndex = null; replacement.sourceRecordIndex = null;
     }
     for (const [key, pending] of replacement.compiled)
       replacement.compiled.set(key, pending.then(material => this.registrations.owner.retained(material.registration)));

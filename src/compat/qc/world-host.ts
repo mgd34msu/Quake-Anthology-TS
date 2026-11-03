@@ -67,6 +67,10 @@ export class QcWorldHost {
     return source !== null && source.provider === this.options.slots.options.provider
       ? this.options.entities.reference(source.slot) : this.options.foreignReference(actor);
   }
+  /** findradius walks QC rows, so foreign actors need their borrowed rows before it runs. */
+  prepareEntities(): void {
+    for (const observed of this.options.actors.observations()) this.reference(observed.id);
+  }
   /** May be called by the application when it opens map/client slots before execution. */
   actor(slot: number): OwnedActor {
     if (this.isFreeEntity(slot)) throw new QcProgramError("world builtin references a free source edict");

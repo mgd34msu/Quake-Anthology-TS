@@ -1,18 +1,19 @@
+import { writeCapture } from "../support/capture.ts";
 import { WorldSeatPresentation } from "../../src/app/bootstrap/presentation.ts";
 import { CvarRegistry } from "../../src/core/cvars/index.ts";
 import type { WorldSnapshot } from "../../src/contracts/session.ts";
 import { expect, spyOn, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rm } from 'node:fs/promises';
 import { Application } from '../../src/app/bootstrap/application.ts';
 import { parseApplicationCommand } from '../../src/app/bootstrap/options.ts';
 import { add3, anglesToAxis, scale3 } from '../../src/core/math.ts';
 import type { DebugShape } from '../../src/debug/shapes.ts';
 import { encodePng } from '../../src/formats/images/png.ts';
+import { trackedTempDirectories } from "../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 for (const backend of ['cpu', 'gl']) test.skipIf(process.env['QUAKE_DEBUG_SHAPES_APP'] !== '1')(`typed rerelease debug calls reach both ${backend} seats, expire by presentation frame, and retire with the world`, async () => {
-  const userRoot = await mkdtemp(join(tmpdir(), 'debug-shapes-app-'));
+  const userRoot = await tempDirectory('debug-shapes-app-');
   const command = parseApplicationCommand(['--game', 'q2-rerelease-baseq2', '--map', 'base1', '--mode', 'coop', '--renderer', backend,
     '--hidden', '--width', '640', '--height', '480', '--seats', '2', '--gamma', '1', '--user-content-root', userRoot]);
   if (command.kind !== 'run') throw new Error('Expected Application launch');
@@ -63,7 +64,7 @@ for (const backend of ['cpu', 'gl']) test.skipIf(process.env['QUAKE_DEBUG_SHAPES
     };
     const capture = async (label: string): Promise<Uint8Array> => {
       const pending = app.captureNextFrame(); await app.step(0.001); const pixels = await pending;
-      await Bun.write(`/tmp/debug-shapes-app-${backend}-${label}.png`, encodePng(640, 480, pixels));
+      await writeCapture(`debug-shapes-app-${backend}-${label}.png`, encodePng(640, 480, pixels));
       return pixels;
     };
     draw(0);

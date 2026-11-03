@@ -4,7 +4,7 @@ import { createMountId, createMountIdentity, createMountPlanId } from "../../con
 import type { ContentId, LooseMount } from "../../contracts/content.ts";
 import { modSelectionKey, type ModSelection } from "../../contracts/mods.ts";
 import { MountedContent } from "../../content/mounts/index.ts";
-import { UserFileStore } from "../../platform/files/writable.ts";
+import { UserFileStore } from "../../core/files/writable.ts";
 
 /** Component storage follows its selection across destination worlds and executable updates. */
 export class ModUserFiles {

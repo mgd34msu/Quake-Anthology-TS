@@ -4,7 +4,8 @@ import { sameActor } from "../../../../contracts/identity.ts";
 import type { ItemId } from "../../../../contracts/gameplay.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
 import { aim } from "../../foundation/weapons.ts";
-import { vadd, vscale, vectors } from "../../foundation/types.ts";
+import { vadd, vscale, vectors, WEAPONS } from "../../foundation/types.ts";
+import { q1WeaponPickupSelection } from "../../foundation/pickups.ts";
 import type { CtfState } from "./state.ts";
 
 const ammoTypes: readonly { readonly item: ItemId; readonly limit: number; readonly weapons: readonly ItemId[] }[] = [
@@ -43,12 +44,25 @@ export function tossWeapon(state: CtfState, actor: ActorId): undefined {
   const definition = weapons.find(weapon => weapon.item === state.services.selectedWeapon(actor)); if (definition === undefined) return undefined;
   const item = state.game.create(definition.classname); item.model = `progs/${definition.model}.mdl`; item.fields.set("ctf.weapon", definition.item);
   item.message = definition.name; item.touch = state.game.named.touch(item, "ctf:weapon_touch");
-  state.game.host.inventory.consume(state.owner(actor), definition.item, 1); launch(state, actor, item); return state.services.weaponChanged(actor, null);
+  // A failed consume means the weapon is not held, so nothing is thrown.
+  if (!state.game.host.inventory.consume(state.owner(actor), definition.item, 1)) { state.game.remove(item); return undefined; }
+  launch(state, actor, item);
+  const owner = state.owner(actor); state.game.selectWeapon(owner, state.game.chooseBest(owner)); return state.services.weaponChanged(actor, null);
 }
 export function registerDrops(state: CtfState): undefined {
   const { game } = state;
   game.named.register("ctf:backpack_touch", { touch: (_runtime, item, actor) => {
     if (!game.isPlayer(actor) || game.health(actor) <= 0 || state.services.observer(actor)) return undefined;
+    // Items.qc BackpackTouch: the thrower cannot take it back for the first two seconds.
+    if (item.owner !== null && sameActor(item.owner, actor) && item.nextThink - game.time > 118) return undefined;
+    game.message(actor, "$qc_backpack_got", false);
+    let listed = false;
+    for (const type of ammoTypes) {
+      const count = item.number(type.item); if (count === 0) continue;
+      if (listed) game.message(actor, ", ", false);
+      listed = true; game.message(actor, `$qc_backpack_${type.item.slice("q1:ammo/".length)}`, false, [count]);
+    }
+    game.message(actor, "\n", false);
     for (const type of ammoTypes) game.host.inventory.give(state.owner(actor), type.item, item.number(type.item));
     game.sound(state.owner(actor), "weapons/lock4.wav", "item"); game.effect("pickup", state.body(actor).origin, actor);
     state.services.weaponChanged(actor, null); return game.remove(item);
@@ -59,6 +73,9 @@ export function registerDrops(state: CtfState): undefined {
     const definition = weapons.find(weapon => weapon.item === item.text("ctf.weapon")); if (definition === undefined) throw new Error("CTF dropped weapon lost source kind");
     state.grant(actor, definition.item, 1); game.message(actor, "$qc_got_item", false, [item.message]);
     game.sound(state.owner(actor), "weapons/pkup.wav", "item"); game.effect("pickup", state.body(actor).origin, actor);
+    // Deathmatch_Weapon: switch to the acquired weapon when it ranks above the current one.
+    const weapon = WEAPONS.find(candidate => game.weaponItem(candidate) === definition.item), player = game.player(actor);
+    if (weapon !== undefined && player !== null) q1WeaponPickupSelection(game, player, weapon, "better");
     state.services.weaponChanged(actor, definition.item); game.useTargets(item, actor); return game.remove(item);
   } }); return undefined;
 }

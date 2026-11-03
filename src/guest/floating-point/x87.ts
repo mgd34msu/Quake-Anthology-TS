@@ -6,9 +6,12 @@ import {
   arithmetic, binary80, compareBinary, convertBinary, decodeBinary, denormalOperand, encodeBinary, formatFor,
   fromInteger, indefinite, integerConversion, invalid, overflow, precision, readBits, roundIntegral, rounding, squareRoot, underflow, writeBits, zero,
 } from "./binary.ts";
+import { loadF32LE, loadF64LE } from "../../foundation/binary.ts";
 import type { BinaryFormat, BinaryOperation, BinaryResult, BinaryValue } from "./binary.ts";
 
+import { doubleToExtended, extendedToDouble, fastArithmetic, fastResult, inWindow } from "./fast-arithmetic.ts";
 import { x87Arctangent, x87Trigonometric } from "./trigonometric.ts";
+import { x87Extract, x87Log2, x87Log2PlusOne, x87Remainder, x87Scale, x87SineCosine, x87Tangent, x87TwoPowerMinusOne } from "./x87-extended.ts";
 
 class DeferredX87Exception extends Error {}
 class UnsupportedX87 extends Error {}
@@ -112,6 +115,45 @@ function compare(context: NumericExecutionContext, right: BinaryValue, unordered
   } else {
     state.statusWord = (state.statusWord & ~0x4500) | (unordered === "less" ? 0x100 : unordered === "equal" ? 0x4000 : unordered === "unordered" ? 0x4500 : 0);
   }
+}
+
+const floatLimit = 2 ** 120, floatFloor = 2 ** -120;
+const operandBytes = new Uint8Array(8);
+function fastRegister(state: GuestX87State, index: number): number {
+  const slot = physical(state, index);
+  return tag(state, slot) === 3 ? Number.NaN : extendedToDouble(state.registers, slot);
+}
+/**
+ * ADD, MUL, SUB(R) and DIV(R) when both operands are exact doubles inside a safe exponent window, in round-to-nearest. Precision
+ * control 53 or 24 rounds like the host double (24 only for binary32 operands), and 64 is taken only when the result is exact.
+ * Anything else, including an unmasked precision exception, returns false before any state changes.
+ */
+function fastBinaryInstruction(state: GuestX87State, group: number, right: number, destination: number, reversed: boolean, pop: boolean): boolean {
+  if (group === 2 || group === 3 || (state.controlWord & 0xc00) !== 0) return false;
+  const control = (state.controlWord >> 8) & 3;
+  if (control === 1) return false;
+  const slot = physical(state, destination);
+  if (tag(state, slot) === 3) return false;
+  const left = extendedToDouble(state.registers, slot);
+  if (!inWindow(left) || !inWindow(right)) return false;
+  const reverse = (group === 5 || group === 7) !== reversed;
+  const operation = group === 0 ? 0 : group === 1 ? 1 : group === 4 || group === 5 ? 2 : 3;
+  if (!fastArithmetic(operation, reverse ? right : left, reverse ? left : right)) return false;
+  let value = fastResult.value;
+  let inexact = fastResult.error !== 0;
+  let up = fastResult.error !== 0 && (value > 0) === (fastResult.error < 0);
+  if (control === 0) {
+    if (Math.fround(left) !== left || Math.fround(right) !== right) return false;
+    if (value !== 0 && (Math.abs(value) > floatLimit || Math.abs(value) < floatFloor)) return false;
+    const rounded = Math.fround(value);
+    if (rounded !== value) { inexact = true; up = Math.abs(rounded) > Math.abs(value); value = rounded; }
+  } else if (control === 3 && inexact) return false;
+  if (inexact && (state.controlWord & precision) === 0) return false;
+  state.statusWord = (state.statusWord & ~0x200) | (up ? 0x200 : 0) | (inexact ? precision : 0);
+  doubleToExtended(state.registers, slot, value);
+  setTag(state, slot, value === 0 ? 1 : 0);
+  if (pop) popX87(state);
+  return true;
 }
 
 function binaryInstruction(context: NumericExecutionContext, group: number, right: BinaryValue, destination: number, reversed: boolean, pop: boolean): void {
@@ -219,7 +261,14 @@ function execute(context: NumericExecutionContext): void {
     }
     if ((opcode === 0xd9 || opcode === 0xdd) && group === 7) { memory.write(address, writeBits(BigInt(opcode === 0xd9 ? state.controlWord : state.statusWord), 2)); return; }
     state.dataPointer = address.byteOffset; state.dataSelector = context.state.segments.ds.selector;
-    if (opcode === 0xd8 || opcode === 0xdc || opcode === 0xda || opcode === 0xde) {
+    if (opcode === 0xd8 || opcode === 0xdc) {
+      const size = opcode === 0xd8 ? 4 : 8;
+      memory.copyInto(address, operandBytes, 0, size);
+      if (fastBinaryInstruction(state, group, size === 4 ? loadF32LE(operandBytes, 0) : loadF64LE(operandBytes, 0), 0, false, false)) return;
+      binaryInstruction(context, group, decodeBinary(readBits(operandBytes.subarray(0, size)), opcode === 0xd8 ? 32 : 64), 0, false, false);
+      return;
+    }
+    if (opcode === 0xda || opcode === 0xde) {
       const right = opcode === 0xda || opcode === 0xde
         ? fromInteger(BigInt.asIntN(opcode === 0xda ? 32 : 16, readBits(memory.copy(address, opcode === 0xda ? 4 : 2))))
         : decodeBinary(readBits(memory.copy(address, opcode === 0xd8 ? 4 : 8)), opcode === 0xd8 ? 32 : 64);
@@ -259,10 +308,14 @@ function execute(context: NumericExecutionContext): void {
     return;
   }
   const index = modrm & 7;
-  if (opcode === 0xd8) { binaryInstruction(context, group, readX87Register(state, index), 0, false, false); return; }
+  if (opcode === 0xd8) {
+    if (fastBinaryInstruction(state, group, fastRegister(state, index), 0, false, false)) return;
+    binaryInstruction(context, group, readX87Register(state, index), 0, false, false); return;
+  }
   if (opcode === 0xdc || opcode === 0xde) {
     if (opcode === 0xde && modrm === 0xd9) { compare(context, readX87Register(state, 1), false, false); popX87(state); popX87(state); return; }
     if (group === 2 || group === 3) throw new UnsupportedX87("Reserved x87 register comparison encoding");
+    if (fastBinaryInstruction(state, group, fastRegister(state, 0), index, true, opcode === 0xde)) return;
     binaryInstruction(context, group, readX87Register(state), index, true, opcode === 0xde); return;
   }
   if (opcode === 0xd9) {
@@ -302,6 +355,34 @@ function execute(context: NumericExecutionContext): void {
     if (modrm === 0xfc) {
       commit(state, 0, roundIntegral(readX87Register(state), rounding(state.controlWord >> 10))); return;
     }
+    const mode = rounding(state.controlWord >> 10);
+    if (modrm === 0xf0) { commit(state, 0, x87TwoPowerMinusOne(readX87Register(state), mode)); return; }
+    if (modrm === 0xf1 || modrm === 0xf9) {
+      const x = readX87Register(state), y = readX87Register(state, 1);
+      commit(state, 1, modrm === 0xf1 ? x87Log2(y, x, mode) : x87Log2PlusOne(y, x, mode)); popX87(state); return;
+    }
+    if (modrm === 0xf2 || modrm === 0xfb) {
+      const value = readX87Register(state);
+      const pair = modrm === 0xfb ? x87SineCosine(value, mode) : null, tangent = modrm === 0xf2 ? x87Tangent(value, mode) : null;
+      if (pair === null && tangent === null) { state.statusWord |= 0x400; return; }
+      state.statusWord &= ~0x400;
+      if (pair !== null) { commit(state, 0, pair.sine); pushX87(state, pair.cosine.value); raise(state, pair.cosine.flags, pair.cosine.roundedUp); }
+      else if (tangent !== null) { commit(state, 0, tangent); pushX87(state, fromInteger(1n)); }
+      return;
+    }
+    if (modrm === 0xf4) {
+      const parts = x87Extract(readX87Register(state));
+      raise(state, parts.flags); writeX87Register(state, 0, parts.exponent); pushX87(state, parts.significand); return;
+    }
+    if (modrm === 0xf5 || modrm === 0xf8) {
+      const outcome = x87Remainder(readX87Register(state), readX87Register(state, 1), modrm === 0xf5, mode);
+      commit(state, 0, outcome.result);
+      // C2 reports an incomplete reduction; otherwise C0, C3 and C1 carry quotient bits 2, 1 and 0.
+      const q = outcome.quotient;
+      state.statusWord = (state.statusWord & ~0x4700) | (outcome.complete ? ((q & 4) !== 0 ? 0x100 : 0) | ((q & 2) !== 0 ? 0x4000 : 0) | ((q & 1) !== 0 ? 0x200 : 0) : 0x400);
+      return;
+    }
+    if (modrm === 0xfd) { commit(state, 0, x87Scale(readX87Register(state), readX87Register(state, 1), mode)); return; }
     throw new UnsupportedX87(`Unsupported x87 special opcode d9 ${modrm.toString(16)}`);
   }
   if (opcode === 0xdd) {

@@ -3,6 +3,7 @@ import type { AttackProvenance, DamageDecision } from "../../../contracts/gamepl
 import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2LandmarkCarry } from "../../q2/foundation/host.ts";
 import { Q2Foundation } from "../../q2/foundation/runtime.ts";
 import { createQ2ItemModule } from "../../q2/foundation/items.ts";
+import { q3ForeignItemDefinitions } from "../q2-q3-items.ts";
 import { createQ2MoverModule } from "../../q2/foundation/movers.ts";
 import { createQ2TargetModule } from "../../q2/foundation/targets.ts";
 import { createQ2SceneryModule } from "../../q2/foundation/scenery.ts";
@@ -61,7 +62,7 @@ export class Q2ProductRuntime {
     if (configuration.match !== undefined && configuration.match.kind !== "standard" && configuration.match.kind !== "horde" && configuration.options.mode !== "deathmatch")
       throw new Error("Q2 Tag and DeathBall require deathmatch admission");
     this.weapons = configuration.weapons;
-    this.monsters = new Q2Monsters(this.weapons, { dropItem: (actor, game, classname) => { this.items.dropMonster(actor, game, classname); return undefined; }, platformState: actor => {
+    this.monsters = new Q2Monsters(this.weapons, { coopKill: attacker => { const state = this.players.states.get(attacker); if (state !== undefined) state.score++; return undefined; }, dropItem: (actor, game, classname) => { this.items.dropMonster(actor, game, classname); return undefined; }, platformState: actor => {
       const entity = this.game.entity(actor);
       if (entity === null) return null;
       for (const expansion of this.expansions) {
@@ -85,7 +86,14 @@ export class Q2ProductRuntime {
       monsterContext: actor => this.monsters.context(actor),
       resumeMonster: (entity, game) => this.monsters.resumeMonster(entity, game),
     });
-    this.items = createQ2ItemModule({ ...configuration.itemHooks,
+    this.items = createQ2ItemModule({ ...configuration.itemHooks, edition: configuration.edition, foreignItems: q3ForeignItemDefinitions,
+      pickedUp: (actor, item, usable) => {
+        const state = this.players.states.get(actor);
+        if (state === undefined) return undefined;
+        state.bonusAlpha = 0.25;
+        if (usable) state.selectedItem = item;
+        return configuration.itemHooks.pickedUp?.(actor, item, usable);
+      },
       ...(configuration.services.randomItems === undefined ? {} : { randomRespawn: (entity: Q2Entity, game: Q2GameServices) => {
         const settings = configuration.services.randomItems?.();
         return settings === undefined ? null : this.armory?.items.randomRespawn(entity, game, settings) ?? null;
@@ -158,7 +166,7 @@ export class Q2ProductRuntime {
     this.rogueSpawns = configuration.edition === "classic" && configuration.program === "rogue" ? new Q2RoguePlayerSpawns() : null;
     this.movementStopSpeed = configuration.match?.kind === "deathball" ? 0 : null;
     const playerHooks: Q2PlayerHooks = { ...configuration.playerHooks,
-      quadFireDropUntil: actor => configuration.edition === "rerelease" && (configuration.services.dropQuadFire?.() ?? true)
+      quadFireDropUntil: actor => (configuration.edition === "rerelease" ? configuration.services.dropQuadFire?.() ?? true : (this.game.options.deathmatchFlags & 0x10000) !== 0)
         ? this.armory?.items.powerups(actor).quadFireUntil ?? 0 : 0,
       weaponInput: actor => this.weaponInput(actor, configuration.playerHooks.weaponInput(actor)),
       score: (victim, attacker, game, change, means, recipient) => {
@@ -224,7 +232,7 @@ export class Q2ProductRuntime {
     const rules = { deathmatchFlags: deathmatchFlags >>> 0 };
     this.activeRules = rules;
     if (deathmatchFlags !== configuredFlags) this.setDeathmatchFlags(deathmatchFlags);
-    this.game = new Q2Foundation(configuration.host, { ...configuration.options, edition: configuration.edition, get deathmatchFlags() { return configuration.services.deathmatchFlags?.read() ?? rules.deathmatchFlags; } }, this.modules);
+    this.game = new Q2Foundation(configuration.host, { ...configuration.options, edition: configuration.edition, playerName: actor => this.players.states.get(actor)?.name ?? null, get deathmatchFlags() { return configuration.services.deathmatchFlags?.read() ?? rules.deathmatchFlags; } }, this.modules);
     this.registerCallbacks();
   }
 
@@ -264,6 +272,11 @@ export class Q2ProductRuntime {
     this.players.attach(entity, this.game, admission);
     this.match.admitted(entity, this.game);
     if (!(this.match.source instanceof Q2Ctf)) this.players.putInServer(entity, this.game, false, landmark);
+    const joined = this.players.states.get(actor.id);
+    if (this.game.options.mode !== "singleplayer" && joined !== undefined && !joined.spectator) {
+      this.game.host.emit({ kind: "effect", effect: "q2:login", origin: this.game.body(entity).origin, direction: { x: 0, y: 0, z: 0 }, count: 1, color: 0 });
+      this.players.hooks.emit({ kind: "print", target: null, level: "high", text: `${joined.name} entered the game\n` });
+    }
     return entity;
   }
 

@@ -32,7 +32,8 @@ export class QcModEnvironment {
     this.host = new Map<QcHostBuiltinName, QcBuiltin>([
       ["cvar", vm => { vm.returnFloat(this.cvars.variableValue(vm.argString(0))); }],
       ["cvar_set", vm => { this.cvars.set(vm.argString(0), vm.argString(1)); }],
-      ["dprint", vm => { if (this.cvars.variableValue("developer") !== 0) services.engine?.print(vm.varString(0)); }],
+      // QuakeWorld prints unconditionally; only the NetQuake family gates on developer.
+      ["dprint", vm => { if (program.api.kind === "q1-quakeworld" || this.cvars.variableValue("developer") !== 0) services.engine?.print(vm.varString(0)); }],
       ["checkclient", vm => {
         if (this.visibility === null) return vm.fail("Mod checkclient requires destination client visibility");
         const self = vm.globals.int(vm.globalOffset("self"));

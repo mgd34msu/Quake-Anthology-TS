@@ -597,7 +597,7 @@ export function botAimAtEnemy(context: GameAiContext, state: BotState): void {
   }
   Object.assign(state.aimTarget, visible ? botAITrace(context, state.eye, bestOrigin, state.entityNum, MASK_SHOT).end : bestOrigin);
   let direction = sub3(bestOrigin, state.eye);
-  if (weapon.speed === 0 && !context.game.knowledge.tactics(state.weaponNum).melee) {
+  if (context.game.knowledge.tactics(state.weaponNum).closeRangeAimPenalty) {
     aimAccuracy = f(aimAccuracy * f(f(0.6) + f(f(Math.min(length3(direction), 150) / 150) * f(0.4))));
   }
   if (aimAccuracy < f(0.8)) {

@@ -609,7 +609,8 @@ function multiplyMat3Into(out: number[], a: readonly number[], b: readonly numbe
 }
 
 /**
- * Allocation-free RotatePointAroundVector under an explicit source rule.
+ * RotatePointAroundVector under an explicit source rule, writing the result to
+ * a caller-owned vector. Its intermediate matrices are still allocated per call.
  * The direction must be normalized. The VM rule rounds inputs first and
  * converts degrees through its float32 PI divide, as q3lcc emits them.
  */
@@ -648,7 +649,7 @@ export function rotatePointAroundVectorRuleInto(out: MutableVec3, direction: Vec
   out.z = dotComponents(rotation[6] ?? 0, rotation[7] ?? 0, rotation[8] ?? 0, px, py, pz);
 }
 
-/** Allocation-free rotatePointAroundVector. The direction must be normalized. */
+/** Writes rotatePointAroundVector to a caller-owned vector (intermediates allocate). The direction must be normalized. */
 export function rotatePointAroundVectorInto(out: MutableVec3, direction: Vec3, point: Vec3, degrees: number): void {
   rotatePointAroundVectorRuleInto(out, direction, point, degrees, "float");
 }
@@ -872,8 +873,8 @@ export class Float32VectorView implements MutableVec3 {
  * Retained binary32 storage for caller-owned scratch. The DataView backing
  * is observable behavior, not an implementation detail: reads canonicalize
  * NaN payloads exactly like guest vector reads, which plain number fields
- * would preserve differently. Allocation-free work on plain Vec3 values
- * belongs in the *Into helpers and the foundation vector store.
+ * would preserve differently. The *Into helpers write to caller-owned vectors
+ * and avoid result allocations; they are not guaranteed allocation-free.
  */
 export function mutableVec3(x = 0, y = 0, z = 0): MutableVec3 {
   const result = new Float32VectorView(new Uint8Array(12));

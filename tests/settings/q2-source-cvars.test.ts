@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createIdentityOwner } from '../../src/contracts/identity.ts';
 import { CvarRegistry, Q2CvarFlag } from '../../src/core/cvars/index.ts';
-import { bindQ2PlayerCvars, registerQ2ServerCvars, restoreQ2ServerCvars } from '../../src/settings/server/q2-owner.ts';
+import { bindQ2PlayerCvars, q2SourceDeathmatchFlags, registerQ2ServerCvars, restoreQ2ServerCvars } from '../../src/settings/server/q2-owner.ts';
 import { createQ2PlayerRules } from '../../src/content/q2/base/player/types.ts';
 import { createQ2RereleaseOptions, q2UsesInstancedItems } from '../../src/content/q2/rerelease/types.ts';
 
@@ -75,4 +75,20 @@ test("map shuffle is a live rerelease-only cvar with a disabled source default",
   expect(rerelease.cvars.find("g_map_list_shuffle")?.flags).toBe(0); expect(rerelease.rules.mapListShuffle).toBe(false);
   rerelease.cvars.set("g_map_list_shuffle", "1"); expect(rerelease.rules.mapListShuffle).toBe(true);
   rerelease.rules.mapListShuffle = false; expect(rerelease.cvars.variableString("g_map_list_shuffle")).toBe("0");
+});
+
+test('Q2 registers g_select_empty as an archived switch defaulting off', () => {
+  const dialects: readonly Parameters<typeof source>[0][] = ['q2-classic', 'q2-rerelease'];
+  for (const dialect of dialects) {
+    const { cvars } = source(dialect);
+    expect(cvars.variableValue('g_select_empty')).toBe(0);
+    cvars.set('g_select_empty', '1'); expect(cvars.variableValue('g_select_empty')).toBe(1);
+  }
+});
+
+test('Q2 rerelease maps g_no_health, g_no_items and g_no_armor onto the matching dmflags bits', () => {
+  const { cvars } = source('q2-rerelease');
+  expect(q2SourceDeathmatchFlags(cvars) & (1 | 2 | 2048)).toBe(0);
+  cvars.set('g_no_health', '1'); cvars.set('g_no_items', '1'); cvars.set('g_no_armor', '1');
+  expect(q2SourceDeathmatchFlags(cvars) & (1 | 2 | 2048)).toBe(1 | 2 | 2048);
 });

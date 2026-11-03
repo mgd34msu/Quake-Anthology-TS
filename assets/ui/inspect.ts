@@ -23,7 +23,7 @@ export function inspectMenuArt() {
       }
     }
     const centerAlpha = image.pixels[(Math.floor(image.height / 2) * image.width + Math.floor(image.width / 2)) * 4 + 3];
-    if (file.endsWith("menu-background.png") ? transparentPixels !== 0 || partialAlphaPixels !== 0 : centerAlpha !== 0 || transparentPixels === 0) throw new Error(`${file}: unexpected background/center alpha`);
+    if (/(menu-background|title)\.png$/.test(file) ? transparentPixels !== 0 || partialAlphaPixels !== 0 : centerAlpha !== 0 || transparentPixels === 0) throw new Error(`${file}: unexpected background/center alpha`);
     return { file, width: image.width, height: image.height, colorType: image.colorType, bytes: bytes.length, sha256, transparentPixels, opaquePixels, partialAlphaPixels, centerAlpha, alphaBounds: { left, top, right, bottom } };
   });
 }

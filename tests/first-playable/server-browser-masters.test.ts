@@ -9,9 +9,11 @@ import { q2OutOfBand } from "../../src/network/q2/handshake.ts";
 import { quakeWorldOutOfBand } from "../../src/network/q1/handshake.ts";
 import { readQuakeWorldDiscovery } from "../../src/network/q1/discovery.ts";
 import { addressKey } from "../../src/network/common/endpoint.ts";
+import { trackedTempDirectories } from "../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 test("Q2 UDP master discovery queries advertised servers and exposes rules and player details", async () => {
-  const root = await mkdtemp(join(tmpdir(), "server-master-")), browser = await StartupServerBrowser.open(new ConfigStore(root));
+  const root = await tempDirectory("server-master-"), browser = await StartupServerBrowser.open(new ConfigStore(root));
   const master = await UdpTransport.bind({ host: "127.0.0.1", port: 0 }), server = await UdpTransport.bind({ host: "127.0.0.1", port: 0 });
   try {
     browser.choose("q2"); browser.masterAddress = browserAddress(master.address); await browser.discover();
@@ -39,7 +41,7 @@ test("Q2 UDP master discovery queries advertised servers and exposes rules and p
 });
 
 test("HTTP lists feed the shared QuakeWorld browser and retain source player fields", async () => {
-  const root = await mkdtemp(join(tmpdir(), "qw-master-")), browser = await StartupServerBrowser.open(new ConfigStore(root));
+  const root = await tempDirectory("qw-master-"), browser = await StartupServerBrowser.open(new ConfigStore(root));
   const peer = await UdpTransport.bind({ host: "127.0.0.1", port: 0 });
   const master = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(`# public servers\n${browserAddress(peer.address)}\n${browserAddress(peer.address)}\n`) });
   const packet = quakeWorldOutOfBand('n\\hostname\\QW Arena\\map\\dm2\\maxclients\\16\\*gamedir\\qw\n1 12 3 45 "Player one" "base" 4 13\n');
@@ -53,4 +55,24 @@ test("HTTP lists feed the shared QuakeWorld browser and retain source player fie
     browser.filter = "Player one"; expect(browser.rows()).toHaveLength(1); browser.filter = "";
     browser.address = browserAddress(peer.address); expect((await browser.connection()).protocol).toBe("qw");
   } finally { master.stop(true); peer.close(); await browser.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("one bad line or unresolvable host in an HTTP master list does not discard the rest", async () => {
+  const root = await tempDirectory("qw-master-bad-"), browser = await StartupServerBrowser.open(new ConfigStore(root));
+  const peer = await UdpTransport.bind({ host: "127.0.0.1", port: 0 });
+  const master = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(`${browserAddress(peer.address)}\n1.2.3.5:27500 my favourite server\n1.2.3.6:notaport\n`) });
+  try {
+    browser.choose("qw"); browser.masterAddress = `http://127.0.0.1:${master.port}/servers`; await browser.discover();
+    expect(browser.rows()).toHaveLength(1);
+    expect(browser.status).toContain("skipped");
+  } finally { master.stop(true); peer.close(); await browser.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("an invalid saved direct list is ignored and reported instead of stopping the browser", async () => {
+  const root = await mkdtemp(join(tmpdir(), "browser-bad-list-"));
+  try {
+    await new ConfigStore(root).dump("servers-direct-q1", "{}");
+    const browser = await StartupServerBrowser.open(new ConfigStore(root));
+    try { expect(browser.status).toContain("servers-direct-q1"); } finally { await browser.close(); }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

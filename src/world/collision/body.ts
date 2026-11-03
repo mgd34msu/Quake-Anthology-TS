@@ -1,20 +1,29 @@
 import type { Bounds, Vec3 } from '../../contracts/math.ts';
 import type { BspPlane, Q1ClipNode, Q1Hull, TraceQuery, TraceResult } from '../../contracts/scene.ts';
 import { createNumericOperations } from '../../core/numeric.ts';
-import { adaptTraceResult, actorContents } from './contents.ts';
+import { adaptTraceResult, actorContents, Q2_NULL_SURFACE } from './contents.ts';
 import type { SpatialActor } from '../spatial/index.ts';
 import { traceQ1Hull } from './q1/index.ts';
 import { createBoxModel, createCapsuleModel } from './q3/model.ts';
 import { sourceTraceView } from './q3/world.ts';
+import { CollisionCounters } from './q3/counters.ts';
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
+const AXIS_NORMALS: readonly Vec3[] = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }];
+const BOX_CLIPNODES: readonly Q1ClipNode[] = [0, 1, 2, 3, 4, 5].map(index => {
+    const empty = { kind: 'contents', value: -1 } satisfies Q1ClipNode['children'][0];
+    const next: Q1ClipNode['children'][0] = index === 5 ? { kind: 'contents', value: -2 } : { kind: 'clipnode', index: index + 1 };
+    return { plane: index, children: index % 2 === 0 ? [empty, next] : [next, empty] };
+});
+/** Actor boxes are throwaway models, so their trace statistics are never read. */
+const ACTOR_COUNTERS = new CollisionCounters();
+const ZERO_BOUNDS: Bounds = { min: zero, max: zero };
 function hull(bounds: Bounds): Q1Hull {
     const planes: BspPlane[] = [
-        { normal: { x: 1, y: 0, z: 0 }, distance: bounds.max.x, type: 0, signbits: 0 }, { normal: { x: 1, y: 0, z: 0 }, distance: bounds.min.x, type: 0, signbits: 0 },
-        { normal: { x: 0, y: 1, z: 0 }, distance: bounds.max.y, type: 1, signbits: 0 }, { normal: { x: 0, y: 1, z: 0 }, distance: bounds.min.y, type: 1, signbits: 0 },
-        { normal: { x: 0, y: 0, z: 1 }, distance: bounds.max.z, type: 2, signbits: 0 }, { normal: { x: 0, y: 0, z: 1 }, distance: bounds.min.z, type: 2, signbits: 0 }
+        { normal: AXIS_NORMALS[0] ?? zero, distance: bounds.max.x, type: 0, signbits: 0 }, { normal: AXIS_NORMALS[0] ?? zero, distance: bounds.min.x, type: 0, signbits: 0 },
+        { normal: AXIS_NORMALS[1] ?? zero, distance: bounds.max.y, type: 1, signbits: 0 }, { normal: AXIS_NORMALS[1] ?? zero, distance: bounds.min.y, type: 1, signbits: 0 },
+        { normal: AXIS_NORMALS[2] ?? zero, distance: bounds.max.z, type: 2, signbits: 0 }, { normal: AXIS_NORMALS[2] ?? zero, distance: bounds.min.z, type: 2, signbits: 0 }
     ];
-    const clipnodes: Q1ClipNode[] = planes.map((_, index) => { const empty = { kind: 'contents', value: -1 } satisfies Q1ClipNode['children'][0]; const next: Q1ClipNode['children'][0] = index === 5 ? { kind: 'contents', value: -2 } : { kind: 'clipnode', index: index + 1 }; return { plane: index, children: index % 2 === 0 ? [empty, next] : [next, empty] }; });
-    return { planes, clipnodes, firstClipnode: 0, lastClipnode: 5, clipBounds: { min: zero, max: zero } };
+    return { planes, clipnodes: BOX_CLIPNODES, firstClipnode: 0, lastClipnode: 5, clipBounds: ZERO_BOUNDS };
 }
 export function traceActorBody(query: TraceQuery, actor: SpatialActor): TraceResult {
     const body = actor.body, collision = actor.collision, bounds = body.state.bounds;
@@ -29,7 +38,7 @@ export function traceActorBody(query: TraceQuery, actor: SpatialActor): TraceRes
     }
     if (query.policy.kind === 'q2' && query.shape.kind !== 'capsule' && collision.shape.kind === 'box')
         return traceQ2Box(query, actor);
-    const model = collision.shape.kind === 'capsule' ? createCapsuleModel(bounds) : createBoxModel(bounds);
+    const model = collision.shape.kind === 'capsule' ? createCapsuleModel(bounds, ACTOR_COUNTERS) : createBoxModel(bounds, ACTOR_COUNTERS);
     const result = model.transformedTraceSource({ start: query.start, end: query.end, mask: query.policy.kind === 'q3' && collision.family === 'q3' ? query.policy.contentsMask : 0x02000000, shape: query.shape.kind === 'point' ? query.shape : { kind: query.shape.kind, mins: query.shape.bounds.min, maxs: query.shape.bounds.max } }, body.state.origin, zero);
     const view = sourceTraceView(result);
     return adaptTraceResult({ kind: 'q3', fraction: result.fraction, end: result.end, startSolid: result.startSolid, allSolid: result.allSolid, sourcePlane: result.plane, contact: view.contact,
@@ -60,7 +69,7 @@ function traceQ2Box(query: TraceQuery, actor: SpatialActor): TraceResult {
         if (d1 <= 0 && d2 <= 0)
             continue;
         if (d1 > d2) {
-            const f = Math.max(0, n.divide(n.subtract(d1, 0.03125), n.subtract(d1, d2)));
+            const raw = n.divide(n.subtract(d1, 0.03125), n.subtract(d1, d2)), f = query.policy.kind === 'q2' && query.policy.leafContents === 'stored' ? raw : Math.max(0, raw);
             const sourcePlane: BspPlane = { normal: { x: axis === 'x' ? sign : 0, y: axis === 'y' ? sign : 0, z: axis === 'z' ? sign : 0 },
                 distance, type: sign < 0 ? current.type + 3 : current.type, signbits: sign < 0 ? 1 << current.type : 0 };
             if (f > enter) {
@@ -73,10 +82,10 @@ function traceQ2Box(query: TraceQuery, actor: SpatialActor): TraceResult {
             leave = Math.min(leave, Math.min(1, n.divide(n.add(d1, 0.03125), n.subtract(d1, d2))));
     }
     const startSolid = !misses && !startOut, allSolid = startSolid && !getOut;
-    const fraction = misses ? 1 : allSolid && (stationary || query.policy.kind === 'q2' && query.policy.leafContents === 'merged') ? 0 : startSolid ? 1 : enter < leave && enter >= 0 ? enter : 1;
+    const fraction = misses ? 1 : allSolid && (stationary || query.policy.kind === 'q2' && query.policy.leafContents === 'merged') ? 0 : startSolid ? 1 : enter < leave && enter > -1 ? Math.max(0, enter) : 1;
     const contents = fraction < 1 ? actorContents(actor.collision, 'q2') : 0;
     const selectedPlane: BspPlane = misses || startSolid || fraction === 1 ? { normal: zero, distance: 0, type: 0, signbits: 0 } : plane;
     return { kind: 'q2', fraction, end: { x: n.add(query.start.x, n.multiply(fraction, n.subtract(query.end.x, query.start.x))), y: n.add(query.start.y, n.multiply(fraction, n.subtract(query.end.y, query.start.y))), z: n.add(query.start.z, n.multiply(fraction, n.subtract(query.end.z, query.start.z))) }, startSolid, allSolid,
-        contact: fraction < 1 && !allSolid ? { kind: 'plane', plane: selectedPlane } : { kind: 'none' }, sourcePlane: selectedPlane, hit: fraction < 1 || startSolid ? { kind: 'actor', actor: actor.body.actor } : { kind: 'none' }, contents, surface: null,
-        secondary: secondary === null || fraction === 1 || startSolid ? null : { plane: secondary, surface: null } };
+        contact: fraction < 1 && !allSolid ? { kind: 'plane', plane: selectedPlane } : { kind: 'none' }, sourcePlane: selectedPlane, hit: fraction < 1 || startSolid ? { kind: 'actor', actor: actor.body.actor } : { kind: 'none' }, contents, surface: Q2_NULL_SURFACE,
+        secondary: secondary === null || fraction === 1 || startSolid ? null : { plane: secondary, surface: Q2_NULL_SURFACE } };
 }

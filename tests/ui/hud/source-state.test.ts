@@ -111,3 +111,13 @@ test("rerelease damage retains direction and material flags, accumulating matchi
  expect(damage.color.x).toBeCloseTo(Math.SQRT1_2); expect(damage.color.y).toBeCloseTo(Math.SQRT1_2);
  expect(hud.presentation(3000).damageIndicators).toEqual([]);
 });
+test("a point-of-interest picture the client lacks is skipped instead of failing the frame", async () => {
+  const hud = new SeatSourceHud(actor), origin = { x: 1, y: 2, z: 3 }, requested: string[] = [];
+  hud.receive({ ...stamp, kind: "q2-rerelease", event: { kind: "keyed-poi", actor, key: 5, duration: 1000, position: origin, image: "nosuch", flags: 0, color: 0 } });
+  const icons: Parameters<SeatSourceHud["prepare"]>[0] = { assets: { provider: async () => ({ palette: null }) }, picture: () => undefined,
+    load: async icon => { const path = icon.kind === "shader" ? icon.name : icon.resource.path; requested.push(path); throw new Error(`Weapon HUD image missing: ${path}`); } };
+  await hud.prepare(icons);
+  await hud.prepare(icons);
+  expect(hud.points()).toEqual([]);
+  expect(requested).toEqual(["pics/nosuch.pcx"]);
+});

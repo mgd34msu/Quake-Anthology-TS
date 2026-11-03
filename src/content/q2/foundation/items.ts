@@ -2,6 +2,7 @@ import { previewPickupGrants } from "../../../world/gameplay/pickups.ts";
 /* Pickup and inventory behaviors adapted from Quake II game/g_items.c and p_weapon.c. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { RegularArmorState, InventoryEntry, ItemId } from "../../../contracts/gameplay.ts";
+import { noInfiniteAmmo } from "./infinite-ammo.ts";
 import type { PickupResource } from "../../../contracts/original-pickups.ts";
 import type { PickupAdmission, PickupAmmoGrant, PickupSupplyObservation, PickupSupplyOffer, PickupSupplyPreview } from "../../../contracts/pickups.ts";
 import { add, movedir, scale, zero } from "./fields.ts";
@@ -14,10 +15,6 @@ import { freeQ2Entity } from "./callbacks.ts";
 import { restoreQ2Actor } from "./checkpoint.ts";
 import type { Q2Touch, Q2Use } from "./host.ts";
 import { parseQ2StartItems } from "./start-items.ts";
-import { itemList as q3ItemList } from "../../q3/base/shared/items.ts";
-import { Holdable, ItemType, Powerup } from "../../q3/base/shared/definitions.ts";
-import { q3WeaponItem } from "../../q3/foundation/arsenal.ts";
-import { Q3_Q2_SUPPLY_PROFILE } from "../../composition/q3-q2-supply.ts";
 
 interface ItemVisual { readonly classname: string; readonly model: string; readonly icon: string; readonly name: string; readonly sound: string; readonly rotate: boolean; readonly respawn: number; readonly consoleGive?: "inventory-only" | "individual-only" | "forbidden"; }
 export type Q2ItemDefinition = ItemVisual & (
@@ -43,7 +40,7 @@ const ammunition: readonly Item[] = [
   { kind: "ammo", classname: "ammo_cells", model: "models/items/ammo/cells/medium/tris.md2", icon: "a_cells", name: "Cells", sound: "misc/am_pkup.wav", rotate: false, respawn: 30, quantity: 50, capacity: 200 },
   { kind: "ammo", classname: "ammo_rockets", model: "models/items/ammo/rockets/medium/tris.md2", icon: "a_rockets", name: "Rockets", sound: "misc/am_pkup.wav", rotate: false, respawn: 30, quantity: 5, capacity: 50 },
   { kind: "ammo", classname: "ammo_slugs", model: "models/items/ammo/slugs/medium/tris.md2", icon: "a_slugs", name: "Slugs", sound: "misc/am_pkup.wav", rotate: false, respawn: 30, quantity: 10, capacity: 50 },
-  { kind: "ammo", classname: "ammo_grenades", model: "models/items/ammo/grenades/medium/tris.md2", icon: "a_grenades", name: "Grenades", sound: "misc/am_pkup.wav", rotate: true, respawn: 30, quantity: 5, capacity: 50, weaponAmmo: true },
+  { kind: "ammo", classname: "ammo_grenades", model: "models/items/ammo/grenades/medium/tris.md2", icon: "a_grenades", name: "Grenades", sound: "misc/am_pkup.wav", rotate: false, respawn: 30, quantity: 5, capacity: 50, weaponAmmo: true },
 ];
 
 const weaponNames: Readonly<Record<Q2BaseWeaponName, { readonly name: string; readonly icon: string }>> = {
@@ -97,9 +94,28 @@ export interface Q2ItemHooks {
   /** Silencer charges are held by the weapon state; other powerups use expiry seconds below. */
   silencer(player: ActorId, charges: number): undefined;
   powerArmor(player: ActorId, kind: "none" | "screen" | "shield"): undefined;
+  /** Source pickups flash the screen and select a usable item. */
+  pickedUp?(player: ActorId, item: ItemId, usable: boolean): undefined;
   ammoPack?(player: OwnedActor, game: Q2GameServices, full: boolean): undefined;
   randomRespawn?(entity: Q2Entity, game: Q2GameServices): Q2Entity | null;
   weaponRespawnSeconds?(): number;
+  /** Rerelease game_x64.dll item rows differ from classic in a few values. */
+  readonly edition?: "classic" | "rerelease";
+  /** Items authored by another game, supplied by composition so the Q2 foundation stays independent of foreign content. */
+  foreignItems?(services: Q2ForeignItemServices): readonly Q2ItemDefinition[];
+}
+
+/** The module services a composition-supplied item definition needs for pickups, powerups and regeneration. */
+export interface Q2ForeignItemServices {
+  item(classname: string): Q2ItemDefinition | undefined;
+  itemId(item: Q2ItemDefinition): ItemId;
+  ammunition(): readonly Q2ItemDefinition[];
+  ensure(actor: OwnedActor, game: Q2GameServices, item: ItemId, capacity: number): undefined;
+  weaponOwned(game: Q2GameServices, player: ActorId, item: Q2ItemDefinition): number;
+  weaponAmmo(entity: Q2Entity, game: Q2GameServices, item: Extract<Q2ItemDefinition, { readonly kind: "weapon" }>): readonly PickupAmmoGrant[];
+  weaponPicked(player: ActorId, item: ItemId, first: boolean): undefined;
+  powers(player: ActorId): Q2PlayerPowerups;
+  readonly regenThink: Q2Think;
 }
 
 export interface Q2PickupPolicy {
@@ -163,51 +179,34 @@ export class Q2ItemModule implements Q2SpawnModule {
   private powerCubeCount = 0;
   private pickupPolicy: Q2PickupPolicy | null = null;
   private pickupAdmission: PickupAdmission | null = null;
-  constructor(private readonly hooks: Q2ItemHooks) { this.registerForeignQ3Items(); }
+  constructor(private readonly hooks: Q2ItemHooks) {
+    this.registerForeignItems();
+    if (hooks.edition === "rerelease") this.applyRereleaseRows();
+  }
 
-  /** Q3-authored items whose classnames Q2 does not already own (colliding
-   * names keep their native Q2 definitions). Grants land in Q2 destinations
-   * through the shared Q3→Q2 supply profile. */
-  private registerForeignQ3Items(): undefined {
-    for (const foreign of q3ItemList("missionpack")) {
-      if (foreign.className === null || foreign.type === ItemType.IT_BAD || this.catalog.has(foreign.className)) continue;
-      this.foreignClassnames.add(foreign.className);
-      const visual = { classname: foreign.className, model: foreign.worldModels[0] ?? "", icon: "i_fixme",
-        name: foreign.pickupName ?? foreign.className, sound: (foreign.pickupSound ?? "sound/misc/am_pkup.wav").replace(/^sound\//, ""), rotate: true };
-      const quantity = foreign.quantity;
-      switch (foreign.type) {
-        case ItemType.IT_HEALTH: this.catalog.set(visual.classname, { ...visual, kind: "health", respawn: 35, amount: quantity,
-          ignoreMaximum: visual.classname === "item_health_mega" || visual.classname === "item_health_small", timed: visual.classname === "item_health_mega" }); break;
-        case ItemType.IT_ARMOR: this.catalog.set(visual.classname, visual.classname === "item_armor_shard"
-          ? { ...visual, kind: "shard", respawn: 25 }
-          : { ...visual, kind: "armor", respawn: 25, points: quantity, maximum: 200, normal: quantity >= 100 ? 0.8 : 0.6, energy: 0.3 }); break;
-        case ItemType.IT_AMMO: {
-          const weapon = q3WeaponItem(foreign.tag);
-          if (weapon === null || weapon.ammo === null) break;
-          const source = weapon.ammo;
-          this.catalog.set(visual.classname, { ...visual, kind: "custom", respawn: 40, capacity: 200, quantity, coopStay: false, droppable: false, use: null,
-            pickup: (entity, game, player) => this.foreignAmmoPickup(entity, game, player, source, quantity) }); break;
-        }
-        case ItemType.IT_WEAPON: {
-          const weapon = q3WeaponItem(foreign.tag);
-          if (weapon === null) break;
-          const source = weapon.item;
-          this.catalog.set(visual.classname, { ...visual, kind: "custom", respawn: 30, capacity: 32767, quantity, coopStay: true, droppable: false, use: null,
-            pickup: (entity, game, player) => this.foreignWeaponPickup(entity, game, player, source, quantity) }); break;
-        }
-        case ItemType.IT_POWERUP: case ItemType.IT_PERSISTANT_POWERUP: {
-          const tag = foreign.tag, persistent = foreign.type === ItemType.IT_PERSISTANT_POWERUP;
-          this.catalog.set(visual.classname, { ...visual, kind: "custom", respawn: persistent ? 0 : 120, capacity: 32767, quantity: 1, coopStay: false, droppable: false, use: null,
-            pickup: (entity, game, player) => this.foreignPowerupPickup(entity, game, player, tag, persistent) }); break;
-        }
-        case ItemType.IT_HOLDABLE: {
-          const tag = foreign.tag;
-          this.catalog.set(visual.classname, { ...visual, kind: "custom", respawn: 60, capacity: 32767, quantity: 1, coopStay: false, droppable: false, use: null,
-            pickup: (entity, game, player) => this.foreignHoldablePickup(entity, game, player, tag) }); break;
-        }
-        case ItemType.IT_TEAM: this.catalog.set(visual.classname, { ...visual, kind: "custom", respawn: 0, capacity: 32767, quantity: 1, coopStay: false, droppable: false, use: null,
-          pickup: () => false }); break;
-      }
+  private applyRereleaseRows(): undefined {
+    const body = this.catalog.get("item_armor_body"), shard = this.catalog.get("item_armor_shard");
+    if (body !== undefined) this.catalog.set(body.classname, { ...body, sound: "misc/ar3_pkup.wav" });
+    if (shard !== undefined) this.catalog.set(shard.classname, { ...shard, icon: "i_armor_shard" });
+    return undefined;
+  }
+
+  /** Foreign (composition-supplied) items whose classnames Q2 does not already own keep their native definitions on a collision. */
+  private registerForeignItems(): undefined {
+    const foreign = this.hooks.foreignItems;
+    if (foreign === undefined) return undefined;
+    const services: Q2ForeignItemServices = {
+      item: classname => this.catalog.get(classname), itemId: id, ammunition: () => ammunition,
+      ensure: (actor, game, item, capacity) => this.ensure(actor, game, item, capacity),
+      weaponOwned: (game, player, item) => this.weaponOwned(game, player, item),
+      weaponAmmo: (entity, game, item) => this.weaponAmmo(entity, game, item),
+      weaponPicked: (player, item, first) => this.hooks.weaponPicked(player, item, first),
+      powers: player => this.powersFor(player), regenThink: this.regenHealth,
+    };
+    for (const definition of foreign(services)) {
+      if (this.catalog.has(definition.classname)) continue;
+      this.foreignClassnames.add(definition.classname);
+      this.catalog.set(definition.classname, definition);
     }
     return undefined;
   }
@@ -216,92 +215,6 @@ export class Q2ItemModule implements Q2SpawnModule {
     let state = this.powers.get(player);
     if (state === undefined) { state = { quadUntil: 0, invulnerabilityUntil: 0, breatherUntil: 0, enviroUntil: 0, hasteUntil: 0, regenUntil: 0, flightUntil: 0, invisUntil: 0 }; this.powers.set(player, state); }
     return state;
-  }
-
-  private foreignAmmoPickup(entity: Q2Entity, game: Q2GameServices, player: OwnedActor, source: ItemId, quantity: number): boolean {
-    const destination = Q3_Q2_SUPPLY_PROFILE.ammo.find(entry => entry.source === source)?.destinations[0];
-    if (destination === undefined) return false;
-    const native = this.catalog.get(destination.slice(3));
-    this.ensure(player, game, destination, native?.kind === "ammo" ? native.capacity : 200);
-    return game.host.inventory.give(player, destination, entity.count || quantity) !== 0;
-  }
-
-  private foreignWeaponPickup(entity: Q2Entity, game: Q2GameServices, player: OwnedActor, source: ItemId, quantity: number): boolean {
-    const destination = Q3_Q2_SUPPLY_PROFILE.weapons.find(entry => entry.source === source)?.destinations[0];
-    if (destination === undefined) return false;
-    const native = this.catalog.get(destination.slice(3));
-    if (native?.kind !== "weapon") return false;
-    const previous = this.weaponOwned(game, player.id, native);
-    this.ensure(player, game, destination, 32767);
-    game.host.inventory.give(player, destination, 1);
-    let ammoGiven = 0;
-    for (const grant of this.weaponAmmo(entity, game, native)) {
-      const ammo = this.catalog.get(grant.item.slice(3));
-      if (ammo?.kind !== "ammo") continue;
-      this.ensure(player, game, grant.item, ammo.capacity);
-      ammoGiven += game.host.inventory.give(player, grant.item, entity.count || grant.amount);
-    }
-    if (previous === 0) this.hooks.weaponPicked(player.id, destination, true);
-    void quantity;
-    return previous === 0 || ammoGiven > 0;
-  }
-
-  private foreignPowerupPickup(_entity: Q2Entity, game: Q2GameServices, player: OwnedActor, tag: Powerup, persistent: boolean): boolean {
-    const now = game.host.now(), state = this.powersFor(player.id), duration = persistent ? 3600 : 30;
-    switch (tag) {
-      case Powerup.PW_QUAD: case Powerup.PW_DOUBLER: state.quadUntil = Math.max(state.quadUntil, now) + duration; return true;
-      case Powerup.PW_BATTLESUIT: state.enviroUntil = Math.max(state.enviroUntil, now) + duration; return true;
-      case Powerup.PW_INVULNERABILITY: state.invulnerabilityUntil = Math.max(state.invulnerabilityUntil, now) + duration;
-        game.host.combat.setTraits(player, { invulnerable: true }); return true;
-      case Powerup.PW_HASTE: case Powerup.PW_SCOUT: state.hasteUntil = Math.max(state.hasteUntil, now) + duration; return true;
-      case Powerup.PW_INVIS: state.invisUntil = Math.max(state.invisUntil, now) + duration; return true;
-      case Powerup.PW_FLIGHT: state.flightUntil = Math.max(state.flightUntil, now) + duration; return true;
-      case Powerup.PW_REGEN: case Powerup.PW_GUARD: {
-        state.regenUntil = Math.max(state.regenUntil, now) + duration;
-        if (tag === Powerup.PW_GUARD) {
-          const health = game.host.combat.read(player.id)?.health ?? 0;
-          if (health < 100) game.host.combat.setHealth(player, 100);
-        }
-        const timer = game.create("regen_timer"); timer.owner = player.id;
-        game.schedule(timer, 1, this.regenHealth); return true;
-      }
-      case Powerup.PW_AMMOREGEN: {
-        for (const ammo of ammunition) if (ammo.kind === "ammo") { this.ensure(player, game, id(ammo), ammo.capacity); game.host.inventory.give(player, id(ammo), 999); }
-        return true;
-      }
-      default: return false;
-    }
-  }
-
-  private foreignHoldablePickup(_entity: Q2Entity, game: Q2GameServices, player: OwnedActor, tag: Holdable): boolean {
-    const playerEntity = game.entity(player.id);
-    switch (tag) {
-      case Holdable.HI_MEDKIT: {
-        const health = game.host.combat.read(player.id)?.health ?? 0, maximum = playerEntity?.maxHealth || 100;
-        if (health < 1 || health >= maximum) return false;
-        game.host.combat.setHealth(player, maximum); return true;
-      }
-      case Holdable.HI_INVULNERABILITY: {
-        const now = game.host.now(), state = this.powersFor(player.id);
-        state.invulnerabilityUntil = Math.max(state.invulnerabilityUntil, now) + 30;
-        game.host.combat.setTraits(player, { invulnerable: true }); return true;
-      }
-      case Holdable.HI_KAMIKAZE: {
-        if (playerEntity === null) return false;
-        game.radiusDamage(playerEntity, player.id, 300, null, 300, 27);
-        const body = game.body(playerEntity);
-        game.damage(player.id, playerEntity, player.id, 10000, 0, zero, body.origin, zero, 0); return true;
-      }
-      case Holdable.HI_TELEPORTER: case Holdable.HI_PORTAL: {
-        const spots = [...game.entities.values()].filter(candidate => candidate.classname === "info_player_deathmatch" || candidate.classname === "info_player_start");
-        const spot = spots[Math.floor(game.host.random() * spots.length)], body = game.host.bodies.read(player.id);
-        if (spot === undefined || body === null) return false;
-        game.host.bodies.unlink(player);
-        game.host.bodies.write(player, { ...body, origin: game.body(spot).origin, velocity: zero, ground: null });
-        game.host.bodies.link(player); return true;
-      }
-      default: return false;
-    }
   }
 
   private readonly regenHealth: Q2Think = (entity, game) => {
@@ -437,6 +350,8 @@ export class Q2ItemModule implements Q2SpawnModule {
   drop(self: Q2Entity, game: Q2GameServices, itemId: ItemId, options: Q2DropOptions): Q2Entity | null {
     const item = itemId.startsWith("q2:") ? this.catalog.get(itemId.slice(3)) : undefined;
     const descriptor = this.lookup(itemId);
+    if (game.options.instagib === true && item?.kind === "weapon") return null;
+    if (item?.kind === "ammo" && game.options.edition === "rerelease" && (game.options.deathmatchFlags & 8192) !== 0 && !noInfiniteAmmo(game, id(item))) return null;
     if (item === undefined || descriptor === null || !descriptor.droppable
       || game.options.mode === "coop" && !(this.pickupPolicy?.instancedCoop?.(game) ?? false) && descriptor.stayCoop) return null;
     const count = game.host.inventory.count(self.actor.id, itemId);
@@ -484,7 +399,11 @@ export class Q2ItemModule implements Q2SpawnModule {
       if (item.kind !== "ammo" && item.kind !== "weapon" && item.kind !== "power" && item.kind !== "power-armor" && item.kind !== "key" && item.kind !== "custom") continue;
       this.ensure(actor, game, id(item), weapons.get(id(item)) ?? (item.kind === "custom" ? item.capacity : 32767));
     }
-    if (giveBlaster && game.host.inventory.count(actor.id, "q2:weapon_blaster") === 0) game.host.inventory.give(actor, "q2:weapon_blaster", 1);
+    if (game.options.instagib === true) {
+      if (giveBlaster && game.host.inventory.count(actor.id, "q2:weapon_railgun") === 0) game.host.inventory.give(actor, "q2:weapon_railgun", 1);
+      const slugs = game.host.inventory.entries(actor.id).find(entry => entry.item === "q2:ammo_slugs");
+      if (giveBlaster && slugs !== undefined && slugs.count < 99) game.host.inventory.configure(actor, { ...slugs, count: 99, capacity: Math.max(slugs.capacity, 99) });
+    } else if (giveBlaster && game.host.inventory.count(actor.id, "q2:weapon_blaster") === 0) game.host.inventory.give(actor, "q2:weapon_blaster", 1);
     return this.bindPowerArmor(actor, game);
   }
 
@@ -517,11 +436,15 @@ export class Q2ItemModule implements Q2SpawnModule {
     const item = this.catalog.get(descriptorClassname);
     if (item === undefined) return false;
     const flags = game.options.deathmatchFlags;
+    if (game.options.mode === "deathmatch" && game.options.edition === "rerelease" && (flags & 8192) !== 0 && item.classname === "weapon_bfg" && this.catalog.has("weapon_disintegrator")) {
+      entity.classname = "weapon_disintegrator"; return this.spawnItem(entity, game, "weapon_disintegrator");
+    }
+    if (game.options.instagib === true && item.kind !== "key" && item.kind !== "custom") { game.remove(entity); return true; }
     if (game.options.mode === "deathmatch" && (
       (flags & 1) !== 0 && (item.kind === "health" || item.kind === "maximum-health") ||
       (flags & 2) !== 0 && item.kind === "power" ||
       (flags & 2048) !== 0 && (item.kind === "armor" || item.kind === "shard" || item.kind === "power-armor") ||
-      (flags & 8192) !== 0 && (item.kind === "ammo" && item.weaponAmmo !== true || item.classname === "weapon_bfg")
+      (flags & 8192) !== 0 && (item.kind === "ammo" && item.weaponAmmo !== true && !noInfiniteAmmo(game, id(item)) || item.classname === "weapon_bfg")
     )) { game.remove(entity); return true; }
     this.pickups.set(entity, { item, targetsUsed: false, retained: false, expiresAt: null });
     if (game.options.mode === "coop" && (item.classname === "key_power_cube" || game.options.edition === "rerelease" && item.classname === "key_explosive_charges")) entity.spawnflags |= 1 << (8 + this.powerCubeCount++);
@@ -584,14 +507,14 @@ export class Q2ItemModule implements Q2SpawnModule {
   }
 
   private ammoQuantity(entity: Q2Entity, game: Q2GameServices, item: Extract<Item, { readonly kind: "ammo" }>): number {
-    return item.weaponAmmo === true && item.infiniteAmmoQuantity !== null && (game.options.deathmatchFlags & 8192) !== 0
+    return item.weaponAmmo === true && item.infiniteAmmoQuantity !== null && (game.options.deathmatchFlags & 8192) !== 0 && !noInfiniteAmmo(game, id(item))
       ? item.infiniteAmmoQuantity ?? 1000 : entity.count || item.quantity;
   }
 
   private weaponAmmo(entity: Q2Entity, game: Q2GameServices, item: Extract<Item, { readonly kind: "weapon" }>): readonly PickupAmmoGrant[] {
     if ((entity.spawnflags & 0x10000) !== 0 || item.ammo === null) return [];
     const ammo = this.catalog.get(item.ammo.slice(3));
-    return ammo?.kind === "ammo" ? [{ item: id(ammo), amount: (game.options.deathmatchFlags & 8192) !== 0 ? 1000 : ammo.quantity }] : [];
+    return ammo?.kind === "ammo" ? [{ item: id(ammo), amount: (game.options.deathmatchFlags & 8192) !== 0 && !noInfiniteAmmo(game, id(ammo)) ? 1000 : ammo.quantity }] : [];
   }
 
   private weaponOwned(game: Q2GameServices, player: ActorId, item: Item): number {
@@ -691,6 +614,8 @@ export class Q2ItemModule implements Q2SpawnModule {
         if (!live()) return;
         game.host.emit({ kind: "pickup", player, item: id(item), icon: item.icon, name: item.name });
         if (!live()) return;
+        this.hooks.pickedUp?.(player, id(item), this.lookup(item.classname)?.usable === true && game.host.inventory.count(player, id(item)) !== 0);
+        if (!live()) return;
         const body = game.host.bodies.read(player);
         if (body !== null) game.host.emit({ kind: "sound", actor: player, origin: body.origin, path: item.sound, channel: 3, volume: 1, attenuation: 1, reliable: false, loop: "once" });
         if (!live()) return;
@@ -719,7 +644,10 @@ export class Q2ItemModule implements Q2SpawnModule {
     if (item.kind === "key") return undefined;
     if (item.kind === "weapon" && !isDropped(entity)
       && (game.options.mode === "coop" || game.options.mode === "deathmatch" && (game.options.deathmatchFlags & 4) !== 0)) {
-      this.pickup(entity).retained = true; return undefined;
+      this.pickup(entity).retained = true;
+      // g_items.cpp SetRespawn with hide_self false: the weapon stays, and DoRespawn still runs after the delay.
+      if (game.options.edition === "rerelease" && game.options.mode === "deathmatch" && game.host.actors.isLive(entity.actor.id)) game.schedule(entity, this.hooks.weaponRespawnSeconds?.() ?? item.respawn, this.respawn);
+      return undefined;
     }
     if (item.kind === "health" && item.timed) {
       entity.owner = player.id; this.pickup(entity).retained = true; entity.visible = false;
@@ -835,6 +763,7 @@ export class Q2ItemModule implements Q2SpawnModule {
         const old = game.host.inventory.count(player.id, id(item));
         game.host.inventory.give(player, id(item), 1);
         if (game.options.mode === "deathmatch" && old === 0) this.use(player, id(item), game);
+        else this.syncPowerArmor(player, game);
         break;
       }
     }
@@ -851,6 +780,22 @@ export class Q2ItemModule implements Q2SpawnModule {
     return !isDropped(entity) && game.options.mode === "deathmatch" ? this.setRespawn(entity, game, 20) : game.remove(entity);
   };
 
+  private setPowerArmor(player: OwnedActor, game: Q2GameServices, kind: "none" | "screen" | "shield"): undefined {
+    game.host.combat.setPoweredProtection(player, kind === "none" ? { kind } : { kind, cells: game.host.inventory.count(player.id, "q2:ammo_cells") });
+    return this.hooks.powerArmor(player.id, kind);
+  }
+
+  /** PowerArmorType derives the active kind from the inventory, shield first, and the armor stops once neither is held. */
+  syncPowerArmor(player: OwnedActor, game: Q2GameServices, requested: "screen" | "shield" | null = null): undefined {
+    const armor = game.host.combat.read(player.id)?.armor;
+    if (requested === null && (armor === undefined || armor.powered.kind === "none")) return undefined;
+    const held = game.host.inventory.count(player.id, "q2:item_power_shield") > 0 ? "shield"
+      : game.host.inventory.count(player.id, "q2:item_power_screen") > 0 ? "screen" : null;
+    const kind = held ?? (requested === null ? "none" : requested);
+    if (armor?.powered.kind === kind) return undefined;
+    return this.setPowerArmor(player, game, kind);
+  }
+
   use(player: OwnedActor, itemId: ItemId, game: Q2GameServices, duration = 30): boolean {
     const item = itemId.startsWith("q2:") ? this.catalog.get(itemId.slice(3)) : undefined;
     if (item === undefined || game.host.inventory.count(player.id, itemId) === 0) return false;
@@ -858,13 +803,18 @@ export class Q2ItemModule implements Q2SpawnModule {
     if (item.kind === "power-armor") {
       const armor = game.host.combat.read(player.id)?.armor;
       const active = armor !== undefined && armor.powered.kind !== "none";
-      if (!active && game.host.inventory.count(player.id, "q2:ammo_cells") === 0) return false;
-      const kind = active ? "none" : item.armor;
-      game.host.combat.setPoweredProtection(player, kind === "none" ? { kind } : { kind, cells: game.host.inventory.count(player.id, "q2:ammo_cells") });
-      this.hooks.powerArmor(player.id, active ? "none" : item.armor);
+      if (!active && game.host.inventory.count(player.id, "q2:ammo_cells") === 0) {
+        game.host.emit({ kind: "print", actor: player.id, level: "high", text: "No cells for power armor.\n" });
+        return false;
+      }
+      game.sound({ actor: player }, active ? "misc/power2.wav" : "misc/power1.wav", 0, 1, 1);
+      if (active) this.setPowerArmor(player, game, "none");
+      else this.syncPowerArmor(player, game, item.armor);
       return true;
     }
     if (item.kind !== "power" || !game.host.inventory.consume(player, itemId, 1)) return false;
+    if (item.classname === "item_quad") game.sound({ actor: player }, "items/damage.wav", 3, 1, 1);
+    else if (item.classname === "item_invulnerability") game.sound({ actor: player }, "items/protect.wav", 3, 1, 1);
     let state = this.powers.get(player.id);
     if (state === undefined) { state = { quadUntil: 0, invulnerabilityUntil: 0, breatherUntil: 0, enviroUntil: 0, hasteUntil: 0, regenUntil: 0, flightUntil: 0, invisUntil: 0 }; this.powers.set(player.id, state); }
     const now = game.host.now();

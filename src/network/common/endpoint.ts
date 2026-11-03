@@ -52,8 +52,29 @@ export function addressKey(address: NetworkAddress, includePort = true): string 
     case "ipx": return `ipx:${address.network.toString(16).padStart(8, "0")}:${address.node.map(value => value.toString(16).padStart(2, "0")).join("")}${includePort ? `:${address.port}` : ""}`;
   }
 }
+/** Field comparison with the same equivalence as addressKey, without formatting keys. */
 export function sameAddress(left: NetworkAddress, right: NetworkAddress, includePort = true): boolean {
-  return left.kind === right.kind && addressKey(left, includePort) === addressKey(right, includePort);
+  if (left.kind !== right.kind) return false;
+  switch (left.kind) {
+    case "loopback": return right.kind === "loopback" && left.id === right.id;
+    case "ipv4": {
+      if (right.kind !== "ipv4") return false;
+      const other = right;
+      return left.host[0] === other.host[0] && left.host[1] === other.host[1] && left.host[2] === other.host[2] && left.host[3] === other.host[3] && (!includePort || left.port === other.port);
+    }
+    case "ipv6": {
+      if (right.kind !== "ipv6") return false;
+      const other = right;
+      return left.host === other.host && (!includePort || left.port === other.port);
+    }
+    case "ipx": {
+      if (right.kind !== "ipx") return false;
+      const other = right;
+      if (left.network !== other.network || includePort && left.port !== other.port) return false;
+      for (let index = 0; index < 6; index++) if (left.node[index] !== other.node[index]) return false;
+      return true;
+    }
+  }
 }
 
 /** Boundary for saved favorites and configured service endpoints. */
@@ -105,4 +126,21 @@ export async function resolveAddress(text: string, defaultPort: number, family: 
   }
   const resolved = await lookup(host, { family });
   return ipAddress(resolved.address, port);
+}
+
+/** True for loopback, RFC 1918, link-local, unique-local and similar non-global hosts. */
+export function isPrivateHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return true;
+  const v4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(host);
+  if (v4 !== null) {
+    const a = Number(v4[1]), b = Number(v4[2]);
+    return a === 0 || a === 10 || a === 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 || a === 100 && b >= 64 && b <= 127;
+  }
+  if (host.includes(":")) return host === "::" || host === "::1" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) || host.startsWith("::ffff:");
+  return false;
+}
+/** IPX is a link-layer network, so it counts as a trusted local network. */
+export function isPrivateNetworkAddress(address: NetworkAddress): boolean {
+  return address.kind === "loopback" || address.kind === "ipx" || address.kind === "ipv4" && isPrivateHost(address.host.join(".")) || address.kind === "ipv6" && isPrivateHost(address.host);
 }

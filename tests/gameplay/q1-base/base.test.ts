@@ -9,7 +9,7 @@ import { resolve } from "node:path";
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
 import { Q1MonsterMovement } from "../../../src/movement/q1/monsters.ts";
@@ -18,14 +18,16 @@ import { readQ1Bsp, parseQ1Entities } from "../../../src/formats/q1-map/index.ts
 import type { Q1Map } from "../../../src/formats/q1-map/index.ts";
 import { Q1Foundation } from "../../../src/content/q1/foundation/runtime.ts";
 import type { Q1Event, Q1FoundationHost } from "../../../src/content/q1/foundation/types.ts";
-import { PLAYER_BOUNDS, ZERO, vadd } from "../../../src/content/q1/foundation/types.ts";
+import { PLAYER_BOUNDS, ZERO } from "../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base, Q1CharacterActor, Q1CampaignState, captureQ1Travel, admitQ1Travel, newQ1Travel, q1Obituary, dropBackpack } from "../../../src/content/q1/base/index.ts";
 import type { Q1ObituaryActor } from "../../../src/content/q1/base/index.ts";
-import { setMonsterRoute } from "../../../src/content/q1/foundation/monsters.ts";
+import { setMonsterRoute } from "../../../src/content/q1/base/monsters.ts";
 import { monsterFrames } from "../../../src/content/q1/base/frames.ts";
-import type { Q1FoundationCheckpoint } from "../../../src/content/q1/foundation/index.ts";
+import type { Q1FoundationCheckpoint } from "../../../src/content/q1/foundation/checkpoint.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../src/persistence/q1-foundation.ts";
 import { captureSharedBodies, restoreSharedBodyLinks } from "../../../src/persistence/world-state.ts";
+import { decodeCheckpointValue, encodeCheckpointValue } from "../../../src/persistence/value.ts";
+import { impulseAuthority } from "../../support/authority.ts";
 
 const archivePath = corpusFile("q1/rerelease/id1/pak0.pak");
 /** Directory of the original QuakeC monster sources (progs106 layout), when provided. */
@@ -61,7 +63,7 @@ function createGame(map: Q1Map, saved?: SavedBaseWorld, deathmatch = 0, nativePr
     const body = bodies.read(actor), entity = runtime?.entity(actor); if (body === null || entity === null || entity === undefined) return null;
     return { ...body, absoluteBounds: translatedBodyBounds(entity.actor, body), flags: entity.movementFlags, ground: body.ground === null ? { kind: "none" } : { kind: "actor", actor: body.ground }, idealYaw: entity.idealYaw, yawSpeed: entity.yawSpeed, enemy: entity.monster?.enemy ?? null };
   }, write: (actor, state) => { const body = bodies.read(actor.id); if (body === null) throw new Error("Missing source body"); bodies.write(actor, { ...body, angles: state.angles }); return undefined; }, link: actor => bodies.link(actor) });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: (actor, impulse) => { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, velocity: vadd(body.velocity, impulse) }); return undefined; }, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = impulseAuthority(actors, callbacks, bodies);
   const inventory = new SharedInventoryTable(actors);
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
     trace: request => {
@@ -83,7 +85,7 @@ function createGame(map: Q1Map, saved?: SavedBaseWorld, deathmatch = 0, nativePr
   const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch, coop: false, gravity: 800, maxClients: 4, campaign: "q1:id1", ...(nativePrecaches ? { precacheProgram: "id1" } : {}), combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => game.combatContext(request), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
   const campaign = new Q1CampaignState(), base = registerQ1Base(game, { campaign });
-  let report: import("../../../src/content/q1/foundation/index.ts").Q1SpawnReport | null = null, player: OwnedActor;
+  let report: import("../../../src/content/q1/foundation/runtime.ts").Q1SpawnReport | null = null, player: OwnedActor;
   if (saved === undefined) {
     report = game.spawnMap(map); player = actors.allocateAtSource("q3:character", 1, "q3:sarge"); const spawn = [...game.entities.values()].find(entity => entity.classname === "info_player_start");
     bodies.create(player, { origin: spawn === undefined ? ZERO : game.body(spawn).origin, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
@@ -178,6 +180,7 @@ test.skipIf(!existsSync(archivePath))("source episode exit and classic versus re
   const killer: Q1ObituaryActor = { ...victim, actor: attacker.id, name: "Grunt", team: 2, health: 100, weapon: "rocketlauncher", quadExpires: 30 };
   const input = { victim, attacker: killer, telefragOwner: null, teamplay: 0, deathType: "", random: () => 0.4 };
   expect(q1Obituary({ ...input, edition: "classic" }).message?.text).toBe("Ranger was gibbed by Grunt's rocket\n");
+  expect(q1Obituary({ ...input, edition: "classic" }).log).toEqual({ what: "rocket", versus: attacker.id });
   expect(q1Obituary({ ...input, edition: "rerelease" }).message?.text).toBe("$qc_death_rl_quad2");
   expect(q1Obituary({ ...input, edition: "rerelease", attacker: { ...killer, team: 1 }, teamplay: 2 }).score?.delta).toBe(-1);
   base.levelRules.begin("start", player.id); expect(base.levelRules.requestExit(1, true).kind).toBe("waiting");
@@ -260,6 +263,7 @@ test.skipIf(!existsSync(archivePath))("source backpacks map ammo for native and 
     const before = inventory.count(player.id, "q3:ammo/lightning"), native = inventory.count(player.id, "q1:ammo/cells");
     const pack = dropBackpack(game, ZERO, { weapon: null, shells: 0, nails: 0, rockets: 0, cells: 5 });
     if (pack === null) throw new Error("Missing cell backpack");
+    expect(pack.movementFlags & 256).toBe(256);
     const sounds = events.filter(event => event.kind === "sound").length;
     pack.touch?.(player.id, null); expect(game.live(pack)).toBe(false);
     expect(inventory.count(player.id, "q3:ammo/lightning")).toBe(before + 5);
@@ -292,4 +296,82 @@ test('source entity message strings decode once before emitting to foreign playe
     game.message(player.id, entity.message);
     expect([...events].reverse().find(event => event.kind === 'message')).toMatchObject({ kind: 'message', text: 'first\nsecond' });
   } finally { actors.close(); }
+});
+
+test.skipIf(!existsSync(archivePath))("nightmare extends every monster's pain cooldown after its pain callback, even an early return", async () => {
+  const map = await readMap("e1m7");
+  const { game, base, actors, player } = createGame({ ...map, entityList: parseQ1Entities('{ "classname" "worldspawn" }') }, undefined, 0, false);
+  try {
+    const entity = game.create("monster_knight"); game.spawnEntity(entity);
+    const monster = base.monsters.get(entity.actor); if (monster === undefined) throw new Error("Missing knight controller");
+    entity.pain?.(player.id, 5); expect(monster.state.painFinished).toBeLessThan(game.time + 5);
+    Object.assign(game.options, { skill: 3 });
+    monster.state.painFinished = game.time + 100;
+    entity.pain?.(player.id, 5); expect(monster.state.painFinished).toBe(game.time + 5);
+  } finally { actors.close(); }
+});
+
+test("classic obituaries test water before the monster branch and the rerelease reads the monster kill string", () => {
+  const victim: Q1ObituaryActor = { actor: createIdentityOwner("obit").actor(1, 0), name: "Ranger", classname: "player", isPlayer: true, isMonster: false, team: 0, health: -5, waterType: "slime", waterLevel: 3, weapon: null, quadExpires: 0, invulnerableExpires: 0, brush: false, killString: "" };
+  const grunt: Q1ObituaryActor = { ...victim, actor: createIdentityOwner("obit2").actor(2, 0), name: "", classname: "monster_army", isPlayer: false, isMonster: true, waterType: "empty", waterLevel: 0, killString: "$qc_ks_grunt" };
+  const input = { victim, attacker: grunt, telefragOwner: null, teamplay: 0, deathType: "", random: () => 0.4 };
+  expect(q1Obituary({ ...input, edition: "classic" }).message?.text).toBe("Ranger gulped a load of slime\n");
+  expect(q1Obituary({ ...input, edition: "classic" }).log).toEqual({ what: "slimed", versus: null });
+  expect(q1Obituary({ ...input, edition: "classic", victim: { ...victim, waterType: "empty" } }).log).toEqual({ what: "grunt", versus: null });
+  expect(q1Obituary({ ...input, edition: "rerelease", victim: { ...victim, waterType: "empty" } }).message?.text).toBe("$qc_ks_grunt");
+});
+
+test("MG programs check monsters before water, MG3 keeps its variant keys and CTF prints hook and team change lines", () => {
+  const victim: Q1ObituaryActor = { actor: createIdentityOwner("obit").actor(1, 0), name: "Ranger", classname: "player", isPlayer: true, isMonster: false, team: 0, health: -5, waterType: "slime", waterLevel: 3, weapon: null, quadExpires: 0, invulnerableExpires: 0, brush: false, killString: "" };
+  const monster = (classname: string, aflag = 0): Q1ObituaryActor => ({ ...victim, actor: createIdentityOwner("obit2").actor(2, 0), name: "", classname, isPlayer: false, isMonster: true, waterType: "empty", waterLevel: 0, aflag });
+  const base: Omit<Parameters<typeof q1Obituary>[0], "attacker" | "variant"> = { victim, telefragOwner: null, teamplay: 0, deathType: "", random: () => 0.4, edition: "rerelease" };
+  expect(q1Obituary({ ...base, attacker: monster("monster_army") }).message?.text).toBe("$qc_death_slime1");
+  expect(q1Obituary({ ...base, attacker: monster("monster_army"), variant: "mg" }).message?.text).toBe("$qc_ks_grunt");
+  expect(q1Obituary({ ...base, attacker: monster("monster_dog", 1), variant: "mg" }).message?.text).toBe("$mg3_qc_obit_demodog");
+  expect(q1Obituary({ ...base, attacker: monster("monster_ogre", 1), variant: "mg" }).message?.text).toBe("$mg3_qc_obit_rocketogre");
+  expect(q1Obituary({ ...base, attacker: monster("monster_tarbaby", 0), variant: "mg" }).message?.text).toBe("$qc_ks_spawn");
+  expect(q1Obituary({ ...base, attacker: monster("monster_lava_man"), variant: "mg" }).message?.text).toBe("$mg3_qc_obit_lavaman");
+  expect(q1Obituary({ ...base, attacker: { ...monster("fireball", 0), isMonster: false }, variant: "mg" }).message?.text).toBe("$qc_ks_lavaball");
+  const self: Q1ObituaryActor = { ...victim, waterType: "empty", waterLevel: 0, classname: "player", isPlayer: true };
+  const own: Parameters<typeof q1Obituary>[0] = { ...base, victim: self, attacker: self, variant: "ctf", teamplay: 64 };
+  expect(q1Obituary({ ...own, deathType: "ctf:teamchange" }).message?.text).toBe("$qc_ks_tried_change_teams");
+  expect(q1Obituary({ ...own, teamplay: 1, deathType: "ctf:teamchange" }).message?.text).toBe("$qc_ks_changed_teams");
+  const hooker: Q1ObituaryActor = { ...self, actor: createIdentityOwner("obit3").actor(3, 0), name: "Hooker", weapon: "ctf:grapple" };
+  expect(q1Obituary({ ...base, victim: { ...self }, attacker: hooker, variant: "ctf" }).message?.text).toBe("$qc_death_hook1");
+});
+
+test.skipIf(!existsSync(archivePath))("a version 5 save with a live grunt and dog resumes them as base controllers", async () => {
+  const base = await readMap("e1m1"), map = { ...base, entityList: [...base.entityList, ...parseQ1Entities('{ "classname" "monster_army" "targetname" "legacy_army" } { "classname" "monster_dog" "targetname" "legacy_dog" }')] };
+  const original = createGame(map), { game, actors, combat, inventory } = original;
+  const army = game.find("legacy_army")[0], dog = game.find("legacy_dog")[0];
+  if (army === undefined || dog === undefined) throw new Error("Missing spawned grunt or dog");
+  const source = game.capture(), legacySlots = new Set([army.actor.id.slot, dog.actor.id.slot]);
+  expect(source.version).toBe(6);
+  // The version 5 foundation owned both species: sequence cursors in the entity record, foundation callback names, no base controller entry.
+  const version5 = { ...source, version: 5, entities: source.entities.map(entity => {
+    if (entity.monster === null || entity.classname !== "monster_army" && entity.classname !== "monster_dog") return entity;
+    const grunt = entity.classname === "monster_army";
+    return { ...entity, monster: { ...entity.monster, mode: "walk", frameIndex: 3, sequence: [1, 1, 1, 1], firstFrame: grunt ? 90 : 78, deathDrop: false },
+      callbacks: { ...entity.callbacks, think: "monster_frame", pain: "monster_pain", die: "monster_die", use: "monster_use", pathEnd: "monster_path_end" } };
+  }), extensions: source.extensions.map(extension => {
+    if (extension.id !== "q1:base") return extension;
+    const root = decodeCheckpointValue(extension.bytes) as { monsters: { actor: { slot: number } }[] };
+    return { ...extension, bytes: encodeCheckpointValue({ ...root, monsters: root.monsters.filter(entry => !legacySlots.has(entry.actor.slot)) }) };
+  }) };
+  const saved: SavedBaseWorld = {
+    source: decodeQ1FoundationCheckpoint(encodeCheckpointValue(version5)), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(),
+    bodies: captureSharedBodies(actors, game.host.bodies),
+    combat: actors.observations().flatMap(actor => { const state = combat.read(actor.id); return state === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state }]; }),
+    inventories: actors.observations().flatMap(actor => inventory.has(actor.id) ? [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: inventory.entries(actor.id) }] : []),
+  };
+  const restored = createGame(map, saved);
+  const resumedArmy = restored.game.find("legacy_army")[0], resumedDog = restored.game.find("legacy_dog")[0];
+  if (resumedArmy === undefined || resumedDog === undefined) throw new Error("Missing restored grunt or dog");
+  expect(restored.base.monsters.get(resumedArmy.actor)?.nextFrame).toBe("army_walk4");
+  expect(restored.base.monsters.get(resumedDog.actor)?.nextFrame).toBe("dog_walk4");
+  restored.game.named.action(resumedArmy, "monster_frame")(); restored.game.named.action(resumedDog, "monster_frame")();
+  // With no path the walk frame falls back to standing; the point is that the resumed think reaches the base controller.
+  expect(restored.base.monsters.get(resumedArmy.actor)?.currentFrame).toMatch(/^army_(walk|stand)/);
+  expect(restored.game.capture().version).toBe(6);
+  restored.actors.close(); actors.close();
 });

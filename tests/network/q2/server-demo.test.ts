@@ -26,8 +26,8 @@ test('classic server footage preserves native entity-only frame and distinct sig
     expect(second.multicasts[0]?.event).toEqual({ kind: 'print', level: 2, text: 'ok' });
     expect('player' in second).toBe(false);
     expect(() => readQ2DemoHeader(bytes)).toThrow('Native serverrecord footage');
-    expect(() => [...readQ2ServerDemo(bytes.subarray(0, bytes.length - 1))]).toThrow();
-    expect(() => [...readQ2ServerDemo(recording(update))]).toThrow();
+    expect(() => [...readQ2ServerDemo(bytes.subarray(0, bytes.length - 1))]).toThrow("Truncated Q2 demo packet");
+    expect(() => [...readQ2ServerDemo(recording(update))]).toThrow("Server demo requires signon followed by entity frames");
 });
 test('serverstop writes native EOF and shared ordered storage drains admitted frames', async () => {
     const root = await mkdtemp(join(tmpdir(), 'server-demo-'));

@@ -39,7 +39,7 @@ test("local body snapshots stay deeply immutable and isolated across writes and 
   expect(first.origin.x).toBe(-0); expect(bodies.linked(actor.id)).toBe(linked);
   expect(bodies.read(actor.id)?.origin.x).toBe(20);
   actors.release(actor); expect(bodies.read(actor.id)).toBeNull();
-  expect(() => bodies.write(actor, state())).toThrow();
+  expect(() => bodies.write(actor, state())).toThrow("Stale or foreign actor authority");
 });
 
 test("external reads and writes retain copies and callback order, including saved links", () => {

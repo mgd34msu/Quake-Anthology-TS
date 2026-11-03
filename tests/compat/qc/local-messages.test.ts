@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import { createIdentityOwner } from '../../../src/contracts/identity.ts';
 import type { ActorId } from '../../../src/contracts/identity.ts';
@@ -78,7 +78,7 @@ test('QC private prompts retain incremental per-client choices, restore, and cle
   expect(restored.prompt(second).kind).toBe('prompt');
  });
 
-const originalPak = `${testCorpusRoot()}/q1/id1/PAK0.PAK`;
+const originalPak = corpusFile("q1/id1/PAK0.PAK");
 test.skipIf(!await Bun.file(originalPak).exists())('original NQ entity writer captures camera generation through buffered flush and save', async () => {
   const { openArchive } = await import('../../../src/content/archive/index.ts');
   const { QcBroadcastMessages } = await import('../../../src/compat/qc/presentation-host.ts');
@@ -127,12 +127,12 @@ test('private QC message dialect requires matching artifact metadata and decodes
   expect(readQuakeCCompatibility(null,digest).messageDialect).toBe('known-retail');
   const dialect = readQuakeCCompatibility(encode({version:1,artifactDigest:digest,messageDialect:'quake-1-re-ts-private'}),digest).messageDialect;
   expect(dialect).toBe('q1-rerelease-private');
-  expect(()=>readQuakeCCompatibility(encode({version:1,artifactDigest:'other',messageDialect:dialect}),digest)).toThrow();
+  expect(()=>readQuakeCCompatibility(encode({version:1,artifactDigest:'other',messageDialect:dialect}),digest)).toThrow("quakec-compatibility.json.artifactDigest: expected sha256");
   const protocol = new NetQuakeDecoder().protocol, bytes = new SizeBuf(1024);
   const messages: readonly NetQuakeMessage[] = [{kind:'prompt-begin',text:'Team',choices:1},{kind:'prompt-choice',text:'Red',impulse:101},{kind:'level-completed'},{kind:'back-to-lobby'},{kind:'prompt-clear'}];
   for(const message of messages) {if(message.kind === 'entity')throw new Error('Unexpected entity');writeNetQuakeMessage(bytes,protocol,message,dialect);}
   expect(new NetQuakeDecoder(protocol,dialect).decode(bytes.bytes())).toEqual(messages);
-  expect(()=>new NetQuakeDecoder(protocol).decode(bytes.bytes())).toThrow();
+  expect(()=>new NetQuakeDecoder(protocol).decode(bytes.bytes())).toThrow("Unknown or unverified retail service 57");
 });
 
 test('Q1 source sky resolves real image faces and isolates recipients and obsolete loads', async () => {
@@ -158,10 +158,12 @@ test('Q1 source sky resolves real image faces and isolates recipients and obsole
   expect(helper.clients(content,first)).toEqual([{slot:4,name:'QuakeC',colors:0,frags:0,ping:37,social:'opaque:source'}]);
   expect(helper.clients(content,second)).toEqual([{slot:4,name:'QuakeC',colors:0,frags:0}]);
   const previousSky = helper.view(second).sourceSky;
+  expect(previousSky?.images).toHaveLength(6);
   const replacementTextures = new SceneTextureLoader(images, { read: async path => ({ bytes: imageBytes, source: { kind: 'generated', name: `reloaded:${path}` } }) });
   const commit = await helper.prepareImageRefresh({ provider: async () => ({ textures: replacementTextures }) });
   expect(helper.view(second).sourceSky).toBe(previousSky);
   commit();
+  expect(helper.view(second).sourceSky?.images).toHaveLength(6);
   expect(helper.view(second).sourceSky?.images[0]).not.toBe(previousSky?.images[0]);
   const obsolete = await helper.prepareImageRefresh({ provider: async () => ({ textures }) });
   helper.receive([{ ...base, kind: 'q1-sky', recipient: first, event: { kind: 'skybox', name: '' } }]);
@@ -175,6 +177,7 @@ test('Q1 source sky resolves real image faces and isolates recipients and obsole
   helper.receive([{...base,sequence:5,kind:'q1-sky',recipient:first,event:{kind:'skybox',name:'delayed'}}]);
   const pending=helper.prepare({provider:async()=>{await gate.promise;return {textures};}});
   helper.retire(first);gate.resolve();await pending;
+  expect(helper.view(second).sourceSky?.images[0]).toBeDefined();
   expect(helper.view(first).sourceSky?.images[0]).toBe(helper.view(second).sourceSky?.images[0]);
   helper.close();expect(helper.clients(content,second)).toEqual([]);
 });
@@ -182,7 +185,7 @@ test('Q1 source sky resolves real image faces and isolates recipients and obsole
 test('Q1 sky and source client metadata persist with saved recipient ownership', async()=>{
   const {SessionActorRegistry,SharedBodyTable}=await import('../../../src/world/actors/index.ts');
   const {SimulationEvents}=await import('../../../src/app/bootstrap/simulation/events.ts');
-  const {SaveReader}=await import('../../../src/persistence/value.ts');
+  const {SaveReader,encodeCheckpointValue,decodeCheckpointValue}=await import('../../../src/persistence/value.ts');
   const identity=createIdentityOwner('q1-service-save'),actors=new SessionActorRegistry(identity);
   const actor=actors.allocate('q1:base','q1:player');
   const bodies=new SharedBodyTable(actors,{absoluteBounds:(_actor,body)=>body.bounds,onLink:()=>undefined,onUnlink:()=>undefined});
@@ -191,8 +194,13 @@ test('Q1 sky and source client metadata persist with saved recipient ownership',
   events.emit(content,{kind:'q1-sky',event:{kind:'skybox',name:'night'}},undefined,actor.id);
   events.emit(content,{kind:'q1-client',event:{kind:'player-info',slot:4,value:'source text'}},undefined,actor.id);
   const saved=events.capture();
-  events.restore(new SaveReader(saved,'events'),()=>actor.id);
+  const replacement=actors.allocate('q1:base','q1:replacement');
+  const restored=new SimulationEvents(bodies,()=>({kind:'seconds',value:1}),()=>null,actor=>actor.slot);
+  expect(restored.persistentPresentation()).toHaveLength(0);
+  restored.restore(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(saved)),'events'),()=>replacement.id);
+  expect(restored.persistentPresentation()).toHaveLength(2);
+  expect(restored.persistentPresentation().every(event=>event.recipient?.equals(replacement.id) === true)).toBe(true);
+  restored.retire(replacement.id);expect(restored.persistentPresentation()).toHaveLength(0);
   expect(events.persistentPresentation()).toHaveLength(2);
-  expect(events.persistentPresentation().every(event=>event.recipient?.equals(actor.id))).toBe(true);
   events.retire(actor.id);expect(events.persistentPresentation()).toHaveLength(0);
 });

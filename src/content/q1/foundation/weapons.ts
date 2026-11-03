@@ -9,8 +9,9 @@ import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 import { ammoItem } from "./entity-services.ts";
+import { mg3Pickups } from "./pickups.ts";
 import type { Q1PlayerState, Q1Weapon } from "./types.ts";
-import { POINT, ZERO, vadd, vsub, vscale, normalize, isQ1BaseWeapon, yawFor } from "./types.ts";
+import { POINT, ZERO, vadd, vsub, vscale, normalize, isQ1BaseWeapon, yawFor, length, dot } from "./types.ts";
 
 export function weaponModel(weapon: Q1Weapon): string {
   if (!isQ1BaseWeapon(weapon)) throw new Error(`Use registered Q1 weapon model for ${weapon}`);
@@ -52,8 +53,9 @@ export function aim(game: Q1EntityServices, actor: OwnedActor, forward: Vec3): V
 export function fireBullets(game: Q1EntityServices, shooter: OwnedActor, direction: Vec3, viewAngles: Vec3, count: number, spreadX: number, spreadY: number, weapon: Q1Weapon | null): undefined {
   const body = game.host.bodies.read(shooter.id); if (body === null) return undefined;
   const basis = game.makeVectors(viewAngles); let source = vadd(body.origin, vscale(basis.forward, 10));
-  source = { ...source, z: Math.fround(body.origin.z + body.bounds.min.z + (body.bounds.max.z - body.bounds.min.z) * 0.7) };
-  let pending: ActorId | null = null, total = 0;
+  // absmin carries SV_LinkEdict's one unit of padding.
+  source = { ...source, z: Math.fround(body.origin.z + body.bounds.min.z - 1 + (body.bounds.max.z - body.bounds.min.z) * 0.7) };
+  let pending: ActorId | null = null, total = 0, holed = false;
   const flush = (): undefined => { if (pending !== null && game.host.actors.isLive(pending)) game.damage(pending, shooter.id, shooter.id, total, weapon); total = 0; return undefined; };
   for (let shot = 0; shot < count; shot++) {
     const ray = vadd(vadd(direction, vscale(game.basis.right, (game.host.random() * 2 - 1) * spreadX)), vscale(game.basis.up, (game.host.random() * 2 - 1) * spreadY));
@@ -65,6 +67,7 @@ export function fireBullets(game: Q1EntityServices, shooter: OwnedActor, directi
       if (pending === null || !sameActor(pending, trace.actor)) { flush(); pending = trace.actor; }
       total += 4;
     } else game.effect("gunshot", vsub(trace.end, vscale(ray, 4)), trace.actor);
+    if (!holed && game.sourceBulletHole !== null && (trace.actor === null || game.world !== null && sameActor(trace.actor, game.world.actor.id))) { holed = true; game.sourceBulletHole(shooter, trace.end, trace.normal); }
   }
   return flush();
 }
@@ -77,11 +80,11 @@ function projectile(game: Q1EntityServices, player: Q1PlayerState, kind: "rocket
   if (kind === "grenade") entity.angularVelocity = { x: 300, y: 300, z: 300 };
   // weapons.qc orients rockets and spikes along their velocity (vectoangles);
   // unified body angles use view convention (pitch negative looking up).
-  const angles = kind === "grenade" ? ZERO : { x: -Math.atan2(velocity.z, Math.hypot(velocity.x, velocity.y)) * 180 / Math.PI, y: yawFor(velocity), z: 0 };
+  const angles = { x: -Math.atan2(velocity.z, Math.hypot(velocity.x, velocity.y)) * 180 / Math.PI, y: yawFor(velocity), z: 0 };
   game.setBody(entity, { origin, velocity, angles }); game.link(entity);
   entity.touch = game.named.touch(entity, "projectile_touch");
-  game.schedule(entity, kind === "grenade" ? 2.5 : kind === "rocket" ? 5 : 6,
-    game.named.action(entity, kind === "grenade" ? "GrenadeExplode" : "SUB_Remove"));
+  if (kind === "grenade" && game.sourceGrenadeFix) game.schedule(entity, 0.05, game.named.action(entity, "GrenadeThink"));
+  else game.schedule(entity, kind === "grenade" ? 2.5 : kind === "rocket" ? 5 : 6, game.named.action(entity, kind === "grenade" ? "GrenadeExplode" : "SUB_Remove"));
   game.launchProjectileBehavior(entity, player.actor.id, player.weapon, kind === "rocket" ? "rocket" : kind === "grenade" ? "grenade" : "nail");
   return entity;
 }
@@ -92,7 +95,11 @@ export function projectileTouch(game: Q1EntityServices, entity: Q1Actor, other: 
   switch (entity.projectile) {
     case "rocket": return explode(game, entity, other, true);
     case "grenade":
+      if (other !== null && game.sourceGrenadeFix && game.sourceTarget(other).aimedDamage && ["monster_boss", "monster_oldone_new"].includes(game.host.classname(other))) {
+        game.damage(other, entity.actor.id, entity.owner, 120, entity.projectileWeapon); return explode(game, entity, other, false);
+      }
       if (other !== null && (game.sourceTarget(other).aimedDamage || game.sourceTarget(other).player)) return explode(game, entity, null, false);
+      if (game.sourceGrenadeFix) { if (entity.attackFinished >= game.time) return undefined; entity.attackFinished = game.time + 0.1; }
       return game.sound(entity, "weapons/bounce.wav", "weapon");
     case "spike": case "superspike": {
       const owner = entity.owner, origin = game.body(entity).origin;
@@ -111,7 +118,7 @@ function explode(game: Q1EntityServices, entity: Q1Actor, direct: ActorId | null
   if (owner !== null) game.host.weaponImpact?.(owner, impactOrigin);
   if (rocket && direct !== null && game.health(direct) !== 0) {
     let amount = Math.fround(100 + game.host.random() * 20);
-    if (game.host.classname(direct) === "monster_shambler") amount *= 0.5;
+    if (game.host.classname(direct) === "monster_shambler" || game.sourceBloodyNightmare !== null && game.host.classname(direct) === "monster_super_shambler") amount *= 0.5;
     game.damage(direct, entity.actor.id, entity.owner, amount, entity.projectileWeapon);
   }
   game.radiusDamage(entity.actor.id, entity.owner, 120, direct, entity.projectileWeapon);
@@ -141,7 +148,7 @@ function lightning(game: Q1EntityServices, player: Q1PlayerState): undefined {
     const target = trace.actor;
     if (target !== null && !hit.some(actor => sameActor(actor, target)) && game.host.combat.read(target)?.canTakeDamage) {
       if (!trace.sky && (trace.actor === null || game.entity(trace.actor)?.solid !== "trigger")) game.host.weaponImpact?.(player.actor.id, trace.end);
-      hit.push(target); game.effect("blood", trace.end, target, 120); game.damage(target, player.actor.id, player.actor.id, 30, "lightning");
+      hit.push(target); game.host.emit({ kind: "particles", origin: trace.end, direction: { x: 0, y: 0, z: 100 }, color: mg3Pickups.has(game) ? 246 : 225, count: 120 }); game.damage(target, player.actor.id, player.actor.id, 30, "lightning");
     }
   }
   return undefined;
@@ -205,6 +212,10 @@ export function fireBaseWeapon(game: Q1EntityServices, player: Q1PlayerState): b
       if (player.lightningSoundAt < game.time) { game.sound(player.actor, "weapons/lhit.wav", "weapon", 1, volume); player.lightningSoundAt = game.time + 0.6; }
       lightning(game, player); if (!repeating) game.sound(player.actor, "weapons/lstart.wav", "auto", 1, volume); break;
   }
+  // SuperDamageSound, limited by super_sound to once a second.
+  if (weapon !== "axe" && game.powerupExpires(player.actor.id, "quad") > game.time && (quadSoundAt.get(player) ?? 0) < game.time) {
+    quadSoundAt.set(player, game.time + 1); game.sound(player.actor, "items/damage3.wav", "body");
+  }
   player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, delay));
   player.weaponFrame = player.continuousFiring ? player.weaponFrame % (weapon === "lightning" ? 4 : 8) + 1 : player.weaponAnimationBase;
   game.weaponPunch(player, punch);
@@ -212,22 +223,43 @@ export function fireBaseWeapon(game: Q1EntityServices, player: Q1PlayerState): b
   game.effect("muzzleflash", body.origin, player.actor.id); return true;
 }
 
+const quadSoundAt = new WeakMap<Q1PlayerState, number>();
 function axeStrike(game: Q1EntityServices, strike: Q1Actor): undefined {
         const player = strike.owner === null ? null : game.player(strike.owner); if (player === null) return game.remove(strike);
+        // In QC the hit runs in a player frame that death and intermission replace.
+        if (game.health(player.actor.id) <= 0 || game.intermission !== null) return game.remove(strike);
         const current = game.host.bodies.read(player.actor.id); if (current === null) return game.remove(strike);
         const start = vadd(current.origin, { x: 0, y: 0, z: 16 }), forward = game.makeVectors(player.viewAngles).forward;
         const trace = game.host.trace({ start, end: vadd(start, vscale(forward, 64)), bounds: POINT, ignore: player.actor.id, monsters: true });
         if (trace.fraction < 1) {
           if (!trace.sky && (trace.actor === null || game.entity(trace.actor)?.solid !== "trigger")) game.host.weaponImpact?.(player.actor.id, trace.end);
-          if (trace.actor !== null && game.host.combat.read(trace.actor)?.canTakeDamage) { game.effect("blood", trace.end, trace.actor, 20); game.damage(trace.actor, player.actor.id, player.actor.id, 20, "axe"); }
-          else { game.sound(player.actor, "player/axhit2.wav", "weapon"); game.effect("gunshot", trace.end, null, 3); }
+          const org = vsub(trace.end, vscale(forward, 4));
+          if (trace.actor !== null && game.host.combat.read(trace.actor)?.canTakeDamage) { game.effect("blood", org, trace.actor, 20); game.damage(trace.actor, player.actor.id, player.actor.id, 20, "axe"); }
+          else { game.sound(player.actor, "player/axhit2.wav", "weapon"); game.effect("gunshot", org, null, 3); }
         }
         return game.remove(strike);
+}
+
+/** MG GrenadeThink: counts 50 ticks to the explosion and reflects a grenade that stopped against a floor it was falling onto. */
+function grenadeThink(game: Q1EntityServices, grenade: Q1Actor): undefined {
+  grenade.count++; if (grenade.count === 50) return explode(game, grenade, null, false);
+  const previous = grenade.vector("oldorigin"), body = game.body(grenade);
+  if (length(body.velocity) === 0 && length(previous) > 120 && previous.z < 0) {
+    const trace = game.host.trace({ start: vadd(body.origin, { x: 0, y: 0, z: 4 }), end: vsub(body.origin, { x: 0, y: 0, z: 8 }), bounds: POINT, ignore: grenade.actor.id, monsters: false });
+    if (trace.fraction < 1) {
+      const reflected = vsub(previous, vscale(trace.normal, 2 * dot(previous, trace.normal)));
+      game.setBody(grenade, { velocity: vscale(reflected, 0.6), ground: null }); grenade.movementFlags &= ~512; grenade.angularVelocity = { x: 400, y: 400, z: 400 };
+    }
+  }
+  const velocity = game.body(grenade).velocity;
+  grenade.fields.set("oldorigin", `${velocity.x} ${velocity.y} ${velocity.z}`);
+  return game.schedule(grenade, 0.05, game.named.action(grenade, "GrenadeThink"));
 }
 
 export function registerWeaponCallbacks(game: Q1EntityServices): undefined {
   game.named.register("projectile_touch", { touch: (runtime, entity, other, normal, surface) => projectileTouch(runtime, entity, other, normal ?? ZERO, surface) });
   game.named.register("GrenadeExplode", { action: (runtime, entity) => explode(runtime, entity, null, false) });
+  game.named.register("GrenadeThink", { action: grenadeThink });
   game.named.register("player_axe3", { action: axeStrike });
   return undefined;
 }

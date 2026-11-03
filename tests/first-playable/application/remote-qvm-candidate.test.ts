@@ -1,6 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { RemoteApplication } from "../../../src/app/bootstrap/remote-application.ts";
@@ -11,9 +10,11 @@ import { QvmUiImport } from "../../../src/compat/qvm/abi.ts";
 import { QvmMemory } from "../../../src/compat/qvm/memory.ts";
 import type { QvmHostCall } from "../../../src/compat/qvm/syscalls.ts";
 import { bindConsoleSettings } from "../../../src/ui/settings/console.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 test("remote QVM signon and retained-control travel isolate preparation and publish real owners", async () => {
-  const root = await mkdtemp(join(tmpdir(), "remote-qvm-candidate-"));
+  const root = await tempDirectory("remote-qvm-candidate-");
   const common = ["--map", "q3ctf1", "--movement", "q3", "--character", "q3", "--mode", "deathmatch"];
   const selected = parseApplicationCommand([...common, "--game", "q3-baseq3", "--dedicated", "--listen", "0", "--bind", "127.0.0.1", "--user-content-root", join(root, "server")]);
   if (selected.kind !== "run") throw new Error("Missing hosted guest options");

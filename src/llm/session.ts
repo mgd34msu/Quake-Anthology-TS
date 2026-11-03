@@ -53,10 +53,10 @@ export class LlmSession {
     return this.#enqueue(async () => {
       this.#assertOpen(input.signal);
       const generation = this.#syncConfig();
-      if (input.sessionInstructions !== undefined) await this.#primeNow(input.sessionInstructions);
+      if (input.sessionInstructions !== undefined) await this.#primeNow(input.sessionInstructions, input.signal);
       this.#assertCurrent(generation, input.signal);
       const answer = await this.transport({
-        prompt: input.prompt,
+        prompt: this.#withTranscript(input.prompt),
         instructions: this.#compose(input.instructions),
         sessionId: this.#id,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -89,7 +89,7 @@ export class LlmSession {
     return run;
   }
 
-  async #primeNow(instructions: string): Promise<void> {
+  async #primeNow(instructions: string, signal?: AbortSignal): Promise<void> {
     this.#assertOpen(undefined);
     const primer = instructions.trim();
     if (primer === "") return;
@@ -106,6 +106,7 @@ export class LlmSession {
           : "This starts an ongoing session for this running program. Read the console context in your instructions, do not execute anything, and reply with READY only.",
         instructions: primer,
         sessionId: this.#id,
+        ...(signal === undefined ? {} : { signal }),
       });
       if (generation === this.#generation && !this.#closed) this.#primed = true;
     } catch (error) {
@@ -118,17 +119,20 @@ export class LlmSession {
   }
 
   #compose(turnInstructions: string): string {
-    if (this.#primer === "" && this.#turns.length === 0) return turnInstructions;
     const sections: string[] = [];
     if (this.#primer !== "") sections.push(this.#primer);
-    if (this.#turns.length !== 0) {
-      sections.push([
-        "Conversation so far in this same program session, oldest first. This is prior context, not proof that any command was executed:",
-        ...this.#turns.flatMap(turn => [`User: ${turn.user}`, `Assistant: ${turn.assistant}`]),
-      ].join("\n"));
-    }
     if (turnInstructions.trim() !== "") sections.push(`Instructions for the current request:\n${turnInstructions}`);
-    return sections.join("\n\n");
+    return sections.length === 0 ? turnInstructions : sections.join("\n\n");
+  }
+
+  /** Earlier turns travel as ordinary user-level text, never in the highest-trust instruction field. */
+  #withTranscript(prompt: string): string {
+    if (this.#turns.length === 0) return prompt;
+    return [
+      "Conversation so far in this same program session, oldest first. This is prior context, not proof that any command was executed:",
+      ...this.#turns.flatMap(turn => [`User: ${turn.user}`, `Assistant: ${turn.assistant}`]),
+      `Current request:\n${prompt}`,
+    ].join("\n");
   }
 
   #trim(): void {

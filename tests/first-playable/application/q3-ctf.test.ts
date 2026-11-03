@@ -1,9 +1,9 @@
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { GameType, Team } from "../../../src/content/q3/base/shared/definitions.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
-import { callMethod, numberValue, objectValue, readField, readNumber, readObject } from "../../support/reflect.ts";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
+const test = corpusTest("q3a/baseq3/pak0.pk3");
 
 // Capture the Flag rules on a Quake III product select the native GT_CTF
 // gametype (provider q3:ctf): the launch seeds g_gametype and team
@@ -17,17 +17,14 @@ test("CTF rules run native GT_CTF with teamed players on a Q3 world", async () =
   const app = await Application.open(parsed.options, { print: () => undefined });
   try {
     const sim = app.simulation;
-    const game = readObject(readObject(sim, "source"), "game");
-    const records = readObject(game, "records");
+    const game = sim.q3Source();
+    if (game === null) throw new Error("Missing Q3 source game");
     const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
     expect(sim.recipe.match.provider).toBe("q3:ctf");
-    expect(readNumber(game, "gameType")).toBe(GameType.GT_CTF);
+    expect(game.gameType).toBe(GameType.GT_CTF);
     const teamOf = (actor: ReturnType<typeof sim.players>[number]): number => {
-      const entityValue: unknown = callMethod(records, "nativeByActor", actor);
-      if (entityValue === null) return -1;
-      const clientValue: unknown = readField(objectValue(entityValue, "native entity"), "client");
-      if (clientValue === null) return -1;
-      return readNumber(readObject(objectValue(clientValue, "native client"), "sess"), "sessionTeam");
+      const client = game.records.nativeByActor(actor)?.client;
+      return client === undefined || client === null ? -1 : client.sess.sessionTeam;
     };
     for (let index = 0; index < 40; index++) await app.step(50);
     expect([Team.TEAM_RED, Team.TEAM_BLUE]).toContain(teamOf(local.actor));
@@ -41,8 +38,8 @@ test("CTF rules run native GT_CTF with teamed players on a Q3 world", async () =
     expect(teams.has(Team.TEAM_RED)).toBe(true);
     expect(teams.has(Team.TEAM_BLUE)).toBe(true);
     expect(teams.has(Team.TEAM_SPECTATOR)).toBe(false);
-    const teamScores = readObject(readObject(game, "level"), "teamScores");
-    expect(numberValue(callMethod(teamScores, "get", Team.TEAM_RED), "red score")).toBeGreaterThanOrEqual(0);
-    expect(numberValue(callMethod(teamScores, "get", Team.TEAM_BLUE), "blue score")).toBeGreaterThanOrEqual(0);
+    // Scores are live bot results, so only their presence as numbers is stable here.
+    expect(Number.isFinite(game.level.teamScores.get(Team.TEAM_RED))).toBe(true);
+    expect(Number.isFinite(game.level.teamScores.get(Team.TEAM_BLUE))).toBe(true);
   } finally { await app.close(); }
 }, 240000);

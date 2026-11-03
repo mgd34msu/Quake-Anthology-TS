@@ -331,12 +331,6 @@ export class TeamArenaUiMemory {
     for (let index = 0; index < text.length; index++) this.strings[this.stringPoint + index] = text.charCodeAt(index);
     this.strings[this.stringPoint + text.length] = 0;
     this.stringPoint += text.length + 1;
-    let last = first;
-    current = first;
-    while (current !== null && current.getAllocationPointer(0) !== undefined) {
-      last = current;
-      current = current.getAllocationPointer(0) ?? null;
-    }
     const offset = this.allocate(8);
     if (offset === null) {
       throw new RangeError("String_Alloc dereferences a failed UI_Alloc stringDef_t");
@@ -344,10 +338,14 @@ export class TeamArenaUiMemory {
     const allocation = this.borrow(offset, 8);
     allocation.setAllocationPointer(0, undefined);
     allocation.setString(4, reference);
-    // The source tracks the penultimate node here, replacing the previous tail.
-    if (last !== null) {
-      last.setAllocationPointer(0, allocation);
+    // The source replaces the penultimate node's link, so colliding strings evict each other and per-frame lookups re-allocate; append at the real tail instead.
+    let tail = first;
+    while (tail !== null) {
+      const next = tail.getAllocationPointer(0) ?? null;
+      if (next === null) break;
+      tail = next;
     }
+    if (tail !== null) tail.setAllocationPointer(0, allocation);
     else this.buckets[hash] = allocation;
     return reference;
   }

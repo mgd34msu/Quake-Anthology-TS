@@ -29,7 +29,8 @@ export class Q1Ctf extends CtfState {
   spawnPlayer(actor: ActorId, firstAdmission: boolean): undefined {
     spawnArsenal(this, actor);
     if (this.sharedGrapple?.selection.kind === "disabled") this.grant(actor, "q1:ctf/weapon/grapple", 0);
-    this.set(actor, "lastHurtCarrier", -10); this.set(actor, "regenTime", 0); this.set(actor, "runeNotice", 0);
+    for (const name of ["lastHurtCarrier", "lastReturned", "lastFraggedCarrier", "flagSince"]) this.set(actor, name, -10);
+    this.set(actor, "regenTime", 0); this.set(actor, "runeNotice", 0);
     if (firstAdmission) {
       this.set(actor, "killed", 0);
       this.set(actor, "motd", 0);
@@ -66,6 +67,11 @@ export class Q1Ctf extends CtfState {
     if (observerImpulse(this, actor)) return true;
     if (input.impulse === 22 || input.impulse === 1 && !input.grappleSelected) {
       if (!this.nativeGrappleEnabled || this.teamplay & CTF_FLAGS.disableGrapple) this.game.message(actor, "$qc_no_weapon"); else this.services.selectGrapple(actor);
+    } else if (input.impulse === 31) {
+      const player = this.game.player(actor); if (player !== null) this.game.selectWeapon(player.actor, "axe");
+    } else if (input.impulse === 99) {
+      const origin = this.body(actor).origin;
+      this.game.message(actor, `You are at '${origin.x.toFixed(1).padStart(5)} ${origin.y.toFixed(1).padStart(5)} ${origin.z.toFixed(1).padStart(5)}'\n`, false);
     } else if (!this.services.observer(actor) && (this.teamplay & CTF_FLAGS.dropItems) && input.impulse === 20) tossAmmo(this, actor);
     else if (!this.services.observer(actor) && (this.teamplay & CTF_FLAGS.dropItems) && input.impulse === 21) tossWeapon(this, actor);
     else if (input.impulse === 25) {

@@ -18,7 +18,9 @@ export function preflightApplicationMatch(content: Pick<LoadedApplicationContent
     let configured: string | undefined;
     for (const value of sourceValues) if (value.name === "g_gametype") configured = value.value;
     const gameType = configured === undefined ? content.recipe.match.provider === "q3:ctf" ? GameType.GT_CTF : options.mode === "singleplayer" ? 2 : 0 : Number(configured);
-    const result = adaptForeignQ3Objectives(content.world, selectedSourceProgram(content.recipe) === "missionpack" ? "missionpack" : "baseq3", gameType);
+    // G_RegisterCvars resets an out-of-range game type to 0 at load.
+    const effective = Number.isInteger(gameType) && gameType >= 0 && gameType < GameType.GT_MAX_GAME_TYPE ? gameType : 0;
+    const result = adaptForeignQ3Objectives(content.world, selectedSourceProgram(content.recipe) === "missionpack" ? "missionpack" : "baseq3", effective);
     if (result.kind === "missing-objectives") throw new Error(`Selected Q3 match map is missing: ${result.classnames.join(", ")}`);
     if (result.kind === "unsupported-mode") throw new Error(`Selected Q3 product does not support game type ${result.gameType}`);
     return;

@@ -5,6 +5,7 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { Q1DamageSourceEffects } from "../../../world/gameplay/index.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
+import { spriteExplosion } from "../base/projectiles.ts";
 import type { Q1PlayerState, Q1Powerup, Q1Weapon } from "../foundation/types.ts";
 import { POINT, length, normalize, vadd, vscale, vsub, weaponItem, yawFor } from "../foundation/types.ts";
 import { missionReference, missionWeapons, moveMissile, setMissionNumber, setMissionReference } from "./types.ts";
@@ -27,7 +28,15 @@ const timers: readonly { readonly id: MissionPowerup; readonly warn: string; rea
 ];
 export class MissionPackPlayers {
   readonly sourceEffects: Q1DamageSourceEffects;
+  private readonly states = new Map<ActorId, Q1Actor>();
   constructor(readonly game: Q1EntityServices, readonly pack: Q1MissionPack) {
+    game.host.actors.onRelease(actor => {
+      const state = this.states.get(actor.id);
+      this.states.delete(actor.id);
+      if (state !== undefined && this.pack === "rogue" && game.options.edition === "rerelease") this.denyVengeance(actor.id);
+      if (state !== undefined && game.live(state)) game.remove(state);
+      return undefined;
+    });
     this.sourceEffects = { beforeQuad: (request, damage) => this.beforeQuad(request, damage), afterQuad: (request, damage) => this.afterQuad(request, damage) };
     game.registerDamageSourceEffects(`q1:${pack}:effects`, this.sourceEffects);
     game.registerPlayerExtension({ id: `q1:${pack}:players`, attach: (_runtime, player) => this.attach(player), frame: (_runtime, player, seconds) => this.frame(player, seconds), afterPhysics: (_runtime, player, seconds) => this.afterPhysics(player, seconds) });
@@ -43,13 +52,18 @@ export class MissionPackPlayers {
     game.named.register("rogue:sphere-impact", { touch: (runtime, sphere, target) => {
       if (runtime.health(target) !== 0) runtime.damage(target, sphere.actor.id, sphere.actor.id, 1000, null, "direct", "rogue:vengeance");
       runtime.radiusDamage(sphere.actor.id, sphere.actor.id, 300, target, null, "rogue:vengeance");
-      runtime.effect("explosion", vsub(runtime.body(sphere).origin, vscale(normalize(runtime.body(sphere).velocity), 8))); return runtime.remove(sphere);
+      runtime.setBody(sphere, { origin: vsub(runtime.body(sphere).origin, vscale(normalize(runtime.body(sphere).velocity), 8)) }); return spriteExplosion(runtime, sphere);
     } });
   }
   private state(player: Q1PlayerState): Q1Actor {
+    const cached = this.states.get(player.actor.id);
+    if (cached !== undefined && this.game.live(cached)) return cached;
+    // A restored world rebuilds its entities, so a cache miss still looks for a saved state entity once.
     const existing = [...this.game.entities.values()].find(entity => entity.classname === "missionpack_player_state" && entity.owner !== null && sameActor(entity.owner, player.actor.id));
-    if (existing !== undefined) return existing;
-    const entity = this.game.create("missionpack_player_state"); entity.owner = player.actor.id; return entity;
+    const entity = existing ?? this.game.create("missionpack_player_state");
+    if (existing === undefined) entity.owner = player.actor.id;
+    this.states.set(player.actor.id, entity);
+    return entity;
   }
   attach(player: Q1PlayerState): undefined {
     const inventory = this.game.host.inventory;
@@ -86,14 +100,22 @@ export class MissionPackPlayers {
         setMissionNumber(state, `${timer.id}:flash`, seconds + 1);
       }
       if (expires <= seconds && state.number(`${timer.id}:lost`) === 0) {
-        missionMessage(game, player.actor.id, timer.lost); setMissionNumber(state, `${timer.id}:lost`, 1);
+        if (timer.lost !== "") missionMessage(game, player.actor.id, timer.lost);
+        setMissionNumber(state, `${timer.id}:lost`, 1);
         if (timer.id === "rogue:antigrav") game.setGravity(player.actor.id, 1);
       }
+    }
+    if ((player.powerups.get("rogue:antigrav") ?? 0) > seconds && state.number("rogue:belt-sound") < seconds) {
+      game.sound(player.actor, "belt/use.wav", "auto"); setMissionNumber(state, "rogue:belt-sound", seconds + 3);
     }
     if ((player.powerups.get("hipnotic:wetsuit") ?? 0) > seconds) {
       player.airFinished = seconds + 12;
       if (player.waterLevel >= 2) {
+        const cycle = state.number("hipnotic:scuba") - seconds;
         if (state.number("hipnotic:scuba") < seconds) { game.sound(player.actor, "misc/wetsuit.wav", "body"); setMissionNumber(state, "hipnotic:scuba", seconds + 7); }
+        else if ([6, 5.5, 5].some(mark => Math.abs(cycle - mark) < 0.04)) {
+          const timer = game.create("death_bubbles"); timer.owner = player.actor.id; timer.count = 1; game.schedule(timer, 0.1, game.named.action(timer, "base:death_bubbles"));
+        }
         const body = game.host.bodies.read(player.actor.id);
         if (body !== null && state.text("hipnotic:scaled-time") !== String(seconds)) {
           game.host.bodies.write(player.actor, { ...body, velocity: vscale(body.velocity, player.waterLevel === 2 ? 1.25 : 1.5) });
@@ -117,7 +139,14 @@ export class MissionPackPlayers {
   private beforeQuad(request: DamageRequest, damage: number): DamagePreparation {
     const game = this.game, player = game.player(request.target), cause = request.attack.cause;
     if (player === null) return { kind: "continue", amount: damage };
-    if (this.pack === "hipnotic" && cause.kind === "q1" && cause.deathType === "discharge" && (player.powerups.get("hipnotic:wetsuit") ?? 0) !== 0) return { kind: "cancel" };
+    const wetsuit = (player.powerups.get("hipnotic:wetsuit") ?? 0) !== 0;
+    if (this.pack === "hipnotic" && cause.kind === "q1" && cause.deathType === "discharge" && wetsuit) return { kind: "cancel" };
+    // weapons.qc LightningDamage refuses a wetsuit wearer for the player, Shambler and gremlin beams alike.
+    if (this.pack === "hipnotic" && cause.kind === "q1" && request.attack.weapon === game.weaponItem("lightning") && request.delivery !== "radius" && wetsuit) return { kind: "cancel" };
+    if (this.pack === "hipnotic" && (player.powerups.get("hipnotic:empathy") ?? 0) !== 0) {
+      const state = this.state(player);
+      if (state.number("hipnotic:empathy-sound") < game.time) { game.sound(player.actor, "hipitems/empathy2.wav", "item"); setMissionNumber(state, "hipnotic:empathy-sound", game.time + 0.5); }
+    }
     if (this.pack === "rogue" && (player.powerups.get("rogue:shield") ?? 0) !== 0 && request.attack.inflictor !== null) {
       const body = game.host.bodies.read(request.target), incoming = game.host.bodies.read(request.attack.inflictor);
       if (body !== null && incoming !== null) {
@@ -139,6 +168,16 @@ export class MissionPackPlayers {
       return { kind: "continue", amount: reflected };
     }
     return { kind: "continue", amount: damage };
+  }
+  /** sphere_remove: a leaving owner's Vengeance Sphere is removed with a broadcast. */
+  private denyVengeance(owner: ActorId): undefined {
+    const game = this.game, name = game.entity(owner)?.text("netname") ?? "";
+    for (const sphere of [...game.entities.values()]) {
+      if (sphere.classname !== "Vengeance" || sphere.owner === null || !sameActor(sphere.owner, owner) || !game.live(sphere)) continue;
+      for (const recipient of game.host.players()) if (!sameActor(recipient, owner)) game.message(recipient, "$qc_death_denied_vengance", false, [name]);
+      game.remove(sphere);
+    }
+    return undefined;
   }
   private shieldHit(player: Q1PlayerState): undefined {
     const game = this.game, state = this.state(player), body = game.host.bodies.read(player.actor.id); if (body === null) return undefined;

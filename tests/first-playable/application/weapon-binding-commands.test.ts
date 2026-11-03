@@ -67,8 +67,8 @@ for (const arsenal of ["q3", "hipnotic"]) test(`console-authored ${arsenal} weap
       const restored = readMovementPlayer(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(pending))), reference);
       expect(restored.arsenalIntent).toEqual({ provider: movement.arsenal.provider, weapon: null, useHoldable: false, impulse: 6 });
       expect(() => readMovementPlayer(new SaveReader({ ...pending, arsenalIntent: { ...pending.arsenalIntent, impulse: 256 } }), reference)).toThrow("source impulse exceeds one byte");
-      expect(() => readMovementPlayer(new SaveReader({ ...pending, arsenalIntent: { ...pending.arsenalIntent, provider: "invalid" } }), reference)).toThrow();
-      expect(() => readMovementPlayer(new SaveReader({ ...pending, arsenalIntent: { ...pending.arsenalIntent, weapon: "invalid" } }), reference)).toThrow();
+      expect(() => readMovementPlayer(new SaveReader({ ...pending, arsenalIntent: { ...pending.arsenalIntent, provider: "invalid" } }), reference)).toThrow("arsenalIntent.provider: expected a namespaced identity");
+      expect(() => readMovementPlayer(new SaveReader({ ...pending, arsenalIntent: { ...pending.arsenalIntent, weapon: "invalid" } }), reference)).toThrow("arsenalIntent.weapon");
       await application.step(100);
       expect(player.weapon).toBe(original);
       expect(movement.arsenalIntent?.impulse).toBe(6);

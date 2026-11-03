@@ -1,15 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
-  BoundedQueue, ByteArena, CleanupStack, FixedPool, IdIndex, StampSet, STRING_NONE, StringTable,
+  BoundedQueue, CleanupStack, IdIndex, StampSet, STRING_NONE, StringTable,
   NAME_MONSTER, NAME_Q1_AMMO, NAME_TEAM_RED_ALIAS, NAME_TEAM_RED_EXACT,
   float32Bits, float32FromBits, loadF32LE, loadI32LE, loadU32LE, storeF32LE, storeU32LE,
-  INVALID_ACTOR_KEY, actorKeyGeneration, actorKeyOf, actorKeySlot, packActorKey,
-  boundsOverlap, boundsSet, createBoundsStore, createVec3Store,
-  vec3AngleVectors, vec3Cross, vec3Dot, vec3MA, vec3Normalize, vec3Set,
 } from "../../src/foundation/index.ts";
 import {
   add3, add3Into, angleVectors, angleVectorsInto, anglesToAxis, anglesToAxisInto,
-  cross3, cross3Into, dot3, lerp3, lerp3Into, lookAtMat4, mutableVec3,
+  cross3, cross3Into, lerp3, lerp3Into, lookAtMat4, mutableVec3,
   normalize3, normalize3Into, normalize3OrZero, normalize3OrZeroInto,
   perpendicularVector, perpendicularVectorInto, planeFromPoints,
   projectPointOnPlane, projectPointOnPlaneInto, radiusFromBounds,
@@ -84,37 +81,6 @@ describe("foundation strings", () => {
   });
 });
 
-describe("foundation arena and pool", () => {
-  test("arena bumps with alignment, counts exhaustion and reuses on reset", () => {
-    const arena = new ByteArena(16);
-    expect(arena.alloc(3, 1)).toBe(0);
-    expect(arena.alloc(4, 4)).toBe(4);
-    expect(arena.alloc(100, 1)).toBe(-1);
-    expect(arena.overflowCount).toBe(1);
-    const offset = arena.allocCopy(new Uint8Array([7, 8]), 1);
-    expect(Array.from(arena.view(offset, 2))).toEqual([7, 8]);
-    arena.reset();
-    expect(arena.used).toBe(0);
-    expect(arena.alloc(16, 1)).toBe(0);
-  });
-
-  test("pool leases are O(1) slots that never allocate after construction", () => {
-    const pool = new FixedPool(2, (slot) => ({ slot, value: 0 }));
-    const first = pool.takeSlot();
-    const second = pool.takeSlot();
-    expect(pool.takeSlot()).toBe(-1);
-    expect(pool.overflowCount).toBe(1);
-    expect(pool.at(first).slot).toBe(first);
-    pool.release(first);
-    expect(() => pool.release(first)).toThrow(RangeError);
-    expect(pool.takeSlot()).toBe(first);
-    expect(pool.peak).toBe(2);
-    pool.reset();
-    expect(pool.active).toBe(0);
-    expect(pool.isLeased(second)).toBe(false);
-  });
-});
-
 describe("foundation bounded queue", () => {
   test("drop-oldest retention, removal and slot replacement preserve order", () => {
     const queue = new BoundedQueue<number>(4);
@@ -161,16 +127,7 @@ describe("foundation cleanup stack", () => {
   });
 });
 
-describe("foundation handles and id index", () => {
-  test("packed actor keys round-trip within safe ranges", () => {
-    const key = packActorKey(495, 7);
-    expect(actorKeySlot(key)).toBe(495);
-    expect(actorKeyGeneration(key)).toBe(7);
-    expect(actorKeyOf({ slot: 1, generation: 0 })).toBe(1);
-    expect(actorKeySlot(INVALID_ACTOR_KEY)).toBe(-1);
-    expect(() => packActorKey(2 ** 20, 0)).toThrow(RangeError);
-  });
-
+describe("foundation id index", () => {
   test("id index resolves duplicates in reverse admission order", () => {
     const index = new IdIndex();
     index.reserve(3);
@@ -198,57 +155,6 @@ describe("foundation handles and id index", () => {
     expect(index.find(10, 1)).toBe(102);
     const cursor = index.begin(10, 1);
     expect([index.next(cursor), index.next(cursor), index.next(cursor), index.next(cursor)]).toEqual([102, 101, 100, -1]);
-  });
-});
-
-describe("foundation vector store", () => {
-  test("store math matches object math exactly on sampled values", () => {
-    const values = samples(3 * 40);
-    const store = createVec3Store(8);
-    for (let index = 0; index < 40; index++) {
-      const ax = values[index * 3] ?? 0;
-      const ay = values[index * 3 + 1] ?? 0;
-      const az = values[index * 3 + 2] ?? 0;
-      const bx = values[(index * 3 + 7) % values.length] ?? 0;
-      const by = values[(index * 3 + 8) % values.length] ?? 0;
-      const bz = values[(index * 3 + 9) % values.length] ?? 0;
-      const a = vec3(ax, ay, az);
-      const b = vec3(bx, by, bz);
-      vec3Set(store, 0, ax, ay, az);
-      vec3Set(store, 1, bx, by, bz);
-      expect(vec3Dot(store, 0, 1)).toBe(dot3(a, b));
-      vec3Cross(store, 2, 0, 1);
-      const crossed = cross3(a, b);
-      expect([store[6], store[7], store[8]]).toEqual([crossed.x, crossed.y, crossed.z]);
-      vec3MA(store, 3, 0, 0.25, 1);
-      expect([store[9], store[10], store[11]]).toEqual([
-        Math.fround(a.x + Math.fround(0.25) * b.x),
-        Math.fround(a.y + Math.fround(0.25) * b.y),
-        Math.fround(a.z + Math.fround(0.25) * b.z),
-      ]);
-      vec3Normalize(store, 4, 0);
-      const normalized = normalize3(a);
-      expect([store[12], store[13], store[14]]).toEqual([normalized.x, normalized.y, normalized.z]);
-    }
-  });
-
-  test("store angle vectors and bounds match the object forms", () => {
-    const store = createVec3Store(8);
-    vec3Set(store, 0, 15, 40, -70);
-    vec3AngleVectors(store, 1, 2, 3, 0);
-    const expected = angleVectors(vec3(15, 40, -70));
-    expect([store[3], store[4], store[5]]).toEqual([expected.forward.x, expected.forward.y, expected.forward.z]);
-    expect([store[6], store[7], store[8]]).toEqual([expected.right.x, expected.right.y, expected.right.z]);
-    expect([store[9], store[10], store[11]]).toEqual([expected.up.x, expected.up.y, expected.up.z]);
-    const bounds = createBoundsStore(2);
-    boundsSet(bounds, 0, 0, 0, 0, 10, 10, 10);
-    boundsSet(bounds, 1, 10, 20, 0, 30, 30, 30);
-    expect(boundsOverlap(bounds, 0, 1)).toBe(false);
-    boundsSet(bounds, 1, 10, 5, 0, 30, 30, 30);
-    expect(boundsOverlap(bounds, 0, 1)).toBe(true);
-    vec3Set(store, 0, -0, 0, 0);
-    vec3Normalize(store, 1, 0);
-    expect(float32Bits(store[3] ?? 0)).toBe(0x80000000);
   });
 });
 
@@ -308,5 +214,17 @@ describe("out-parameter math", () => {
     const aliased = mutableVec3(1, 2, 3);
     cross3Into(aliased, aliased, vec3(4, 5, 6));
     expect(xyz(aliased)).toEqual(cross3(vec3(1, 2, 3), vec3(4, 5, 6)));
+  });
+});
+
+describe("foundation stamp epoch wrap", () => {
+  test("the epoch re-zeroes at the 32-bit limit instead of silently reaching zero marks", () => {
+    const stamps = new StampSet(2);
+    Reflect.set(stamps, "currentEpoch", 0xffffffff);
+    expect(stamps.mark(1)).toBe(true);
+    stamps.begin();
+    expect(stamps.epoch).toBe(1);
+    expect(stamps.mark(1)).toBe(true);
+    expect(stamps.mark(1)).toBe(false);
   });
 });

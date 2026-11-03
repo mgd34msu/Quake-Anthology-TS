@@ -1,6 +1,6 @@
 // win32/win_input.c MidiInProc, MIDI_NoteOn and MIDI_NoteOff.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
-import { KeyCode } from "./key-codes.ts";
+import { KeyCode } from "../core/key-codes.ts";
 
 /** MIDI 1.0 byte framing replaces WinMM's complete short-message callbacks. */
 export class SourceMidiDecoder {

@@ -4,7 +4,7 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor, Q1Monster } from "../foundation/entity.ts";
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
-import { POINT, ZERO, dot, length, normalize, vadd, vscale, vsub, yawFor } from "../foundation/types.ts";
+import { POINT, ZERO, dot, length, normalize, pathEndTime, vadd, vscale, vsub, yawFor } from "../foundation/types.ts";
 import type { Q1Basis } from "../foundation/types.ts";
 import type { MonsterAi, MonsterFrame } from "./animation.ts";
 import { monsterFrames } from "./frames.ts";
@@ -12,14 +12,17 @@ import { precacheId1Monster } from "./species.ts";
 import type { MonsterSpecies } from "./species.ts";
 import { monsterAction, monsterJumpTouch } from "./monster-actions.ts";
 import { castLightning, throwGib, throwHead } from "./projectiles.ts";
-import { pathEndTime } from "../foundation/monsters.ts";
+import { armyCheckAttack, armyPain, dogCheckAttack, dogPain } from "./grunt.ts";
 import type { SaveReader } from "../../../persistence/value.ts";
 import { monsterTargetEligible } from "../../monsters/target.ts";
+import { mg3Pickups } from "../foundation/pickups.ts";
 
 export interface BaseMonsterSource {
   readonly callbackPrefix: string;
   readonly frames?: ReadonlyMap<string, MonsterFrame>;
   readonly actions?: ReadonlyMap<string, (monster: BaseMonster) => undefined>;
+  /** MG1 and MG3 Demon_JumpTouch only hurts when attack_finished has passed, then holds it for half a second. */
+  readonly jumpAttackGate?: boolean;
 }
 export interface MonsterServices {
   countMonsterKill(monster: BaseMonster): boolean;
@@ -29,6 +32,13 @@ export interface MonsterServices {
 }
 
 /** Source animation state only. Bodies, health, armor, damage and callback ordering stay in the shared host. */
+/** V1.01 knight.qc lists attackb1 twice and oldone.qc lists shake12 twice, so id1 progs number the later frames one higher than the rerelease table. */
+function classicFrameShift(name: string): number {
+  const knight = /^knight_atk(\d+)$/.exec(name), thrash = /^old_thrash(\d+)$/.exec(name);
+  if (knight !== null) return Number(knight[1]) >= 2 && Number(knight[1]) <= 10 ? 1 : 0;
+  return thrash !== null && Number(thrash[1]) >= 13 && Number(thrash[1]) <= 20 ? 1 : 0;
+}
+
 export class BaseMonster {
   readonly state: Q1Monster;
   currentFrame: string;
@@ -38,22 +48,21 @@ export class BaseMonster {
   idleUntil = 0;
   lefty = false;
   sliding = false;
-  lightningCount = 0;
   countedDeath = false;
   constructor(readonly game: Q1EntityServices, readonly entity: Q1Actor, readonly spec: MonsterSpecies, readonly services: MonsterServices, readonly source?: BaseMonsterSource) {
     this.currentFrame = spec.stand; this.nextFrame = spec.stand;
-    this.state = entity.monster ?? { species: spec.species, mode: "stand", frameIndex: 0, sequence: [], firstFrame: 0, enemy: null, oldEnemy: null,
-      path: entity.target, pauseUntil: 0, attackFinished: 0, painFinished: 0, searchUntil: 0, deathDrop: false, refired: false };
+    this.state = entity.monster ?? { species: spec.species, mode: "stand", enemy: null, oldEnemy: null,
+      path: entity.target, pauseUntil: 0, attackFinished: 0, painFinished: 0, searchUntil: 0, refired: false };
     entity.monster = this.state;
     entity.fields.set("source.monsterCallbackPrefix", source?.callbackPrefix ?? "base");
   }
-  capture() { return { currentFrame: this.currentFrame, nextFrame: this.nextFrame, inPain: this.inPain, counter: this.counter, idleUntil: this.idleUntil, lefty: this.lefty, sliding: this.sliding, lightningCount: this.lightningCount, countedDeath: this.countedDeath }; }
+  capture() { return { currentFrame: this.currentFrame, nextFrame: this.nextFrame, inPain: this.inPain, counter: this.counter, idleUntil: this.idleUntil, lefty: this.lefty, sliding: this.sliding, countedDeath: this.countedDeath }; }
   restore(reader: SaveReader): undefined {
     this.currentFrame = reader.field("currentFrame").string(); this.nextFrame = reader.field("nextFrame").string();
     const known = (name: string): boolean => monsterFrames.has(name) || (this.source?.frames?.has(name) ?? false) || (this.source?.actions?.has(name) ?? false);
     if (!known(this.currentFrame) || !known(this.nextFrame)) return reader.fail("unknown source monster continuation");
     this.inPain = reader.field("inPain").number(); this.counter = reader.field("counter").number(); this.idleUntil = reader.field("idleUntil").number();
-    this.lefty = reader.field("lefty").boolean(); this.sliding = reader.field("sliding").boolean(); this.lightningCount = reader.field("lightningCount").number(); this.countedDeath = reader.field("countedDeath").boolean(); return undefined;
+    this.lefty = reader.field("lefty").boolean(); this.sliding = reader.field("sliding").boolean(); this.countedDeath = reader.field("countedDeath").boolean(); return undefined;
   }
   get enemy(): ActorId | null { return this.state.enemy; }
   set enemy(value: ActorId | null) { this.state.enemy = value; }
@@ -63,15 +72,8 @@ export class BaseMonster {
 
   play(name: string): undefined {
     if (!this.game.live(this.entity)) return undefined;
-    if (this.game.health(this.entity.actor.id) > 0 && this.enemy !== null && !monsterTargetEligible(this.game.health(this.enemy), this.game.monsterTarget(this.enemy))) {
-      const previous = this.state.oldEnemy;
-      this.enemy = previous !== null && monsterTargetEligible(this.game.health(previous), this.game.monsterTarget(previous)) ? previous : null;
-      this.state.oldEnemy = null;
-      this.entity.attackState = "straight";
-      return this.play(this.enemy === null ? this.route() === null ? this.spec.stand : this.spec.walk : this.spec.run);
-    }
     const frame = this.source?.frames?.get(name) ?? monsterFrames.get(name); if (frame === undefined) throw new Error(`Missing Q1 source animation ${name}`);
-    this.currentFrame = name; this.nextFrame = frame.next; this.entity.frame = frame.frame;
+    this.currentFrame = name; this.nextFrame = frame.next; this.entity.frame = frame.frame + (this.game.options.edition === "classic" ? classicFrameShift(name) : 0);
     this.game.schedule(this.entity, 0.1, this.game.named.action(this.entity, `${this.source?.callbackPrefix ?? "base"}:monster_frame`));
     if (this.game.options.edition === "classic") {
       if (name === "boss_idle1" || name === "f_death2") return undefined;
@@ -86,8 +88,15 @@ export class BaseMonster {
         case "lightstyle": this.game.host.emit({ kind: "lightstyle", style: 0, pattern: op.pattern }); break;
         case "action": { const action = this.source?.actions?.get(op.name); if (action === undefined) monsterAction(this, op.name); else action(this); break; }
         case "sound": {
+          const path = this.sfx(op.path);
+          if (op.path === "fish/idle.wav" && mg3Pickups.has(this.game)) {
+            // MG3 fish.qc: a five to ten second quiet period follows each idle sound.
+            if (this.entity.number("waitmin") > this.game.time) break;
+            if (this.game.host.random() < 0.25) { this.game.sound(this.entity, path, op.channel, op.attenuation); this.entity.fields.set("waitmin", String(Math.fround(this.game.time + 5 + this.game.host.random() * 5))); }
+            break;
+          }
           const r = op.chance === null ? 0 : this.game.host.random();
-          if (op.chance === null || (op.comparison === "greater" ? r > op.chance : r < op.chance)) this.game.sound(this.entity, op.path, op.channel, op.attenuation);
+          if (op.chance === null || (op.comparison === "greater" ? r > op.chance : r < op.chance)) this.game.sound(this.entity, path, op.channel, op.attenuation);
           break;
         }
       }
@@ -134,9 +143,13 @@ export class BaseMonster {
   }
   findTarget(): boolean {
     const { game, entity } = this;
-    const candidate = game.sightEntity !== null && game.sightTime >= game.time - 0.1 && !(game.monsterMissions.get(entity.actor.id)?.ambush ?? ((entity.spawnflags & 3) !== 0))
-      ? game.sightEntity.monster?.enemy ?? null : game.host.checkClient(entity.actor);
-    if (candidate === null || game.health(candidate) <= 0) return false;
+    let candidate: ActorId | null;
+    if (game.sightEntity !== null && game.sightTime >= game.time - 0.1 && !(game.monsterMissions.get(entity.actor.id)?.ambush ?? ((entity.spawnflags & 3) !== 0))) {
+      const sighted = game.sightEntity.monster?.enemy ?? null;
+      if (sighted === null ? this.enemy === null : this.enemy !== null && sameActor(sighted, this.enemy)) return true;
+      candidate = game.sightEntity.actor.id;
+    } else candidate = game.host.checkClient(entity.actor);
+    if (candidate === null || this.enemy !== null && sameActor(candidate, this.enemy) || game.health(candidate) <= 0) return false;
     const observed = game.monsterTarget(candidate);
     if (observed === null || observed.invisible || observed.notarget) return false;
     const body = game.host.bodies.read(candidate); if (body === null) return false;
@@ -144,6 +157,10 @@ export class BaseMonster {
     if (distance >= 1000 || !this.visible(candidate)) return false;
     const front = dot(normalize(delta), this.makeVectors().forward) > 0.3;
     if (distance >= 500 && !front || distance >= 120 && distance < 500 && (observed.hostileUntil === null || observed.hostileUntil < game.time) && !front) return false;
+    if (!game.isPlayer(candidate)) {
+      candidate = game.entity(candidate)?.monster?.enemy ?? null;
+      if (candidate === null || !game.isPlayer(candidate)) return false;
+    }
     this.found(candidate); return true;
   }
   route(): ActorId | null {
@@ -177,20 +194,21 @@ export class BaseMonster {
       case "melee_side": this.ai("charge_side", 0); this.melee(60, 3, 3, true); return undefined;
       case "melee": this.melee(60, 3, 3, false); return undefined;
       case "pain": game.host.walkMove(entity.actor, game.body(entity).angles.y + 180, distance); return undefined;
-      case "painforward": case "forward": game.host.walkMove(entity.actor, game.body(entity).angles.y, distance); return undefined;
+      case "painforward": game.host.walkMove(entity.actor, entity.idealYaw, distance); return undefined;
+      case "forward": game.host.walkMove(entity.actor, game.body(entity).angles.y, distance); return undefined;
     }
   }
   run(distance: number): undefined {
     const { game, entity } = this;
     if (this.enemy === null || !monsterTargetEligible(game.health(this.enemy), game.monsterTarget(this.enemy))) {
       entity.attackState = "straight";
-      if (this.state.oldEnemy !== null && monsterTargetEligible(game.health(this.state.oldEnemy), game.monsterTarget(this.state.oldEnemy))) { this.enemy = this.state.oldEnemy; this.state.oldEnemy = null; }
+      if (this.state.oldEnemy !== null && monsterTargetEligible(game.health(this.state.oldEnemy), game.monsterTarget(this.state.oldEnemy))) { this.enemy = this.state.oldEnemy; this.state.oldEnemy = null; this.huntTarget(); }
       else { this.enemy = null; this.state.oldEnemy = null; return this.play(this.route() === null ? this.spec.stand : this.spec.walk); }
     }
     const enemy = this.enemy; if (enemy === null) return undefined;
     const combatRoute = game.monsterMissions.get(entity.actor.id)?.combatRoute();
     if (combatRoute?.goal != null) { game.host.moveToGoal(entity.actor, combatRoute.goal, distance, "contact"); return undefined; }
-    const seen = this.visible(); game.world?.fields.set("enemy_visible", seen ? "1" : "0"); if (seen) this.state.searchUntil = game.time + 5;
+    const seen = this.visible(); game.world?.fields.set("enemy_visible", seen ? "1" : "0");
     if (this.searchForCoopTarget()) return undefined;
     this.updateRunKnowledge();
     if (entity.attackState !== "straight") {
@@ -217,15 +235,24 @@ export class BaseMonster {
     this.game.world?.fields.set("enemy_yaw", String(Math.fround(yawFor(delta)))); return undefined;
   }
   moveToEnemy(distance: number): undefined { if (this.enemy !== null) this.game.host.moveToGoal(this.entity.actor, this.enemy, distance); return undefined; }
+  huntTarget(): undefined {
+    const target = this.target; if (target === null) return undefined;
+    this.state.mode = "run"; this.entity.idealYaw = yawFor(vsub(target, this.origin));
+    this.nextFrame = this.spec.run; this.delay(0.1); return this.attackFinished(1);
+  }
   searchForCoopTarget(): boolean { return this.game.options.coop && this.state.searchUntil < this.game.time && this.findTarget(); }
   attackFinished(seconds: number): undefined {
     this.state.refired = false;
     if (this.game.options.edition === "rerelease" || this.game.options.skill !== 3) this.state.attackFinished = this.game.time + seconds;
     return undefined;
   }
+  /** Hipnotic CheckAttack lets a charmed monster fire when another entity is in the line. */
+  protected firesThroughBlockers(): boolean { return false; }
   tryAttack(): boolean {
     const { game, entity, spec } = this, target = this.target, enemy = this.enemy;
     if (target === null || enemy === null) return false;
+    if (spec.species === "army") return armyCheckAttack(this);
+    if (spec.species === "dog") return dogCheckAttack(this);
     const distance = this.rangeDistance();
     if (spec.species === "demon") {
       if (distance < 120) { entity.attackState = "melee"; return true; }
@@ -238,7 +265,7 @@ export class BaseMonster {
     const clearShot = (): boolean => {
       const start = this.eye(), end = this.eye(enemy); if (start === null || end === null) return false;
       const trace = game.host.trace({ start, end, bounds: POINT, ignore: entity.actor.id, monsters: true });
-      return trace.actor !== null && sameActor(trace.actor, enemy) && (spec.species === "wizard" || !(trace.inOpen && trace.inWater));
+      return (trace.actor !== null && sameActor(trace.actor, enemy) || this.firesThroughBlockers()) && (spec.species === "wizard" || !(trace.inOpen && trace.inWater));
     };
     const wizardMove = (sliding: boolean): undefined => { if (this.sliding === sliding) return undefined; this.sliding = sliding; return this.play(sliding ? "wiz_side1" : "wiz_run1"); };
     if (!specialized && spec.species !== "wizard" && !clearShot()) return false;
@@ -272,6 +299,7 @@ export class BaseMonster {
       case "shambler": { const chance = this.game.host.random(); return this.play(chance > 0.6 || this.game.health(this.entity.actor.id) === 600 ? "sham_smash1" : chance > 0.3 ? "sham_swingr1" : "sham_swingl1"); }
       case "tarbaby": return this.play("tbaby_jump1");
       case "fish": return this.play("f_attack1");
+      case "dog": return this.play("dog_atta1");
       default: return undefined;
     }
   }
@@ -281,7 +309,7 @@ export class BaseMonster {
     damage = Math.fround(damage * scale); this.game.damage(enemy, this.entity.actor.id, this.entity.actor.id, damage); return damage;
   }
   retaliate(attacker: ActorId | null): undefined {
-    if (attacker === null || sameActor(attacker, this.entity.actor.id) || this.game.host.classname(attacker) === this.entity.classname) return undefined;
+    if (attacker === null || sameActor(attacker, this.entity.actor.id) || this.game.host.classname(attacker) === this.entity.classname && this.spec.species !== "army") return undefined;
     if (this.game.world !== null && sameActor(attacker, this.game.world.actor.id)) return undefined;
     if (this.enemy !== null && sameActor(attacker, this.enemy)) return undefined;
     if (this.enemy !== null && this.game.isPlayer(this.enemy)) this.state.oldEnemy = this.enemy;
@@ -309,7 +337,7 @@ export class BaseMonster {
         return game.host.random() * 200 > damage ? undefined : this.play("demon1_pain1");
       case "knight": {
         if (state.painFinished > game.time) return undefined;
-        const r = game.host.random(); game.sound(entity, "knight/khurt.wav"); state.painFinished = game.time + 1;
+        const r = game.host.random(); game.sound(entity, this.sfx("knight/khurt.wav")); state.painFinished = game.time + 1;
         return this.play(r < 0.85 ? "knight_pain1" : "knight_painb1");
       }
       case "enforcer": {
@@ -324,12 +352,14 @@ export class BaseMonster {
       }
       case "hellknight":
         if (state.painFinished > game.time) return undefined;
-        game.sound(entity, "hknight/pain1.wav");
+        game.sound(entity, this.sfx("hknight/pain1.wav"));
         if (game.time - state.painFinished <= 5 && game.host.random() * 30 > damage) return undefined;
         state.painFinished = game.time + 1; return this.play("hknight_pain1");
       case "shalrath":
         if (state.painFinished > game.time) return undefined;
         game.sound(entity, "shalrath/pain.wav"); state.painFinished = game.time + 3; return this.play("shal_pain1");
+      case "army": return armyPain(this);
+      case "dog": return dogPain(this);
       case "tarbaby": case "boss": case "oldone": return undefined;
     }
   }
@@ -342,6 +372,19 @@ export class BaseMonster {
     this.entity.movementFlags &= ~3;
     return mission === undefined ? this.game.useTargets(this.entity, this.enemy) : undefined;
   }
+  /** Source variants (Rogue statues) swap individual sound paths. */
+  protected sfx(path: string): string { return path; }
+  /** Plays the gibbing death when health is below the species threshold; returns whether it did. */
+  protected gibDeath(): boolean {
+    const { game, entity, spec } = this;
+    if (game.health(entity.actor.id) >= spec.gibHealth || spec.head === null) return false;
+    game.sound(entity, spec.species === "zombie" ? "zombie/z_gib.wav" : "player/udeath.wav");
+    // The grunt throws its head first, so the gibs leave from the lowered body.
+    if (spec.species === "army") throwHead(game, entity, spec.head);
+    for (const model of spec.gibs) throwGib(game, this.origin, model, game.health(entity.actor.id));
+    if (spec.species !== "army") throwHead(game, entity, spec.head);
+    return true;
+  }
   die(attacker: ActorId | null): undefined {
     const { game, entity, spec } = this;
     if (this.countedDeath) return undefined;
@@ -349,17 +392,13 @@ export class BaseMonster {
     entity.damageable = false; entity.touch = null;
     if (spec.species === "oldone") return this.services.finale(this);
     this.countKill();
-    if (game.health(entity.actor.id) < spec.gibHealth && spec.head !== null) {
-      game.sound(entity, spec.species === "zombie" ? "zombie/z_gib.wav" : "player/udeath.wav");
-      for (const model of spec.gibs) throwGib(game, this.origin, model, game.health(entity.actor.id));
-      return throwHead(game, entity, spec.head);
-    }
+    if (this.gibDeath()) return undefined;
     switch (spec.species) {
-      case "knight": game.sound(entity, "knight/kdeath.wav"); return this.play(game.host.random() < 0.5 ? "knight_die1" : "knight_dieb1");
+      case "knight": game.sound(entity, this.sfx("knight/kdeath.wav")); return this.play(game.host.random() < 0.5 ? "knight_die1" : "knight_dieb1");
       case "enforcer": game.sound(entity, "enforcer/death1.wav"); return this.play(game.host.random() > 0.5 ? "enf_die1" : "enf_fdie1");
       case "demon": return this.play("demon1_die1");
       case "ogre": game.sound(entity, "ogre/ogdth.wav"); return this.play(game.host.random() < 0.5 ? "ogre_die1" : "ogre_bdie1");
-      case "hellknight": game.sound(entity, "hknight/death1.wav"); return this.play(game.host.random() > 0.5 ? "hknight_die1" : "hknight_dieb1");
+      case "hellknight": game.sound(entity, this.sfx("hknight/death1.wav")); return this.play(game.host.random() > 0.5 ? "hknight_die1" : "hknight_dieb1");
       case "shambler": game.sound(entity, "shambler/sdeath.wav"); return this.play("sham_death1");
       case "wizard": entity.movement = "toss"; entity.movementFlags &= ~1; return this.play("wiz_death1");
       case "shalrath": game.sound(entity, "shalrath/death.wav"); entity.solid = "none"; game.link(entity); return this.play("shal_death1");
@@ -367,6 +406,8 @@ export class BaseMonster {
       case "fish": return this.play("f_death1");
       case "zombie": game.sound(entity, "zombie/z_gib.wav"); for (const model of spec.gibs) throwGib(game, this.origin, model, game.health(entity.actor.id)); return throwHead(game, entity, "h_zombie");
       case "boss": return this.play("boss_death1");
+      case "army": game.sound(entity, "soldier/death1.wav"); return this.play(game.host.random() < 0.5 ? "army_die1" : "army_cdie1");
+      case "dog": game.sound(entity, "dog/ddeath.wav"); entity.solid = "none"; game.link(entity); return this.play(game.host.random() > 0.5 ? "dog_die1" : "dog_dieb1");
     }
   }
   spawn(): undefined {
@@ -397,9 +438,10 @@ export class BaseMonster {
   start(): undefined {
       const { game, entity, spec } = this;
       if (spec.movement === "walk") {
-        const start = vadd(this.origin, { x: 0, y: 0, z: 1 }); const trace = game.host.trace({ start, end: vadd(start, { x: 0, y: 0, z: -256 }), bounds: game.body(entity).bounds, ignore: entity.actor.id, monsters: true });
+        // droptofloor: the monster is raised a unit first and keeps that origin when there is no floor to land on.
+        const start = vadd(this.origin, { x: 0, y: 0, z: 1 }); game.setBody(entity, { origin: start });
+        const trace = game.host.trace({ start, end: vadd(start, { x: 0, y: 0, z: -256 }), bounds: game.body(entity).bounds, ignore: entity.actor.id, monsters: true });
         if (trace.fraction < 1 && !trace.allSolid) { game.setBody(entity, { origin: trace.end, ground: trace.actor }); entity.movementFlags |= 512; }
-        else game.setBody(entity, { origin: start });
         game.host.walkMove(entity.actor, 0, 0);
       }
       if (spec.species === "fish" && game.options.edition === "classic" && !game.monsterMissions.has(entity.actor.id)) game.totalMonsters++;
@@ -442,9 +484,26 @@ export function registerMonsterCallbacks(game: Q1EntityServices, prefix: string,
     game.named.register(`${prefix}:monster_start`, { action: (_game, entity) => monster(entity).start() });
     game.named.register(`${prefix}:monster_stand`, { action: (_game, entity) => { const value = monster(entity); return value.play(value.spec.stand); } });
     game.named.register(`${prefix}:monster_found`, { action: (_game, entity) => { const value = monster(entity); return value.enemy === null ? undefined : value.found(value.enemy); } });
-    game.named.register(`${prefix}:monster_pain`, { pain: (_game, entity, attacker, damage) => monster(entity).pain(attacker, damage) });
+    game.named.register(`${prefix}:monster_pain`, { pain: (runtime, entity, attacker, damage) => {
+      const result = monster(entity).pain(attacker, damage);
+      // T_Damage extends the cooldown after every th_pain call on nightmare, including one that returns early.
+      if (runtime.options.skill === 3) monster(entity).state.painFinished = runtime.time + 5;
+      return result;
+    } });
     game.named.register(`${prefix}:monster_die`, { die: (_game, entity, attacker) => monster(entity).die(attacker) });
     game.named.register(`${prefix}:monster_use`, { use: (_game, entity, _other, activator) => monster(entity).use(activator) });
     game.named.register(`${prefix}:boss_awake`, { use: (_game, entity, _other, activator) => monster(entity).awake(activator) });
+  return undefined;
+}
+
+/** Points a monster at a route goal (or back to standing) outside its own think, as the monster-mission host does. */
+export function setMonsterRoute(game: Q1EntityServices, entity: Q1Actor, goal: ActorId | null, pauseUntil: number): undefined {
+  const monster = entity.monster; if (monster === null) throw new Error(`Missing saved monster state: ${entity.classname}`);
+  monster.pauseUntil = pauseUntil;
+  const prefix = entity.fields.get("source.monsterCallbackPrefix");
+  if (prefix === undefined) throw new Error(`Monster ${entity.classname} has no source controller`);
+  game.named.action(entity, `${prefix}:monster_route`)();
+  const target = goal === null ? null : game.host.bodies.read(goal);
+  if (target !== null) entity.idealYaw = yawFor(vsub(target.origin, game.body(entity).origin));
   return undefined;
 }

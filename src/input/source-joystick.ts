@@ -1,5 +1,5 @@
 // Source joystick profiles from Quake III linux_joystick.c and win_input.c. GPL-2.0-or-later.
-import { KeyCode } from "./key-codes.ts";
+import { KeyCode } from "../core/key-codes.ts";
 import type { SdlJoystickEvent } from "../platform/sdl.ts";
 export type SourceJoystickProfile = "linux" | "windows";
 

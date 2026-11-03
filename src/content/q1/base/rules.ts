@@ -47,11 +47,13 @@ export class Q1SpawnSelector {
       const after = this.lastSpawn === null ? -1 : entities.indexOf(this.lastSpawn);
       const activated = entities.some(entity => entity.classname === "info_player_coop" && entity.activated);
       const coopPoint = (entity: (typeof entities)[number]): boolean => entity.classname === "info_player_coop" && (!activated || entity.activated);
-      const point = entities.slice(after + 1).find(coopPoint) ?? entities.find(coopPoint) ?? entities.find(entity => entity.classname === "info_player_start");
+      const point = entities.slice(after + 1).find(coopPoint) ?? entities.find(entity => entity.classname === "info_player_start");
       if (point !== undefined) { this.lastSpawn = point; return point; }
     } else if (game.options.deathmatch !== 0) {
       const points = entities.filter(entity => entity.classname === "info_player_deathmatch");
-      if (points.length === 0) throw new Error("No info_player_deathmatch on level");
+      // The rerelease defers a deathmatch spawn on a map with no deathmatch points and forces info_player_start after the retry window.
+      if (points.length === 0 && game.options.edition === "classic") throw new Error("No info_player_deathmatch on level");
+      if (points.length === 0) return forceSpawn ? entities.find(entity => entity.classname === "info_player_start") ?? null : null;
       if (game.options.edition === "classic") {
         const start = this.lastSpawn === null ? -1 : points.indexOf(this.lastSpawn);
         for (let i = 1; i <= points.length; i++) {
@@ -88,8 +90,22 @@ export interface Q1ObituaryActor {
   readonly invulnerableExpires: number;
   readonly brush: boolean;
   readonly killString: string;
+  /** Per-entity `aflag`, which MG3 uses to tell its monster variants apart. */
+  readonly aflag?: number;
 }
+/** MG1 and MG3 client.qc check monsters before the environment; the MG programs have no quad rocket lines. */
+const mgMonsterKeys: ReadonlyMap<string, string> = new Map([
+  ["monster_army", "$qc_ks_grunt"], ["monster_demon1", "$qc_ks_fiend"], ["monster_dog", "$qc_ks_rottweiler"], ["monster_enforcer", "$qc_ks_enforcer"], ["monster_fish", "$qc_ks_rotfish"],
+  ["monster_hell_knight", "$qc_ks_deathknight"], ["monster_ranged_knight", "$qc_ks_deathknight"], ["monster_knight", "$qc_ks_knight"], ["monster_ogre", "$qc_ks_ogre"], ["monster_shalrath", "$qc_ks_vore"],
+  ["monster_shambler", "$qc_ks_shambler"], ["monster_tarbaby", "$qc_ks_spawn"], ["monster_wizard", "$qc_ks_scrag"], ["monster_zombie", "$qc_ks_zombie"],
+  ["monster_super_shambler", "$mg3_qc_obit_supershambler"], ["monster_lava_man", "$mg3_qc_obit_lavaman"],
+]);
+const mgVariantKeys: ReadonlyMap<string, string> = new Map([["monster_dog", "$mg3_qc_obit_demodog"], ["monster_ogre", "$mg3_qc_obit_rocketogre"], ["monster_tarbaby", "$mg3_qc_obit_slime"]]);
+const mgHazardKeys: ReadonlyMap<string, string> = new Map([["explo_box", "$qc_ks_blew_up"], ["trap_shooter", "$qc_ks_spiked"], ["trap_spikeshooter", "$qc_ks_spiked"], ["fireball", "$qc_ks_lavaball"], ["trigger_changelevel", "$qc_ks_tried_leave"]]);
+/** CTF log.qc input: the `what` token of LogPlayerDeath, or of LogPlayerDMDeath when `versus` names the other player. */
+export interface Q1ObituaryLog { readonly what: string; readonly versus: ActorId | null }
 export interface Q1Obituary {
+  readonly log?: Q1ObituaryLog;
   readonly message: { readonly text: string; readonly arguments: readonly string[] } | null;
   readonly score: { readonly actor: ActorId; readonly delta: number } | null;
   readonly achievement: { readonly actor: ActorId; readonly id: string } | null;
@@ -103,19 +119,27 @@ export function q1ClientNotice(edition: "classic" | "rerelease", event: "connect
   return { text, arguments: [], scoreDelta };
 }
 /** The selected score authority commits this decision once for an accepted death. */
-export function q1Obituary(input: { readonly edition: "classic" | "rerelease"; readonly victim: Q1ObituaryActor; readonly attacker: Q1ObituaryActor | null; readonly telefragOwner: Q1ObituaryActor | null; readonly teamplay: number; readonly deathType: string; readonly random: () => number }): Q1Obituary {
+const ctfLogWeapons: ReadonlyMap<string, string> = new Map([["grenadelauncher", "grenade"], ["rocketlauncher", "rocket"], ["ctf:grapple", "hook"]]);
+const ctfLogMonsters: ReadonlyMap<string, string> = new Map([
+  ["monster_army", "grunt"], ["monster_demon1", "fiend"], ["monster_dog", "dog"], ["monster_dragon", "dragon"], ["monster_enforcer", "enforcer"], ["monster_fish", "fish"],
+  ["monster_hell_knight", "deathknight"], ["monster_knight", "knight"], ["monster_ogre", "ogre"], ["monster_oldone", "shub"], ["monster_shalrath", "vore"], ["monster_shambler", "shambler"],
+  ["monster_tarbaby", "spawn"], ["monster_vomit", "vomitus"], ["monster_wizard", "scrag"], ["monster_zombie", "zombie"],
+]);
+export function q1Obituary(input: { readonly edition: "classic" | "rerelease"; readonly victim: Q1ObituaryActor; readonly attacker: Q1ObituaryActor | null; readonly telefragOwner: Q1ObituaryActor | null; readonly teamplay: number; readonly deathType: string; readonly random: () => number; readonly variant?: "mg" | "ctf" }): Q1Obituary {
   const { victim, attacker, random } = input; const roll = random();
   if (!victim.isPlayer) return { message: null, score: null, achievement: null };
-  const result = (text: string, credited: ActorId, delta: number, args: readonly string[] = [victim.name], achievement: Q1Obituary["achievement"] = null): Q1Obituary => ({ message: text === "" ? null : input.edition === "classic" ? { text: classicObituaryText(text, args), arguments: [] } : { text, arguments: args }, score: { actor: credited, delta }, achievement });
-  if (attacker?.classname === "teledeath" && input.telefragOwner !== null) return result("$qc_telefragged", input.telefragOwner.actor, 1, [victim.name, input.telefragOwner.name]);
-  if (attacker?.classname === "teledeath2") return result("$qc_satans_power", victim.actor, -1);
+  const result = (text: string, credited: ActorId, delta: number, args: readonly string[] = [victim.name], achievement: Q1Obituary["achievement"] = null, log?: Q1ObituaryLog): Q1Obituary => ({ message: text === "" ? null : input.edition === "classic" ? { text: classicObituaryText(text, args), arguments: [] } : { text, arguments: args }, score: { actor: credited, delta }, achievement, ...(log === undefined ? {} : { log }) });
+  if (attacker?.classname === "teledeath" && input.telefragOwner !== null) return result("$qc_telefragged", input.telefragOwner.actor, 1, [victim.name, input.telefragOwner.name], null, { what: "telefrag", versus: input.telefragOwner.actor });
+  if (attacker?.classname === "teledeath2") return result("$qc_satans_power", victim.actor, -1, [victim.name], null, { what: "telefrag", versus: null });
   if (attacker?.isPlayer) {
     if (sameActor(victim.actor, attacker.actor)) {
-      if (victim.weapon === "lightning" && victim.waterLevel > 1) return result(victim.waterType === "slime" ? "$qc_discharge_slime" : victim.waterType === "lava" ? "$qc_discharge_lava" : "$qc_discharge_water", victim.actor, -1);
-      return result(victim.weapon === "grenadelauncher" ? "$qc_suicide_pin" : roll !== 0 ? "$qc_suicide_bored" : "$qc_suicide_loaded", victim.actor, -1);
+      if (victim.weapon === "lightning" && victim.waterLevel > 1) return result(victim.waterType === "slime" ? "$qc_discharge_slime" : victim.waterType === "lava" ? "$qc_discharge_lava" : "$qc_discharge_water", victim.actor, -1, [victim.name], null, { what: "discharge", versus: null });
+      if (input.variant === "ctf" && victim.weapon !== "grenadelauncher" && input.deathType === "ctf:teamchange") return result((input.teamplay & 64) !== 0 ? "$qc_ks_tried_change_teams" : "$qc_ks_changed_teams", victim.actor, -1, [victim.name], null, { what: "teamchange", versus: null });
+      return result(victim.weapon === "grenadelauncher" ? "$qc_suicide_pin" : roll !== 0 ? "$qc_suicide_bored" : "$qc_suicide_loaded", victim.actor, -1, [victim.name], null, { what: victim.weapon === "grenadelauncher" ? "grenade" : "rocket", versus: null });
     }
-    if (input.teamplay === 2 && victim.team === attacker.team && (input.edition === "classic" ? victim.team > 0 : attacker.team !== 0)) return result(roll < 0.25 ? "$qc_ff_teammate" : roll < 0.5 ? "$qc_ff_glasses" : roll < 0.75 ? "$qc_ff_otherteam" : "$qc_ff_friend", attacker.actor, -1, [attacker.name]);
-    const message = (text: string, achievement: Q1Obituary["achievement"] = null): Q1Obituary => result(text, attacker.actor, 1, [victim.name, attacker.name], achievement);
+    if (input.teamplay === 2 && victim.team === attacker.team && (input.edition === "classic" ? victim.team > 0 : attacker.team !== 0)) return result(roll < 0.25 ? "$qc_ff_teammate" : roll < 0.5 ? "$qc_ff_glasses" : roll < 0.75 ? "$qc_ff_otherteam" : "$qc_ff_friend", attacker.actor, -1, [attacker.name], null, { what: attacker.weapon === null ? "" : ctfLogWeapons.get(attacker.weapon) ?? attacker.weapon, versus: attacker.actor });
+    const log: Q1ObituaryLog = { what: attacker.weapon === null ? "" : ctfLogWeapons.get(attacker.weapon) ?? attacker.weapon, versus: attacker.actor };
+    const message = (text: string, achievement: Q1Obituary["achievement"] = null): Q1Obituary => result(text, attacker.actor, 1, [victim.name, attacker.name], achievement, log);
     switch (attacker.weapon) {
       case "axe": return message("$qc_death_ax");
       case "shotgun": return message("$qc_death_sg");
@@ -124,25 +148,36 @@ export function q1Obituary(input: { readonly edition: "classic" | "rerelease"; r
       case "supernailgun": return message("$qc_death_sng");
       case "grenadelauncher": return message(victim.health < -40 ? "$qc_death_gl1" : "$qc_death_gl2");
       case "rocketlauncher": {
-        if (input.edition === "rerelease" && attacker.quadExpires > 0 && victim.health < -40) { const r = random(); return message(r < 0.3 ? "$qc_death_rl_quad1" : r < 0.6 ? "$qc_death_rl_quad2" : "$qc_death_rl1"); }
+        if (input.edition === "rerelease" && input.variant !== "mg" && attacker.quadExpires > 0 && victim.health < -40) { const r = random(); return message(r < 0.3 ? "$qc_death_rl_quad1" : r < 0.6 ? "$qc_death_rl_quad2" : "$qc_death_rl1"); }
         return message(victim.health < -40 ? "$qc_death_rl2" : "$qc_death_rl3");
       }
+      case "ctf:grapple": return message(random() < 0.5 ? "$qc_death_hook1" : "$qc_death_hook2");
       case "lightning": return message(attacker.waterLevel > 1 ? "$qc_death_lg1" : "$qc_death_lg2", input.edition === "rerelease" && attacker.waterLevel > 1 && attacker.invulnerableExpires !== 0 ? { actor: attacker.actor, id: "ACH_SURVIVE_DISCHARGE" } : null);
       case null: return message(attacker.killString);
       default: return message(attacker.killString);
     }
   }
-  if (input.edition === "classic" && attacker !== null) {
-    if (attacker.isMonster) return result(victim.name + (classicMonsterObituaries.get(attacker.classname) ?? ""), victim.actor, -1);
-    const trap = attacker.classname === "explo_box" || attacker.classname === "misc_explobox" || attacker.classname === "misc_explobox2" ? " blew up\n" : attacker.brush && attacker.classname !== "worldspawn" ? " was squished\n" : attacker.classname === "trap_shooter" || attacker.classname === "trap_spikeshooter" ? " was spiked\n" : attacker.classname === "fireball" || attacker.classname === "misc_fireball" ? " ate a lavaball\n" : attacker.classname === "trigger_changelevel" ? " tried to leave\n" : null;
-    if (trap !== null) return result(victim.name + trap, victim.actor, -1);
+  if (input.variant === "mg" && attacker !== null) {
+    if (attacker.isMonster) {
+      const key = attacker.aflag !== undefined && attacker.aflag !== 0 ? mgVariantKeys.get(attacker.classname) ?? mgMonsterKeys.get(attacker.classname) : mgMonsterKeys.get(attacker.classname);
+      return result(key ?? "", victim.actor, -1);
+    }
+    const hazard = mgHazardKeys.get(attacker.classname);
+    if (hazard !== undefined) return result(hazard, victim.actor, -1);
+    if (attacker.brush && attacker.classname !== "worldspawn") return result("$qc_death_squish", victim.actor, -1);
   }
-  if (victim.waterType === "water") return result(random() < 0.5 ? "$qc_death_drown1" : "$qc_death_drown2", victim.actor, -1);
-  if (victim.waterType === "slime") return result(random() < 0.5 ? "$qc_death_slime1" : "$qc_death_slime2", victim.actor, -1);
-  if (victim.waterType === "lava") return result(victim.health < -15 ? "$qc_death_lava1" : random() < 0.5 ? "$qc_death_lava2" : "$qc_death_lava3", victim.actor, -1);
-  if (attacker?.brush && attacker.classname !== "worldspawn") return result("$qc_death_squish", victim.actor, -1);
-  if (attacker !== null && attacker.killString !== "") return result(attacker.killString, victim.actor, -1);
-  return result(input.deathType === "falling" ? "$qc_death_fall" : "$qc_death_died", victim.actor, -1);
+  if (victim.waterType === "water") return result(random() < 0.5 ? "$qc_death_drown1" : "$qc_death_drown2", victim.actor, -1, [victim.name], null, { what: "drowned", versus: null });
+  if (victim.waterType === "slime") return result(random() < 0.5 ? "$qc_death_slime1" : "$qc_death_slime2", victim.actor, -1, [victim.name], null, { what: "slimed", versus: null });
+  if (victim.waterType === "lava") return result(victim.health < -15 ? "$qc_death_lava1" : random() < 0.5 ? "$qc_death_lava2" : "$qc_death_lava3", victim.actor, -1, [victim.name], null, { what: "melted", versus: null });
+  if (input.edition === "classic" && attacker !== null) {
+    if (attacker.isMonster) return result(victim.name + (classicMonsterObituaries.get(attacker.classname) ?? ""), victim.actor, -1, [victim.name], null, { what: ctfLogMonsters.get(attacker.classname) ?? "", versus: null });
+    const trapLog = attacker.classname === "explo_box" || attacker.classname === "misc_explobox" || attacker.classname === "misc_explobox2" ? "explosion" : attacker.brush && attacker.classname !== "worldspawn" ? "squished" : attacker.classname === "trap_shooter" || attacker.classname === "trap_spikeshooter" ? "spiked" : attacker.classname === "fireball" || attacker.classname === "misc_fireball" ? "fireball" : "noexit";
+    const trap = attacker.classname === "explo_box" || attacker.classname === "misc_explobox" || attacker.classname === "misc_explobox2" ? " blew up\n" : attacker.brush && attacker.classname !== "worldspawn" ? " was squished\n" : attacker.classname === "trap_shooter" || attacker.classname === "trap_spikeshooter" ? " was spiked\n" : attacker.classname === "fireball" || attacker.classname === "misc_fireball" ? " ate a lavaball\n" : attacker.classname === "trigger_changelevel" ? " tried to leave\n" : null;
+    if (trap !== null) return result(victim.name + trap, victim.actor, -1, [victim.name], null, { what: trapLog, versus: null });
+  }
+  if (attacker?.brush && attacker.classname !== "worldspawn") return result("$qc_death_squish", victim.actor, -1, [victim.name], null, { what: "squished", versus: null });
+  if (attacker !== null && attacker.killString !== "") return result(attacker.killString, victim.actor, -1, [victim.name], null, { what: "died", versus: null });
+  return result(input.deathType === "falling" ? "$qc_death_fall" : "$qc_death_died", victim.actor, -1, [victim.name], null, { what: input.deathType === "falling" ? "falling" : "died", versus: null });
 }
 
 export type Q1SourceFinale = { readonly kind: "finale"; readonly text: string; readonly track: number } | { readonly kind: "sell-screen" };
@@ -155,6 +190,8 @@ export interface Q1IntermissionRule {
   finale?(stage: number, nextMap: string): Q1SourceFinale | null | undefined;
   travel?(map: string, cause: ActorId | null): boolean;
 }
+/** MG1 and MG3 client.qc checks the deathmatch maps by name ahead of the trigger_changelevel lookup. */
+const mgDeathmatchRotation: ReadonlyMap<string, string> = new Map([["mgdm1", "mgdm2"], ["mgdm2", "mgdm3"], ["mgdm3", "mgdm4"], ["mgdm4", "mgdm1"]]);
 export class Q1LevelRules {
   private nextMap = "";
   private stage = 0;
@@ -208,7 +245,8 @@ export class Q1LevelRules {
       else if ((flags & 2) === 0) { next = "e2m1"; this.campaign.writeFlags(flags | 2); }
       else if ((flags & 4) === 0) { next = "e3m1"; this.campaign.writeFlags(flags | 4); }
       else if ((flags & 8) === 0) { next = "e4m1"; this.campaign.writeFlags(flags - 7); }
-    } else next = [...this.game.entities.values()].find(entity => entity.classname === "trigger_changelevel")?.text("map") || next;
+    } else if (this.game.sourceGrenadeFix && mgDeathmatchRotation.has(next)) next = mgDeathmatchRotation.get(next) ?? next;
+    else next = [...this.game.entities.values()].find(entity => entity.classname === "trigger_changelevel")?.text("map") || next;
     this.nextMap = next; const timer = this.game.create("nextlevel");
     this.game.schedule(timer, 0.1, this.game.named.action(timer, "base:next_level")); return true;
   }

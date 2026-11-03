@@ -2,8 +2,6 @@ import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ActorCommand } from "../../../src/contracts/session.ts";
 import type { UserCommand } from "../../../src/contracts/protocol.ts";
-import { encodeUnifiedActorCommand, decodeUnifiedActorCommand } from "../../../src/network/common/commands.ts";
-import type { UnifiedCommandReceiver } from "../../../src/network/common/commands.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { createSimulation } from "../../../src/app/bootstrap/simulation/index.ts";
@@ -18,26 +16,6 @@ function move(kind: "q1" | "q2" | "q3", time: number): UserCommand {
   return kind === "q1" ? { ...common, kind: "q1-netquake", acknowledgedServerTimeSeconds: time / 1000, viewAngles: { x: 0, y: 0, z: 0 } }
     : { ...common, kind: "q2-classic", milliseconds: 50, angleShorts: [0, 0, 0], lightLevel: 128 };
 }
-
-test("unified commands round-trip each raw dialect and independent intent through an authenticated actor binding", () => {
-  const identity = createIdentityOwner("unified-arsenal"), actor = identity.actor(17, 3), client = identity.client(2, 1);
-  const commands: readonly UserCommand[] = [move("q1", 12.345678901), move("q2", 50),
-    { kind: "q1-quakeworld", milliseconds: 53, angles: { x: -0, y: 47.125, z: 0 }, forwardMove: 320, sideMove: -7, upMove: 0, buttons: 2, impulse: 8 },
-    { kind: "q2-rerelease", milliseconds: 25, angles: { x: 12.000000001, y: -3, z: 0 }, forwardMove: 199.999999, sideMove: 0, buttons: 8, serverFrame: 105 },
-    { kind: "q3", serverTimeMilliseconds: 500, angleWords: [17, 65000, 0], buttons: 5, weapon: 2, forwardMove: 127, rightMove: -127, upMove: 0 }];
-  for (const command of commands) for (const withIntent of [false, true]) {
-    const input: ActorCommand = { actor, source: { kind: "remote-client", client }, sequence: 4294967300, command,
-      ...(withIntent ? { arsenal: { provider: "q3:official", weapon: "q3:weapon/gauntlet", useHoldable: true } } : {}) };
-    const receiver: UnifiedCommandReceiver = { source: input.source,
-      resolveControlledActor: (slot, generation) => slot === actor.slot && generation === actor.generation ? { actor, movement: command.kind, arsenal: "q3:official" } : null };
-    const bytes = encodeUnifiedActorCommand(input);
-    expect(decodeUnifiedActorCommand(bytes, receiver)).toEqual(input);
-    expect(() => decodeUnifiedActorCommand(bytes, { ...receiver, resolveControlledActor: () => null })).toThrow("not controlled");
-    if (withIntent) expect(() => decodeUnifiedActorCommand(bytes, { ...receiver,
-      resolveControlledActor: () => ({ actor, movement: command.kind, arsenal: "q2:official" }) })).toThrow("another provider");
-    expect(() => decodeUnifiedActorCommand(bytes.subarray(0, bytes.length - 1), receiver)).toThrow();
-  }
-});
 
 for (const family of ["q1", "q2", "q3"]) test(`Q3 gauntlet selection and medkit intent use ${family} movement in authority and private prediction`, async () => {
   if (family !== "q1" && family !== "q2" && family !== "q3") throw new Error("Unexpected movement family");

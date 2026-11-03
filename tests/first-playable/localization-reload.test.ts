@@ -1,8 +1,7 @@
 import { CvarRegistry } from "../../src/core/cvars/index.ts";
 import { registerAccessibilitySettings } from "../../src/ui/settings/accessibility.ts";
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { createMountIdentity } from "../../src/contracts/content.ts";
@@ -13,6 +12,8 @@ import { ApplicationRereleasePresentation } from "../../src/app/bootstrap/rerele
 import { loadApplicationContent } from "../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import type { SettingBinding } from "../../src/ui/settings/index.ts";
+import { trackedTempDirectories } from "../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 async function select(binding: SettingBinding | undefined, language: string): Promise<void> {
   if (binding?.kind !== "choice") throw new Error("Missing language choice");
@@ -28,7 +29,7 @@ test("mounted language binding reloads tables per seat and preserves selection a
   if (command.kind !== "run") throw new Error("Expected application launch");
   const content = await loadApplicationContent(command.options), identity = createIdentityOwner("language-reload");
   const assets = new ApplicationAssets(content, { identity: Symbol("language-reload"), session: identity.session, generation: 0 });
-  const root = await mkdtemp(join(tmpdir(), "quake-language-"));
+  const root = await tempDirectory("quake-language-");
   const first = { seat: identity.seat(0), actor: identity.actor(0, 0) }, second = { seat: identity.seat(1), actor: identity.actor(1, 0) };
   const contentId = content.recipe.map.entities.content;
   const errors: unknown[] = [];

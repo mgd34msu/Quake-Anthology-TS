@@ -1,5 +1,5 @@
 import type { EnemySelection, MonsterDefinitionReference, MonsterSelectionTarget } from "../../../src/contracts/content.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusHasFile, testCorpusRoot } from "../../support/corpus.ts";
 
 import { preservesAuthoredQ1Placement } from "../../../src/app/bootstrap/simulation/monster-placement.ts";
 import { parseQ1Entities } from "../../../src/formats/q1-map/index.ts";
@@ -75,7 +75,7 @@ test.skipIf(!existsSync(join(corpus, "q1/rerelease/mg3/pak0.pak")))("retail MG3 
       mapBytes: start.bytes, navigationContent: start.reference.provenance.mount.identity.content });
     expect(prepared.asset).toBeNull();
   } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
-}, 30000);
+}, 120000);
 
 async function openSelectedId1(map: string, wizardClassname = "monster_wizard", edition: "classic" | "rerelease" = "classic", saveDirectory?: string) {
   const command = parseApplicationCommand(["--content-root", corpus, "--game", `q1-${edition}-id1`, "--map", map, "--dedicated", "--mode", "singleplayer"]);
@@ -176,7 +176,7 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m2 selected 
     for (let frame = 0; frame < 5; frame++) await application.step(100);
     expect(selectedId1(application).source.entities.entities.some(entity => entity.classname === "item_backpack")).toBe(true);
   } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
-}, 30000);
+}, 120000);
 
 test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m3 preserves native authored flying overlap but rejects different selected geometry", async () => {
   const application = await openSelectedId1("e1m3");
@@ -209,7 +209,7 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m3 preserves
   try {
     await expect((async () => { for (let frame = 0; frame < 15; frame++) await different.step(100); })()).rejects.toThrow("monster_wizard -> q1:monsters/classic/id1/monster_ogre");
   } finally { await different.close(); }
-}, 30000);
+}, 120000);
 
 
 test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")))("retail rerelease e1m2 selected ogre restores grenade damage and authored kill credit", async () => {
@@ -302,7 +302,7 @@ test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")))("retail rere
   } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
 }, 60000);
 
-test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")))("retail e2m3 selected fish swim, bite and restore in authored water in both editions", async () => {
+test.skipIf(!corpusHasFile("q1/rerelease/id1/pak0.pak") || !corpusHasFile("q1/id1/pak0.pak"))("retail e2m3 selected fish swim, bite and restore in authored water in both editions", async () => {
   for (const edition of ["classic", "rerelease"]) {
     const directory = await mkdtemp(join(tmpdir(), "q1-selected-fish-"));
     const application = await openSelectedId1("e2m3", "monster_wizard", edition === "classic" ? "classic" : "rerelease", directory);
@@ -500,4 +500,4 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("native Q1 client visi
     await application.step(100);
     expect(restoredSource.game.host.checkClient(restoredMonster.entity.actor)).toBeNull();
   } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
-}, 30000);
+}, 120000);

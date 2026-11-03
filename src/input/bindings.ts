@@ -4,7 +4,7 @@ import type { InputBinding, PhysicalInput } from "../contracts/ui.ts";
 import type { CommandBuffer, CommandInvocation } from "../core/commands/index.ts";
 import { keynumToString, stringToKeynum } from "./keys.ts";
 import { physicalMouseButton, quakeMouseButton } from "./mouse-buttons.ts";
-import { KeyCode } from "./key-codes.ts";
+import { KeyCode } from "../core/key-codes.ts";
 import type { BindingStore } from "./binding-store.ts";
 import { defaultWeaponBindings, type WeaponBindingItem } from "./weapon-bindings.ts";
 

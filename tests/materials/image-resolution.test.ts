@@ -1,5 +1,6 @@
+import { writeCapture } from "../support/capture.ts";
 import { SceneMaterialRegistrations } from "../../src/render/scene/material-registrations.ts";
-import { testCorpusRoot } from "../support/corpus.ts";
+import { testCorpusRoot, corpusFile } from "../support/corpus.ts";
 
 import { sceneModelBatches } from "../../src/render/scene/submissions.ts";
 import { expect, test } from "bun:test";
@@ -402,7 +403,7 @@ test("semantic Q2 skin and sprite PCX retain global palette, flood fill, transpa
 });
 
 for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.skipIf(process.env["QUAKE_IMAGE_RENDER"] !== "1")(`actual MD2 custom skins use every shared image format through ${backend}`, async () => {
-  const archive = await openArchive(`${testCorpusRoot()}/q2/baseq2/pak0.pak`);
+  const archive = await openArchive(corpusFile("q2/baseq2/pak0.pak"));
   const identity = createIdentityOwner(`image-model-${backend}`), owner = { identity: Symbol(backend), session: identity.session, generation: 0 };
   const images = new SceneImageRegistry(owner), renderer = await NativeRenderer.open({ renderer: backend, width: 320, height: 240, hidden: true, gamma: 1 }, owner);
   const loaders: SceneTextureLoader[] = [];
@@ -436,7 +437,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.sk
       frames.begin(); frames.view({ target: input.target, time: input.time, viewport: camera.viewport, clear: input.clear, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
       const capture = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute(frames.finish()); const pixels = await capture;
       expect(pixels.filter((value, index) => index % 4 !== 3 && value > 5).length).toBeGreaterThan(100);
-      if (extension === "gif" || extension === "pcx") await Bun.write(`/tmp/shared-image-${backend}-${extension}.png`, encodePng(320, 240, pixels));
+      if (extension === "gif" || extension === "pcx") await writeCapture(`shared-image-${backend}-${extension}.png`, encodePng(320, 240, pixels));
     }
   } finally { for (const textures of loaders) textures.close(); images.close(); renderer.close(); archive.close(); }
 }, 30000);

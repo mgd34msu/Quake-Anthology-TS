@@ -61,6 +61,7 @@ export interface ClientSpawnHost {
   readonly bodyDie: EntityDie;
   /** The session initializes the selected character and arsenal at the source spawn site. */
   readonly selectedPlayer?: (entity: GameEntity, pose: SpawnPose) => void;
+  readonly selectedWeaponAfterTargets?: (entity: GameEntity) => void;
   effects(): ClientEffectsContext;
   targets(): TargetUseContext;
 }
@@ -370,6 +371,7 @@ export class ClientSpawnRuntime {
           if (ps.stats.get(schema.weapons) & (1 << weapon)) { ps.weapon = weapon; break; }
         }
       }
+      else this.host.selectedWeaponAfterTargets?.(entity);
     }
     ps.commandTime = (frame.time - 100) | 0;
     pers.cmd.serverTime = frame.time;

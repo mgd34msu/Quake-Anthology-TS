@@ -79,7 +79,7 @@ const tossWeapons: readonly TossWeapon[] = [
 export function tossRogueWeapon(game: Q1EntityServices, player: Q1PlayerState): Q1Actor | null {
   const definition = tossWeapons.find(candidate => candidate.weapon === player.weapon || candidate.powered === player.weapon), body = game.host.bodies.read(player.actor.id);
   if (game.options.deathmatch !== 1 || (game.options.teamplay ?? 0) < 1 || definition === undefined || body === null) return null;
-  const item = game.create(definition.classname); item.owner = player.actor.id; item.model = definition.model; item.movement = "bounce"; item.solid = "trigger";
+  const item = game.create(definition.classname); item.owner = player.actor.id; item.model = definition.model; item.movement = "bounce"; item.solid = "trigger"; item.movementFlags |= 256;
   const forward = game.makeVectors(player.viewAngles).forward;
   game.setBody(item, { origin: vadd(body.origin, { x: 0, y: 0, z: 16 }), velocity: vscale(aim(game, player.actor, forward), 500), bounds: { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 56 } } });
   game.host.inventory.consume(player.actor, weaponItem(definition.weapon), 1);

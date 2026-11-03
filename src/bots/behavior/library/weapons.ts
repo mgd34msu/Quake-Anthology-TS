@@ -1,5 +1,5 @@
 import { SaveReader } from "../../../persistence/value.ts";
-import { readScriptDiagnostic } from "../../../ui/common/legacy/script/lexer.ts";
+import { readScriptDiagnostic } from "../../../content/legacy-script/lexer.ts";
 /*
  * Bot weapon configuration and selection translated from id Software's
  * code/botlib/be_ai_weap.c and code/game/be_ai_weap.h.
@@ -9,8 +9,8 @@ import { readScriptDiagnostic } from "../../../ui/common/legacy/script/lexer.ts"
 
 import type { Vec3 } from "../../../core/math.ts";
 import { CommonError } from "../../../core/common-error.ts";
-import { ScriptLanguageError, type ScriptDiagnostic, type ScriptToken, type SourceLocation } from "../../../ui/common/legacy/script/lexer.ts";
-import { ScriptSourceReader, type ScriptPreprocessorOptions } from "../../../ui/common/legacy/script/preprocessor.ts";
+import { ScriptLanguageError, type ScriptDiagnostic, type ScriptToken, type SourceLocation } from "../../../content/legacy-script/lexer.ts";
+import { ScriptSourceReader, type ScriptPreprocessorOptions } from "../../../content/legacy-script/preprocessor.ts";
 import { StructureReader, StructureFieldType, writeStructure, type StructureDefinition, type StructureField, type StructureFieldDefinition } from "./structure.ts";
 import type { BotLog } from "./log.ts";
 import {
@@ -362,7 +362,7 @@ const projectileDumpDefinition: StructureDefinition = {
   size: PROJECTILE_INFO_BYTES,
   fields: [
     dumpField("name", 0, StructureFieldType.String),
-    dumpField("model", 88, StructureFieldType.String),
+    dumpField("model", 80, StructureFieldType.String),
     dumpField("flags", 160, StructureFieldType.Int),
     dumpField("gravity", 164, StructureFieldType.Float),
     dumpField("damage", 168, StructureFieldType.Int),

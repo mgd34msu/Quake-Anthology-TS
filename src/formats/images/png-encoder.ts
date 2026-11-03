@@ -1,14 +1,5 @@
 // Adapted from the reference port GPL-2.0-or-later.
-import { deflateSync } from "node:zlib";
-
-function crc32(bytes: Uint8Array): number {
-  let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) === 0 ? 0 : 0xedb88320);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
+import { crc32, deflateSync } from "node:zlib";
 
 function chunk(type: string, data: Uint8Array): Uint8Array {
   const result = new Uint8Array(data.length + 12);

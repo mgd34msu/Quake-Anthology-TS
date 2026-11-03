@@ -2,7 +2,7 @@
 import { Tokenizer } from "../../core/common-parse.ts";
 import { gameAtoi } from "../../core/game-numeric.ts";
 import { q2ApplicationLayout } from "../../app/bootstrap/network/q2-layout.ts";
-import { nativeQ2HudStat, type NativeQ2HudArsenal, type NativeQ2HudFrame, type NativeQ2HudOperation } from "./q2-native.ts";
+import { nativeQ2HudStat, NativeQ2HudLayoutError, type NativeQ2HudArsenal, type NativeQ2HudFrame, type NativeQ2HudOperation } from "./q2-native.ts";
 
 export interface NativeQ2HudTable { readonly rows: string[][]; readonly columns: number[]; }
 export interface NativeQ2HudEnvironment {
@@ -17,7 +17,7 @@ const white = { x: 1, y: 1, z: 1, w: 1 }, black = { x: 0, y: 0, z: 0, w: 1 };
 const encoder = new TextEncoder(), decoder = new TextDecoder();
 function cell(value: string): string { return decoder.decode(encoder.encode(value).subarray(0, 23)); }
 function clientName(frame: NativeQ2HudFrame, slot: number): string {
-  if (slot < 0 || slot >= 256) throw new RangeError("Q2 HUD client is outside clientinfo");
+  if (slot < 0 || slot >= 256) throw new NativeQ2HudLayoutError("Q2 HUD client is outside clientinfo");
   return (frame.configstrings.get(q2ApplicationLayout(frame.protocol).playerSkins + slot) ?? "").split("\\")[0] ?? "";
 }
 function localized(frame: NativeQ2HudFrame, environment: NativeQ2HudEnvironment, text: string, args: readonly string[] = []): string {
@@ -49,17 +49,17 @@ export function q2RereleaseLayout(source: string, frame: NativeQ2HudFrame, width
     for (const digit of valueText.slice(0, length)) { picture(`${alternate ? "anum" : "num"}_${digit === "-" ? "minus" : digit}`, atX); atX += 16; }
   };
   const configStat = (index: number): string => {
-    const value = stat(index); if (value < 0 || value >= config.maxConfigStrings) throw new RangeError("Q2 HUD stat string is outside configstrings");
+    const value = stat(index); if (value < 0 || value >= config.maxConfigStrings) throw new NativeQ2HudLayoutError("Q2 HUD stat string is outside configstrings");
     return frame.configstrings.get(value) ?? "";
   };
-  const count = (value: number, maximum: number): number => { if (value < 0 || value > maximum) throw new RangeError("Q2 HUD argument count exceeds source limits"); return value; };
+  const count = (value: number, maximum: number): number => { if (value < 0 || value > maximum) throw new NativeQ2HudLayoutError("Q2 HUD argument count exceeds source limits"); return value; };
   const flash = frame.timeMilliseconds % 1000 < 500;
   for (let token = parser.next(); token !== undefined; token = parser.next()) {
     const command = token.value, draw = enabled();
     switch (command) {
       case "if": { const index = integer(); conditions.push(draw && stat(index) !== 0); break; }
       case "ifgef": { const value = integer(); conditions.push(draw && frame.serverFrame >= value); break; }
-      case "endif": { if (conditions.pop() === undefined) throw new Error("Q2 HUD endif without matching if"); break; }
+      case "endif": { if (conditions.pop() === undefined) throw new NativeQ2HudLayoutError("Q2 HUD endif without matching if"); break; }
       case "xl": case "xr": case "xv": { const value = integer(); if (draw) x = value + (command === "xr" ? width : command === "xv" ? Math.trunc(width / 2) - 160 : 0); break; }
       case "yt": case "yb": case "yv": { const value = integer(); if (draw) y = value + (command === "yb" ? height : command === "yv" ? Math.trunc(height / 2) - 120 : 0); break; }
       case "pic": {
@@ -69,7 +69,7 @@ export function q2RereleaseLayout(source: string, frame: NativeQ2HudFrame, width
           if (stat(index) !== 0 && arsenal.selectedItem.icon !== null) out.push({ kind: "arsenal-picture", x, y, ...arsenal.selectedItem.icon });
           break;
         }
-        const value = stat(index); if (value < 0 || value >= config.maxImages) throw new RangeError("Q2 HUD image is outside configstrings");
+        const value = stat(index); if (value < 0 || value >= config.maxImages) throw new NativeQ2HudLayoutError("Q2 HUD image is outside configstrings");
         picture(frame.configstrings.get(config.images + value) ?? ""); break;
       }
       case "picn": { const value = next(); if (draw) picture(value); break; }
@@ -136,7 +136,7 @@ export function q2RereleaseLayout(source: string, frame: NativeQ2HudFrame, width
       }
       case "table_row": {
         const size = count(integer(), 6), values = Array.from({ length: size }, next); if (!draw) break;
-        if (rows.length >= 11) throw new RangeError("Q2 HUD table exceeds source dimensions");
+        if (rows.length >= 11) throw new NativeQ2HudLayoutError("Q2 HUD table exceeds source dimensions");
         const row = Array.from({ length: Math.max(size, columns.length) }, (_, index) => cell(values[index] ?? "")); rows.push(row);
         for (const [index, value] of row.slice(0, columns.length).entries()) columns[index] = Math.max(columns[index] ?? 0, Math.trunc(measure(value, true)));
         break;
@@ -181,7 +181,7 @@ export function q2RereleaseLayout(source: string, frame: NativeQ2HudFrame, width
       }
     }
   }
-  if (conditions.length !== 0) throw new Error("Q2 HUD if without matching endif");
+  if (conditions.length !== 0) throw new NativeQ2HudLayoutError("Q2 HUD if without matching endif");
   return out;
 }
 

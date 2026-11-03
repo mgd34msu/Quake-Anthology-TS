@@ -35,14 +35,6 @@ export function quakeEdictLifetime(firstDynamicSlot: number, exhaustion: "fatal"
     } };
 }
 
-export function q3EntityLifetime(firstDynamicSlot: number, mapStartMilliseconds: number): ActorLifetimePolicy {
-  return { firstDynamicSlot, reuse: "source-cooldown", clear: "source-gentity", exhaustion: "fatal",
-    reusableAfter(freedAt, now) {
-      if (freedAt.kind !== "milliseconds" || now.kind !== "milliseconds") throw new RangeError("Q3 entity lifetime uses milliseconds");
-      return !(freedAt.value > ((mapStartMilliseconds + 2000) | 0) && ((now.value - freedAt.value) | 0) < 1000);
-    } };
-}
-
 /** Raw pointers use atSource on each access. Only built-in host references carry generations. */
 export class SourceActorSlots {
   constructor(private readonly actors: SessionActorRegistry, readonly options: SourceActorSlotsOptions) {

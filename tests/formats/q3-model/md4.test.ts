@@ -1,7 +1,7 @@
 /* Synthetic fixture adapted from the reference implementation MD4 model tests. GPL-2.0-or-later. */
 import { test, expect } from "bun:test";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
-import { parseMd4, skinMd4Surface } from "../../../src/formats/q3-model/index.ts";
+import { parseMd4, skinMd4Surface } from "../../../src/formats/q3-model/md4.ts";
 
 // 100-byte header; two 40+2*48-byte frames; LODs with two/one surfaces.
 // Each surface: 168-byte header, triangle, one bone reference, then vertices
@@ -89,7 +89,8 @@ test("MD4 reads independent LODs, variable weights, and global bone indices", ()
   expect(vertices[0]?.normal).toEqual({ x: 169, y: 181, z: 193 });
   expect(vertices[1]?.position).toEqual({ x: 0, y: 0, z: 0 });
   bytes.fill(0);
-  expect(model.bytes[0]).toBe(73);
+  expect("bytes" in model).toBe(false);
+  expect(model.name).toBe(parseMd4(fixture()).name);
 });
 
 test("MD4 rejects a truncated declared allocation", () => {

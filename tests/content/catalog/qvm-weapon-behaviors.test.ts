@@ -30,10 +30,10 @@ test('mounted QVM declarations bind exact bytecode entries and layouts without i
     expect(entry.profile.definition.fire).toEqual({kind:'qvm',module:entry.artifact.module,instructionIndex:9});
     expect(sameQvmWeaponLayout(entry.profile,{...entry.profile,fields:{...entry.profile.fields,think:532}})).toBe(false);
     expect(sameQvmWeaponLayout(entry.profile,entry.profile)).toBe(true);
-    await expect(loadQvmWeaponBehavior(mounts,'weapon-behavior:author',{...declaration,artifactDigest:'sha256:'+'0'.repeat(64)})).rejects.toThrow();
+    await expect(loadQvmWeaponBehavior(mounts,'weapon-behavior:author',{...declaration,artifactDigest:'sha256:'+'0'.repeat(64)})).rejects.toThrow("qvm-weapon-profile.artifactDigest: expected sha256:");
     await expect(loadQvmWeaponBehavior(mounts,'weapon-behavior:author',{...declaration,fireFunction:10})).rejects.toThrow('function entry');
     await expect(loadQvmWeaponBehavior(mounts,'weapon-behavior:author',{...declaration,fields:{...declaration.fields,health:524}})).rejects.toThrow('overlapping');
     expect(parseWeaponBehaviorTool(['declare-qvm','q3-author','--profile','author-profile.json'])).toMatchObject({action:'declare-qvm',profile:'author-profile.json'});
-    expect(()=>parseWeaponBehaviorTool(['declare-qvm','q3-author','--profile','author-profile.json','--fire','9'])).toThrow();
+    expect(()=>parseWeaponBehaviorTool(['declare-qvm','q3-author','--profile','author-profile.json','--fire','9'])).toThrow("declare-qvm requires --profile and takes identity, role and callbacks from that declaration");
   } finally {await rm(root,{recursive:true,force:true});}
 });

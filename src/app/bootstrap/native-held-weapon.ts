@@ -20,24 +20,25 @@ type Grip = (entity: SceneEntity) => ModelTransform | null;
 export type ResolvedHeldEntity = (camera: Vec3, purpose: "view" | "shadow") => SceneEntity | null;
 
 export class NativeHeldWeapons {
-  private readonly grips = new Map<string, Promise<Grip>>();
+  private readonly grips = new Map<string, Promise<Grip | null>>();
   constructor(private readonly assets: NativeHeldAssets) {}
 
-  private grip(content: ContentId, entity: SceneEntity): Promise<Grip> {
+  private grip(content: ContentId, entity: SceneEntity): Promise<Grip | null> {
     const key = `${content}/${entity.resource.id}`, existing = this.grips.get(key);
     if (existing !== undefined) return existing;
     const pending = (async () => {
       const path = `${entity.resource.requestedPath}.attachment.json`;
       const file = await (await this.assets.provider(content)).mounts.open(path);
       const definition = file === null ? q2WeaponAttachment(entity.resource.digest) : readModelAttachment(file.bytes);
-      if (definition === null) throw new Error(`Native held model ${content}/${entity.resource.requestedPath} requires ${path}`);
-      return createModelGrip(entity, definition);
+      return definition === null ? null : createModelGrip(entity, definition);
     })();
     this.grips.set(key, pending); return pending;
   }
 
-  async attachment(content: ContentId, carrier: SceneEntity): Promise<(child: SceneEntity) => ResolvedHeldEntity> {
+  /** A carrier model with no attachment definition (a third-party player model) holds no weapon: null, not a fault. */
+  async attachment(content: ContentId, carrier: SceneEntity): Promise<((child: SceneEntity) => ResolvedHeldEntity) | null> {
     const original = await this.grip(content, carrier), replacement = replacementEntity(carrier);
+    if (original === null) return null;
     const enhanced = replacement === null ? null : await this.grip(content, replacement);
     return child => {
       const inherit = (entity: SceneEntity): SceneEntity => ({ ...entity, flags: carrier.flags,

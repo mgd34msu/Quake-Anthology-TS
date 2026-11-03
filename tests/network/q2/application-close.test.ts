@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createIdentityOwner } from '../../../src/contracts/identity.ts';
-import { LoopbackHub } from '../../../src/network/common/loopback.ts';
+import { LoopbackHub } from '../../support/loopback.ts';
 import { UsercmdT, type EntityStateT } from '../../../src/network/q2/index.ts';
 import { Q2ClientNetwork, Q2ServerNetwork } from '../../../src/app/bootstrap/network/q2.ts';
 import type { Q2ApplicationServerHost } from '../../../src/app/bootstrap/network/types.ts';

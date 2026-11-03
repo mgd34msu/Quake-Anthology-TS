@@ -57,7 +57,7 @@ for (let i = 0; i < 5; i++) {
 for (let i = 0; i < 6; i++) { const offset = i - 2; actions[`mg3_rknight:rknight_magicc${6 + i}`] = monster => shot(monster, offset, 0); }
 export const runeKnightDefinition: HeavyDefinition = {
   spec: { species: "hellknight", classnames: ["monster_ranged_knight"], model: "rknight", head: "h_hellkn", health: 250, gibHealth: -40, gibs: ["gib1", "gib2", "gib3"],
-    bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 40 } }, stand: "rknight_stand1", walk: "rknight_walk1", run: "rknight_run", sight: "", melee: false, missile: "rknight_magic", movement: "walk" }, frames, actions,
+    bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, stand: "rknight_stand1", walk: "rknight_walk1", run: "rknight_run", sight: "", melee: false, missile: "rknight_magic", movement: "walk" }, frames, actions,
   spawn: monster => { monster.game.host.combat.setHealth(monster.entity.actor, 250); monster.number("allowPathFind", 1); monster.number("combat_style", 1); return monster.initialize(1); },
   sight: monster => monster.game.sound(monster.entity, monster.game.host.random() < 0.5 ? "rknight/sight_01.wav" : "rknight/sight_03.wav"),
   pain: (monster, _attacker, damage) => {

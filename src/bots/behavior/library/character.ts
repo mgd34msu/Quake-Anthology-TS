@@ -6,7 +6,7 @@ import { SaveReader } from "../../../persistence/value.ts";
  */
 
 import { float32, int32 } from "../../../core/numeric.ts";
-import { ScriptSourceReader } from "../../../ui/common/legacy/script/preprocessor.ts";
+import { ScriptSourceReader } from "../../../content/legacy-script/preprocessor.ts";
 import { BotMemory, type BotMemoryAllocation } from "./memory.ts";
 import type { BotScriptReader } from "./script-sources.ts";
 import type { BotLog } from "./log.ts";
@@ -16,7 +16,7 @@ import {
   ScriptLanguageError,
   type ScriptToken,
   type SourceLocation,
-} from "../../../ui/common/legacy/script/lexer.ts";
+} from "../../../content/legacy-script/lexer.ts";
 
 export enum Characteristic {
   Name = 0,

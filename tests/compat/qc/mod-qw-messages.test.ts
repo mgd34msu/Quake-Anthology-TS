@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import type { ModHostServices } from "../../../src/world/session/mods.ts";
@@ -8,15 +8,16 @@ import type { NetworkEvent } from "../../../src/contracts/protocol.ts";
 import type { SourcePresentationEvent } from "../../../src/app/bootstrap/simulation/types.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
 import { QcEntityMemory, QcMachine, classicQcEntityLayout, createQcBuiltins, loadQcProgram } from "../../../src/compat/qc/index.ts";
 import type { QcHostBuiltinName } from "../../../src/compat/qc/index.ts";
 import { QcModMessages } from "../../../src/compat/qc/mod-messages.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../src/persistence/value.ts";
 import { receivesQuakeWorldMessage } from "../../../src/compat/qc/message-routing.ts";
+import { inertAuthority } from "../../support/authority.ts";
 
-const programPath = `${testCorpusRoot()}/q1/qw/qwprogs.dat`;
+const programPath = corpusFile("q1/qw/qwprogs.dat");
 test.skipIf(!await Bun.file(programPath).exists())("QW component signon and buffered owner survive save without replaying other clients or following reused edicts", async () => {
   const program = loadQcProgram(await Bun.file(programPath).bytes()), ids = createIdentityOwner("qw-component-messages"), actors = new SessionActorRegistry(ids);
   const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
@@ -26,7 +27,7 @@ test.skipIf(!await Bun.file(programPath).exists())("QW component signon and buff
   const effects: { readonly source: SourcePresentationEvent; readonly recipient: ActorId | undefined }[] = [], prints: { readonly event: NetworkEvent; readonly actor: ActorId | null }[] = [];
   const zero = { x: 0, y: 0, z: 0 };
   const services: ModHostServices = { actors, callbacks, bodies,
-    combat: new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined }),
+    combat: inertAuthority(actors, callbacks),
     inventory: new SharedInventoryTable(actors), time: () => ({ kind: "seconds", value: 3 }), seed: 1,
     clients: { maximum: 8, clients: () => [...clients].map(([client, actor]) => ({ client, actor })), forActor: actor => [...clients].find(([, value]) => actor.equals(value))?.[0] ?? null,
       actor: client => clients.get(client) ?? null, userinfo: () => "", setUserinfo: () => {}, command: () => null, drop: () => {},
@@ -40,7 +41,7 @@ test.skipIf(!await Bun.file(programPath).exists())("QW component signon and buff
     const value = sourceSlots.get(slot); if (value === undefined) throw new Error("Unknown source entity"); return value;
   } };
   let loading = true;
-  const original = new QcModMessages(world, services, "q1:classic:id1:installed", () => "unused", { loading: () => loading, phs: () => true });
+  const original = new QcModMessages(world, services, "q1:classic:id1:installed", () => "unused", { loading: () => loading, phs: () => true, publishesKills: true });
   let active = original;
   const vm = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE), builtins: createQcBuiltins({ kind: "quakeworld", host: original.messages.host }), serverActive: () => !loading });
   const write = (name: QcHostBuiltinName, destination: number, value: number | string) => {
@@ -61,7 +62,7 @@ test.skipIf(!await Bun.file(programPath).exists())("QW component signon and buff
     expect(listeners.size).toBe(0);
     actors.release(sourceActor); const replacement = actors.allocate("mod:qw", "quakec:replacement"); sourceSlots.set(2, replacement);
     loading = false;
-    restored = new QcModMessages(world, services, "q1:classic:id1:installed", () => "unused", { loading: () => loading, phs: () => true });
+    restored = new QcModMessages(world, services, "q1:classic:id1:installed", () => "unused", { loading: () => loading, phs: () => true, publishesKills: true });
     restored.restore(new SaveReader(saved), actor => actors.referenceSaved(actor, "current")); restored.start();
     expect(prints).toHaveLength(1);
     const late = actors.allocate("q2:game", "q2:player"), client = ids.client(3, 9); clients.set(client, late.id);
@@ -84,8 +85,11 @@ test.skipIf(!await Bun.file(programPath).exists())("QW component signon and buff
     restored.messages.flush();
     expect(prints).toHaveLength(3);
     expect(prints[2]).toEqual({ actor: rejoined.id, event: { kind: "print", level: 3, text: "component signon\n" } });
+    const stale = [...listeners];
     restored.close(); expect(listeners.size).toBe(0);
     const after = actors.allocate("q2:game", "q2:player"); clients.set(ids.client(2, 1), after.id);
+    for (const listener of stale) listener({ kind: "admitted", identity: { client: ids.client(2, 1), actor: after.id } });
+    restored.messages.flush();
     expect(prints).toHaveLength(3); expect(actors.isLive(rejoined.id)).toBe(true);
   } finally { restored?.close(); original.close(); actors.close(); }
 });

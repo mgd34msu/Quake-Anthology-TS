@@ -38,7 +38,7 @@ function validateBounds(bounds: Bounds): void {
 }
 function prepare(shape: TraceShape): PreparedShape {
   if (shape.kind === "point") return { center: vec3(0, 0, 0), mins: vec3(0, 0, 0), extents: vec3(0, 0, 0), capsule: false, radius: 0, halfheight: 0, offset: vec3(0, 0, 0) };
-  validateBounds({ min: shape.mins, max: shape.maxs });
+  if (!finite(shape.mins) || !finite(shape.maxs)) throw new RangeError("trace shape requires finite bounds");
   const center = scale3(add3(shape.mins, shape.maxs), 0.5);
   const mins = sub3(shape.mins, center);
   const extents = sub3(shape.maxs, center);
@@ -86,8 +86,8 @@ function traceBox(work: TraceWork, bounds: Bounds, start: Vec3, end: Vec3, shape
     if (!shape.capsule) {
       const signs = plane.signbits;
       if (signs >= 8) throw new RangeError("CM brush plane signbits outside trace offsets");
-      expansion = -dot3(n, vec3((signs & 1) !== 0 ? shape.extents.x : shape.mins.x,
-        (signs & 2) !== 0 ? shape.extents.y : shape.mins.y, (signs & 4) !== 0 ? shape.extents.z : shape.mins.z));
+      const x = (signs & 1) !== 0 ? shape.extents.x : shape.mins.x, y = (signs & 2) !== 0 ? shape.extents.y : shape.mins.y, z = (signs & 4) !== 0 ? shape.extents.z : shape.mins.z;
+      expansion = -f32(f32(f32(n.x * f32(x)) + f32(n.y * f32(y))) + f32(n.z * f32(z)));
     }
     const distance = f32(plane.distance + expansion);
     let first = start, last = end;

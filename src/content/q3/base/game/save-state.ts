@@ -4,14 +4,16 @@ import { savedActorId } from "../../../../persistence/save-image.ts";
 import type { Q3EntityRecords } from "../records.ts";
 import { itemAt, itemList } from "../shared/items.ts";
 import { GameEntity, MAX_CLIENTS, MAX_GENTITIES } from "./state.ts";
-import type { GameClient } from "./state.ts";
+import type { GameClient, ClientPersistant, PlayerTeamState, ClientSession } from "./state.ts";
+import type { GameLevel } from "./level.ts";
+import type { EntityStateFields } from "../shared/entity-state.ts";
 import type { EntityPool } from "./entities.ts";
 import type { PlayerState, PlayerStateSlots } from "../shared/player-state.ts";
 import { captureEntityValues, restoreEntityValues, captureClientValues, restoreClientValues,
   capturePlayerValues, restorePlayerValues, capturePersistantValues, restorePersistantValues,
   captureTeamValues, restoreTeamValues, captureSessionValues, restoreSessionValues,
   captureNetworkValues, restoreNetworkValues } from "./save-values.ts";
-import type { EntityValues, ClientValues, PlayerValues, PersistantValues, TeamValues, SessionValues, NetworkValues } from "./save-values.ts";
+import type { EntityValues, ClientValues, PlayerValues, PersistantValues, TeamValues, SessionValues, NetworkValues, LevelValues } from "./save-values.ts";
 
 export interface Q3EntityState {
   readonly values: EntityValues;
@@ -180,3 +182,8 @@ export type Q3ClientStateCoverage = CompleteCoverage<Exclude<keyof GameClient, k
 export type Q3PlayerStateCoverage = CompleteCoverage<Exclude<keyof PlayerState, keyof PlayerValues
   | "origin" | "velocity" | "stats" | "ammo" | "events" | "eventParms" | "persistant" | "powerups"
   | "product" | "copy" | "copyFrom" | "health" | "setEventDebug" | "addEvent">>;
+export type Q3PersistantStateCoverage = CompleteCoverage<Exclude<keyof ClientPersistant, keyof PersistantValues | "cmd" | "teamState">>;
+export type Q3TeamStateCoverage = CompleteCoverage<Exclude<keyof PlayerTeamState, keyof TeamValues>>;
+export type Q3SessionStateCoverage = CompleteCoverage<Exclude<keyof ClientSession, keyof SessionValues>>;
+export type Q3NetworkStateCoverage = CompleteCoverage<Exclude<keyof EntityStateFields, keyof NetworkValues | "pos" | "apos">>;
+export type Q3LevelStateCoverage = CompleteCoverage<Exclude<keyof GameLevel, keyof LevelValues | "clear" | "teamScores" | "numTeamVotingClients" | "sortedClients" | "vote" | "teamVotes">>;

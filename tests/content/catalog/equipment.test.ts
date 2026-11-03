@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect } from "bun:test";
+import { corpusTest, testCorpusRoot } from "../../support/corpus.ts";
 
 import type { ContentId, EquipmentSelection, GrappleSelection, ProviderReference } from "../../../src/contracts/content.ts";
 import { discoverInstalledContent, disabledEquipment, EQUIPMENT_PROVIDERS, nativeEquipment, presetChoice, resolveLaunch, selectLaunch } from "../../../src/content/catalog/index.ts";
@@ -12,6 +12,7 @@ import { applicationPreset, loadApplicationContent } from "../../../src/app/boot
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { parseMdl } from "../../../src/formats/q12-model/mdl.ts";
 
+const test = corpusTest("q1/id1/pak0.pak");
 const installed = discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
 function preset(catalog: InstalledCatalog, product: string, map: string): LaunchPreset {
   const content = catalog.require(product).id, family = catalog.require(product).expectation.family;
@@ -83,8 +84,8 @@ test("equipment selection and saved discriminants preserve campaign, arsenal and
   expect(chosen.equipment).toEqual(equipment); expect(chosen.map).toEqual(native.map); expect(chosen.campaign).toEqual(native.campaign);
   expect(chosen.weapons).toEqual(native.weapons); expect(chosen.match).toEqual(native.match); expect(chosen.execution).toEqual(native.execution);
   expect(readEquipment(new SaveReader(equipment, "equipment"))).toEqual(equipment);
-  expect(() => readEquipment(new SaveReader({ ...equipment, handGrenades: { ...equipment.handGrenades, binding: "slot" } }, "equipment"))).toThrow();
-  expect(() => readEquipment(new SaveReader({ ...equipment, handGrenades: { ...equipment.handGrenades, initialAmmo: 51 } }, "equipment"))).toThrow();
+  expect(() => readEquipment(new SaveReader({ ...equipment, handGrenades: { ...equipment.handGrenades, binding: "slot" } }, "equipment"))).toThrow("equipment.handGrenades.binding: expected offhand");
+  expect(() => readEquipment(new SaveReader({ ...equipment, handGrenades: { ...equipment.handGrenades, initialAmmo: 51 } }, "equipment"))).toThrow("equipment.handGrenades: hand grenade allowance exceeds capacity");
   const disabled = selectLaunch({ ...presetChoice(native.id), equipment: { kind: "selected", value: disabledEquipment() } }, { ...native, equipment });
   expect(disabled.equipment).toEqual(disabledEquipment());
   const resolved = await resolveLaunch({ catalog, preset: native, choice: { ...presetChoice(native.id), equipment: { kind: "selected", value: equipment } } });
@@ -153,7 +154,7 @@ test("equipment resolution rejects mismatched installed sources and invalid ammu
   const catalog = await installed, native = preset(catalog, "q1-rerelease-id1", "maps/start.bsp");
   const invalid: EquipmentSelection = { grapple: { kind: "enabled", mechanic: "q2-ctf", edition: "classic", binding: "offhand",
     source: source(EQUIPMENT_PROVIDERS.ctf, catalog.require("q2-rerelease-ctf").id) }, handGrenades: { kind: "disabled" } };
-  expect(resolveLaunch({ catalog, preset: native, choice: { ...presetChoice(native.id), equipment: { kind: "selected", value: invalid } } })).rejects.toThrow("does not supply");
+  await expect(resolveLaunch({ catalog, preset: native, choice: { ...presetChoice(native.id), equipment: { kind: "selected", value: invalid } } })).rejects.toThrow("does not supply");
   const badAmmo: EquipmentSelection = { grapple: { kind: "disabled" }, handGrenades: { kind: "enabled", source: source(EQUIPMENT_PROVIDERS.handGrenades, catalog.require("q2-classic-baseq2").id), edition: "classic", binding: "offhand", initialAmmo: -1, capacity: 50 } };
-  expect(resolveLaunch({ catalog, preset: native, choice: { ...presetChoice(native.id), equipment: { kind: "selected", value: badAmmo } } })).rejects.toThrow("allowance");
+  await expect(resolveLaunch({ catalog, preset: native, choice: { ...presetChoice(native.id), equipment: { kind: "selected", value: badAmmo } } })).rejects.toThrow("allowance");
 });

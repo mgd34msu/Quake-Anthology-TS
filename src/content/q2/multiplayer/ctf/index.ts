@@ -203,6 +203,9 @@ export class Q2Ctf implements Q2SpawnModule {
       case "ctf-menu": {
         if (args.length !== 1) return false;
         const action = args[0];
+        // The join menu is only opened for team-less players, and these entries exist only there.
+        if ((action === "join-red" || action === "join-blue" || action === "chase" || action === "match") && state.team !== 0) return false;
+        if (action === "match" && !(this.rules.competition !== 0 && this.context.match.phase === "none")) return false;
         switch (action) {
           case "join-red": case "join-blue": case "observer": case "chase": case "credits": case "match": case "ready": case "notready":
           case "admin-settings": case "admin-start": case "admin-cancel": case "close": this.menuAction(entity, game, action); break;

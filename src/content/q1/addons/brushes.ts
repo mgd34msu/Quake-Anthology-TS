@@ -10,7 +10,9 @@ export function registerAddonBrushes(context: Q1AddonContext): undefined {
   const pushBrush = (entity: Q1Actor): undefined => { entity.solid = "bsp"; entity.movement = "push"; return game.link(entity); };
   const bobPosition = (entity: Q1Actor, angle: number) => {
     entity.count = Math.fround(Math.fround(entity.count + angle) % 360);
-    return vadd(vscale(entity.vector("dest"), Math.fround(Math.sin(entity.count))), vscale(entity.vector("dest2"), Math.fround(Math.cos(entity.count))));
+    // The source sin()/cos() are QuakeC functions of degrees (makevectors on {0, angle, 0}).
+    const radians = entity.count * (Math.PI * 2 / 360);
+    return vadd(vscale(entity.vector("dest"), Math.fround(Math.sin(radians))), vscale(entity.vector("dest2"), Math.fround(Math.cos(radians))));
   };
   game.named.register(prefix + "bob_tick", { action: (_game, entity) => game.setOrigin(entity, bobPosition(entity, Math.fround(entity.angularVelocity.x * context.frameTime))) });
   game.named.register(prefix + "bob_think", { action: (_game, entity) => {

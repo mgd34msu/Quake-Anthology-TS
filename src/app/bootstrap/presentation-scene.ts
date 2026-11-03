@@ -10,7 +10,7 @@ import { anchoredViewWeapon, anchoredViewWeaponAxis, weaponViewOrigin } from "./
 import { SelectedQ3WeaponPresenter } from "./q3-selected-weapon.ts";
 import { NativeHeldWeapons, type ResolvedHeldEntity } from "./native-held-weapon.ts";
 import { ForeignHeldWeapons } from "./held-weapon.ts";
-import type { ApplicationAssets } from "./assets.ts";
+import type { ApplicationAssets, ModelAsset } from "./assets.ts";
 import type { SimulationPresentation, SimulationPresentationEvent } from "./simulation/types.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { ActorId } from "../../contracts/identity.ts";
@@ -83,6 +83,24 @@ export class ApplicationWorldScene {
   private flares: { readonly flare: SceneFlare; readonly origin: Vec3; readonly image: RendererImage; readonly imagePath: string }[] = [];
   private shaderBeams: { readonly material: RegisteredSceneMaterial; readonly origin: Vec3; readonly end: Vec3; readonly width: number }[] = [];
 
+  private readonly lastUsed = new Map<string, number>();
+  private prepares = 0;
+  private usedWeapon(key: string): SelectedQ3WeaponPresenter | undefined { this.lastUsed.set(`w:${key}`, this.prepares); return this.selectedWeapons.get(key); }
+  private usedCharacter(key: string): Q3CharacterPresenter | undefined { this.lastUsed.set(`c:${key}`, this.prepares); return this.characters.get(key); }
+  /** Presenters are keyed by actor generation, so those not seen for a while belong to actors that left. */
+  private pruneUnused(): void {
+    if ((++this.prepares & 255) !== 0) return;
+    for (const [tagged, last] of this.lastUsed) {
+      if (this.prepares - last <= 256) continue;
+      this.lastUsed.delete(tagged);
+      if (tagged.startsWith("w:")) this.selectedWeapons.delete(tagged.slice(2)); else this.characters.delete(tagged.slice(2));
+    }
+  }
+
+  private skipModel(source: { readonly content: string; readonly path: string }, error: unknown): void {
+    this.assets.warnOnce(`model:${source.content}/${source.path}`, `Model ${source.path} cannot be drawn: ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+
   constructor(readonly assets: ApplicationAssets, private readonly characterAssets: Q3CharacterAssets | null, private readonly planarShadows: () => boolean = () => false) {
     this.foreignWeapons = new ForeignHeldWeapons(assets);
     this.nativeWeapons = new NativeHeldWeapons(assets);
@@ -103,6 +121,7 @@ export class ApplicationWorldScene {
   }
 
   async prepare(viewer: ActorId | null, snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[], fieldOfView = 90, heldWeapons: readonly QvmHeldWeapon[] = [], viewWeaponVisible = true, bodies: readonly ComponentBody[] = [], primaryBodies: readonly PreparedPrimaryBody[] = []): Promise<void> {
+    this.pruneUnused();
     this.objects.clear();
     this.ordered.length = 0;
     this.flares = [];
@@ -188,12 +207,22 @@ export class ApplicationWorldScene {
       }
       if (source.q3Weapon !== undefined) {
         const key = `${source.content}/${source.actor.slot}/${source.actor.generation}`;
-        let presenter = this.selectedWeapons.get(key);
+        let presenter = this.usedWeapon(key);
         if (presenter === undefined) { presenter = new SelectedQ3WeaponPresenter(this.assets, this.characterAssets?.animation ?? null); this.selectedWeapons.set(key, presenter); }
-        await append(source.content, await presenter.frame(source, fieldOfView), () => ({ viewModel: true }));
+        const held = await presenter.frame(source, fieldOfView);
+        if (held !== null) await append(source.content, held, () => ({ viewModel: true }));
         continue;
       }
-      const asset = await this.assets.model(source.content, source.path);
+      let asset: ModelAsset;
+      try { asset = await this.assets.model(source.content, source.path); }
+      catch (error) {
+        // R_RegisterModel returns null in Q2 and the entity is simply not drawn.
+        if (source.family !== "q2") throw error;
+        // cl_parse.c falls back to players/male when another player's model is not installed.
+        if (!source.path.startsWith("players/") || source.path === "players/male/tris.md2") { this.skipModel(source, error); continue; }
+        source = { ...source, path: "players/male/tris.md2", skinPath: "players/male/grunt.pcx" };
+        try { asset = await this.assets.model(source.content, source.path); } catch (fallback) { this.skipModel(source, fallback); continue; }
+      }
       const modelFlags = asset.model.kind === "q1-mdl" ? asset.model.flags
         : asset.model.kind === "md5" && asset.model.skinSelection.kind === "q1-mdl-replacement" ? asset.model.skinSelection.flags : 0;
       const angles = source.family === "q1" && (modelFlags & 8) !== 0 ? { ...source.angles,
@@ -239,10 +268,11 @@ export class ApplicationWorldScene {
         const declaration = await this.foreignWeapons.declaration(equipped);
         if (declaration?.kind === "none") continue;
         const attach = await this.nativeWeapons.attachment(source.content, entity);
+        if (attach === null) continue;
         let passes: readonly import("../../content/q3/foundation/presentation.ts").Q3CharacterPass[];
         if (equipped.q3Weapon !== undefined && declaration === undefined) {
           const key = `${equipped.content}/${equipped.actor.slot}/${equipped.actor.generation}`;
-          let selected = this.selectedWeapons.get(key);
+          let selected = this.usedWeapon(key);
           if (selected === undefined) { selected = new SelectedQ3WeaponPresenter(this.assets, this.characterAssets?.animation ?? null); this.selectedWeapons.set(key, selected); }
           passes = await selected.world({ ...equipped, visible: true }, { origin: entity.lightingOrigin, powerups: 0 }, false);
         } else passes = await this.foreignWeapons.frame(equipped, { origin: entity.lightingOrigin, color: entity.color, opacity: entity.opacity ?? 1 });
@@ -264,7 +294,7 @@ export class ApplicationWorldScene {
     }
     if (this.characterAssets !== null) for (const character of characters) {
       const key = `${character.actor.slot}:${character.actor.generation}`;
-      let presenter = this.characters.get(key);
+      let presenter = this.usedCharacter(key);
       if (presenter === undefined) {
         presenter = new Q3CharacterPresenter(this.characterAssets);
         presenter.reset(character, Math.trunc(this.preparedTime * 1000));
@@ -275,7 +305,7 @@ export class ApplicationWorldScene {
       let weapon: readonly import("../../content/q3/foundation/presentation.ts").Q3CharacterPass[] = [];
       if (equipped?.q3Weapon !== undefined && declaration === undefined) {
         const weaponKey = `${equipped.content}/${equipped.actor.slot}/${equipped.actor.generation}`;
-        let selected = this.selectedWeapons.get(weaponKey);
+        let selected = this.usedWeapon(weaponKey);
         if (selected === undefined) { selected = new SelectedQ3WeaponPresenter(this.assets, this.characterAssets.animation); this.selectedWeapons.set(weaponKey, selected); }
         weapon = await selected.world({ ...equipped, visible: true }, character, viewer?.equals(character.actor) ?? false);
       } else if (equipped !== undefined && !viewer?.equals(character.actor)) {
@@ -301,7 +331,7 @@ export class ApplicationWorldScene {
       let passes: readonly import("../../content/q3/foundation/presentation.ts").Q3CharacterPass[];
       if (equipped.q3Weapon !== undefined && declaration === undefined) {
         const key = `${equipped.content}/${equipped.actor.slot}/${equipped.actor.generation}`;
-        let selected = this.selectedWeapons.get(key);
+        let selected = this.usedWeapon(key);
         if (selected === undefined) { selected = new SelectedQ3WeaponPresenter(this.assets, this.characterAssets?.animation ?? null); this.selectedWeapons.set(key, selected); }
         passes = await selected.world({ ...equipped, visible: true }, { origin: held.parent.lightingOrigin, powerups: 0 }, false);
       } else passes = await this.foreignWeapons.frame(equipped, { origin: held.parent.lightingOrigin, color: { x: 1, y: 1, z: 1, w: 1 } });

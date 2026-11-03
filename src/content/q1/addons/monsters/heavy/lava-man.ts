@@ -4,6 +4,7 @@ import { sameActor } from "../../../../../contracts/identity.ts";
 import { POINT, ZERO, length, normalize, vadd, vscale, vsub } from "../../../foundation/types.ts";
 import { velocityAngles } from "../../../missionpacks/types.ts";
 import { spriteExplosion } from "../../../base/projectiles.ts";
+import type { Q1AddonContext } from "../../context.ts";
 import type { HeavyDefinition, Q1HeavyMonster, Q1Mg3Heavy } from "./runtime.ts";
 import { heavyPrefix } from "./runtime.ts";
 import { frames } from "./tables/mg3_lavaman.ts";
@@ -75,10 +76,24 @@ export function lavaManDefinition(runtime: Q1Mg3Heavy): HeavyDefinition {
     },
     spawn: monster => { const { game, entity } = monster; if (game.options.deathmatch !== 0) return game.remove(entity); game.totalMonsters++; entity.spawnflags |= 16384;
       if (entity.targetname !== "") { entity.use = game.named.use(entity, `${heavyPrefix}:lavaman_awake`); return undefined; } return awake(monster, entity.activator); },
-    attack: checkAttack, melee: monster => monster.play("lavaman_fire1"),
+    melee: monster => monster.play("lavaman_fire1"),
     pain: monster => { const { entity, game, state } = monster;
       if (entity.count === 0) { entity.count++; state.painFinished = game.time + 2; return monster.play("lavaman_shocka1"); }
       if (state.painFinished > game.time || game.host.random() >= 0.05) return undefined; state.painFinished = game.time + 2; return monster.play("lavaman_shocka1"); },
     die: monster => monster.play("lavaman_death1"),
   };
+}
+
+/** combat.qc T_Damage: a monster_boss cannot hurt a lava man, and everything but lightning and the laser does 80%. */
+export function registerLavaManDamage(context: Q1AddonContext): undefined {
+  const { game } = context;
+  game.registerDamageSourceEffects("mg3:lava-man", {
+    beforeHealth: request => game.host.classname(request.target) !== "monster_lava_man" || request.attack.attacker === null || game.host.classname(request.attack.attacker) !== "monster_boss",
+    afterArmor: (request, take) => {
+      if (game.host.classname(request.target) !== "monster_lava_man") return take;
+      const weapon = request.attack.attacker === null ? null : game.player(request.attack.attacker)?.weapon;
+      return weapon !== "lightning" && weapon !== "mg3:laser" ? Math.fround(take * Math.fround(0.8)) : take;
+    },
+  });
+  return undefined;
 }

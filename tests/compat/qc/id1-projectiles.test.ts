@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { afterEach, expect } from "bun:test";
+import { corpusTest, corpusFile } from "../../support/corpus.ts";
 
 import type { ItemId } from '../../../src/contracts/gameplay.ts';
 import { openArchive } from '../../../src/content/archive/index.ts';
@@ -9,13 +9,18 @@ import { SessionActorRegistry, SourceActorSlots, quakeEdictLifetime } from '../.
 import { Q1_DONOR_PROFILE, createNumericOperations } from '../../../src/core/numeric.ts';
 import { Id1ProjectileAttacks } from '../../../src/content/q1/quakec/id1-projectiles.ts';
 import type { QcBuiltin, QcHostBuiltinName } from '../../../src/compat/qc/index.ts';
+const test = corpusTest("q1/id1/PAK0.PAK", "q1/qw/qwprogs.dat");
+
+const registries: SessionActorRegistry[] = [];
+afterEach(() => { for (const registry of registries.splice(0)) registry.close(); });
 
 for (const qw of [false, true]) test(`pinned ${qw ? 'QW' : 'NQ'} projectile attribution retains launch identity while native damage executes`, async () => {
-  const archive = await openArchive(`${testCorpusRoot()}/q1/id1/PAK0.PAK`);
+  const archive = await openArchive(corpusFile("q1/id1/PAK0.PAK"));
   try {
     const entry = archive.findEntries('progs.dat').at(-1); if (entry === undefined) throw new Error('No id1 program');
-    const program = loadQcProgram(qw ? new Uint8Array(await Bun.file(`${testCorpusRoot()}/q1/qw/qwprogs.dat`).arrayBuffer()) : await archive.readEntry(entry));
+    const program = loadQcProgram(qw ? new Uint8Array(await Bun.file(corpusFile("q1/qw/qwprogs.dat")).arrayBuffer()) : await archive.readEntry(entry));
     const entities = new QcEntityMemory(classicQcEntityLayout(program), 8, 4), actors = new SessionActorRegistry(createIdentityOwner(`projectiles-${qw}`));
+    registries.push(actors);
     const slots = new SourceActorSlots(actors, { provider: 'test:qc', capacity: 8, lifetime: quakeEdictLifetime(1),
       storage: createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: qw ? 100 : 92 }),
       now: () => ({ kind: 'seconds', value: 10 }), unlink: () => undefined, exhausted: () => { throw new Error('No slots'); } });
@@ -41,7 +46,7 @@ for (const qw of [false, true]) test(`pinned ${qw ? 'QW' : 'NQ'} projectile attr
     const attribution = observer.resolve(call);
     expect(attribution?.weapon).toBe('q1:weapon/rocketlauncher'); expect(attribution?.launch?.owner.equals(owner.id)).toBe(true);
     expect(attribution?.launch?.emittedAt).toBe(2); expect(attribution?.time).toBe(10);
-    expect(() => observer.resolve({ ...call, attacker: owner.id })).toThrow();
+    expect(() => observer.resolve({ ...call, attacker: owner.id })).toThrow("progs.dat: Projectile damage arguments changed");
     const restoredActors = SessionActorRegistry.restore(createIdentityOwner(`projectiles-restored-${qw}`), actors.checkpoint(), actors.sourceCheckpoint());
     const restoredEntities = new QcEntityMemory(classicQcEntityLayout(program), 8, 4);
     const restoredVm = new QcMachine({ program, entities: restoredEntities, numeric: createNumericOperations(Q1_DONOR_PROFILE),
@@ -105,5 +110,42 @@ for (const qw of [false, true]) test(`pinned ${qw ? 'QW' : 'NQ'} projectile attr
         caller: program.functionNamed('T_RadiusDamage').index, statement: qw ? 580 : 1629 } })).toBeNull();
       return undefined;
     }));
+  } finally { archive.close(); }
+});
+
+for (const qw of [false, true]) test(`${qw ? 'QW' : 'NQ'} W_FireRocket executes under the composed observer and records its launch owner`, async () => {
+  const archive = await openArchive(corpusFile("q1/id1/PAK0.PAK"));
+  try {
+    const entry = archive.findEntries('progs.dat').at(-1); if (entry === undefined) throw new Error('No id1 program');
+    const program = loadQcProgram(qw ? new Uint8Array(await Bun.file(corpusFile("q1/qw/qwprogs.dat")).arrayBuffer()) : await archive.readEntry(entry));
+    const entities = new QcEntityMemory(classicQcEntityLayout(program), 8, 4), actors = new SessionActorRegistry(createIdentityOwner(`fired-${qw}`));
+    registries.push(actors);
+    const slots = new SourceActorSlots(actors, { provider: 'test:qc', capacity: 8, lifetime: quakeEdictLifetime(1),
+      storage: createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: qw ? 100 : 92 }),
+      now: () => ({ kind: 'seconds', value: 10 }), unlink: () => undefined, exhausted: () => { throw new Error('No slots'); } });
+    slots.bindExisting(0, 'test:world'); const owner = slots.bindExisting(1, 'test:player'), missile = slots.bindExisting(2, 'test:missile'), target = slots.bindExisting(3, 'test:target');
+    const spawned: number[] = [];
+    const none: QcBuiltin = () => undefined;
+    const host = new Map<QcHostBuiltinName, QcBuiltin>([['infokey', vm => { vm.returnInt(0); return undefined; }],
+      ['spawn', vm => { spawned.push(2); vm.returnInt(entities.reference(2)); return undefined; }],
+      ['aim', vm => { vm.returnVector({ x: 1, y: 0, z: 0 }); return undefined; }],
+      ['setmodel', none], ['setsize', none], ['setorigin', none], ['sound', none]]);
+    for (const name of ['WriteByte', 'WriteCoord', 'WriteShort', 'WriteAngle', 'WriteEntity', 'WriteString', 'WriteLong', 'WriteChar', 'multicast'] satisfies readonly QcHostBuiltinName[]) host.set(name, none);
+    const observer: Id1ProjectileAttacks = new Id1ProjectileAttacks({ program, entities, actors, slots }, () => vm);
+    const vm: QcMachine = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE), builtins: createQcBuiltins({ kind: qw ? 'quakeworld' : 'netquake', host }), serverActive: () => true,
+      functionBoundary: observer.compose({ functions: new Set<number>(), run: (_call, execute) => execute() }),
+      observeEntityStore: store => observer.observeStore(store) });
+    const field = (name: string) => vm.fieldOffset(name);
+    entities.at(1).setFloat(field('ammo_rockets'), 5); entities.at(1).setFloat(field('currentammo'), 5);
+    vm.globals.setInt(vm.globalOffset('self'), entities.reference(1)); vm.globals.setFloat(vm.globalOffset('time'), 2);
+    vm.execute(program.functionNamed('W_FireRocket').index);
+    expect(spawned).toEqual([2]);
+    expect(entities.at(2).int(field('owner'))).toBe(entities.reference(1));
+    vm.globals.setFloat(vm.globalOffset('time'), 10); vm.globals.setInt(vm.globalOffset('self'), entities.reference(2));
+    vm.globals.setInt(4, entities.reference(3)); vm.globals.setInt(7, entities.reference(2)); vm.globals.setInt(10, entities.reference(1)); vm.globals.setFloat(13, 20);
+    const attack = observer.resolve({ call: { functionIndex: program.functionNamed('T_Damage').index, caller: program.functionNamed('T_MissileTouch').index, statement: qw ? 3256 : 3783 },
+      target: target.id, inflictor: missile.id, attacker: owner.id, amount: 20 });
+    expect(attack?.weapon).toBe('q1:weapon/rocketlauncher');
+    expect(attack?.launch?.owner.equals(owner.id)).toBe(true); expect(attack?.launch?.emittedAt).toBe(2);
   } finally { archive.close(); }
 });

@@ -2,6 +2,7 @@ import type { UiControl, UiMenuId } from "../../contracts/ui.ts";
 import { LlmSettingsError, type LlmSettingsService } from "../../llm/settings.ts";
 import type { NativeUiController } from "../common/controller.ts";
 import { menuRow } from "../common/layout.ts";
+import { buttonControl, wrapWords } from "../common/controls.ts";
 
 export type LlmSettingsUi = Pick<LlmSettingsService, "read" | "selectProvider" | "setModel" | "saveApiKey" | "removeCredential" | "saveOtherService" | "signInSubscription" | "cancelSignIn" | "refreshModels" | "setReasoningEffort">;
 export function registerLlmSettingsMenu(controller: NativeUiController, service: LlmSettingsUi): { readonly root: UiMenuId; dispose(): void } {
@@ -31,10 +32,7 @@ export function registerLlmSettingsMenu(controller: NativeUiController, service:
     const pending = snapshot.subscriptionAuth.status === "pending";
     const catalog = snapshot.catalogs[provider], chosenModel = model ?? selected.model;
     const metadata = catalog.models.find(item => item.id === chosenModel);
-    const button = (id: string, label: string, row: number, action: () => void, enabled = !busy): UiControl => ({
-      id: `ui:llm:${id}`, kind: "button", label, rect: menuRow(row), visible: true, enabled,
-      activate: () => { action(); return undefined; },
-    });
+    const button = (id: string, label: string, row: number, action: () => void, enabled = !busy): UiControl => buttonControl(`ui:llm:${id}`, label, menuRow(row), action, enabled);
     const field = (id: string, label: string, row: number, text: string, change: (value: string) => void, masked = false): UiControl => ({
       id: `ui:llm:${id}`, kind: "text-entry", label, rect: menuRow(row), visible: true, enabled: !busy,
       text, masked, maximumLength: masked ? 4096 : 512,
@@ -69,7 +67,7 @@ export function registerLlmSettingsMenu(controller: NativeUiController, service:
       : catalog.status === "error" ? catalog.message
       : status || (snapshot.subscriptionAuth.status === "error" ? snapshot.subscriptionAuth.message : snapshot.errors[0]?.message ??
         (chosenModel === "" ? "Select a model after signing in or saving an API key." : "Console: llm_ask or llm_exec"));
-    const lines = message.match(/.{1,54}(?:\s|$)|.{1,54}/g) ?? [];
+    const lines = wrapWords(message, 54);
     controls.push(button("save", "Save settings", 8, () => {
       const draftEffort = effort, draftKey = key, draftModel = model ?? selected.model, draftBase = baseUrl ?? snapshot.providers["other-api"].baseUrl;
       key = "";

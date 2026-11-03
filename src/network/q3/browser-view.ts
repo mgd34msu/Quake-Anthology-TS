@@ -167,8 +167,10 @@ export class Q3BrowserView {
   async addServer(source: number, name: () => string, address: () => string): Promise<-1 | 0 | 1> {
     const list = this.list(source); if (list === null || list.count >= list.rows.length) return -1;
     const generation = this.generation, resolved = await this.options.browser.resolveQ3(address()); this.entry(generation);
-    if (resolved === null) throw new Error("LAN_AddServer: address resolution failed");
+    // An unresolvable address is a refusal for the UI, not a fault of the VM call.
+    if (resolved === null) return -1;
     if (list.rows.slice(0, list.count).some(row => same(row.address, resolved))) return 0;
+    if (list.count >= list.rows.length) return -1;
     const row = slotAt(list.rows, list.count); row.address = resolved;
     row.name = sourceCommandText(name()).slice(0, 31); row.visible = 1;
     if (source !== 0 && source !== 1 && source !== 2 && source !== 3) return -1;
@@ -179,7 +181,7 @@ export class Q3BrowserView {
   async removeServer(source: number, address: () => string): Promise<void> {
     const list = this.list(source); if (list === null) return;
     const generation = this.generation, resolved = await this.options.browser.resolveQ3(address()); this.entry(generation);
-    if (resolved === null) throw new Error("LAN_RemoveServer: address resolution failed");
+    if (resolved === null) return;
     const index = list.rows.slice(0, list.count).findIndex(row => same(row.address, resolved)); if (index < 0) return;
     if (source !== 0 && source !== 1 && source !== 2 && source !== 3) return;
     this.options.browser.removeQ3(source, resolved);
@@ -199,34 +201,36 @@ export class Q3BrowserView {
     const result = slot.handle === null ? null : this.options.browser.q3Core.requestResult(slot.handle);
     if (result?.kind === "completed") {
       let text = ""; for (const [key, value] of result.status.rules) text += `\\${key}\\${value}`;
-      slot.info = setInfoValue(text, "nettype", "1", { dialect: "q3", maximumLength: 1024, target: "client-userinfo",
-        serverHighCharacters: false, print: value => { this.options.print(value); this.entry(); } });
+      // Any server on the network can send this text, so one too long for an info string just leaves the row blank.
+      try {
+        slot.info = setInfoValue(text, "nettype", "1", { dialect: "q3", maximumLength: 1024, target: "client-userinfo",
+          serverHighCharacters: false, print: value => { this.options.print(value); this.entry(); } });
+      } catch (error) { if (!(error instanceof RangeError)) throw error; slot.info = ""; }
       return Math.trunc(result.pingMilliseconds) + 1;
     }
     return 0;
   }
   getPing(index: number, size: number, write?: (address: string | null) => void): { readonly address: string; readonly time: number } {
-    this.entry(); const slot = slotAt(this.pings, index);
-    if (slot.address === null) { write?.(null); return { address: "", time: 0 }; }
+    this.entry(); const slot = this.pings[index];
+    if (slot === undefined || slot.address === null) { write?.(null); return { address: "", time: 0 }; }
     const text = addressKey(slot.address); write?.(text); const address = copyString(text, size);
     const measured = this.pingTime(slot), elapsed = Math.trunc(this.options.now() - slot.start);
     const time = measured !== 0 ? measured : elapsed < Math.max(100, this.options.maxPing()) ? 0 : elapsed;
     this.publishPing(slot.address, measured); return { address, time };
   }
   sourcePingInfo(index: number, size: number, write?: (text: string) => void): string | null {
-    this.entry(); const slot = slotAt(this.pings, index); if (slot.address === null) return null;
+    this.entry(); const slot = this.pings[index]; if (slot === undefined || slot.address === null) return null;
     this.pingTime(slot); write?.(slot.info); return copyString(slot.info, size);
   }
   private startPing(slot: PingSlot, address: NetworkAddress): void {
     this.release(slot.handle); slot.address = address; slot.start = this.options.now(); slot.published = false;
+    // A failed send leaves the slot pending to time out like a lost packet; the source ignores send failures.
     slot.handle = this.options.browser.q3Core.request(address, slot.start, "info", null);
-    if (slot.handle === null) { slot.address = null; throw new Error("Could not send Q3 ping"); }
   }
   updateVisiblePings(source: number): boolean {
     const list = this.list(source); if (list === null) return false;
     let count = this.getPingQueueCount(), active = false;
     for (const row of list.rows.slice(0, list.count)) {
-      if (count >= 32) break;
       if (row.visible === 0) continue;
       if (source === 2 && row.ping === 0) {
         const address = list.overflow.pop();
@@ -234,6 +238,8 @@ export class Q3BrowserView {
         continue;
       }
       if (row.ping !== -1 || row.address === null || this.pings.some(slot => same(slot.address, row.address))) continue;
+      // cl_main.c tests the queue limit only for rows that need a ping, so later ping 0 rows still consume overflow addresses.
+      if (count >= 32) break;
       const slot = this.pings.find(slot => slot.address === null); if (slot === undefined) break;
       this.startPing(slot, row.address); count++; active = true;
     }
@@ -266,8 +272,8 @@ export class Q3BrowserView {
   }
   private startStatus(slot: StatusSlot, address: NetworkAddress): void {
     this.release(slot.handle); slot.address = address; slot.start = this.options.now(); slot.retrieved = false;
+    // A failed send leaves the request unretrieved with no handle, so the next call resends it.
     slot.handle = this.options.browser.q3Core.request(address, slot.start, "status", null);
-    if (slot.handle === null) { slot.retrieved = true; throw new Error("Could not send Q3 server status request"); }
   }
   async serverStatus(address: string | null, size: number | null, write?: (text: string) => void): Promise<string | null> {
     this.entry();
@@ -275,8 +281,9 @@ export class Q3BrowserView {
     const generation = this.generation, resolved = await this.options.browser.resolveQ3(address); this.entry(generation);
     if (resolved === null) return null;
     if (size === null) {
-      const slot = this.statuses.find(slot => same(slot.address, resolved));
-      if (slot !== undefined) { this.release(slot.handle); slot.handle = null; slot.address = null; slot.retrieved = true; slot.print = false; }
+      // CL_ServerStatus only marks the slot retrieved, keeping its address and cached result.
+      const slot = this.statusSlot(resolved);
+      slot.retrieved = true; slot.print = false;
       return null;
     }
     const slot = this.statusSlot(resolved);

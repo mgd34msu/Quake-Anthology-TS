@@ -1,14 +1,15 @@
-import { expect, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { expect } from "bun:test";
+import { glTest as test } from "../support/gl.ts";
+import { rm } from 'node:fs/promises';
 import { discoverInstalledContent } from '../../src/content/catalog/index.ts';
 import { StartupSelectionModel } from '../../src/app/bootstrap/startup-selection.ts';
 import { parseApplicationCommand } from '../../src/app/bootstrap/options.ts';
 import { Application } from '../../src/app/bootstrap/application.ts';
+import { trackedTempDirectories } from "../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 test('startup-selected QuakeWorld movement drives the normal mixed-game application', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'quake-selected-input-'));
+    const root = await tempDirectory('quake-selected-input-');
     const parsed = parseApplicationCommand(['--menu', '--hidden', '--renderer', 'gl', '--user-content-root', root]);
     if (parsed.kind !== 'menu') throw new Error('No startup options');
     const catalog = await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, discoverMods: false });
@@ -32,9 +33,10 @@ test('startup-selected QuakeWorld movement drives the normal mixed-game applicat
         window.pushEvent({ kind: 'window', timestamp: 0, event: 12, data1: 0, data2: 0 });
         window.pushEvent({ kind: 'key', timestamp: 0, down: true, repeat: false, scancode: 26, keycode: 119, modifiers: 0 });
         const origin = app.simulation.playerView(player.actor).origin;
-        for (let frame = 0; frame < 8; frame++) await app.step(25);
+        // Measured under offscreen GL: about 6 units after 8 frames (input latency plus acceleration), 39 after 16, then roughly 170 units/s.
+        for (let frame = 0; frame < 16; frame++) await app.step(25);
         const moved = app.simulation.playerView(player.actor).origin;
-        expect(Math.hypot(moved.x - origin.x, moved.y - origin.y)).toBeGreaterThan(0);
+        expect(Math.hypot(moved.x - origin.x, moved.y - origin.y)).toBeGreaterThan(16);
         expect(prints.some(text => text.includes('does not match movement'))).toBe(false);
         window.pushEvent({ kind: 'key', timestamp: 0, down: false, repeat: false, scancode: 26, keycode: 119, modifiers: 0 });
         await app.step(25);

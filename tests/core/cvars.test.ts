@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import type { CommandContext, CommandDialect } from "../../src/contracts/common.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CvarFlag, CvarRegistry, Q2CvarFlag } from "../../src/core/cvars/index.ts";
+import { literal } from "../support/literal.ts";
 
 const context: CommandContext = { session: createIdentityOwner("cvars-smoke").session, origin: { kind: "server-console" } };
 
@@ -152,4 +153,16 @@ test("canonical snapshots retain old values across metadata, latch and restore c
   cvars.restoreSaveState(saved);
   expect(cvars.canonicalSnapshots()).toEqual(initial);
   expect(applied[0]?.value).toBe("2.5");
+});
+
+test("archived values cannot end their quoted token or inject script lines", () => {
+  for (const dialect of literal(["q1-netquake", "q2-classic", "q3"])) {
+    const cvars = new CvarRegistry({ dialect, context });
+    cvars.register("cl_maxpackets", "30", CvarFlag.Archive);
+    cvars.set("cl_maxpackets", '30"\nexec evil.cfg\r\n//', true);
+    const commands = cvars.archiveCommands();
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).not.toMatch(/[\r\n]/);
+    expect(commands[0]?.match(/"/g)).toHaveLength(2);
+  }
 });

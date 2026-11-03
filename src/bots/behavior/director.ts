@@ -39,7 +39,7 @@ export interface SourceBotDirectorOptions {
   readonly files: BotSourceFiles;
   readonly entities: string;
   readonly restoring?: boolean;
-  navigation(library: BotLibrary): BotNavigation & GoalNavigation;
+  navigation(library: BotLibrary, bspEntities: AasBspEntities): BotNavigation & GoalNavigation;
 }
 
 export interface SourceBotRosterEntry {
@@ -80,7 +80,7 @@ export class SourceBotDirector {
     this.round = this.createRound(options.host, options.navigation);
   }
   private createRound(host: SourceBotDirectorHost, navigationFor: SourceBotDirectorOptions["navigation"]) {
-    const game = host.game, navigation = navigationFor(this.library);
+    const game = host.game, navigation = navigationFor(this.library, this.bspEntities);
     const ai = new GameAi(game, this.library, { navigation, bspEntities: this.bspEntities,
       pointContents: point => host.pointContents(point),
       getSnapshotEntity: (client, sequence) => host.snapshotEntity(client, sequence),
@@ -144,7 +144,7 @@ export class SourceBotDirector {
     const orchestration = this.checkpointOrchestration(), assets = this.options.files.provenance?.();
     if (assets === undefined) throw new Error("Exact bot persistence requires complete mounted asset provenance");
     const memory = this.library.memory.checkpoint();
-    return { version: 1, assets, memory: memory.image, bsp: this.bspEntities.checkpoint(memory),
+    return { version: 2, assets, memory: memory.image, bsp: this.bspEntities.checkpoint(memory),
       library: this.library.captureSaveState(memory), ai: this.ai.captureSaveState(), catalog: this.catalog.captureSaveState(), orchestration };
   }
   restoreSaveState(value: unknown, resolveActor: (saved: SavedActorId) => import("../../contracts/identity.ts").ActorId,
@@ -152,8 +152,10 @@ export class SourceBotDirector {
     edge: (client: number, id: number) => import("../navigation/types.ts").NavigationEdge | null,
     remapObservation: (number: number, generation: number) => { readonly number: number; readonly generation: number }): void {
     if (this.loaded || this.closed || this.options.restoring !== true) throw new Error("Bot director restoration requires an inert constructor");
-    const reader = new SaveReader(value, "bot.director"); reader.field("version").literal(1);
-    const assets = this.options.files.provenance?.();
+    const reader = new SaveReader(value, "bot.director");
+    // Version 1 digested every file under bots/, navigation graphs included; version 2 leaves them out.
+    const version = reader.field("version").choice<1 | 2>(1, 2);
+    const assets = version === 1 ? this.options.files.legacyProvenance?.() : this.options.files.provenance?.();
     if (assets === undefined || reader.field("assets").string() !== assets) throw new Error("Saved bot assets differ from mounted bot files");
     reader.field("library").field("initialized").literal(true);
     reader.field("bsp").field("loaded").literal(true);

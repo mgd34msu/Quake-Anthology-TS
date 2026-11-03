@@ -1,5 +1,5 @@
 import { q3WeaponDelay } from "../../../src/movement/q3/weapon.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import { Powerup } from "../../../src/movement/q3/constants.ts";
 import type { WeaponBehaviorProjectilePort } from "../../../src/contracts/weapon-behavior.ts";
@@ -15,27 +15,32 @@ import { existsSync } from "node:fs";
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
 import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
-import { Q1Foundation } from "../../../src/content/q1/foundation/index.ts";
+import { Q1Foundation } from "../../../src/content/q1/foundation/runtime.ts";
 import { Q1EntityServices } from "../../../src/content/q1/foundation/entity-services.ts";
 import { registerHipnoticWeapons } from "../../../src/content/q1/missionpacks/arsenal.ts";
 import { missionWeapons } from "../../../src/content/q1/missionpacks/types.ts";
-import type { Q1Event, Q1FoundationHost } from "../../../src/content/q1/foundation/index.ts";
+import { fireRogueLava } from "../../../src/content/q1/missionpacks/rogue-weapons.ts";
+import type { Q1Event, Q1FoundationHost } from "../../../src/content/q1/foundation/types.ts";
 import { PLAYER_BOUNDS, ZERO, vadd, weaponItem } from "../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base } from "../../../src/content/q1/base/index.ts";
 import { Q1CharacterActor } from "../../../src/content/q1/base/player.ts";
 import type { Q1CharacterInput } from "../../../src/content/q1/base/player.ts";
-import { registerMissionPackArsenal, launchRogueLavaSpike, captureMissionPackTravel, decodeMissionPackTravel, admitMissionPackTravel, newMissionPackTravel, dropMissionPackBackpack } from "../../../src/content/q1/missionpacks/index.ts";
-import type { Q1MissionPack } from "../../../src/content/q1/missionpacks/index.ts";
-import { missionPackCharacterPose } from "../../../src/content/q1/missionpacks/index.ts";
+import { registerMissionPackArsenal } from "../../../src/content/q1/missionpacks/arsenal.ts";
+import { launchRogueLavaSpike } from "../../../src/content/q1/missionpacks/rogue-weapons.ts";
+import { captureMissionPackTravel, decodeMissionPackTravel, admitMissionPackTravel, newMissionPackTravel } from "../../../src/content/q1/missionpacks/travel.ts";
+import { dropMissionPackBackpack } from "../../../src/content/q1/missionpacks/backpacks.ts";
+import type { Q1MissionPack } from "../../../src/content/q1/missionpacks/types.ts";
+import { missionPackCharacterPose } from "../../../src/content/q1/missionpacks/presentation.ts";
 import { missionPackObituary } from "../../../src/content/q1/missionpacks/obituaries.ts";
 import type { Q1ObituaryActor } from "../../../src/content/q1/base/rules.ts";
+import { impulseAuthority } from "../../support/authority.ts";
 
-const archivePath = `${testCorpusRoot()}/q1/rerelease/id1/pak0.pak`;
+const archivePath = corpusFile("q1/rerelease/id1/pak0.pak");
 async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "rerelease", deathmatch = 0, teamplay = 0, weaponBehavior?: WeaponBehaviorProjectilePort) {
   const archive = await openArchive(archivePath);
   const entry = archive.findEntries("maps/start.bsp")[0]; if (entry === undefined) throw new Error("Retail start.bsp missing");
@@ -49,7 +54,7 @@ async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "
     const model = entity.model.startsWith("*") ? Number(entity.model.slice(1)) : null;
     scene.link(body, { family: "q1", shape: model === null ? { kind: "box" } : { kind: "model", model }, contents: -2, owner: entity.owner, role: entity.solid === "trigger" ? "trigger" : "solid", monster: entity.monster !== null, deadMonster: false }); return undefined;
   } });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: (actor, impulse) => { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, velocity: vadd(body.velocity, impulse) }); return undefined; }, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = impulseAuthority(actors, callbacks, bodies);
   const inventory = new SharedInventoryTable(actors);
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, ...(weaponBehavior === undefined ? {} : { weaponBehavior }), random: () => 0.4, trace: request => {
     const trace = scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" }, policy: { kind: "q1", move: request.monsters ? "normal" : "no-monsters", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: request.ignore });
@@ -133,12 +138,14 @@ for (const edition of ["classic", "rerelease"] satisfies readonly ("classic" | "
 });
 
 test.skipIf(!existsSync(archivePath))("Rogue powered ammunition, lava armor and five-way grenades preserve source behavior", async () => {
-  const { game, arsenal, actors, callbacks, combat, inventory, player, target, gravity } = await session("rogue");
+  const { game, arsenal, actors, callbacks, combat, inventory, player, target, gravity, events } = await session("rogue");
   inventory.give(player.actor, weaponItem("nailgun"), 1); inventory.give(player.actor, weaponItem("supernailgun"), 1);
   inventory.give(player.actor, "rogue:ammo/lava-nails", 3); arsenal.players.enableCombos(player);
   expect(game.selectWeapon(player.actor, "rogue:lava-supernailgun")).toBe(true); expect(game.attack(player.actor, ZERO, 1)).toBe(true);
   expect(inventory.count(player.actor.id, "rogue:ammo/lava-nails")).toBe(1); expect(game.attack(player.actor, ZERO, 1.21)).toBe(true);
   expect(inventory.count(player.actor.id, "rogue:ammo/lava-nails")).toBe(0);
+  events.length = 0; expect(fireRogueLava(game, player)).toBe(false);
+  expect(events.some(event => event.kind === "message" && event.text.includes("out_lava_nails"))).toBe(true);
   combat.setArmor(target.actor, { regular: { kind: "q1", points: 100, absorption: 0.8, item: "q1:armor/red" }, powered: { kind: "none" } });
   const lava = launchRogueLavaSpike(game, player.actor.id, game.host.bodies.read(target.actor.id)?.origin ?? ZERO, { x: 1, y: 0, z: 0 });
   callbacks.touch({ self: lava.actor, other: target.actor.id, plane: null, surface: null });
@@ -365,4 +372,25 @@ for (const program of ["hipnotic", "rogue", "mg3"] satisfies readonly ("hipnotic
     expect(game.weaponInput(native.player.actor, true, ZERO, 1.05)).toBe(false);
     expect(game.weaponInput(native.player.actor, true, ZERO, 1.067)).toBe(true);
   } finally { native.actors.close(); }
+});
+
+test.skipIf(!existsSync(archivePath))("Rogue weapons-stay pickups hand out the plasma, multi-rocket and lava-nail rounds once", async () => {
+  const { game, callbacks, inventory, player } = await session("rogue", "rerelease", 2);
+  const pickups: readonly (readonly [string, `${string}:${string}`, number])[] = [["weapon_lightning", "rogue:ammo/plasma", 5], ["weapon_rocketlauncher", "rogue:ammo/multi-rockets", 3], ["weapon_nailgun", "rogue:ammo/lava-nails", 20]];
+  for (const [classname, item, amount] of pickups) {
+    const pickup = game.create(classname); game.spawnEntity(pickup); pickup.solid = "trigger";
+    const before = inventory.count(player.actor.id, item);
+    callbacks.touch({ self: pickup.actor, other: player.actor.id, plane: null, surface: null });
+    expect(inventory.count(player.actor.id, item) - before).toBe(amount);
+  }
+});
+
+test.skipIf(!existsSync(archivePath))("Hipnotic wetsuit cancels lightning-beam damage but not other weapons", async () => {
+  const { game, player, target } = await session("hipnotic");
+  game.givePowerup(target, "hipnotic:wetsuit");
+  const before = game.health(target.actor.id);
+  game.damage(target.actor.id, player.actor.id, player.actor.id, 30, "lightning");
+  expect(game.health(target.actor.id)).toBe(before);
+  game.damage(target.actor.id, player.actor.id, player.actor.id, 10, "shotgun");
+  expect(game.health(target.actor.id)).toBeLessThan(before);
 });

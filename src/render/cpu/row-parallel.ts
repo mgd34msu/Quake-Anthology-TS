@@ -9,7 +9,7 @@ import { availableParallelism } from "node:os";
 import type { BatchLighting, BlendFactor, DepthImageLevel } from "../../contracts/render.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import { runTriangleRows } from "./triangle-kernel.ts";
-import type { BoundTexture, Framebuffer, Sample, TriangleSetup } from "./triangle-kernel.ts";
+import type { BoundTexture, Framebuffer, Sample, TextureStorage, TriangleSetup } from "./triangle-kernel.ts";
 
 export interface RowSharedFramebuffer {
   readonly width: number;
@@ -158,6 +158,8 @@ const ERROR_BYTES = 4096;
 
 export interface RowTextureRegistration { readonly id: number; readonly texture: unknown }
 export interface RowLightingRegistration { readonly id: number; readonly parameters: unknown }
+export interface RowLevelRegistration { readonly id: number; readonly level: unknown }
+export interface RowLightingBase { readonly id: number; readonly worldPositions: unknown; readonly normals: unknown }
 export interface RowDepthRegistration { readonly id: number; readonly depth: DepthImageLevel }
 export interface RowJobMessage {
   readonly kind: "job";
@@ -165,29 +167,43 @@ export interface RowJobMessage {
   readonly bandRows: number;
   readonly jobBuffer: SharedArrayBuffer | null;
   readonly textures: readonly RowTextureRegistration[];
+  /** Mip level pixels not yet held by the workers; textures reference levels by id. */
+  readonly levels: readonly RowLevelRegistration[];
+  /** Level ids the workers must drop before this job. */
+  readonly evictLevels: readonly number[];
+  /** Per-vertex arrays shared by many triangles of one batch, sent once per job. */
+  readonly lightingBases: readonly RowLightingBase[];
   readonly lightings: readonly RowLightingRegistration[];
   readonly depths: readonly RowDepthRegistration[];
 }
 
-function serializeTexture(texture: BoundTexture): unknown {
+/** Upper bound on level pixels the workers retain across jobs. */
+export const ROW_LEVEL_BUDGET_BYTES = 96 * 1024 * 1024;
+
+function serializeLevel(level: TextureStorage): unknown {
+  return { width: level.width, height: level.height, pixels: level.pixels,
+    internalFormat: level.internalFormat, hasAlpha: level.hasAlpha, componentMaximum: level.componentMaximum,
+    uniform: level.uniform === null ? null : { ...level.uniform } };
+}
+
+function serializeTexture(texture: BoundTexture, levelId: (level: TextureStorage) => number): unknown {
   if (texture.kind === "incomplete") return { kind: "incomplete" };
   if (texture.kind === "constant") return { kind: "constant", internalFormat: texture.internalFormat, sample: { ...texture.sample } };
   return { kind: "image", internalFormat: texture.internalFormat, wrap: texture.wrap,
     minifyLinear: texture.minifyLinear, magnifyLinear: texture.magnifyLinear, mipmapping: texture.mipmapping,
     magnificationLimit: texture.magnificationLimit, borderColor: { ...texture.borderColor },
-    levels: texture.levels.map(level => ({ width: level.width, height: level.height, pixels: level.pixels,
-      internalFormat: level.internalFormat, hasAlpha: level.hasAlpha, componentMaximum: level.componentMaximum,
-      uniform: level.uniform === null ? null : { ...level.uniform } })) };
+    levels: texture.levels.map(levelId) };
 }
 
 /** Lighting parameters cross postMessage, but the shadow atlas carries a
  * RendererImage whose owner identity is a symbol. Workers only sample the
  * registered depth image and read texelSize/nearPlane, so the atlas is
  * reduced to those scalars. */
-function serializeLighting(parameters: BatchLighting): unknown {
+function serializeLighting(parameters: BatchLighting, baseId: number): unknown {
   if (parameters.kind === "vertex") return parameters;
   const atlas = parameters.atlas;
-  return { ...parameters, atlas: atlas === null ? null : { texelSize: atlas.texelSize, nearPlane: atlas.nearPlane } };
+  return { ...parameters, worldPositions: [], normals: [], baseId,
+    atlas: atlas === null ? null : { texelSize: atlas.texelSize, nearPlane: atlas.nearPlane } };
 }
 
 function configuredWorkerCount(): number {
@@ -209,10 +225,21 @@ export class RowParallelPool implements RowRegistries {
   readonly #sampled: Sample = { r: 1, g: 1, b: 1, a: 1 };
   #jobBuffer: SharedArrayBuffer | null = null;
   #closed = false;
-  readonly #textureIds = new WeakMap<object, number>();
+  #textureIds = new WeakMap<object, number>();
   readonly #constantIds = new Map<string, number>();
-  readonly #lightingIds = new WeakMap<object, number>();
+  #lightingIds = new WeakMap<object, number>();
+  #lightingBases = new WeakMap<object, { readonly normals: object | null; readonly id: number }[]>();
+  #nextLightingBase = 0;
+  #pendingLightingBases: RowLightingBase[] = [];
   readonly #depthIds = new WeakMap<object, number>();
+  /* Level storage is replaced, never mutated, when an image updates, so its identity is a safe cache key. */
+  readonly #levelIds = new WeakMap<TextureStorage, number>();
+  readonly #sentLevels = new Map<number, { readonly storage: WeakRef<TextureStorage>; readonly bytes: number }>();
+  #sentLevelBytes = 0;
+  #nextLevel = 0;
+  #pendingLevels: RowLevelRegistration[] = [];
+  readonly #touched = new Set<number>();
+  levelsSent = 0;
   #nextTexture = 0;
   #nextLighting = 0;
   #nextDepth = 0;
@@ -238,14 +265,15 @@ export class RowParallelPool implements RowRegistries {
     }
   }
 
-  static tryCreate(shared: RowSharedFramebuffer): RowParallelPool | null {
+  /** `failed` receives the reason when workers cannot start, so a silent fallback to serial drawing stays diagnosable. */
+  static tryCreate(shared: RowSharedFramebuffer, failed?: (reason: string) => void): RowParallelPool | null {
     const count = configuredWorkerCount();
     if (count < 1 || typeof SharedArrayBuffer !== "function") return null;
     try {
       const probe = new Int32Array(new SharedArrayBuffer(4));
       Atomics.wait(probe, 0, 0, 0);
       return new RowParallelPool(shared, count);
-    } catch { return null; }
+    } catch (error) { failed?.(error instanceof Error ? error.message : String(error)); return null; }
   }
 
   get workerCount(): number { return this.#workers.length; }
@@ -258,8 +286,42 @@ export class RowParallelPool implements RowRegistries {
     if (known !== undefined) return known;
     const id = this.#nextTexture++;
     if (key === null) this.#textureIds.set(texture, id); else this.#constantIds.set(key, id);
-    this.#pendingTextures.push({ id, texture: serializeTexture(texture) });
+    this.#pendingTextures.push({ id, texture: serializeTexture(texture, level => this.#levelId(level)) });
     return id;
+  }
+
+  #levelId(level: TextureStorage): number {
+    const known = this.#levelIds.get(level);
+    if (known !== undefined) {
+      this.#touched.add(known);
+      // Re-insert so Map order tracks recency for eviction.
+      const entry = this.#sentLevels.get(known);
+      if (entry !== undefined) { this.#sentLevels.delete(known); this.#sentLevels.set(known, entry); }
+      return known;
+    }
+    const id = this.#nextLevel++;
+    this.#touched.add(id);
+    this.#levelIds.set(level, id);
+    this.#sentLevels.set(id, { storage: new WeakRef(level), bytes: level.pixels.byteLength });
+    this.#sentLevelBytes += level.pixels.byteLength;
+    this.#pendingLevels.push({ id, level: serializeLevel(level) });
+    return id;
+  }
+
+  /** Drops the least recently used levels beyond the budget; levels used by the job being built are never dropped. */
+  #evictLevels(): number[] {
+    const evicted: number[] = [];
+    if (this.#sentLevelBytes <= ROW_LEVEL_BUDGET_BYTES) return evicted;
+    for (const [id, entry] of this.#sentLevels) {
+      if (this.#sentLevelBytes <= ROW_LEVEL_BUDGET_BYTES) break;
+      if (this.#touched.has(id)) continue;
+      this.#sentLevels.delete(id);
+      this.#sentLevelBytes -= entry.bytes;
+      const storage = entry.storage.deref();
+      if (storage !== undefined) this.#levelIds.delete(storage);
+      evicted.push(id);
+    }
+    return evicted;
   }
 
   lightingId(parameters: BatchLighting): number {
@@ -267,7 +329,19 @@ export class RowParallelPool implements RowRegistries {
     if (known !== undefined) return known;
     const id = this.#nextLighting++;
     this.#lightingIds.set(parameters, id);
-    this.#pendingLightings.push({ id, parameters: serializeLighting(parameters) });
+    this.#pendingLightings.push({ id, parameters: serializeLighting(parameters, parameters.kind === "vertex" ? -1 : this.#lightingBase(parameters)) });
+    return id;
+  }
+
+  #lightingBase(parameters: Exclude<BatchLighting, { readonly kind: "vertex" }>): number {
+    const normals = parameters.kind === "q2-world" ? parameters.normals : null;
+    let known = this.#lightingBases.get(parameters.worldPositions);
+    if (known === undefined) { known = []; this.#lightingBases.set(parameters.worldPositions, known); }
+    const found = known.find(entry => entry.normals === normals);
+    if (found !== undefined) return found.id;
+    const id = this.#nextLightingBase++;
+    known.push({ normals, id });
+    this.#pendingLightingBases.push({ id, worldPositions: parameters.worldPositions, normals: normals ?? [] });
     return id;
   }
 
@@ -290,12 +364,16 @@ export class RowParallelPool implements RowRegistries {
       freshBuffer = this.#jobBuffer;
     }
     const data = new Float64Array(this.#jobBuffer);
-    this.#pendingTextures = []; this.#pendingLightings = []; this.#pendingDepths = [];
+    this.#pendingTextures = []; this.#pendingLightings = []; this.#pendingDepths = []; this.#pendingLevels = []; this.#pendingLightingBases = []; this.#touched.clear();
+    // Texture and lighting ids last one job, because workers drop their copies when the next job starts (RENDER-002).
+    this.#textureIds = new WeakMap(); this.#lightingIds = new WeakMap(); this.#lightingBases = new WeakMap(); this.#constantIds.clear();
     for (let i = 0; i < setups.length; i++) {
       const setup = setups[i];
       if (setup === undefined) throw new RangeError("Missing row-parallel triangle setup");
       encodeRowSetup(data, i * ROW_SETUP_STRIDE, setup, this);
     }
+    const evictLevels = this.#evictLevels();
+    this.levelsSent += this.#pendingLevels.length;
     const workers = this.#workers.length;
     const bandRows = Math.max(1, Math.ceil(this.#shared.height / (workers * 4)));
     Atomics.store(this.#control, CONTROL_NEXT, 0);
@@ -303,7 +381,7 @@ export class RowParallelPool implements RowRegistries {
     Atomics.store(this.#control, CONTROL_ERROR, 0);
     Atomics.store(this.#control, CONTROL_ERROR_LENGTH, 0);
     const message: RowJobMessage = { kind: "job", count: setups.length, bandRows, jobBuffer: freshBuffer,
-      textures: this.#pendingTextures, lightings: this.#pendingLightings, depths: this.#pendingDepths };
+      textures: this.#pendingTextures, levels: this.#pendingLevels, evictLevels, lightingBases: this.#pendingLightingBases, lightings: this.#pendingLightings, depths: this.#pendingDepths };
     for (const worker of this.#workers) worker.postMessage(message);
     // The coordinator claims bands alongside the workers instead of only
     // blocking on the barrier: bands are row-disjoint and setups run in

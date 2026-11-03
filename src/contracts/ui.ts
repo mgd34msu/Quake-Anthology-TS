@@ -3,11 +3,10 @@ import type { ItemId } from "./gameplay.ts";
 /* Client module calls follow Q2 rerelease game.h and Q3 cg_public.h/ui_public.h.
  * Copyright (C) id Software. GPL-2.0-or-later. */
 import type { PresentationSelection, ResourceId } from "./content.ts";
-import type { Q2CgameApiIdentity, Q3ApiIdentity } from "./execution.ts";
+import type { Q3ApiIdentity } from "./execution.ts";
 import type { ClientId, ProviderId, SeatId } from "./identity.ts";
-import type { Vec2, Vec3, Vec4 } from "./math.ts";
-import type { Q2RereleaseMovementInput, Q2RereleaseMovementResult } from "./movement.ts";
-import type { NetworkSnapshot, Q2RereleasePlayerState } from "./protocol.ts";
+import type { Vec2, Vec4 } from "./math.ts";
+import type { NetworkSnapshot } from "./protocol.ts";
 import type { Rect } from "./render.ts";
 import type { SourceTime } from "./time.ts";
 
@@ -122,13 +121,6 @@ export interface LegacyUiScript {
   readonly module: ProviderId;
   readonly source: string;
 }
-export interface LegacyUiFeeder {
-  readonly module: ProviderId;
-  readonly sourceId: number;
-  readonly count: (seat: SeatId) => number;
-  readonly row: (seat: SeatId, index: number) => UiListRow | null;
-  readonly select: (seat: SeatId, index: number) => undefined;
-}
 export interface SeatUiController {
   readonly seat: SeatId;
   readonly state: () => SeatUiState;
@@ -143,45 +135,6 @@ export interface HudFrame {
   readonly time: SourceTime;
   readonly snapshot: NetworkSnapshot;
   readonly ui: SeatUiState;
-}
-export interface HudProvider {
-  readonly id: ProviderId;
-  readonly draw: (frame: HudFrame) => readonly UiDrawCommand[];
-}
-
-export interface Q2HudServerData {
-  readonly layout: string;
-  readonly inventory: readonly number[];
-}
-export interface Q2HudDraw {
-  readonly seat: SeatId;
-  readonly serverData: Q2HudServerData;
-  readonly viewport: Rect;
-  readonly safeArea: Rect;
-  readonly scale: number;
-  readonly playerNumber: number;
-  readonly player: Q2RereleasePlayerState;
-}
-/** Draw imports are bound to the selected seat before invoking the source module. */
-export interface Q2CgameExports {
-  readonly api: Q2CgameApiIdentity;
-  readonly init: () => undefined;
-  readonly shutdown: () => undefined;
-  readonly drawHud: (frame: Q2HudDraw) => undefined;
-  readonly touchPictures: () => undefined;
-  readonly layoutFlags: (player: Q2RereleasePlayerState) => number;
-  readonly activeWeaponWheelWeapon: (player: Q2RereleasePlayerState) => number;
-  readonly ownedWeaponWheelWeapons: (player: Q2RereleasePlayerState) => number;
-  readonly weaponWheelAmmoCount: (player: Q2RereleasePlayerState, ammoId: number) => number;
-  readonly powerupWheelCount: (player: Q2RereleasePlayerState, powerupId: number) => number;
-  readonly hitMarkerDamage: (player: Q2RereleasePlayerState) => number;
-  readonly pmove: (input: Q2RereleaseMovementInput) => Q2RereleaseMovementResult;
-  readonly parseConfigString: (index: number, value: string) => undefined;
-  readonly parseCenterPrint: (seat: SeatId, text: string, instant: boolean) => undefined;
-  readonly clearNotify: (seat: SeatId) => undefined;
-  readonly clearCenterPrint: (seat: SeatId) => undefined;
-  readonly notifyMessage: (seat: SeatId, text: string, chat: boolean) => undefined;
-  readonly monsterFlashOffset: (flashId: number) => Vec3;
 }
 export type StereoView = "center" | "left" | "right";
 export type Q3CgameEventHandling = "none" | "team-menu" | "scoreboard" | "edit-hud";

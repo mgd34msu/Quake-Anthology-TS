@@ -1,5 +1,5 @@
 /* teamplay.qc flag and team rules. Copyright Rogue / ZOID. GPL-2.0-or-later. */
-import type { ActorId } from "../../../../contracts/identity.ts";
+import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import { sameActor } from "../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
 import type { Q1EntityServices } from "../../foundation/entity-services.ts";
@@ -11,7 +11,19 @@ import { brush, later, number, vector } from "./common.ts";
 const flagBounds = { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 74 } };
 function teamName(team: number): string { return team === 5 ? "Red" : team === 14 ? "Blue" : team === 1 ? "Grey" : "UNKNOWN"; }
 export class RogueTeams {
+  private readonly states = new Map<OwnedActor, Q1Actor>();
   constructor(private readonly game: Q1EntityServices, private readonly hooks: MissionpackWorldHooks) {
+    game.host.actors.onRelease(actor => {
+      const state = this.states.get(actor); this.states.delete(actor);
+      if (state !== undefined && game.live(state)) game.remove(state);
+      return undefined;
+    });
+    game.registerPlayerExtension({ id: "rogue:team", captureTravel: (_game, player) => new Uint8Array([this.state(player.actor.id).number("steam") & 255]),
+      restoreTravel: (_game, player, bytes) => {
+        const team = (bytes[0] ?? 255) << 24 >> 24;
+        if (this.ctf && team >= 0 && this.legal(team)) { number(this.state(player.actor.id), "steam", team); }
+        return undefined;
+      } });
     game.setBaseTeamHealth(false);
     game.registerDamageSourceEffects("rogue:teams", {
       armorAllowed: request => !this.ctf || request.attack.attacker !== null && sameActor(request.attack.attacker, request.target) || this.team(request.attack.attacker) !== this.team(request.target) || ((hooks.gamecfg?.() ?? 0) & 2) !== 0,
@@ -34,10 +46,22 @@ export class RogueTeams {
   get mode(): number { return this.game.options.teamplay ?? 0; }
   get ctf(): boolean { return this.mode === 4 || this.mode === 5 || this.mode === 6; }
   private state(actor: ActorId): Q1Actor {
-    const found = [...this.game.entities.values()].find(entity => entity.classname === "rogue_team_state" && entity.owner !== null && sameActor(entity.owner, actor)); if (found !== undefined) return found;
-    const state = this.game.create("rogue_team_state"); state.owner = actor; number(state, "steam", this.ctf && ((this.hooks.gamecfg?.() ?? 0) & 8) === 0 ? -1 : this.color(actor)); return state;
+    const owner = this.game.host.actors.resolveOwned(actor), cached = owner === null ? undefined : this.states.get(owner);
+    if (cached !== undefined && this.game.live(cached)) return cached;
+    // A restored world rebuilds its entities, so a cache miss still scans once for a saved state entity.
+    const found = [...this.game.entities.values()].find(entity => entity.classname === "rogue_team_state" && entity.owner !== null && sameActor(entity.owner, actor));
+    if (found !== undefined) { if (owner !== null) this.states.set(owner, found); return found; }
+    const state = this.game.create("rogue_team_state"); state.owner = actor; number(state, "steam", this.ctf && ((this.hooks.gamecfg?.() ?? 0) & 8) === 0 ? -1 : this.color(actor));
+    if (owner !== null) this.states.set(owner, state);
+    return state;
   }
   private color(actor: ActorId): number { if (this.hooks.teamColor === undefined) { if (this.mode <= 0) return 0; throw new Error("Rogue teamplay requires shared player colors"); } return this.hooks.teamColor(actor); }
+  /** Rogue ClientKill refuses the fifth suicide of a connection and counts every accepted one. */
+  suicide(actor: ActorId): boolean {
+    const state = this.state(actor);
+    if (state.number("suicide_count") > 3) { this.message(actor, "$qc_suicided_too_much", false); return false; }
+    number(state, "suicide_count", state.number("suicide_count") + 1); return true;
+  }
   team(actor: ActorId | null): number { return actor === null || !this.game.isPlayer(actor) ? 0 : this.state(actor).number("steam"); }
   private setColor(actor: ActorId, team: number): undefined { if (this.hooks.setTeamColor === undefined) throw new Error("Rogue CTF requires shared color mutation"); return this.hooks.setTeamColor(actor, team); }
   private score(actor: ActorId, delta: number): undefined { if (this.hooks.addFrags === undefined) throw new Error("Rogue CTF requires shared score authority"); return this.hooks.addFrags(actor, delta); }
@@ -47,7 +71,14 @@ export class RogueTeams {
   private sound(actor: ActorId, path: string, global = false): undefined { const owner = this.game.host.actors.resolveOwned(actor); return owner === null ? undefined : this.game.sound(owner, path, global ? "voice" : "item", global ? 0 : 1); }
   private legal(team: number): boolean { return this.mode < 4 ? team > 0 : this.ctf ? team === 5 || team === 14 || this.mode === 6 && team === 1 : true; }
   playerSpawned(actor: ActorId): undefined {
-    const state = this.state(actor); if (state.number("steam") >= 0 || this.mode < 4) { const color = this.color(actor); if (this.legal(color)) { number(state, "steam", color); return undefined; } }
+    const state = this.state(actor), player = this.game.entity(actor);
+    // TeamSetSkin: the CTF player model uses its second skin in deathmatch.
+    if (player !== null) player.skin = this.game.options.deathmatch !== 0 && this.mode >= 4 ? 1 : 0;
+    for (const timer of ["ctf_lasthurtcarrier", "ctf_lastreturnedflag", "ctf_lastfraggedcarrier", "ctf_flagsince"]) number(state, timer, -10); if (state.number("steam") >= 0 || this.mode < 4) { const color = this.color(actor); if (this.legal(color)) { number(state, "steam", color); return undefined; } }
+    return this.assign(actor, state);
+  }
+  /** ClientConnect's team assignment, run ahead of spawn selection so a first spawn uses the team base. */
+  private assign(actor: ActorId, state: Q1Actor): undefined {
     let red = 0, blue = 0, grey = 0; for (const player of this.game.host.players()) if (!sameActor(actor, player)) { const team = this.team(player); if (team === 5) red++; else if (team === 14) blue++; else if (team === 1) grey++; }
     let team = 5, count = red; if (blue < count || blue === count && this.game.host.random() < 0.5) { team = 14; count = blue; } if (this.mode === 6 && grey * 2 < count) team = 1;
     number(state, "steam", team); number(state, "ctf_flags", state.number("ctf_flags") | 4); this.message(actor, `You have been assigned to the ${teamName(team)} team.\n`, false); return this.setColor(actor, team);
@@ -61,7 +92,7 @@ export class RogueTeams {
     if (color === state.number("steam")) return undefined;
     const previous = state.number("steam"), changes = ((this.hooks.gamecfg?.() ?? 0) & 16) !== 0;
     if (previous >= 0 && this.legal(previous) && !changes) {
-      if (state.number("suicide_count") > 3) { this.message(actor, "$qc_color_games", false); if (this.hooks.disconnect === undefined) throw new Error("Rogue team enforcement requires shared disconnect"); this.hooks.disconnect(actor); }
+      if (state.number("suicide_count") > 3) { this.message(actor, "$qc_color_games", false); if (this.hooks.disconnect === undefined) throw new Error("Rogue team enforcement requires shared disconnect"); this.hooks.disconnect(actor); this.broadcast(`${this.name(actor)} has bad color sense\n`); return; }
       if (state.number("ctf_killed") !== 1) number(state, "ctf_killed", 2); game.damage(actor, actor, actor, 1000); number(state, "suicide_count", state.number("suicide_count") + 1); this.message(actor, "$qc_cannot_change_teams", false); return this.setColor(actor, previous);
     }
     if (previous >= 0 && !this.legal(previous)) number(state, "steam", -50);
@@ -71,6 +102,7 @@ export class RogueTeams {
   selectSpawn(actor: ActorId): Q1Actor | undefined {
     const game = this.game, world = game.world; if (game.options.coop || game.options.deathmatch === 0 || !this.ctf || world === null) return undefined;
     const entities = [...game.entities.values()], test = entities.find(e => e.classname === "testplayerstart"); if (test !== undefined) return test;
+    if (this.mode >= 4 && this.state(actor).number("steam") < 0) this.assign(actor, this.state(actor));
     const team = this.state(actor).number("ctf_killed") === 0 ? this.team(actor) : 0;
     const key = team === 5 ? "rogue:team1_lastspawn" : team === 14 ? "rogue:team2_lastspawn" : "rogue:lastspawn";
     const classname = team === 5 ? "info_player_team1" : team === 14 ? "info_player_team2" : "info_player_deathmatch";
@@ -137,7 +169,7 @@ export class RogueTeams {
   private clearKeys(actor: ActorId): undefined { const owner = this.game.host.actors.resolveOwned(actor); if (owner !== null) for (const item of ["q1:key/silver", "q1:key/gold"] satisfies readonly ("q1:key/silver" | "q1:key/gold")[]) this.game.host.inventory.consume(owner, item, this.game.host.inventory.count(actor, item)); return undefined; }
   private capture(actor: ActorId, alternate: boolean): undefined {
     const game = this.game, state = this.state(actor), team = this.team(actor), bits = state.number("ctf_flags"); this.broadcast(`${this.name(actor)} captured the flag!\n`); this.clearKeys(actor); this.sound(actor, "misc/flagcap.wav", true); this.score(actor, alternate ? 8 : 15);
-    for (const player of game.host.players()) { const other = this.state(player); if (this.color(player) === team) { if (!sameActor(actor, player)) this.score(player, alternate ? 4 : 10); if (!alternate) { if (this.mode !== 5 && other.number("ctf_lastreturnedflag") + 4 > game.time) this.score(player, 1); if (other.number("ctf_lastfraggedcarrier") + 6 > game.time) this.score(player, 2); } this.message(player, "$qc_your_team_captured"); } else { number(other, "ctf_lasthurtcarrier", -5); this.message(player, "$qc_your_flag_captured"); } if (!alternate) number(other, "ctf_flags", other.number("ctf_flags") & ~3); }
+    for (const player of game.host.players()) { const other = this.state(player); if (this.color(player) === team) { if (!sameActor(actor, player)) this.score(player, alternate ? 4 : 10); if (!alternate) { if (this.mode !== 5 && other.number("ctf_lastreturnedflag") + 4 > game.time) { this.score(player, 1); this.broadcast(`${this.name(player)} gets an assist for returning the ${teamName(team)} flag!\n`); } if (other.number("ctf_lastfraggedcarrier") + 6 > game.time) { this.score(player, 2); this.broadcast(`${this.name(player)} gets an assist for fragging the flag carrier!\n`); } } if (this.mode !== 5) this.message(player, "$qc_your_team_captured"); } else { number(other, "ctf_lasthurtcarrier", -5); if (this.mode !== 5) this.message(player, "$qc_your_flag_captured"); } if (!alternate) number(other, "ctf_flags", other.number("ctf_flags") & ~3); }
     for (const flag of this.flags()) if (alternate ? flag.number("team") === ((bits & 1) !== 0 ? 5 : 14) : this.mode === 5 ? flag.classname === "item_flag" : flag.classname !== "item_flag") this.regenerate(flag);
     if (alternate) number(state, "ctf_flags", bits & ~3); return undefined;
   }
@@ -146,7 +178,7 @@ export class RogueTeams {
     const state = this.state(actor), bits = state.number("ctf_flags"), team = flag.number("team");
     if (this.mode !== 5) {
       if (this.mode !== 4 && this.mode !== 6) return undefined;
-      if (team === this.team(actor)) { if (flag.number("cnt") === 0) return team === 5 && (bits & 2) !== 0 || team === 14 && (bits & 1) !== 0 ? this.capture(actor, false) : undefined; this.score(actor, 1); number(state, "ctf_lastreturnedflag", game.time); this.sound(actor, flag.text("noise1")); return this.returnFlag(flag); }
+      if (team === this.team(actor)) { if (flag.number("cnt") === 0) return team === 5 && (bits & 2) !== 0 || team === 14 && (bits & 1) !== 0 ? this.capture(actor, false) : undefined; this.score(actor, 1); number(state, "ctf_lastreturnedflag", game.time); this.broadcast(`${this.name(actor)} returned the ${teamName(team)} flag!\n`); this.sound(actor, flag.text("noise1")); return this.returnFlag(flag); }
       if ((bits & 3) !== 0) return undefined;
     }
     this.broadcast(`${this.name(actor)} got the ${this.mode === 5 ? "" : teamName(team) + " "}flag!\n`); this.sound(actor, flag.text("noise")); number(state, "ctf_flags", bits | (team === 14 ? 2 : 1)); number(state, "ctf_flagsince", game.time);
@@ -173,13 +205,13 @@ export class RogueTeams {
     const game = this.game, victim = this.state(target), killer = this.state(attacker), team = this.team(attacker);
     if ((victim.number("ctf_flags") & 3) !== 0 && this.team(target) !== team) { number(killer, "ctf_lastfraggedcarrier", game.time); if (victim.number("ctf_flagsince") + 2 <= game.time) { this.score(attacker, 2); this.message(attacker, "$qc_enemy_killed_bonus", false, [2]); } else this.message(attacker, "$qc_enemy_killed_no_bonus", false); }
     let flagBonus = false, carrierBonus = false;
-    if (victim.number("ctf_lasthurtcarrier") + 4 > game.time && (killer.number("ctf_flags") & 3) === 0) { this.score(attacker, 2); carrierBonus = true; }
+    if (victim.number("ctf_lasthurtcarrier") + 4 > game.time && (killer.number("ctf_flags") & 3) === 0) { this.score(attacker, 2); carrierBonus = true; this.broadcast(`${this.name(attacker)} defends ${teamName(team)}'s flag carrier against an agressive enemy\n`); }
     for (const originActor of [attacker, target]) {
       const origin = game.host.bodies.read(originActor)?.origin; if (origin === undefined) continue;
       for (const observation of [...game.host.actors.observations()].reverse()) {
-        const actor = observation.id, body = game.host.bodies.read(actor); if (body === null || length(vsub(vadd(body.origin, vscale(vadd(body.bounds.min, body.bounds.max), 0.5)), origin)) > 400) continue;
-        if (game.isPlayer(actor) && this.team(actor) === team && (this.state(actor).number("ctf_flags") & 3) !== 0 && !sameActor(actor, attacker) && !carrierBonus) { this.score(attacker, 1); carrierBonus = true; }
-        const classname = game.host.classname(actor); if (team === 5 && classname === "item_flag_team1" || team === 14 && classname === "item_flag_team2" || classname === "item_flag" && (!sameActor(originActor, target) || !flagBonus)) { this.score(attacker, 1); flagBonus = true; }
+        const actor = observation.id, body = game.host.bodies.read(actor); if (body === null || game.entity(actor)?.solid === "none" || length(vsub(vadd(body.origin, vscale(vadd(body.bounds.min, body.bounds.max), 0.5)), origin)) > 400) continue;
+        if (game.isPlayer(actor) && this.team(actor) === team && (this.state(actor).number("ctf_flags") & 3) !== 0 && !sameActor(actor, attacker) && !carrierBonus) { this.score(attacker, 1); carrierBonus = true; this.broadcast(`${this.name(attacker)} defends ${teamName(team)}'s flag carrier\n`); }
+        const classname = game.host.classname(actor); if (team === 5 && classname === "item_flag_team1" || team === 14 && classname === "item_flag_team2" || classname === "item_flag" && (!sameActor(originActor, target) || !flagBonus)) { this.score(attacker, 1); flagBonus = true; this.broadcast(`${this.name(attacker)} defends the${this.mode === 5 ? "" : ` ${teamName(team)}`} flag\n`); }
       }
     }
     return undefined;

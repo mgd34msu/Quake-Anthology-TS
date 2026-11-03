@@ -3,7 +3,7 @@ import { loadApplicationContent } from "../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { createSimulation } from "../../src/app/bootstrap/simulation/index.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
-import { captureQ1SourceSave, restoreQ1SourceSave } from "../../src/persistence/q1-source.ts";
+import { captureQ1SourceSave, restoreQ1SourceSave } from "../../src/compat/qc/q1-source-save.ts";
 import { decodeQ1Save, encodeQ1Save } from "../../src/persistence/q1.ts";
 
 test("original Quake save restores actual edict fields into a fresh precached source", async () => {

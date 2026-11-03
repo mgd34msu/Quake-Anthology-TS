@@ -1,10 +1,18 @@
 /* doors.qc/buttons.qc/plats.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId } from "../../../contracts/identity.ts";
+import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor } from "./entity.ts";
 import { moveDirection } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 import { ZERO, vadd, vsub, vscale, dot, overlaps } from "./types.ts";
 
+/** MG1 and MG3 let a door, key or button override the map's worldtype (SUB_SetWorldtype). */
+function entityWorldType(game: Q1EntityServices, entity: Q1Actor): number {
+  const authored = game.sourceDoorKeys ? entity.number("worldtype") : 0;
+  return authored > 0 && authored <= 3 ? authored - 1 : game.worldType;
+}
+const DOOR_CRUSHER = 64;
+const DOOR_NONSOLID = 4096;
 function doorSound(entity: Q1Actor, moving: boolean): string {
   if (entity.sounds === 1) return moving ? "doors/doormv1.wav" : "doors/drclos4.wav";
   if (entity.sounds === 2) return moving ? "doors/hydro1.wav" : "doors/hydro2.wav";
@@ -15,7 +23,8 @@ function doorSound(entity: Q1Actor, moving: boolean): string {
 export function doorDown(game: Q1EntityServices, entity: Q1Actor): undefined {
   game.sound(entity, doorSound(entity, true)); entity.state = "down";
   if (entity.maxHealth > 0) { game.host.combat.setHealth(entity.actor, entity.maxHealth); entity.damageable = true; }
-  return game.calcMove(entity, entity.pos1, entity.speed, game.named.action(entity, "door_hit_bottom"));
+  const closing = game.sourceDoorKeys ? entity.number("speed2") || entity.speed : entity.speed;
+  return game.calcMove(entity, entity.pos1, closing, game.named.action(entity, "door_hit_bottom"));
 }
 export function doorUp(game: Q1EntityServices, entity: Q1Actor): undefined {
   if (entity.state === "up") return undefined;
@@ -28,25 +37,34 @@ export function doorUp(game: Q1EntityServices, entity: Q1Actor): undefined {
 }
 function doorUse(game: Q1EntityServices, entity: Q1Actor, activator: ActorId | null): undefined {
   const master = entity.doorGroup[0] ?? entity;
+  if (lockKey(master) !== null) keyUseSound(game, master);
   const down = (master.spawnflags & 32) !== 0 && (master.state === "up" || master.state === "top");
   for (const door of master.doorGroup.length === 0 ? [master] : master.doorGroup) {
     door.message = ""; door.activator = activator; if (down) doorDown(game, door); else doorUp(game, door);
   }
   return undefined;
 }
+/** MG1 and MG3 doors and buttons take a map-authored `movedir` vector as the whole travel instead of deriving one from angles. */
+function authoredMoveDirection(game: Q1EntityServices, entity: Q1Actor): Vec3 | null {
+  if (!game.sourceDoorKeys || !entity.fields.has("movedir")) return null;
+  const direction = entity.vector("movedir");
+  return direction.x === 0 && direction.y === 0 && direction.z === 0 ? null : direction;
+}
 export function spawnDoor(game: Q1EntityServices, entity: Q1Actor): undefined {
-  const keySounds = game.worldType === 0 ? ["doors/medtry.wav", "doors/meduse.wav"] : game.worldType === 1 ? ["doors/runetry.wav", "doors/runeuse.wav"] : game.worldType === 2 ? ["doors/basetry.wav", "doors/baseuse.wav"] : [];
+  const worldType = entityWorldType(game, entity);
+  const keySounds = worldType === 0 ? ["doors/medtry.wav", "doors/meduse.wav"] : worldType === 1 ? ["doors/runetry.wav", "doors/runeuse.wav"] : worldType === 2 ? ["doors/basetry.wav", "doors/baseuse.wav"] : [];
   for (const path of keySounds) if (game.usesId1Precaches) game.precacheSound(path);
   const sounds = [["misc/null.wav", "misc/null.wav"], ["doors/drclos4.wav", "doors/doormv1.wav"], ["doors/hydro1.wav", "doors/hydro2.wav"], ["doors/stndr1.wav", "doors/stndr2.wav"], ["doors/ddoor1.wav", "doors/ddoor2.wav"]][entity.sounds] ?? [];
   for (const path of sounds) if (game.usesId1Precaches) game.precacheSound(path);
-  const body = game.body(entity); entity.movedir = moveDirection(body.angles, game); game.setBody(entity, { angles: ZERO });
-  entity.solid = "bsp"; entity.movement = "push"; entity.speed ||= 100; entity.wait ||= 3; entity.damage ||= 2;
+  const body = game.body(entity), authored = authoredMoveDirection(game, entity);
+  entity.movedir = authored ?? moveDirection(body.angles, game); game.setBody(entity, { angles: ZERO });
+  entity.solid = game.sourceDoorKeys && (entity.spawnflags & DOOR_NONSOLID) !== 0 ? "none" : "bsp"; entity.movement = "push"; entity.speed ||= 100; entity.wait ||= 3; entity.damage ||= 2;
   if ((entity.spawnflags & 24) !== 0) entity.wait = -1;
   entity.pos1 = body.origin;
   const size = vsub(body.bounds.max, body.bounds.min);
   const absoluteDirection = { x: Math.abs(entity.movedir.x), y: Math.abs(entity.movedir.y), z: Math.abs(entity.movedir.z) };
   const distance = game.options.edition === "rerelease" ? dot(absoluteDirection, size) : Math.abs(dot(entity.movedir, size));
-  entity.pos2 = vadd(entity.pos1, vscale(entity.movedir, distance - (entity.number("lip") || 8)));
+  entity.pos2 = authored === null ? vadd(entity.pos1, vscale(entity.movedir, distance - (entity.number("lip") || 8))) : vadd(entity.pos1, authored);
   if ((entity.spawnflags & 1) !== 0) { const closed = entity.pos1; entity.pos1 = entity.pos2; entity.pos2 = closed; game.setOrigin(entity, entity.pos1); }
   entity.use = game.named.use(entity, "door_use");
   entity.blocked = game.named.blocked(entity, "door_blocked");
@@ -85,9 +103,12 @@ export function spawnButton(game: Q1EntityServices, entity: Q1Actor): undefined 
   const sound = ["buttons/airbut1.wav", "buttons/switch21.wav", "buttons/switch02.wav", "buttons/switch04.wav"][entity.sounds];
   if (game.usesId1Precaches && (sound !== undefined)) game.precacheSound(sound);
   const body = game.body(entity); entity.solid = "bsp"; entity.movement = "push"; entity.speed ||= 40; entity.wait ||= 1;
-  entity.movedir = moveDirection(body.angles, game); game.setBody(entity, { angles: ZERO });
+  const authored = authoredMoveDirection(game, entity);
+  entity.movedir = authored ?? moveDirection(body.angles, game); game.setBody(entity, { angles: ZERO });
   entity.pos1 = body.origin;
-  entity.pos2 = vadd(body.origin, vscale(entity.movedir, Math.abs(dot(entity.movedir, vsub(body.bounds.max, body.bounds.min))) - (entity.number("lip") || 4)));
+  const size = vsub(body.bounds.max, body.bounds.min), absoluteDirection = { x: Math.abs(entity.movedir.x), y: Math.abs(entity.movedir.y), z: Math.abs(entity.movedir.z) };
+  const distance = game.options.edition === "rerelease" ? dot(absoluteDirection, size) : Math.abs(dot(entity.movedir, size));
+  entity.pos2 = authored === null ? vadd(body.origin, vscale(entity.movedir, distance - (entity.number("lip") || 4))) : vadd(body.origin, authored);
   entity.use = game.named.use(entity, "button_use");
   if (entity.maxHealth > 0) { entity.damageable = true; entity.die = game.named.die(entity, "button_killed"); }
   else entity.touch = game.named.touch(entity, "button_touch");
@@ -125,24 +146,45 @@ export function spawnPlat(game: Q1EntityServices, entity: Q1Actor): undefined {
   return undefined;
 }
 
+function keyMessage(game: Q1EntityServices, entity: Q1Actor, other: ActorId, key: "q1:key/gold" | "q1:key/silver"): undefined {
+  const worldType = entityWorldType(game, entity);
+  game.message(other, `$qc_need_${key === "q1:key/gold" ? "gold" : "silver"}_${worldType === 2 ? "keycard" : worldType === 1 ? "runekey" : "key"}`);
+  return game.sound(entity, worldType === 2 ? "doors/basetry.wav" : worldType === 1 ? "doors/runetry.wav" : "doors/medtry.wav");
+}
+function keyUseSound(game: Q1EntityServices, entity: Q1Actor): undefined {
+  const worldType = entityWorldType(game, entity);
+  return game.sound(entity, worldType === 2 ? "doors/baseuse.wav" : worldType === 1 ? "doors/runeuse.wav" : "doors/meduse.wav", "item");
+}
+function lockKey(entity: Q1Actor): "q1:key/gold" | "q1:key/silver" | null {
+  return (entity.spawnflags & 8) !== 0 ? "q1:key/gold" : (entity.spawnflags & 16) !== 0 ? "q1:key/silver" : null;
+}
 function doorTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
     if (!game.isPlayer(other)) return undefined;
     const master = entity.doorGroup[0] ?? entity; if (master.attackFinished > game.time) return undefined;
     master.attackFinished = game.time + 2; game.message(other, master.message);
-    const key = (entity.spawnflags & 8) !== 0 ? "q1:key/gold" : (entity.spawnflags & 16) !== 0 ? "q1:key/silver" : null;
+    if (master.message !== "") { const owner = game.host.actors.resolveOwned(other); if (owner !== null) game.sound(owner, "misc/talk.wav"); }
+    const key = lockKey(entity);
     if (key === null) return undefined;
     const player = game.player(other); if (player === null) return undefined;
-    if (!game.host.inventory.consume(player.actor, key, 1)) {
-      game.message(other, `$qc_need_${key === "q1:key/gold" ? "gold" : "silver"}_${game.worldType === 2 ? "keycard" : game.worldType === 1 ? "runekey" : "key"}`);
-      return game.sound(entity, game.worldType === 2 ? "doors/basetry.wav" : game.worldType === 1 ? "doors/runetry.wav" : "doors/medtry.wav");
-    }
-    for (const door of master.doorGroup) door.touch = null;
-    game.sound(entity, game.worldType === 2 ? "doors/baseuse.wav" : game.worldType === 1 ? "doors/runeuse.wav" : "doors/meduse.wav", "item");
+    if (!game.host.inventory.consume(player.actor, key, 1)) return keyMessage(game, entity, other, key);
+    // door_touch clears only this door and the next one in the link ring.
+    entity.touch = null; const ring = master.doorGroup, next = ring[(ring.indexOf(entity) + 1) % Math.max(1, ring.length)]; if (next !== undefined) next.touch = null;
     return doorUse(game, master, other);
 }
+function buttonTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
+  if (!game.isPlayer(other)) return undefined;
+  const key = game.sourceDoorKeys ? lockKey(entity) : null;
+  if (key !== null) {
+    const player = game.player(other); if (player === null) return undefined;
+    if (!game.host.inventory.consume(player.actor, key, 1)) return keyMessage(game, entity, other, key);
+    keyUseSound(game, entity);
+  }
+  return buttonFire(game, entity, other);
+}
 function buttonFire(game: Q1EntityServices, entity: Q1Actor, activator: ActorId | null): undefined {
+  entity.activator = activator;
   if (entity.state === "up" || entity.state === "top") return undefined;
-  entity.activator = activator; entity.state = "up";
+  entity.state = "up";
   game.sound(entity, ["buttons/airbut1.wav", "buttons/switch21.wav", "buttons/switch02.wav", "buttons/switch04.wav"][entity.sounds] ?? "buttons/airbut1.wav");
   return game.calcMove(entity, entity.pos2, entity.speed, game.named.action(entity, "button_wait"));
 }
@@ -188,6 +230,7 @@ export function registerMoverCallbacks(game: Q1EntityServices): undefined {
   game.named.register("door_use", { use: (runtime, entity, _other, activator) => doorUse(runtime, entity, activator) });
   game.named.register("door_blocked", { blocked: (runtime, entity, other) => {
     runtime.damage(other, entity.actor.id, entity.actor.id, entity.damage, null, "direct", "crush");
+    if (runtime.sourceDoorKeys && (entity.spawnflags & DOOR_CRUSHER) !== 0) return undefined;
     if (entity.wait >= 0) { if (entity.state === "down") doorUp(runtime, entity); else doorDown(runtime, entity); } return undefined;
   } });
   game.named.register("door_killed", { die: (runtime, entity, attacker) => { const master = entity.doorGroup[0] ?? entity; runtime.host.combat.setHealth(master.actor, master.maxHealth); master.damageable = false; return doorUse(runtime, master, attacker); } });
@@ -198,7 +241,7 @@ export function registerMoverCallbacks(game: Q1EntityServices): undefined {
     entity.attackFinished = runtime.time + 1; return doorUse(runtime, master, other);
   } });
   game.named.register("button_use", { use: (runtime, entity, _other, activator) => buttonFire(runtime, entity, activator) });
-  game.named.register("button_touch", { touch: (runtime, entity, other) => runtime.isPlayer(other) ? buttonFire(runtime, entity, other) : undefined });
+  game.named.register("button_touch", { touch: buttonTouch });
   game.named.register("button_killed", { die: (runtime, entity, attacker) => { runtime.host.combat.setHealth(entity.actor, entity.maxHealth); entity.damageable = false; return buttonFire(runtime, entity, attacker); } });
   game.named.register("button_wait", { action: (runtime, entity) => {
     entity.state = "top"; if (entity.wait >= 0) runtime.scheduleAt(entity, Math.fround(entity.number("ltime") + entity.wait), runtime.named.action(entity, "button_return"));

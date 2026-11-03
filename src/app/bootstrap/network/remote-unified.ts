@@ -42,12 +42,15 @@ export interface UnifiedRemoteOptions {
   print(text:string): void;
 }
 
+const MAX_IDENTITY_SLOTS = 65536;
+
 /** Read-only replica: identities and presentation state, never an authoritative Simulation. */
 export class UnifiedRemotePresentation {
   readonly client: SessionClient;
   private readonly world = new RemoteWorldContent(null);
-  private readonly actors = new Map<string,ActorId>();
-  private readonly clients = new Map<string,ClientId>();
+  // One entry per slot: a new generation replaces the old, so identity memory is bounded by the slot range.
+  private readonly actors = new Map<number,{readonly generation:number;readonly value:ActorId}>();
+  private readonly clients = new Map<number,{readonly generation:number;readonly value:ClientId}>();
   private readonly resources = new Map<ResourceId,ResolvedResourceReference>();
   private readonly pendingEvents = new EventRing<{frame:number;events:readonly SimulationPresentationEvent[];simulation:readonly SimulationEvent[]}>(4096);
   private readonly pendingCursor: EventCursor = this.pendingEvents.openCursor();
@@ -81,13 +84,15 @@ export class UnifiedRemotePresentation {
   private assertCurrent(generation:number):void {if(this.closed||generation!==this.generation)throw new Error('Unified replica load was retired');}
   private identity():UnifiedIdentityDecoder {
     return {session:this.options.identity.session,actor:(slot,generation)=>{
-      const key=`${slot}:${generation}`,old=this.actors.get(key);if(old!==undefined)return old;
-      const value=this.options.identity.actor(slot,this.options.nextGeneration(slot));this.actors.set(key,value);return value;
+      if(slot>=MAX_IDENTITY_SLOTS)throw new RangeError('Unified actor slot is out of range');
+      const old=this.actors.get(slot);if(old?.generation===generation)return old.value;
+      const value=this.options.identity.actor(slot,this.options.nextGeneration(slot));this.actors.set(slot,{generation,value});return value;
     },client:(slot,generation)=>{
       if(this.binding?.client.slot===slot&&this.binding.client.generation===generation)return this.client.id;
-      const key=`${slot}:${generation}`,old=this.clients.get(key);if(old!==undefined)return old;
+      if(slot>=MAX_IDENTITY_SLOTS)throw new RangeError('Unified client slot is out of range');
+      const old=this.clients.get(slot);if(old?.generation===generation)return old.value;
       // Remote references are not admitted session clients; their generation is epoch-scoped.
-      const value=this.options.identity.client(slot,this.options.nextGeneration(slot));this.clients.set(key,value);return value;
+      const value=this.options.identity.client(slot,this.options.nextGeneration(slot));this.clients.set(slot,{generation,value});return value;
     },seat:()=>this.options.seat,resourceId:id=>{const resource=this.resources.get(id);if(resource===undefined)throw new Error(`Unified resource was not declared: ${id}`);return resource.id;}};
   }
   async offer(offer:Extract<UnifiedControl,{kind:'offer'}>):Promise<void>{
@@ -212,7 +217,7 @@ export class UnifiedRemotePresentation {
   characterViews(){const actor=this.current?.player.actor,player=this.predictedPlayer();return this.current?.characters.map(view=>player!==null&&actor!==undefined&&view.actor.equals(actor)?{...view,origin:this.shift(view.origin),velocity:movementVelocity(player.state)}:view)??[];}
   worldText(){return this.current?.worldText??[];}
   isPlayer(actor:ActorId):boolean{return this.current?.output.snapshot.configurations.some(value=>value.actor.equals(actor))??false;}
-  numberOf(actor:ActorId):number|null {for(const [key,value] of this.actors)if(value.equals(actor))return Number(key.split(':')[0]);return null;}
+  numberOf(actor:ActorId):number|null {return this.actors.get(actor.slot)?.value.equals(actor)===true?actor.slot:null;}
   playerCommand(actor:ActorId,name:string,args:readonly string[]):undefined {if(this.player===null||!this.player.actor.equals(actor))throw new Error('Unified command belongs to another player');this.options.sendCommand(name,args);return undefined;}
   registerResource(_content:ContentId,_path:string,resource:ResolvedResourceReference):undefined {this.resources.set(unifiedResourceId(resource),resource);return undefined;}
   drainSimulationEvents():readonly SimulationEvent[]{const events=this.simulationEvents.take(this.simulationCursor);this.simulationEvents.retire();return events;}

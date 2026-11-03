@@ -90,6 +90,14 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     return this.read(actor.id);
   }
 
+  /** Spawn selection writes the weapon directly, without the switch animation a requested change would play. */
+  setSpawnWeapon(actor: ActorId, weapon: number): void {
+    const player = this.require(actor), item = Q3_WEAPON_ITEMS.find(entry => entry.weapon === weapon)?.item;
+    if (item === undefined || player.arsenal.state.kind !== "q3") throw new Error("Spawn weapon is not a Q3 weapon");
+    player.arsenal = { ...player.arsenal, activeWeapon: item, state: { ...player.arsenal.state, sourceWeapon: weapon } };
+    player.runtime = { ...player.runtime, requestedWeapon: null };
+  }
+
   read(actor: ActorId): ArsenalState {
     return { ...this.require(actor).arsenal, ammo: this.options.inventory.entries(actor).filter(entry => this.inventoryItems.has(entry.item)) };
   }
@@ -176,8 +184,8 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     if (intent !== undefined && intent.provider !== this.provider) throw new Error("Arsenal intent belongs to a different provider");
     if (intent?.weapon != null) {
       const requested = Q3_WEAPON_ITEMS.find(entry => entry.item === intent.weapon);
-      if (requested === undefined || this.options.product === "baseq3" && requested.weapon > 10) throw new Error("Weapon does not belong to the selected Q3 product");
-      this.select(input.actor.id, intent.weapon);
+      // Peers choose this string; a weapon outside the product is no request.
+      if (requested !== undefined && (this.options.product !== "baseq3" || requested.weapon <= 10)) this.select(input.actor.id, intent.weapon);
     }
     const weaponAnimation = { provider: this.provider, state: { ...q3SpawnAnimation(), torso: player.torsoAnimation } };
     const firingDelay = this.options.firingDelay;

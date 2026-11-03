@@ -13,20 +13,21 @@ import { monsterDabeam } from "./dabeam.ts";
 import { fixbotFrame, fixbotMoves } from "./tables/xatrix-fixbot.ts";
 
 function run(context: MonsterContext): undefined { return context.setMove(context.state.standGround ? "fixbot_move_stand" : "fixbot_move_run"); }
-function goal(context: MonsterContext): Q2Entity {
-  const entity = context.game.entity(context.entity.goal);
-  if (entity === null) throw new Error("Fixbot source movement requires its bot goal");
-  return entity;
+/** The C dereferences a freed or NULL goal; the port treats a missing goal as the end of the goal-driven move. */
+function goal(context: MonsterContext): Q2Entity | null { return context.game.entity(context.entity.goal); }
+function dropGoal(context: MonsterContext): undefined {
+  context.entity.goal = context.entity.enemy = null; return context.setMove("fixbot_move_stand");
 }
 function turn(context: MonsterContext): number {
-  const direction = subtract(context.game.body(goal(context)).origin, context.game.body(context.entity).origin);
+  const target = goal(context);
+  if (target === null) { dropGoal(context); return Infinity; }
+  const direction = subtract(context.game.body(target).origin, context.game.body(context.entity).origin);
   context.state.idealYaw = vectorToAnglesRule(direction, "native-ai").y; changeYaw(context);
   return Math.trunc(length(direction));
 }
 function leaveGoal(context: MonsterContext): undefined {
-  const target = goal(context); context.game.schedule(target, 0.1, freeQ2Entity);
-  context.entity.goal = null; context.entity.enemy = null;
-  return context.setMove("fixbot_move_stand");
+  const target = goal(context); if (target !== null) context.game.schedule(target, 0.1, freeQ2Entity);
+  return dropGoal(context);
 }
 function verticalGoal(context: MonsterContext, landing: boolean): undefined {
   const { game, entity } = context, target = game.create("bot_goal"), body = game.body(entity);
@@ -79,7 +80,7 @@ export function createFixbotDefinition(monsters: Q2Monsters): Q2MonsterDefinitio
     ai: {
       ai_move2(context, distance) { if (distance !== 0) runAi(context, "move", distance); turn(context); return undefined; },
       ai_movetogoal(context, distance) { beforeMove.set(context.entity.actor, context.game.body(context.entity).origin); context.moveToGoal(distance); return undefined; },
-      ai_facing(context) { if (inFront(context, goal(context).actor.id)) return context.setMove("fixbot_move_forward"); turn(context); return undefined; },
+      ai_facing(context) { const target = goal(context); if (target !== null && inFront(context, target.actor.id)) return context.setMove("fixbot_move_forward"); turn(context); return undefined; },
     },
     callbacks: {
       fixbot_run: run, fixbot_dead: finishCorpse, fixbot_attack: attack,
@@ -116,12 +117,12 @@ export function createFixbotDefinition(monsters: Q2Monsters): Q2MonsterDefinitio
         for (const actor of game.host.nearby(game.body(entity).origin, 1024)) {
           const candidate = game.entity(actor);
           if (candidate === null || health(game, actor) < 100 || candidate.classname !== "object_repair" || !visible(context, actor)) continue;
-          const old = goal(context); if (old.classname === "bot_goal") game.schedule(old, 0.1, freeQ2Entity);
+          const old = goal(context); if (old !== null && old.classname === "bot_goal") game.schedule(old, 0.1, freeQ2Entity);
           entity.goal = entity.enemy = actor;
           if (length(subtract(game.body(entity).origin, game.body(candidate).origin)) < 32) context.setMove("fixbot_move_weld_start");
           return undefined;
         }
-        const target = goal(context);
+        const target = goal(context); if (target === null) return dropGoal(context);
         if (length(subtract(game.body(entity).origin, game.body(target).origin)) < 32) return target.classname === "object_repair" ? context.setMove("fixbot_move_weld_start") : leaveGoal(context);
         const previous = beforeMove.get(entity.actor); if (previous === undefined) throw new Error("Fixbot scanner must follow source movement in the same frame");
         if (Math.trunc(length(subtract(game.body(entity).origin, previous))) === 0) return target.classname === "object_repair" ? context.setMove("fixbot_move_stand") : leaveGoal(context);
@@ -130,7 +131,8 @@ export function createFixbotDefinition(monsters: Q2Monsters): Q2MonsterDefinitio
       weldstate(context) {
         if (context.entity.frame === fixbotFrame.weldstart_10) return context.setMove("fixbot_move_weld");
         if (context.entity.frame === fixbotFrame.weldmiddle_07) {
-          const target = goal(context), hp = health(context.game, target.actor.id);
+          const target = goal(context); if (target === null) return dropGoal(context);
+          const hp = health(context.game, target.actor.id);
           if (hp < 0) { const enemy = context.game.entity(context.entity.enemy); if (enemy !== null) enemy.owner = null; return context.setMove("fixbot_move_weld_end"); }
           return context.game.host.combat.setHealth(target.actor, hp - 10);
         }

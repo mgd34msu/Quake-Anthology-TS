@@ -28,6 +28,7 @@ export function voteTouch(state: CtfState, trigger: Q1Actor, actor: ActorId): un
   if (leader !== null && state.world.number("ctf.voteExitTime") === 0) state.context.setNumber(state.world, "ctf.voteExitTime", game.time + 60);
   return voteTeleport(state, trigger, actor);
 }
+/** Deliberate divergence: the released CTF GotoNextMap discards the voted map and a trigger's own map; the port honors both. */
 function nextLevel(state: CtfState, map: string): undefined {
   state.context.setNumber(state.world, "ctf.pregameOver", 1);
   const timer = state.game.create("ctf_nextlevel"); timer.fields.set("map", map);
@@ -58,7 +59,8 @@ export function registerMaps(state: CtfState): undefined {
   game.named.register("ctf:changelevel_touch", { touch: (_runtime, entity, actor) => {
     const noexit = state.context.services.cvar("noexit");
     if (!game.isPlayer(actor) || noexit === 1 || noexit === 2 && !state.startMap) return undefined;
-    state.announce("$qc_exited", actor); game.useTargets(entity, actor);
+    if (game.options.coop || game.options.deathmatch !== 0) state.announce("$qc_exited", actor);
+    game.useTargets(entity, actor);
     if ((entity.spawnflags & 1) !== 0 && game.options.deathmatch === 0) return game.travel(entity.text("map"), actor);
     entity.touch = null; return game.schedule(entity, 0.1, game.named.action(entity, "ctf:nextlevel"));
   } });

@@ -4,5 +4,5 @@ export { SharedBodyTable, copyVector, copyBounds, copyBody, translatedBodyBounds
 export type { BodyStateBinding, BodyLinkHooks, BodyLinkState } from "./body.ts";
 export { ActorCallbackTable } from "./callbacks.ts";
 export type { ActorInvocation } from "./callbacks.ts";
-export { SourceActorSlots, quakeEdictLifetime, q3EntityLifetime } from "./source-slots.ts";
+export { SourceActorSlots, quakeEdictLifetime } from "./source-slots.ts";
 export type { SourceSlotState, SourceSlotStorage, SourceActorSlotsOptions } from "./source-slots.ts";

@@ -492,17 +492,3 @@ export function implicitShaderInput(input: FinishImplicitShaderInput): FinishSha
   }
   return { definition: implicitDefinition(input.name, stages, sort), lightmapIndex, images, profile: input.profile };
 }
-
-export function finishImplicitShader(input: FinishImplicitShaderInput): FinishedShader {
-  return finishShader(implicitShaderInput(input));
-}
-
-/** R_FindShader's named missing-image record, before public registration maps it to handle zero. */
-export function finishFailedShader(input: FinishFailedShaderInput): FinishedShader {
-  return finishShader({
-    definition: implicitDefinition(input.name, [], null),
-    lightmapIndex: input.lightmapIndex,
-    images: [],
-    profile: input.profile,
-  });
-}

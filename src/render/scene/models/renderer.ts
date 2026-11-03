@@ -1,7 +1,7 @@
-import { compiledDrawGroup, sequenceDrawGroup, sourceDrawGroup } from "../submissions.ts";
-import type { SceneModelGroup } from "../submissions.ts";
+import { compiledDrawGroup, sequenceDrawGroup, shadowVolumeGroup, sourceDrawGroup } from "../submissions.ts";
+import type { SceneModelGroup, SceneShadowGroup } from "../submissions.ts";
 import type { GameFamily } from "../../../contracts/content.ts";
-import type { Vec3 } from "../../../contracts/math.ts";
+import type { Vec3, Vec4 } from "../../../contracts/math.ts";
 import type { DrawBatch, Palette, Q2FragmentLight } from "../../../contracts/render.ts";
 import type { SceneEntity, TimedFrames } from "../../../contracts/scene.ts";
 import { add3, dot3, normalize3, radiusFromBounds, scale3, sub3 } from "../../../core/math.ts";
@@ -12,7 +12,9 @@ import type { RegisteredSceneMaterial } from "../material-registrations.ts";
 import { diffuseColor } from "../../../materials/color.ts";
 import type { MaterialGeometry } from "../../../materials/geometry.ts";
 import type { EntityLighting } from "../../../materials/q3-lighting.ts";
+import type { CompiledMaterial } from "../../../materials/compile.ts";
 import { prepareMaterialBatches } from "../../../materials/evaluate.ts";
+import type { MaterialDrawContext } from "../../../materials/evaluate.ts";
 import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches } from "../../../materials/legacy.ts";
 import type { SceneShaderRegistry } from "../shaders.ts";
 import type { SceneTexture, SceneTextureLoader } from "../textures.ts";
@@ -26,9 +28,10 @@ import type { ShadowCaster, ShadowMesh, ShadowSphere } from "../shadows.ts";
 import { ModelLightSampler } from "./light-sampler.ts";
 import { Q2_SHELL_MASK, aliasShadeDivisor, aliasShadowLightFractions, q1AliasShadowDirection, q1AliasShadowPoint, q2AliasLight, q2ShellColor } from "./lighting.ts";
 import { prepareSceneEntity, preparedModelGroups } from "./prepare.ts";
+import { stencilShadowVolume } from "./stencil-shadow.ts";
 import { replacementEntity } from "./replacements.ts";
 import type { ModelReplacementPolicy } from "./replacements.ts";
-import { r_avertexnormal_dots } from "./shadedots.ts";
+import { ANORM_DOTS_ROW, SHADEDOT_QUANT, r_avertexnormal_dots } from "./shadedots.ts";
 import { attachSceneEntity, modelAttachmentTag, modelWorldPoint, modelWorldDirection, q3ModelViewOrigin } from "./transform.ts";
 import { byteColor, modelImage } from "./types.ts";
 import type { ModelVertexLighting, ModelImageSelection, ModelSkinningFrame, ModelSourceOptions, PreparedModelSurface, PreparedVertexLighting } from "./types.ts";
@@ -45,6 +48,7 @@ type ModelResource = Pick<SceneEntity, "resource" | "model">;
 type Material = { readonly kind: "q3"; readonly name: string; readonly original: RegisteredSceneMaterial }
   | { readonly kind: "legacy"; readonly texture: SceneTexture };
 const unit: Vec3 = { x: 1, y: 1, z: 1 };
+const RF_SHADOW_PLANE = 256;
 const normalIndices = new Map<number, Map<number, Map<number, number>>>();
 for (const [index, normal] of ALIAS_NORMALS.entries()) {
   let ys = normalIndices.get(normal.x);
@@ -207,7 +211,7 @@ export class SceneModelRenderer {
     return texture;
   }
 
-  prepare(entities: readonly SceneEntity[], input: WorldViewInput, sourceOptions: SourceOptions = () => ({}), skinningFrame?: ModelSkinningFrame): readonly SceneModelGroup[] {
+  prepare(entities: readonly SceneEntity[], input: WorldViewInput, sourceOptions: SourceOptions = () => ({}), skinningFrame?: ModelSkinningFrame): readonly (SceneModelGroup | SceneShadowGroup)[] {
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     const lightCache = new Map<SceneEntity, Vec3>();
     const preparedLights = new Map<SceneEntity, PreparedVertexLighting>();
@@ -293,13 +297,13 @@ export class SceneModelRenderer {
         }
         if (entity.flags.kind === "q2" && q2ShellColor(entity.flags.bits) !== null) return light;
         if (basis === undefined) {
-          const yaw = Math.atan2(entity.transform.axis[0].y, entity.transform.axis[0].x), row = Math.trunc(yaw * 16 / (2 * Math.PI)) & 15;
+          const yaw = Math.atan2(entity.transform.axis[0].y, entity.transform.axis[0].x), row = Math.trunc(yaw * SHADEDOT_QUANT / (2 * Math.PI)) & (SHADEDOT_QUANT - 1);
           basis = { yaw, row, direction: null };
         }
         const { row } = basis;
-        let shade = normalIndex < 0 ? null : r_avertexnormal_dots[row * 256 + normalIndex] ?? null;
+        let shade = normalIndex < 0 ? null : r_avertexnormal_dots[row * ANORM_DOTS_ROW + normalIndex] ?? null;
         if (previousNormalIndex !== undefined && entity.pose.kind === "frame" && shade !== null) {
-          const oldShade = r_avertexnormal_dots[row * 256 + previousNormalIndex] ?? shade;
+          const oldShade = r_avertexnormal_dots[row * ANORM_DOTS_ROW + previousNormalIndex] ?? shade;
           shade = shade * (1 - entity.pose.backLerp) + oldShade * entity.pose.backLerp;
         }
         if (shade === null) {
@@ -336,7 +340,7 @@ export class SceneModelRenderer {
       ...(skinningFrame === undefined ? {} : { skinningFrame }),
       ...(this.provider.modelPolicy === undefined ? {} : { modelPolicy: this.provider.modelPolicy }),
       frustum: cameraFrustum(input.camera), options, prepareVertexLighting, paletteColor: (_entity, index) => this.paletteColor(index) }),
-    { draw: surface => this.draw(surface, input, surface.options, coneLights, lightCache.get(surface.entity)) }));
+    { draw: (surface, personalModel) => this.draw(surface, input, surface.options, coneLights, lightCache.get(surface.entity), personalModel) }));
   }
 
   /** Light views retain player bodies and off-camera geometry, without inflated powerup shells. */
@@ -450,7 +454,34 @@ export class SceneModelRenderer {
     return mapped;
   }
 
-  private draw(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions, coneLights: readonly Q2FragmentLight[] | null, shade?: Vec3): readonly SceneModelGroup[] {
+  /**
+   * R_AddMD3Surfaces resubmits each opaque, unfogged surface with the stencil shadow shader (r_shadows 2) or, for
+   * RF_SHADOW_PLANE entities, the projection shadow shader (r_shadows 3).
+   */
+  private modelShadowGroups(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions, compiled: CompiledMaterial,
+    context: MaterialDrawContext, project: (point: Vec3) => Vec4, unfogged: boolean, personalModel: boolean): readonly (SceneModelGroup | SceneShadowGroup)[] {
+    const mode = input.modelShadows, lighting = context.lighting, entity = surface.entity;
+    if (mode === undefined || !unfogged || compiled.finished.sort !== 3 || lighting === null || lighting === undefined || this.provider.family !== "q3") return [];
+    const source = options.source === undefined ? undefined : { ...options.source, surface: surface.surfaceIndex, fog: 0, dlight: 0 };
+    if (mode === 2) {
+      if (personalModel || !entityCastsShadow(entity, options.viewModel)) return [];
+      const volume = stencilShadowVolume(surface.localGeometry.vertices.map(vertex => vertex.position), surface.localGeometry.indices, lighting.lightDir);
+      if (volume === null || volume.indices.length === 0) return [];
+      const camera = input.camera;
+      return [shadowVolumeGroup(this.provider.shaders.sourceMaterials.stencilShadow, source, { kind: "shadow-volume",
+        positions: volume.positions.map(point => project(modelWorldPoint(surface.transform, point))), indices: volume.indices,
+        mirror: camera.clip.kind === "portal" && camera.clip.mirror, whiteImage: this.provider.textures.white.image })];
+    }
+    if (entity.flags.kind !== "q3" || (entity.flags.bits & RF_SHADOW_PLANE) === 0) return [];
+    const material = this.provider.shaders.sourceMaterials.projectionShadow, remap = currentRemap(material), projection = remap?.material ?? material;
+    const axis = surface.transform.axis, scaled = surface.transform.scale;
+    const batches = prepareMaterialBatches(projection, surface.localGeometry, { ...context, timeOffset: context.timeOffset + (remap?.timeOffset ?? 0),
+      projectionShadow: { axis: [scale3(axis[0], scaled.x), scale3(axis[1], scaled.y), scale3(axis[2], scaled.z)], origin: surface.transform.origin,
+        shadowPlane: entity.shadowPlane, lightDir: lighting.lightDir } });
+    return [source === undefined ? compiledDrawGroup(projection, batches) : sourceDrawGroup(material, source, batches)];
+  }
+
+  private draw(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions, coneLights: readonly Q2FragmentLight[] | null, shade?: Vec3, personalModel = false): readonly (SceneModelGroup | SceneShadowGroup)[] {
     const material = this.materials.get(materialKey(surface.entity, surface.image, options));
     if (material === undefined) throw new Error(`Model material was not preloaded: ${surface.entity.resource.requestedPath}/${surface.name}`);
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
@@ -477,8 +508,10 @@ export class SceneModelRenderer {
         project: (point: Vec3) => project(modelWorldPoint(surface.transform, point)) };
       const batches = prepareMaterialBatches(compiled, surface.localGeometry, context);
       // R_AddMD3Surfaces and R_AddAnimSurfaces submit no frontend dlight bits.
+      const shadowGroups = this.modelShadowGroups(surface, input, options, compiled, context, project, fog === null, personalModel);
+      if (personalModel) return shadowGroups;
       return [options.source === undefined ? compiledDrawGroup(compiled, batches)
-        : sourceDrawGroup(material.original, { ...options.source, surface: surface.surfaceIndex, fog: fog === null ? 0 : fog.index + 1, dlight: 0 }, batches)];
+        : sourceDrawGroup(material.original, { ...options.source, surface: surface.surfaceIndex, fog: fog === null ? 0 : fog.index + 1, dlight: 0 }, batches), ...shadowGroups];
     }
     const texture = material.texture, alpha = surface.translucent ? surface.entity.color.w : 1;
     const lighting = { kind: "vertex" } satisfies Parameters<typeof createQ1Material>[2];

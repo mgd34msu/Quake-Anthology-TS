@@ -45,5 +45,5 @@ test("all-undecodable texture candidates resolve as missing", async () => {
 test("strict staging loader still rejects undecodable candidates", async () => {
   const garbage = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
   const textures = loader(new Map([["textures/e1/wall.tga", garbage], ["textures/e1/wall.bmp", bmp1x1()]]), true);
-  await expect(textures.load("textures/e1/wall")).rejects.toThrow();
+  await expect(textures.load("textures/e1/wall")).rejects.toThrow("truncated TGA header");
 });

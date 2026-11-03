@@ -11,7 +11,9 @@ export class Q2RereleaseTriggers implements Q2SpawnModule {
   constructor(readonly players: Q2RereleasePlayers, readonly hooks: Q2RereleaseHooks) {}
 
   private init(entity: Q2Entity, game: Q2GameServices): undefined {
-    entity.visible = false; entity.serverFlags |= 1; entity.movedir = movedir(game.body(entity).angles);
+    entity.visible = false; entity.serverFlags |= 1;
+    const angles = game.body(entity).angles;
+    entity.movedir = angles.x === 0 && angles.y === 0 && angles.z === 0 && !entity.spawn.values.has("angle") ? zero : movedir(angles);
     game.move(entity, { angles: zero }, false); game.solid(entity, "trigger"); return undefined;
   }
 

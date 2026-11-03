@@ -70,6 +70,8 @@ export interface BotWeaponTactics {
   readonly aimSkill: number | null;
   readonly weakness: number;
   readonly predictOccludedSplash: boolean;
+  /** Whether aim accuracy falls off at short range (machinegun, shotgun, lightning, railgun in the source). */
+  readonly closeRangeAimPenalty: boolean;
 }
 export interface BotArsenalKnowledge {
   pickupUtility(library: BotLibrary, state: BotState, preview: PickupSupplyPreview): number;
@@ -114,6 +116,8 @@ export interface SourceBotGame {
   readonly clock: { readonly time: number; readonly startTime: number; readonly intermissionTime: number };
   readonly memory: GameMemory;
   readonly knowledge: BotArsenalKnowledge;
+  /** Cheap present, linked and visible test, so scans over every slot need not copy absent entities. */
+  observable(number: number): boolean;
   entity(number: number): BotObservedEntity;
   modelIndex(name: string): number;
   chooseTeam(client: number): number;

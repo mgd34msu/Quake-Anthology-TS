@@ -125,7 +125,7 @@ export function createWidowDefinition(monsters: Q2Monsters, weapons: Q2MissionPa
     restore: widowRestoreArmor,
     blocked(context) {
       if (context.state.move.name === "widow_move_run_attack") { context.state.targetAnger = true; if (checkAttack(context)) attack(context); else run(context); return true; }
-      return rogueBlockedCheckShot(context, 0.25 + 0.05 * context.game.options.skill, source);
+      return context.game.options.edition === "rerelease" ? false : rogueBlockedCheckShot(context, 0.25 + 0.05 * context.game.options.skill, source);
     },
     pain(context, reaction) {
       damagedSkin(context); const { game, entity, state } = context, skill = game.options.skill;

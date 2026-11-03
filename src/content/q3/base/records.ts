@@ -68,7 +68,7 @@ export class Q3EntityRecords {
     states.forEach((state, slot) => {
       const record = this.record(slot);
       if (record.actor !== null) throw new Error("Q3 ownership hydration requires fresh records");
-      record.actor = state.actor; record.active = state.active; record.borrowed = state.borrowed;
+      this.assign(record, state.actor); record.active = state.active; record.borrowed = state.borrowed;
     });
   }
 
@@ -114,7 +114,7 @@ export class Q3EntityRecords {
       const actor = this.record(slot).actor; if (actor !== null) host.ammoTimerStored?.(actor.id, weapon, value);
     }));
     this.unobserve = host.actors.onRelease(actor => {
-      for (const record of this.records) if (record.actor === actor) { record.actor = null; record.active = false; }
+      for (const record of this.records) if (record.actor === actor) { this.assign(record, null); record.active = false; }
       return undefined;
     });
   }
@@ -123,13 +123,30 @@ export class Q3EntityRecords {
 
   get(slot: number): GameEntity | undefined { return this.records[slot]?.entity; }
   client(slot: number): GameClient { const client = this.clients[slot]; if (client === undefined) throw new RangeError(`Q3 client ${slot} outside 0..63`); return client; }
+  /** Actor lookups run per trace hit and per tick, so records are indexed by actor slot instead of scanned. */
+  private readonly byActorSlot = new Map<number, SourceRecord[]>();
+  private assign(record: SourceRecord, actor: OwnedActor | null): void {
+    const previous = record.actor;
+    if (previous !== null) {
+      const bucket = this.byActorSlot.get(previous.id.slot), index = bucket?.indexOf(record) ?? -1;
+      if (bucket !== undefined && index >= 0) bucket.splice(index, 1);
+    }
+    record.actor = actor;
+    if (actor !== null) {
+      const bucket = this.byActorSlot.get(actor.id.slot);
+      if (bucket === undefined) this.byActorSlot.set(actor.id.slot, [record]); else bucket.push(record);
+    }
+  }
+  private recordOf(actor: ActorId): SourceRecord | undefined {
+    return this.byActorSlot.get(actor.slot)?.find(record => record.actor?.id.equals(actor));
+  }
   private record(slot: number): SourceRecord { const record = this.records[slot]; if (record === undefined) throw new RangeError(`Q3 entity ${slot} outside 0..1023`); return record; }
 
   private ensureActor(slot: number): OwnedActor {
     const record = this.record(slot);
     if (record.actor !== null) { this.host.actors.assertOwned(record.actor); return record.actor; }
     const actor = this.host.actors.allocateAtSource(this.provider, slot, slot < MAX_CLIENTS ? "q3:player" : "q3:entity");
-    record.actor = actor;
+    this.assign(record, actor);
     this.host.bodies.create(actor, ZERO_BODY);
     this.bindOwnedServices(record);
     return actor;
@@ -154,7 +171,7 @@ export class Q3EntityRecords {
     if (slot < MAX_CLIENTS || slot >= 1022 || actor.owner !== this.provider || record.actor !== null
       || this.nativeByActor(actor.id) !== null || this.host.bodies.read(actor.id) === null)
       throw new Error("Q3 owned actor adoption requires an unused entity slot and its existing body");
-    record.actor = actor; record.active = true; record.borrowed = false; record.entity.s.number = slot;
+    this.assign(record, actor); record.active = true; record.borrowed = false; record.entity.s.number = slot;
     this.bindOwnedServices(record);
     return record.entity;
   }
@@ -164,7 +181,7 @@ export class Q3EntityRecords {
     this.host.actors.assertOwned(actor);
     const record = this.record(slot);
     if (record.actor !== null && record.actor !== actor) throw new Error(`Q3 slot ${slot} already has an actor`);
-    record.actor = actor; record.active = true; record.borrowed = true;
+    this.assign(record, actor); record.active = true; record.borrowed = true;
     if (player) record.entity.client = this.client(slot);
     record.entity.s.number = slot;
     return record.entity;
@@ -180,7 +197,7 @@ export class Q3EntityRecords {
     const record = this.record(slot);
     const actor = record.actor;
     if (actor !== null && !record.borrowed) this.host.actors.release(actor);
-    record.actor = null; record.active = false; record.borrowed = false;
+    this.assign(record, null); record.active = false; record.borrowed = false;
   }
 
   release(entity: GameEntity): void {
@@ -188,7 +205,7 @@ export class Q3EntityRecords {
     if (record.entity !== entity) throw new Error("Q3 entity belongs to another record owner");
     const actor = record.actor;
     if (actor !== null && !record.borrowed) this.host.actors.release(actor);
-    record.actor = null; record.active = false; record.borrowed = false;
+    this.assign(record, null); record.active = false; record.borrowed = false;
     const fresh = new GameEntity(entity.slot, entity.binding);
     Object.assign(entity, fresh);
     // Body getters retain their forwarding binding; source metadata is cleared.
@@ -196,12 +213,12 @@ export class Q3EntityRecords {
   }
 
   nativeByActor(actor: ActorId | null): GameEntity | null {
-    return actor === null ? null : this.records.find(record => record.actor?.id.equals(actor))?.entity ?? null;
+    return actor === null ? null : this.recordOf(actor)?.entity ?? null;
   }
 
   byActor(actor: ActorId | null): GameEntity | null {
     if (actor === null) return null;
-    return this.records.find(record => record.actor?.id.equals(actor))?.entity ?? this.host.foreign(actor);
+    return this.recordOf(actor)?.entity ?? this.host.foreign(actor);
   }
 
   private reactionOther(actor: ActorId | null): DamageInflictor { return this.damageInflictor(actor); }
@@ -213,7 +230,7 @@ export class Q3EntityRecords {
 
   damageInflictor(actor: ActorId | null): DamageInflictor {
     if (actor === null) return this.record(1022).entity;
-    const native = this.records.find(record => record.actor?.id.equals(actor));
+    const native = this.recordOf(actor);
     if (native !== undefined) return native.entity;
     return { kind: "shared-actor", actor, origin: () => {
       const body = this.host.bodies.read(actor);
@@ -236,7 +253,7 @@ export class Q3EntityRecords {
       think: () => { entity.nextthink = 0; if (entity.think === null) throw new Error("NULL ent->think"); entity.think(entity); return undefined; },
       touch: contact => {
         if (entity.touch === null) return undefined;
-        const native = this.records.find(candidate => candidate.actor?.id.equals(contact.other));
+        const native = this.recordOf(contact.other);
         entity.touch(entity, native?.entity ?? this.damageInflictor(contact.other), contact); return undefined; },
       use: (_self, other, activator) => { entity.use?.(entity, this.useParticipant(other), this.useParticipant(activator)); return undefined; }, pain, die,
     });

@@ -1,7 +1,7 @@
 import type { ContentDigest } from "../../contracts/content.ts";
 import type { NativePrimaryWeaponProfile } from "./native-primary-weapons.ts";
 import type { NativeItemField } from "../../contracts/native-mod-items.ts";
-import { xatrixCombatProfile } from "./classic/combat-profile.ts";
+import { xatrix1998CombatProfile, xatrixCombatProfile } from "./classic/combat-profile.ts";
 
 const classicButtons: NativeItemField = { record: "client", offset: 0xdcc, encoding: "int32" };
 const classicLatched: NativeItemField = { record: "client", offset: 0xdd4, encoding: "int32" };
@@ -39,6 +39,43 @@ const xatrix: NativePrimaryWeaponProfile = {
     priority: { record: "client", offset: 0xe80, encoding: "int32" }, duck: { record: "client", offset: 0xe84, encoding: "int32" }, run: { record: "client", offset: 0xe88, encoding: "int32" } },
   delay: { flag: { record: "image", offset: 0x6b694, encoding: "int32" }, region: { entry: 0x3676f, join: 0x36793 }, evaluate: { kind: "source-flag", factors: [1, 0.5] } },
   damage: { kind: "source-flag", address: 0x6b690, encoding: "int32", factors: [1, 4], region: { entry: 0x36748, join: 0x3676f } },
+};
+/** 1998 retail Xatrix DLL (PE32, 0b0d119e). Every address below is the 8187df profile's counterpart found by instruction shape
+ * in this PE: Think_Weapon 0x352c0 (is_quad store 0x68e70, is_quadfire 0x68e74), Weapon_Generic 0x35710, PutClientInServer 0x30bd0.
+ * The client record has no resp.spectator in this build (resp.cmd_angles 0xd84 is followed directly by old_pmove 0xd90),
+ * so buttons sit at 0xdc0 and sizeof(gclient_t) is 0xee4. */
+const xatrix1998Buttons: NativeItemField = { record: "client", offset: 0xdc0, encoding: "int32" };
+const xatrix1998Latched: NativeItemField = { record: "client", offset: 0xdc8, encoding: "int32" };
+const xatrix1998: NativePrimaryWeaponProfile = {
+  equipmentContexts: xatrix.equipmentContexts,
+  digest: xatrix1998CombatProfile.digest,
+  abi: xatrix.abi,
+  dispatcher: { entry: { kind: "rva", rva: 0x352c0 }, record: "entity", argument: 0, arguments: 1 },
+  decisions: [
+    ...[[0x35846, 0x35856], [0x35c6d, 0x35c7e], [0x37e2d, 0x37e3e]].map(([entry, join]) => {
+      if (entry === undefined || join === undefined) throw new Error("Incomplete original decision range");
+      return { entry, join, fields: [xatrix1998Buttons, xatrix1998Latched].map(field => ({ field, clearMask: 1 })) };
+    }),
+    ...[[0x364a2, 0x364a9], [0x366d8, 0x366df], [0x36b1d, 0x36b24], [0x36b47, 0x36b4e]].map(([entry, join]) => {
+      if (entry === undefined || join === undefined) throw new Error("Incomplete original decision range");
+      return { entry, join, fields: [{ field: xatrix1998Buttons, clearMask: 1 }] };
+    }),
+  ],
+  committedInput: [],
+  spawn: { entry: 0x30bd0, accepted: [] },
+  active: [
+    { kind: "scalar", field: { record: "image", offset: 0x740a8, encoding: "float32" }, mask: null, comparison: "equals", value: 0 },
+    { kind: "scalar", field: { record: "entity", offset: 0x1ec, encoding: "int32" }, mask: null, comparison: "equals", value: 0 },
+  ],
+  continuations: [[{ kind: "scalar", field: { record: "client", offset: 0xdf4, encoding: "int32" }, mask: null, comparison: "equals", value: 3 }]],
+  time: { address: 0x73fe4, encoding: "float32", milliseconds: 1000 },
+  entity: xatrix.entity,
+  client: { byteLength: 3812, viewAngles: 0xe38, buttons: xatrix1998Buttons, latchedButtons: xatrix1998Latched },
+  attackAnimation: { entry: 0x35710, skip: [{ entry: 0x3571b, join: 0x35795 }, { entry: 0x3579a, join: 0x35996 }, { entry: 0x358e1, join: 0x3597c }] },
+  animation: { frame: xatrix.animation.frame, end: { record: "client", offset: 0xe70, encoding: "int32" },
+    priority: { record: "client", offset: 0xe74, encoding: "int32" }, duck: { record: "client", offset: 0xe78, encoding: "int32" }, run: { record: "client", offset: 0xe7c, encoding: "int32" } },
+  delay: { flag: { record: "image", offset: 0x68e74, encoding: "int32" }, region: { entry: 0x3531f, join: 0x35343 }, evaluate: { kind: "source-flag", factors: [1, 0.5] } },
+  damage: { kind: "source-flag", address: 0x68e70, encoding: "int32", factors: [1, 4], region: { entry: 0x352f8, join: 0x3531f } },
 };
 const retail: NativePrimaryWeaponProfile = {
   equipmentContexts: [{ provider: "q2:equipment/hand-grenades", item: "q2:ammo_grenades" }],
@@ -78,5 +115,10 @@ const retail: NativePrimaryWeaponProfile = {
   damage: { kind: "source-result", entry: 0xef5f0, result: "uint8" },
 };
 export function nativePrimaryWeaponProfile(digest: ContentDigest): NativePrimaryWeaponProfile | null {
-  return digest === xatrix.digest ? xatrix : digest === retail.digest ? retail : null;
+  switch (digest) {
+    case xatrix.digest: return xatrix;
+    case xatrix1998.digest: return xatrix1998;
+    case retail.digest: return retail;
+    default: return null;
+  }
 }

@@ -1,5 +1,7 @@
 # Q1 source comparison and completion checklist
 
+> **Dated record, not current status.** A donor-versus-port comparison from September 2026. The maintained status is [status.md](status.md). Where this page disagrees with it or with the code, trust those. Paths such as `verification/`, `work-packages.json`, `completion-status.json` and `../the Q1 reference port/...` name files deleted or scrubbed in commit `949c337c`; bare `src/...` paths may name donor-project files.
+
 ## Accepted NQ profiles and device persistence
 
 Accepted `5a0e1848` supplies classic-id1 host protocol selection and shared-client negotiation of NQ 15/666/999, limits, alpha/scale, movement/travel and version flags. Root passed 9 tests/209 assertions and strict/policy checks; independent donor servers exercised signon and authoritative movement over all three protocols through the hidden shared client with no local world. Root inspected three images and donor-codec entity updates of 9/15/21 bytes matched inside actual UDP payloads. Rerelease, expansion/mod admission, private extensions, full bidirectional qualification, static visual-field production, nondefault lerpfinish and a menu protocol selector remain open.

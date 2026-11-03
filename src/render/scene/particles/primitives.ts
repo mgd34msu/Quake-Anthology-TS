@@ -1,6 +1,6 @@
 // Q3 tr_surface.c generated entity geometry. Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { add3, cross3, dot3, length3, normalize3, perpendicularVector, rotatePointAroundVector, scale3, sub3, vec3 } from "../../../core/math.ts";
-import type { Axis, Bounds, Vec3, Vec4 } from "../../../contracts/math.ts";
+import type { Axis, Vec3, Vec4 } from "../../../contracts/math.ts";
 import type { ModelTransform } from "../../../contracts/scene.ts";
 import type { DrawBatch, RenderState, RenderVertex, RendererImage } from "../../../contracts/render.ts";
 import type { MaterialVertex as BspVertex } from "../../../materials/geometry.ts";
@@ -24,7 +24,8 @@ export function railGeometry(entity: RailPose, viewOrigin: Vec3, settings: RailS
   const start = entity.kind === "lightning" ? entity.origin : entity.oldOrigin;
   const end = entity.kind === "lightning" ? entity.oldOrigin : entity.origin;
   const delta = sub3(end, start), direction = normalize3(delta), length = Math.trunc(length3(delta));
-  if (!Number.isInteger(length) || length < -0x80000000 || length > 0x7fffffff) throw new RangeError("rail length exceeds source int32 conversion");
+  // The source's int conversion is undefined past int32, so such a beam is not drawn.
+  if (!Number.isInteger(length) || length < -0x80000000 || length > 0x7fffffff) return { vertices, indices };
   // Source rail calls leave normals, lightmap coordinates and alpha unwritten.
   // The retained tess writer preserves those cells.
   const vertex = (position: Vec3, s: number, t: number, dim = false): BspVertex => ({ position, normal: vec3(0, 0, 0),
@@ -32,7 +33,7 @@ export function railGeometry(entity: RailPose, viewOrigin: Vec3, settings: RailS
       y: dim ? Math.trunc(entity.shaderRGBA.y * 0.25) : entity.shaderRGBA.y,
       z: dim ? Math.trunc(entity.shaderRGBA.z * 0.25) : entity.shaderRGBA.z, w: 0 } });
   function core(right: Vec3, width: number): void {
-    if (!Number.isInteger(width) || width < -0x80000000 || width > 0x7fffffff) throw new RangeError("rail core width requires a source int32");
+    if (!Number.isInteger(width) || width < -0x80000000 || width > 0x7fffffff) return;
     const base = vertices.length, offset = scale3(right, Math.fround(width)), t = Math.fround(Math.fround(length) / 256);
     vertices.push(vertex(add3(start, offset), 0, 0, true), vertex(sub3(start, offset), 0, 1),
       vertex(add3(end, offset), t, 0), vertex(sub3(end, offset), t, 1));
@@ -50,13 +51,12 @@ export function railGeometry(entity: RailPose, viewOrigin: Vec3, settings: RailS
   const seed = vec3(direction.z, -direction.x, direction.y);
   const right = normalize3(sub3(seed, scale3(direction, dot3(seed, direction)))), up = cross3(right, direction);
   let segments = Math.trunc(Math.fround(Math.fround(length) / Math.fround(settings.segmentLength)));
-  if (!Number.isInteger(segments) || segments < -0x80000000 || segments > 0x7fffffff) throw new RangeError("rail ring count exceeds source int32 conversion");
+  if (!Number.isInteger(segments) || segments < -0x80000000 || segments > 0x7fffffff) return { vertices, indices };
   if (segments <= 0) segments = 1;
   // VectorScale expands the live cvar read once per component.
   const step = vec3(direction.x * Math.fround(settings.segmentLength), direction.y * Math.fround(settings.segmentLength), direction.z * Math.fround(settings.segmentLength));
   const width = settings.ringWidth;
-  if (!Number.isInteger(width) || width < -0x80000000 || width > 0x7fffffff) throw new RangeError("rail ring width requires a source int32");
-  if (segments > 1_000_000) throw new RangeError("rail ring geometry exceeds safe allocation");
+  if (!Number.isInteger(width) || width < -0x80000000 || width > 0x7fffffff || segments > 1_000_000) return { vertices, indices };
   if (segments > 1) segments--;
   const positions: Vec3[] = [];
   for (let index = 0; index < 4; index++) {
@@ -104,13 +104,6 @@ export function spriteGeometry(entity: SpritePose, viewAxis: Axis, mirror: boole
     lightmapCoord: { x: s, y: t }, color: { ...entity.shaderRGBA } });
   return { vertices: [vertex(corner(1, 1), 0, 0), vertex(corner(-1, 1), 1, 0), vertex(corner(-1, -1), 1, 1), vertex(corner(1, -1), 0, 1)],
     indices: [0, 1, 3, 3, 1, 2] };
-}
-
-/** Source uses the entity origin/radius for every generated primitive's fog. */
-export function spriteFog(origin: Vec3, radius: number, bounds: readonly Bounds[]): number {
-  return bounds.findIndex(fog => origin.x - radius < fog.max.x && origin.x + radius > fog.min.x
-    && origin.y - radius < fog.max.y && origin.y + radius > fog.min.y
-    && origin.z - radius < fog.max.z && origin.z + radius > fog.min.z);
 }
 
 export function beamBatch(entity: BeamPose, project: (point: Vec3) => Vec4, previous: RenderState, whiteImage: RendererImage): DrawBatch {

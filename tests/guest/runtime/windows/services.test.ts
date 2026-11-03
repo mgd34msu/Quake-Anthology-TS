@@ -45,10 +45,10 @@ test("Windows heap, TLS and file services expose mutations in authoritative gues
   expect(runtime.allocationSize(odd, heap.byteOffset)).toBe(6);
   expect(memory.copy(odd, 16)).toEqual(new Uint8Array(16));
   expect(call("HeapFree", [p(heap), u(0), p(odd)])).toEqual({ kind: "int32", value: 1 });
-  expect(() => memory.copy(memory.offset(odd, 4095n), 1)).toThrow();
+  expect(() => memory.copy(memory.offset(odd, 4095n), 1)).toThrow("test:windows-services: read at 0x1ffff (1 bytes): range includes unmapped bytes");
   const enlarged = resultPointer(call("HeapReAlloc", [p(heap), u(8), p(allocation), u(40)]));
   expect(memory.readUint32(enlarged)).toBe(0x12345678); expect(memory.readUint32(memory.offset(enlarged, 20n))).toBe(0);
-  expect(() => memory.readUint8(allocation)).toThrow();
+  expect(() => memory.readUint8(allocation)).toThrow("test:windows-services: read at 0x1e000 (1 bytes): range includes unmapped bytes");
   const index = call("TlsAlloc", []); if (index.kind !== "uint32") throw new Error("TLS index required");
   expect(call("TlsSetValue", [index, p(enlarged)])).toEqual({ kind: "int32", value: 1 });
   const slot = memory.offset(runtime.teb, 0xe10n + BigInt(index.value * 4)); expect(memory.readPointer(slot)?.byteOffset).toBe(enlarged.byteOffset);
@@ -64,7 +64,7 @@ test("Windows heap, TLS and file services expose mutations in authoritative gues
   expect(call("SetFilePointer", [p(handle), s(1), p(null), u(0)])).toEqual({ kind: "uint32", value: 1 });
   memory.write(buffer, new Uint8Array([99, 88])); call("WriteFile", [p(handle), p(buffer), u(2), p(transferred), p(null)]);
   expect(fileBytes).toEqual(new Uint8Array([10, 99, 88])); call("CloseHandle", [p(handle)]); expect(closed).toBe(true);
-  expect(call("HeapDestroy", [p(heap)])).toEqual({ kind: "int32", value: 1 }); expect(() => memory.readUint8(enlarged)).toThrow();
+  expect(call("HeapDestroy", [p(heap)])).toEqual({ kind: "int32", value: 1 }); expect(() => memory.readUint8(enlarged)).toThrow("test:windows-services: read at 0x1f000 (1 bytes): range includes unmapped bytes");
 });
 
 test("CRT memory and floating services preserve overlap, sign and adjacent binary32 values", () => {

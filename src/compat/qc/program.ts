@@ -68,6 +68,14 @@ export class QcProgram {
     if (!Number.isInteger(index) || index <= 0 || fn === undefined) throw new QcProgramError(`invalid function ${index}`, this.source);
     return fn;
   }
+  private sortedStarts: readonly number[] | null = null;
+  /** Statement index one past the function: the next function's first statement, or the end of the program. */
+  functionEnd(fn: { readonly firstStatement: number }): number {
+    const starts = this.sortedStarts ??= [...new Set(this.functions.map(other => other.firstStatement))].sort((a, b) => a - b);
+    let low = 0, high = starts.length;
+    while (low < high) { const middle = low + high >> 1; if ((starts[middle] ?? 0) > fn.firstStatement) high = middle; else low = middle + 1; }
+    return starts[low] ?? this.statements.length;
+  }
   functionNamed(name: string): QcFunction {
     const fn = this.functionsByName.get(name);
     if (fn === undefined || fn.index === 0) throw new QcProgramError(`missing function ${name}`, this.source);

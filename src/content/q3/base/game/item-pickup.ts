@@ -74,9 +74,6 @@ function addAmmoTo(client: GameClient, weapon: Weapon, count: number): void {
   ammo.set(weapon, total > 200 ? 200 : total);
 }
 
-export function addAmmo(other: GameEntity, weapon: Weapon, count: number): void {
-  addAmmoTo(clientOf(other), weapon, count);
-}
 
 function pickupAmmoFrom(itemEntity: GameEntity, client: GameClient, item: ItemDefinition): number {
   if (item.type !== ItemType.IT_AMMO) throw new Error("Pickup_Ammo requires an ammo item");

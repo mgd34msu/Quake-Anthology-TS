@@ -1,4 +1,4 @@
-import { SaveReader } from "../persistence/value.ts";
+import { SaveReader } from "./save-value.ts";
 /*
  * COM_Parse, COM_ParseExt, COM_Compress, SkipWhitespace and SkipRestOfLine from game/q_shared.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.

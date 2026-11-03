@@ -1,5 +1,6 @@
+import type { ActorId } from "../../../../src/contracts/identity.ts";
 import { expect, test, spyOn } from "bun:test";
-import { testCorpusRoot } from "../../../support/corpus.ts";
+import { testCorpusRoot, corpusFile } from "../../../support/corpus.ts";
 
 import { existsSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -17,7 +18,7 @@ import { createNumericOperations, Q2_DONOR_PROFILE } from "../../../../src/core/
 import { parseEntities } from "../../../../src/core/common-parse.ts";
 import { decodeQ2Map } from "../../../../src/formats/q2-map/index.ts";
 import { ActorCallbackTable, SessionActorRegistry } from "../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../../../src/world/gameplay/index.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
 import { ClassicOriginalSaveFiles, encodeQ2ClassicOriginalSave, decodeQ2ClassicOriginalSave } from "../../../../src/persistence/q2-classic-guest.ts";
 import { encodeCheckpointValue, decodeCheckpointValue } from "../../../../src/persistence/value.ts";
@@ -39,7 +40,7 @@ async function candidate(prepared: PreparedClassicGuest, geometry: Q2WorldGeomet
   const callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(geometry);
   const physics = new SharedPhysics({ actors, callbacks, scene, numeric: Q2_DONOR_PROFILE, sourceOrder: (a, b) => a.slot - b.slot,
     worldActor: () => required(actors.atSource(prepared.execution.owner.provider, 0)).id, onBlocked: () => undefined });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined }), inventory = new SharedInventoryTable(actors);
+  const combat = inertAuthority(actors, callbacks), inventory = new SharedInventoryTable(actors);
   const cvars = action.kind === "travel" ? action.from.services.options.cvars : new CvarRegistry({ dialect: "q2-classic", context: { session: actors.session, origin: { kind: "server-console" } } });
   if (action.kind === "create" && savedCvars === undefined) { cvars.register("ctf", deathmatch ? "1" : "0"); cvars.register("deathmatch", deathmatch ? "1" : "0"); cvars.register("coop", "0"); }
   else if (savedCvars !== undefined) cvars.restoreSaveState(decodeCheckpointValue(savedCvars));
@@ -58,12 +59,12 @@ async function candidate(prepared: PreparedClassicGuest, geometry: Q2WorldGeomet
     : await action.from.travelLoading(action.map, services, async () => { await Bun.sleep(0); }, action.revisit);
   return { world, actors, physics, files, scene, cvars, portals };
 }
-const pak = `${testCorpusRoot()}/q2/baseq2/pak0.pak`;
-test.skipIf(!existsSync(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`) || !existsSync(pak))("classic external player velocity enters source Pmove and remains source owned", async () => {
+const pak = corpusFile("q2/baseq2/pak0.pak");
+test.skipIf(!existsSync(corpusFile("q2/xatrix/gamex86.dll")) || !existsSync(pak))("classic external player velocity enters source Pmove and remains source owned", async () => {
   const archive = await openArchive(pak);
   const geometry = decodeQ2Map(await archive.readEntry(required(archive.findEntries("maps/base1.bsp")[0])), "base1"); await archive.close();
   const identity = createMountIdentity("mount:test:native-movement", "q2:classic:xatrix:installed", 1);
-  using mounts = await openMountPlan({ id: "mount-plan:test:native-movement", mounts: [{ kind: "loose", identity, rootPath: `${testCorpusRoot()}/q2/xatrix` }], defaultOrder: [identity.id], prefixOrders: [] });
+  using mounts = await openMountPlan({ id: "mount-plan:test:native-movement", mounts: [{ kind: "loose", identity, rootPath: corpusFile("q2/xatrix") }], defaultOrder: [identity.id], prefixOrders: [] });
   const artifact = required(await mounts.open("gamex86.dll"));
   const prepared = await prepareClassicGuest({ kind: "native", owner: { provider: "q2:classic-native", content: identity.content }, role: "server-game", api: { kind: "q2-classic-game", version: 3 }, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" }, artifact: artifact.reference }, mounts);
   const running = await candidate(prepared, geometry);
@@ -108,7 +109,7 @@ test.skipIf(!existsSync(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`) || !existsS
 });
 for (const fixture of [{ name: "ctf", deathmatch: true }, { name: "xatrix", deathmatch: false }]) {
 const dll = `${testCorpusRoot()}/q2/${fixture.name}/gamex86.dll`;
-test.skipIf(!existsSync(dll) || !existsSync(pak))(`actual native world restores ${fixture.name} original callback files into fresh source actors`, async () => {
+test.skipIf(!existsSync(dll) || !existsSync(pak))(`actual native world restores ${fixture.name} original callback files into fresh source actors${fixture.deathmatch ? " (module API only: the original server refuses deathmatch saves, so Begin telefrags the restored body)" : ""}`, async () => {
   const archive = await openArchive(pak), geometry = decodeQ2Map(await archive.readEntry(required(archive.findEntries("maps/base1.bsp")[0])), "base1"); await archive.close();
   const identity = createMountIdentity("mount:test:native-original", `q2:classic:${fixture.name}:installed`, 1);
   const mounts = await openMountPlan({ id: "mount-plan:test:native-original", mounts: [{ kind: "loose", identity, rootPath: dirname(dll) }], defaultOrder: [identity.id], prefixOrders: [] });
@@ -176,11 +177,11 @@ test.skipIf(!existsSync(dll) || !existsSync(pak))(`actual native world restores 
 }
 
 
-test.skipIf(!existsSync(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`) || !existsSync(pak))("actual retained Xatrix gamemap keeps DLL globals and revisits level files without game reload", async () => {
+test.skipIf(!existsSync(corpusFile("q2/xatrix/gamex86.dll")) || !existsSync(pak))("actual retained Xatrix gamemap keeps DLL globals and revisits level files without game reload", async () => {
   const directory = mkdtempSync(join(tmpdir(), "q2-retained-travel-"));
   const archive = await openArchive(pak), geometry = decodeQ2Map(await archive.readEntry(required(archive.findEntries("maps/base1.bsp")[0])), "base1"); await archive.close();
   const identity = createMountIdentity("mount:test:native-travel", "q2:classic:xatrix:installed", 1);
-  const mounts = await openMountPlan({ id: "mount-plan:test:native-travel", mounts: [{ kind: "loose", identity, rootPath: `${testCorpusRoot()}/q2/xatrix` }], defaultOrder: [identity.id], prefixOrders: [] });
+  const mounts = await openMountPlan({ id: "mount-plan:test:native-travel", mounts: [{ kind: "loose", identity, rootPath: corpusFile("q2/xatrix") }], defaultOrder: [identity.id], prefixOrders: [] });
   let current: Awaited<ReturnType<typeof candidate>> | null = null;
   try {
     const artifact = required(await mounts.open("gamex86.dll"));
@@ -233,11 +234,12 @@ test.skipIf(!existsSync(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`) || !existsS
 import { classicCombatProfile } from "../../../../src/compat/q2/classic/combat-profile.ts";
 import { nativeCombatSignature } from "../../../../src/compat/q2/native-combat-call.ts";
 import { CLASSIC_Q2_ABI } from "../../../../src/compat/q2/classic/layout.ts";
+import { inertAuthority } from "../../../support/authority.ts";
 
-test.skipIf(!existsSync(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`) || !existsSync(pak))("actual Xatrix declared combat calls retain original armor stores and pain observation", async () => {
+test.skipIf(!existsSync(corpusFile("q2/xatrix/gamex86.dll")) || !existsSync(pak))("actual Xatrix declared combat calls retain original armor stores and pain observation", async () => {
   const archive = await openArchive(pak), geometry = decodeQ2Map(await archive.readEntry(required(archive.findEntries("maps/base1.bsp")[0])), "base1"); await archive.close();
   const identity = createMountIdentity("mount:test:native-damage", "q2:classic:xatrix:installed", 1);
-  using mounts = await openMountPlan({ id: "mount-plan:test:native-damage", mounts: [{ kind: "loose", identity, rootPath: `${testCorpusRoot()}/q2/xatrix` }], defaultOrder: [identity.id], prefixOrders: [] });
+  using mounts = await openMountPlan({ id: "mount-plan:test:native-damage", mounts: [{ kind: "loose", identity, rootPath: corpusFile("q2/xatrix") }], defaultOrder: [identity.id], prefixOrders: [] });
   const artifact = required(await mounts.open("gamex86.dll"));
   const prepared = await prepareClassicGuest({ kind: "native", owner: { provider: "q2:classic-native", content: identity.content }, role: "server-game", api: { kind: "q2-classic-game", version: 3 }, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" }, artifact: artifact.reference }, mounts);
   const running = await candidate(prepared, geometry, undefined, undefined, false, { kind: "create" }, () => ({ sequence: 1,
@@ -291,6 +293,41 @@ test.skipIf(!existsSync(`${testCorpusRoot()}/q2/xatrix/gamex86.dll`) || !existsS
       remove = enable(); reset(); nativeHit(); expect(transformed).toBe(2);
       expect(memory.readInt32(memory.offset(view.address, 480n))).toBe(doubledHealth); expect(memory.readInt32(memory.offset(client, armorSlot))).toBe(doubledArmor);
     } finally { remove(); }
-
+    // GAPCOMPAT-009: a foreign attacker keeps one stand-in edict, so repeated hits do not grow num_edicts.
+    reset();
+    const foreign = running.actors.allocate("test:foreign", "test:attacker"), zero = { x: 0, y: 0, z: 0 };
+    engine.bodies.create(foreign, { origin: { x: 8, y: 0, z: 0 }, angles: zero, velocity: zero, bounds: { min: zero, max: { x: 2, y: 2, z: 2 } }, ground: null });
+    const foreignHit = (sequence: number) => engine.combat.apply({ target: actor, amount: 1, knockback: 0, direction: zero, point: zero, normal: zero, delivery: "direct",
+      attack: { sequence, time: { kind: "milliseconds", value: 100 }, attacker: foreign.id, inflictor: foreign.id, weapon: null, weaponProvider: source.memory.module.id,
+        combatProvider: source.memory.module.id, inventoryProvider: source.memory.module.id, movementProvider: source.memory.module.id,
+        cause: { kind: "q2", meansOfDeath: 8, damageFlags: 0, native: { edition: "classic", game: "xatrix", value: 8 } } } });
+    expect(foreignHit(10).kind).toBe("committed");
+    const edicts = host.edicts.descriptor().count;
+    for (let hit = 0; hit < 20; hit++) { reset(); expect(foreignHit(11 + hit).kind).toBe("committed"); }
+    expect(host.edicts.descriptor().count).toBe(edicts);
+    // GAPSIM-013: guest T_Damage on a selected monster's stand-in edict reaches shared combat with the real attacker.
+    const monster = running.actors.allocate("test:monster", "test:monster");
+    engine.bodies.create(monster, { origin: { x: 16, y: 0, z: 0 }, angles: zero, velocity: zero, bounds: { min: zero, max: { x: 2, y: 2, z: 2 } }, ground: null });
+    engine.combat.create(monster, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+    const proxySlot = running.world.allocateMonsterProxy();
+    if (proxySlot === null) throw new Error("Expected a stand-in edict for the selected monster");
+    running.world.bindMonsterProxy(proxySlot, monster);
+    const hits: { readonly target: ActorId; readonly attacker: ActorId | null }[] = [];
+    // The fixture registers no combat policy for the shared monster, so a replace operation stands in for shared combat.
+    const removeObserver = engine.combat.damageOperation.register({ provider: "test:damage-only", id: "test:stand-in-hit", order: 0, kind: "replace", replace: request => {
+      hits.push({ target: request.target, attacker: request.attack.attacker });
+      return { kind: "committed", decision: { request, mutations: [], appliedDamage: 0, reaction: "none" }, survived: true };
+    } });
+    try {
+      const proxy = host.edicts.at(proxySlot), vectors = memory.allocate({ byteLength: 36, alignment: 4n, label: "stand-in damage comparison" });
+      try {
+        host.invoke(memory.offset(source.imageBase, BigInt(profile.entries.damage)), nativeCombatSignature(profile.calls.damage, "damage", CLASSIC_Q2_ABI),
+          [proxy.address, view.address, view.address, vectors, memory.offset(vectors, 12n), memory.offset(vectors, 24n)].map<import("../../../../src/contracts/execution.ts").GuestCallValue>(value => ({ kind: "pointer", value }))
+            .concat([25, 0, 0, 8].map(value => ({ kind: "int32", value } satisfies import("../../../../src/contracts/execution.ts").GuestCallValue))), proxy);
+      } finally { memory.unmap(vectors, 36); }
+      expect(hits).toHaveLength(1);
+      expect(hits[0]?.target.equals(monster.id)).toBe(true);
+      expect(hits[0]?.attacker?.equals(actor)).toBe(true);
+    } finally { removeObserver(); }
   } finally { running.world.close(); running.actors.close(); }
 }, 120000);

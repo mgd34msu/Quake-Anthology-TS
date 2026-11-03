@@ -15,16 +15,12 @@ export interface SchedulerOptions {
   readonly resolve: (provider: ProviderId, callback: CallbackId) => ThinkCallback | null;
 }
 
-export interface ProviderFrame { readonly provider: ProviderId; readonly frame: FrameContext; }
 export type ThinkResult =
   | { readonly kind: "not-run"; readonly reason: "unscheduled" | "boundary" | "not-due" | "stale" }
   | { readonly kind: "ran"; readonly invocations: number; readonly alive: boolean };
 
 interface PendingThink extends ScheduledThink {
   readonly owned: OwnedActor;
-  readonly sourceSlot: number;
-  /** Provider registration order as an integer, bound once at schedule time. */
-  readonly providerRank: number;
 }
 
 /** Deadlines select eligibility; source traversal, rather than deadline sorting, selects execution order. */
@@ -66,7 +62,6 @@ export class FrameScheduler implements ActorSchedule {
   private readonly profiles = new Map<ProviderId, ClockProfile>();
   private readonly providerRanks = new Map<ProviderId, number>();
   private readonly ordering: FrameOrdering;
-  private advancing = false;
   private closed = false;
 
   constructor(private readonly options: SchedulerOptions) {
@@ -101,7 +96,7 @@ export class FrameScheduler implements ActorSchedule {
     if (providerRank === undefined) throw new RangeError("Provider is absent from mixed frame ordering");
     const sourceSlot = this.options.sourceSlot?.(actor.id) ?? actor.id.slot;
     if (!Number.isSafeInteger(sourceSlot) || sourceSlot < 0) throw new RangeError("Source slot must be a nonnegative safe integer");
-    this.scheduled.set(actor.id.slot, Object.freeze({ actor: actor.id, owned: actor, callback, sourceSlot, providerRank,
+    this.scheduled.set(actor.id.slot, Object.freeze({ actor: actor.id, owned: actor, callback,
       timing: Object.freeze({ ...timing, due: copyTime(timing.due), order: Object.freeze({ ...timing.order }) }) }));
     return undefined;
   }
@@ -151,45 +146,7 @@ export class FrameScheduler implements ActorSchedule {
     }
   }
 
-  /** Later-slot additions and cancellation are visible during the same traversal. */
-  advance(frames: readonly ProviderFrame[], boundary: ThinkTiming["boundary"]): readonly { readonly actor: ActorId; readonly result: ThinkResult }[] {
-    this.assertOpen();
-    if (this.advancing) throw new Error("Scheduler advance is already running");
-    const contexts = new Map<ProviderId, FrameContext>();
-    for (const { provider, frame } of frames) {
-      this.profile(provider);
-      if (contexts.has(provider)) throw new Error(`Duplicate provider frame: ${provider}`);
-      contexts.set(provider, copyFrame(frame));
-    }
-    const results: { readonly actor: ActorId; readonly result: ThinkResult }[] = [];
-    let cursor: PendingThink | null = null;
-    this.advancing = true;
-    try {
-      while (!this.closed) {
-        let next: PendingThink | null = null;
-        for (const pending of this.scheduled.values()) {
-          if (!this.options.actors.isLive(pending.actor)) { this.scheduled.delete(pending.actor.slot); continue; }
-          if (cursor !== null && this.comparePending(pending, cursor, false) <= 0) continue;
-          if (next === null || this.comparePending(pending, next, true) < 0) next = pending;
-        }
-        if (next === null) break;
-        cursor = next;
-        const executionProvider = next.timing.executionProvider ?? next.owned.owner;
-        const frame = contexts.get(executionProvider);
-        if (frame === undefined) throw new Error(`Missing source frame for provider: ${executionProvider}`);
-        results.push({ actor: next.actor, result: this.run(next.actor, frame, boundary) });
-      }
-    } finally { this.advancing = false; }
-    return results;
-  }
-
   close(): undefined { this.closed = true; this.scheduled.clear(); return undefined; }
-
-  private comparePending(left: PendingThink, right: PendingThink, invocations: boolean): number {
-    return left.providerRank - right.providerRank
-      || left.sourceSlot - right.sourceSlot
-      || (invocations ? left.timing.order.sequence - right.timing.order.sequence : 0);
-  }
 
   private result(invocations: number, actor: ActorId, reason: Extract<ThinkResult, { readonly kind: "not-run" }>["reason"]): ThinkResult {
     return invocations === 0 ? { kind: "not-run", reason } : { kind: "ran", invocations, alive: this.options.actors.isLive(actor) };

@@ -2,8 +2,12 @@ import { expect, test } from "bun:test";
 import { QvmMemory } from "../../../src/compat/qvm/memory.ts";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
 import { digestBytes } from "../../../src/content/mounts/index.ts";
-import { QvmModule, QvmOpcode, rejectQvmSyscall, resolveQvmArtifact } from "../../../src/compat/qvm/index.ts";
-import type { QvmCancellationScope, QvmHost } from "../../../src/compat/qvm/index.ts";
+import { QvmModule } from "../../../src/compat/qvm/module.ts";
+import { QvmOpcode } from "../../../src/compat/qvm/image.ts";
+import { rejectQvmSyscall } from "../../../src/compat/qvm/syscalls.ts";
+import { resolveQvmArtifact } from "../../../src/compat/qvm/artifacts.ts";
+import type { QvmCancellationScope } from "../../../src/compat/qvm/interpreter.ts";
+import type { QvmHost } from "../../../src/compat/qvm/syscalls.ts";
 
 function sourceModule(operations: readonly (readonly [QvmOpcode, number?])[] = [
     [QvmOpcode.OP_ENTER, 64], [QvmOpcode.OP_LOCAL, 56], [QvmOpcode.OP_CONST, 123], [QvmOpcode.OP_STORE4],
@@ -108,7 +112,7 @@ test("host stores cannot borrow the invocation of a suspended asynchronous child
   });
   let effects = 0;
   const remove = module.memory.observeWrites([{ byteOffset: 64, byteLength: 4 }], () => undefined, () => {
-    effects++; expect(() => module.call([], 8)).toThrow(); return undefined;
+    effects++; expect(() => module.call([], 8)).toThrow(/QVM is already active; recursive calls belong to the current syscall|QVM recursive call requires the active syscall or function hook with no pending child/); return undefined;
   });
   try {
     const pending = module.callAsync([]);

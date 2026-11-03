@@ -4,7 +4,7 @@ import { Q2MatchUi } from "../../src/app/bootstrap/q2-match-ui.ts";
 import { NativeUiController, defaultUiSkin } from "../../src/ui/common/index.ts";
 import { SeatInput } from "../../src/input/seat.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 import { SessionActorRegistry } from "../../src/world/actors/registry.ts";
 
 test("CTF HUD and menu commands stay on the recipient seat", () => {

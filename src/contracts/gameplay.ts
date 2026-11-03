@@ -206,18 +206,6 @@ export type TransitionDecision =
   | { readonly kind: "travel"; readonly map: `${string}:${string}`; readonly spawnPoint: string; readonly completeCampaign: boolean }
   | { readonly kind: "campaign-complete"; readonly campaign: ProviderId };
 
-export interface CampaignController {
-  readonly id: ProviderId;
-  gates(): readonly MissionGate[];
-  proposeTransition(): CampaignTransitionIntent | null;
-}
-
-export interface MatchController {
-  readonly id: ProviderId;
-  confirmedDamage(outcome: DamageOutcome): undefined;
-  proposeTransition(): MatchTransitionIntent | null;
-}
-
 /** The coordinator alone commits travel after resolving campaign and match intent order. */
 export interface TransitionCoordinator {
   resolve(mode: TransitionMode, intents: readonly TransitionIntent[]): TransitionDecision;

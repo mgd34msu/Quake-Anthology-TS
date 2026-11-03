@@ -17,10 +17,7 @@ export type Q1MonsterSpecies = "army" | "dog" | "knight" | "enforcer" | "demon" 
 export const Q1_MONSTER_SPECIES: readonly Q1MonsterSpecies[] = ["army", "dog", "knight", "enforcer", "demon", "ogre", "hellknight", "shambler", "wizard", "shalrath", "tarbaby", "fish", "zombie", "boss", "oldone", "gremlin", "scourge", "armagon", "spikemine", "decoy", "eel", "sword", "wrath", "super-wrath", "mummy", "lava-man", "morph", "dragon"];
 export interface Q1Monster {
   readonly species: Q1MonsterSpecies;
-  mode: "stand" | "walk" | "run" | "attack" | "leap" | "pain" | "death";
-  frameIndex: number;
-  sequence: readonly number[];
-  firstFrame: number;
+  mode: "stand" | "walk" | "run";
   enemy: ActorId | null;
   oldEnemy: ActorId | null;
   path: string;
@@ -28,9 +25,10 @@ export interface Q1Monster {
   attackFinished: number;
   painFinished: number;
   searchUntil: number;
-  deathDrop: boolean;
   refired: boolean;
 }
+/** Bumped whenever any entity is renamed, so name indexes know to rebuild. */
+export const targetnameEpoch = { value: 0 };
 export class Q1Actor {
   model = "";
   frame = 0;
@@ -41,7 +39,9 @@ export class Q1Actor {
   readonly fields = new Map<string, string>();
   readonly references = new Map<string, ActorId | null>();
   target = "";
-  targetname = "";
+  private currentTargetname = "";
+  get targetname(): string { return this.currentTargetname; }
+  set targetname(value: string) { if (value !== this.currentTargetname) { this.currentTargetname = value; targetnameEpoch.value++; } }
   killtarget = "";
   message = "";
   delay = 0;

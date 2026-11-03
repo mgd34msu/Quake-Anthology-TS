@@ -204,7 +204,7 @@ export class NativePrimaryWeapons {
         parameters: [{ kind: "scalar", storage: "pointer" }, { kind: "scalar", storage: "pointer" }], result: { kind: "scalar", storage: "pointer" }, variadic: false },
         [{ kind: "pointer", value: result }, { kind: "pointer", value: this.record(actor).address }]);
       return milliseconds * Number(this.host.memory.readInt64(result)) / evaluate.baselineMilliseconds;
-    } finally { for (const value of saved) this.write(actor, value.field, value.value); }
+    } finally { if (this.current(actor)) for (const value of saved) this.write(actor, value.field, value.value); }
   }
   private matches(actor: ActorId, test: NativeItemTest): boolean {
     if (test.kind === "pointer") {

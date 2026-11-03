@@ -1,11 +1,13 @@
-import { expect, spyOn, test } from "bun:test";
+import { writeCapture } from "../support/capture.ts";
+import { expect, spyOn } from "bun:test";
+import { glTest as test } from "../support/gl.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { StartupApplication } from "../../src/app/bootstrap/startup.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { NativeUiController } from "../../src/ui/common/controller.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 import { encodePng } from "../../src/formats/images/png.ts";
 
 test("startup Display keeps renderer and Apply visible on one normal-sized page", async () => {
@@ -35,7 +37,7 @@ test("startup Display keeps renderer and Apply visible on one normal-sized page"
     key(KeyCode.Tab);
     expect(controller.state().focus).toMatchObject({ menu: "menu:settings:display:0", control: "ui:video:renderer-apply" });
     const pixels = startup.captureNextFrame(); await startup.step();
-    await Bun.write("/tmp/video-settings-gl-startup-complete-page.png", encodePng(640, 480, await pixels));
+    await writeCapture("video-settings-gl-startup-complete-page.png", encodePng(640, 480, await pixels));
     key(KeyCode.Tab); expect(controller.state().focus).toMatchObject({ control: "ui:settings:back" });
     key(KeyCode.Tab); expect(controller.state().focus).toMatchObject({ control: "ui:video:brightness" });
   } finally { await app?.close(); captureController.mockRestore(); await rm(root, { recursive: true, force: true }); }

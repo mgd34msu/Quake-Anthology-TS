@@ -204,7 +204,7 @@ test("script reader rejects escapes and symlinks without falling through to moun
     await symlink(join(outside.root, "secret.cfg"), join(consoleRoot, "settings/seat-0/secret.cfg"));
     let reads = 0;
     const read = (name: string) => readConsoleScript({ name, source: context(0), consoleRoot, settings, mounted: async () => { reads++; return undefined; } });
-    await expect(read("../secret.cfg")).rejects.toThrow();
+    await expect(read("../secret.cfg")).rejects.toThrow("Invalid relative resource path: ../secret.cfg");
     await expect(read("escape/secret.cfg")).rejects.toThrow("symlink");
     await expect(read("secret.cfg")).rejects.toThrow("symlink");
     expect(reads).toBe(0);

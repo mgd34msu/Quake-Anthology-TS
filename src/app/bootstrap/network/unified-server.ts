@@ -1,9 +1,12 @@
 import { EventRing, type EventCursor } from "../../../foundation/event-ring.ts";
 import { UnifiedComponentPublisher } from "./unified-component-publication.ts";
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { ClientId } from '../../../contracts/identity.ts';
 import { addressKey, sameAddress } from '../../../network/common/endpoint.ts';
+import { printablePeerText } from '../../../network/common/diagnostics.ts';
+import { zeroNonFinite } from './unified-finite.ts';
+import { MovementBudget } from '../../../network/common/movement-budget.ts';
 import type { NetworkAddress } from '../../../network/common/endpoint.ts';
 import type { DatagramTransport } from '../../../network/common/transport.ts';
 import type { CompositionIdentity, WireSelection } from '../../../network/common/session.ts';
@@ -26,7 +29,10 @@ function hostCall<T>(callback: () => T): T {
   try { return callback(); } catch (error) { throw new UnifiedHostFailure(error); }
 }
 
-interface PendingPeer<TAddress> { readonly address: TAddress; readonly nonce: string; readonly token: string; readonly created: number; }
+const COOKIE_WINDOW_MILLISECONDS = 10000;
+const MAX_PEERS_PER_ADDRESS = 8;
+const MAX_INBOUND_MESSAGE_BYTES = 256 * 1024;
+const UNREADY_TIMEOUT_MILLISECONDS = 60000;
 interface Peer<TAddress> {
   readonly address: TAddress;
   readonly token: string;
@@ -36,6 +42,8 @@ interface Peer<TAddress> {
   player: UnifiedApplicationPlayer | null;
   ready: boolean;
   lastReceived: number;
+  readonly created: number;
+  readonly budget: MovementBudget;
   lastQueuedInput: number;
   lastConsumedInput: number;
   lastSubmittedInput: number;
@@ -58,7 +66,7 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
   private now = 0;
   private host: UnifiedApplicationServerHost;
   private composition: CompositionIdentity;
-  private readonly pending = new Map<string, PendingPeer<TAddress>>();
+  private readonly secret = randomBytes(32);
   private readonly peers = new Map<string, Peer<TAddress>>();
   private readonly commands = new EventRing<ActorCommand>(16384);
   private readonly commandCursor: EventCursor = this.commands.openCursor();
@@ -91,7 +99,7 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
       this.commands.filterLive(command => !command.actor.equals(player.actor));
       hostCall(() => this.host.disconnect(player));
     }
-    this.options.print(`Unified peer ${addressKey(peer.address)} disconnected: ${reason}\n`);
+    this.options.print(`Unified peer ${addressKey(peer.address)} disconnected: ${printablePeerText(reason)}\n`);
     try { this.queue(peer, { kind: 'disconnect', reason: reason.slice(0, 1024) }); this.flush(peer, now); }
     catch { peer.channel.close(); this.peers.delete(peer.token); }
   }
@@ -115,7 +123,7 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
       const player = peer.player;
       this.queue(peer, { kind: 'admitted', epoch: this.epoch, client: { slot: player.client.slot, generation: player.client.generation }, actor: { slot: player.actor.slot, generation: player.actor.generation }, sourceEntity: player.sourceEntity });
       const initial = hostCall(() => this.host.initialPresentation(player));
-      if (initial.length > 0) this.queue(peer, { kind: 'events', epoch: this.epoch, frame: 0, payload: encodeUnifiedPresentationEvents(initial), simulation: encodeCheckpointValue([]) });
+      if (initial.length > 0) this.queue(peer, { kind: 'events', epoch: this.epoch, frame: 0, payload: encodeUnifiedPresentationEvents(initial, count => { this.options.print(`Unified server dropped ${count} presentation event(s) with non-finite numbers\n`); }), simulation: encodeCheckpointValue([]) });
       peer.ready = true;
       return;
     }
@@ -136,14 +144,18 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
     if (batch.epoch !== this.epoch) return;
     for (const input of batch.commands) {
       if (input.sequence <= peer.lastQueuedInput) continue;
+      if (!peer.budget.admit('milliseconds' in input.command ? input.command.milliseconds : 0, this.now)) { peer.lastQueuedInput = input.sequence; continue; }
       const command = this.host.input(peer.player, input.sequence, input.command, input.arsenal);
       this.commands.admit(command); peer.lastQueuedInput = input.sequence;
     }
   }
+  private cookie(address: TAddress, nonce: string, now: number, windowsBack: number): string {
+    const window = Math.floor(now / COOKIE_WINDOW_MILLISECONDS) - windowsBack;
+    return createHmac('sha256', this.secret).update(`${addressKey(address)}|${nonce}|${window}`).digest('hex').slice(0, 32);
+  }
   async poll(now: number): Promise<readonly ActorCommand[]> {
     if (this.ended) return [];
     this.now = now;
-    for (const [key, pending] of this.pending) if (now - pending.created > 10000) this.pending.delete(key);
     for (let count = 0; count < 4096; count++) {
       const event = this.options.transport.poll();
       if (event === null) break;
@@ -160,26 +172,30 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
             if (message.kind === 'reliable') this.acceptControl(peer, message.payload, now);
             else this.acceptInputs(peer, message.payload);
           }
-        } catch (error) { if (error instanceof UnifiedHostFailure) throw error.cause; this.drop(peer, error instanceof Error ? error.message : String(error), now); }
+        } catch (error) {
+          // A fault raised by one peer's message costs that peer its connection. If the game itself is broken,
+          // the disconnect callback fails too and the application's frame boundary takes over.
+          const fault = error instanceof UnifiedHostFailure ? error.cause : error;
+          this.drop(peer, fault instanceof Error ? fault.message : String(fault), now);
+        }
         continue;
       }
       const handshake = decodeUnifiedHandshake(event.payload);
       if (handshake === null || handshake.kind === 'challenge') continue;
-      const key = addressKey(event.from);
       if (handshake.kind === 'hello') {
-        const old = this.pending.get(key);
-        if (old === undefined && this.pending.size >= 256) continue;
-        const pending = old?.nonce === handshake.nonce ? old : { address: event.from, nonce: handshake.nonce, token: randomBytes(16).toString('hex'), created: now };
-        this.pending.set(key, pending);
-        this.options.transport.send(event.from, encodeUnifiedHandshake({ kind: 'challenge', nonce: pending.nonce, token: pending.token }));
+        // The challenge is a keyed hash of the source and a time window, so spoofed hellos allocate nothing.
+        this.options.transport.send(event.from, encodeUnifiedHandshake({ kind: 'challenge', nonce: handshake.nonce, token: this.cookie(event.from, handshake.nonce, now, 0) }));
       } else {
         const existing = this.peers.get(handshake.token);
-        if (existing !== undefined && existing.nonce === handshake.nonce && sameAddress(existing.address, event.from)) { this.flush(existing, now); continue; }
-        const pending = this.pending.get(key);
-        if (pending === undefined || pending.token !== handshake.token || pending.nonce !== handshake.nonce || this.peers.size >= this.host.maxClients + 8) continue;
-        this.pending.delete(key);
-        const peer: Peer<TAddress> = { address: event.from, token: pending.token, nonce: pending.nonce,
-          channel: new UnifiedChannel(pending.token, { datagramBytes: Math.min(1200, this.options.transport.maxDatagramBytes ?? 1200) }), resources: new Set(), player: null, ready: false, lastReceived: now, lastQueuedInput: -1, lastConsumedInput: -1, lastSubmittedInput: -1, requiredReliable: 0, components: new UnifiedComponentPublisher(), closing: null };
+        if (existing !== undefined && existing.nonce === handshake.nonce && sameAddress(existing.address, event.from)) {
+          try { this.flush(existing, now); }
+          catch (error) { this.drop(existing, error instanceof Error ? error.message : String(error), now); }
+          continue;
+        }
+        if (this.peers.size >= this.host.maxClients + 8 || [...this.peers.values()].filter(peer => sameAddress(peer.address, event.from, false)).length >= MAX_PEERS_PER_ADDRESS) continue;
+        if (handshake.token !== this.cookie(event.from, handshake.nonce, now, 0) && handshake.token !== this.cookie(event.from, handshake.nonce, now, 1)) continue;
+        const peer: Peer<TAddress> = { address: event.from, token: handshake.token, nonce: handshake.nonce,
+          channel: new UnifiedChannel(handshake.token, { datagramBytes: Math.min(1200, this.options.transport.maxDatagramBytes ?? 1200), inboundMessageBytes: MAX_INBOUND_MESSAGE_BYTES }), resources: new Set(), player: null, ready: false, lastReceived: now, created: now, budget: new MovementBudget(), lastQueuedInput: -1, lastConsumedInput: -1, lastSubmittedInput: -1, requiredReliable: 0, components: new UnifiedComponentPublisher(), closing: null };
         this.peers.set(peer.token, peer); this.offer(peer);
       }
     }
@@ -187,6 +203,7 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
       if (peer.closing !== null && (now - peer.closing > 1000 || peer.channel.acknowledgedReliableSequence >= peer.requiredReliable)) {
         peer.channel.close(); this.peers.delete(peer.token); continue;
       }
+      if (peer.closing === null && !peer.ready && now - peer.created > UNREADY_TIMEOUT_MILLISECONDS) { this.drop(peer, 'Signon timed out', now); continue; }
       if (peer.closing === null && now - peer.lastReceived > 30000) { this.drop(peer, 'Connection timed out', now); continue; }
       try { this.flush(peer, now); }
       catch (error) { this.drop(peer, error instanceof Error ? error.message : String(error), now); }
@@ -234,10 +251,10 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
         const presentation = hostCall(() => this.host.presentationEvents(player, events));
         const frame = hostCall(() => this.host.frame(player, output, this.epoch, peer.lastConsumedInput));
         if (presentation.length > 0 || frame.output.events.length > 0) this.queue(peer, { kind: 'events', epoch: this.epoch, frame: output.snapshot.frame.frame,
-          payload: encodeUnifiedPresentationEvents(presentation), simulation: encodeCheckpointValue(frame.output.events.map(writeUnifiedSimulationEvent)) });
+          payload: encodeUnifiedPresentationEvents(presentation, count => { this.options.print(`Unified server dropped ${count} presentation event(s) with non-finite numbers\n`); }), simulation: encodeCheckpointValue(frame.output.events.map(writeUnifiedSimulationEvent)) });
         const components = peer.components.project(hostCall(() => this.host.components?.(player) ?? []), hostCall(() => this.host.nativeComponents?.(player) ?? []));
         if (components.update !== null) this.queue(peer, { kind: 'components', epoch: this.epoch, update: components.update });
-        peer.channel.queueFrame(encodeUnifiedFrame({ ...frame, components: components.frame, output: { snapshot: frame.output.snapshot, events: [] } }), peer.requiredReliable);
+        peer.channel.queueFrame(encodeUnifiedFrame(zeroNonFinite({ ...frame, components: components.frame, output: { snapshot: frame.output.snapshot, events: [] } })), peer.requiredReliable);
         this.flush(peer, now);
       } catch (error) { if (error instanceof UnifiedHostFailure) throw error.cause; this.drop(peer, error instanceof Error ? error.message : String(error), now); }
     }
@@ -260,7 +277,7 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
       try { if (peer.player !== null) this.host.disconnect(peer.player); } catch (error) { failures.push(error); }
       peer.channel.close();
     }
-    this.peers.clear(); this.pending.clear(); this.commands.reset();
+    this.peers.clear(); this.commands.reset();
     try { this.options.transport.close(); } catch (error) { failures.push(error); }
     if (failures.length > 0) throw new AggregateError(failures, 'Unified server shutdown failed');
   }

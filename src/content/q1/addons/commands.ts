@@ -42,6 +42,12 @@ function cleanupMarkers(context: Q1AddonContext, name: "secret_marker" | "exit_m
   return undefined;
 }
 
+/** The MG1/MG3 impulses their ImpulseCommands leaves open to every client, which `sv_gate_dev_impulses` puts behind cheats. */
+export function isQ1AddonDeveloperImpulse(program: Q1AddonContext["program"], impulse: number): boolean {
+  if (impulse === 219) return program === "mg1" || program === "mg3";
+  return program === "mg3" && (impulse >= 100 && impulse <= 105 || impulse >= 111 && impulse <= 122 || impulse === 222 || impulse === 223 || impulse === 227 || impulse === 228);
+}
+
 export function handleQ1AddonImpulse(context: Q1AddonContext, actor: ActorId, impulse: number): boolean {
   if (context.program === "ctf") return false;
   if (impulse === 219) { omnicideQ1Addons(context, actor); return true; }

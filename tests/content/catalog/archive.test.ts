@@ -41,7 +41,16 @@ test("memory PAK retains duplicate ordinals, source spelling and owned bytes", a
   const unsafe = duplicatePak();
   unsafe.fill(0, 14, 70);
   unsafe.set(new TextEncoder().encode("../escape"), 14);
-  expect(() => decodeArchive(unsafe)).toThrow("Unsafe archive member path");
+  // An unaddressable member is skipped instead of rejecting the archive (FORMATS-012).
+  const skipped = decodeArchive(unsafe);
+  expect(skipped.entries.map(entry => entry.ordinal)).toEqual([0]);
+  skipped.close();
+  const dotted = duplicatePak();
+  dotted.fill(0, 14, 70);
+  dotted.set(new TextEncoder().encode("./maps//a.bsp"), 14);
+  const normalized = decodeArchive(dotted);
+  expect(normalized.entries.map(entry => entry.path)).toEqual(["maps/a.bsp", "Models/duplicate.mdl"]);
+  normalized.close();
   expect(normalizeEntryPath("models/monsters/tank/../ctank/skin.pcx")).toBe("models/monsters/ctank/skin.pcx");
 });
 

@@ -1,5 +1,5 @@
 import { SaveReader } from "../../../persistence/value.ts";
-import { readScriptDiagnostic } from "../../../ui/common/legacy/script/lexer.ts";
+import { readScriptDiagnostic } from "../../../content/legacy-script/lexer.ts";
 /*
  * Fuzzy weight configuration translated from id Software's
  * code/botlib/be_ai_weight.c and be_ai_weight.h.
@@ -10,17 +10,16 @@ import { readScriptDiagnostic } from "../../../ui/common/legacy/script/lexer.ts"
 import {
   ScriptSourceReader,
   type ScriptPreprocessorOptions,
-} from "../../../ui/common/legacy/script/preprocessor.ts";
+} from "../../../content/legacy-script/preprocessor.ts";
 import type { BotScriptReader } from "./script-sources.ts";
-import { BotMemory, type BotMemoryAllocation } from "./memory.ts";
+import { allocationView, BotMemory, type BotMemoryAllocation } from "./memory.ts";
 import {
   NumberFlag,
-  scriptNumberSubtypeName,
   ScriptLanguageError,
   type ScriptDiagnostic,
   type ScriptToken,
   type SourceLocation,
-} from "../../../ui/common/legacy/script/lexer.ts";
+} from "../../../content/legacy-script/lexer.ts";
 
 export const MAX_FUZZY_WEIGHTS = 128;
 export const MAX_CACHED_WEIGHT_CONFIGS = 128;
@@ -73,11 +72,6 @@ type SeparatorDecision =
 type WeightPointer =
   | { readonly kind: "name"; readonly allocation: BotMemoryAllocation }
   | { readonly kind: "separator"; readonly separator: FuzzySeparator };
-
-function allocationView(allocation: BotMemoryAllocation): DataView {
-  const bytes = allocation.bytes;
-  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-}
 
 function terminatedBytes(bytes: Uint8Array): Uint8Array {
   const end = bytes.indexOf(0);
@@ -441,7 +435,7 @@ class WeightParser {
   private expectInteger(): Extract<ScriptToken, { readonly kind: "number" }> {
     const token = this.expectAny();
     if (token.kind !== "number") this.fail(`expected a number, found ${token.text}`, token.location);
-    if ((token.flags & NumberFlag.Integer) === 0) scriptNumberSubtypeName(NumberFlag.Integer);
+    if ((token.flags & NumberFlag.Integer) === 0) this.fail(`expected integer, found ${token.text}`, token.location);
     return token;
   }
 
@@ -500,7 +494,8 @@ function inventoryValue(inventory: WeightInventory, index: number): number {
   return value;
 }
 
-function sourceUnitRandom(random: BotRandom): number {
+/** botlib's `random()`: the low 15 bits of `rand()` over 0x7fff. */
+export function sourceUnitRandom(random: BotRandom): number {
   const raw = random.nextInt();
   if (!Number.isInteger(raw) || raw < INT32_MIN || raw > UINT32_MAX) {
     throw new RangeError("bot random nextInt must return an int32 or uint32 value");

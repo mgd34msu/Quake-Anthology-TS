@@ -54,4 +54,6 @@ export interface Q1ServerNetworkOptions<TAddress extends NetworkAddress> {
     readonly transport: DatagramTransport<TAddress>;
     readonly host: Q1ApplicationServerHost;
     readonly timeoutMilliseconds?: number;
+    /** Ignore datagrams from non-private addresses (NET-007); NetQuake has no handshake secret. */
+    readonly trustedNetworksOnly?: boolean;
 }

@@ -78,6 +78,6 @@ test("QuakeWorld movement stays unavailable without base Quake", async () => {
     const command = parseApplicationCommand(["--content-root", root, "--game", "q1-classic-id1", "--map", "e1m1",
       "--movement", "qw", "--character", "q1", "--dedicated"]);
     if (command.kind !== "run") throw new Error("Expected launch options");
-    expect(() => resolveApplicationMovement(catalog, command.options)).toThrow();
+    expect(() => resolveApplicationMovement(catalog, command.options)).toThrow("Content q1-classic-id1 requires: q1/id1/pak0.pak, q1/id1/pak1.pak, q1/id1");
   } finally { await rm(root, { recursive: true, force: true }); }
 });

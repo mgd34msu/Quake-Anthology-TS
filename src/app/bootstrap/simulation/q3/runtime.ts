@@ -21,7 +21,7 @@ import { Q3WorldAdapter } from "../../../../content/q3/base/world-adapter.ts";
 import { Q3CombatBridge } from "../../../../content/q3/base/combat-bridge.ts";
 import { Q3GameSettings } from "../../../../content/q3/base/settings.ts";
 import { GameLevel } from "../../../../content/q3/base/game/level.ts";
-import { findQ3EntityTeams } from "../../../../content/q3/base/map-spawns.ts";
+import { createQ3SpawnHandlers, findQ3EntityTeams } from "../../../../content/q3/base/map-spawns.ts";
 import { EntityEvent, EntityType, GameType, Team, MoveType, statSchema } from "../../../../content/q3/base/shared/definitions.ts";
 import { findItem, itemAt } from "../../../../content/q3/base/shared/items.ts";
 import type { Q3SourceHost, Q3SourceOptions, Q3SourceBots, Q3SourceSessionCarry } from "./types.ts";
@@ -33,7 +33,7 @@ import type { ClientEffectsContext } from "../../../../content/q3/team-arena/cli
 import { clientEvents } from "../../../../content/q3/team-arena/client-events.ts";
 import { clientInactivityTimer, clientIntermissionThink, spectatorClientEndFrame, spectatorThink } from "../../../../content/q3/team-arena/client-policy.ts";
 import type { ClientPolicyContext } from "../../../../content/q3/team-arena/client-policy.ts";
-import { ClientSpawnRuntime, ClientSpawnState, spawnDeathmatchPoint, spawnPlayerStart } from "../../../../content/q3/team-arena/client-spawn.ts";
+import { ClientSpawnRuntime, ClientSpawnState } from "../../../../content/q3/team-arena/client-spawn.ts";
 import { ClientThinkRuntime } from "../../../../content/q3/team-arena/client-think.ts";
 import { GameCommandRuntime } from "../../../../content/q3/team-arena/commands.ts";
 import { DeathRuntime } from "../../../../content/q3/base/game/death.ts";
@@ -46,7 +46,6 @@ import type { DropItemContext } from "../../../../content/q3/base/game/item-moti
 import { MatchModuleState, MatchRuntime } from "../../../../content/q3/team-arena/match.ts";
 import { GameMemory } from "../../../../content/q3/base/game/memory.ts";
 import { killBox } from "../../../../content/q3/base/game/misc.ts";
-import { miscSpawnHandlers } from "../../../../content/q3/base/game/misc-spawn.ts";
 import { MissileRuntime } from "../../../../content/q3/base/game/missile.ts";
 import { MoverRuntime } from "../../../../content/q3/base/game/mover.ts";
 import { MoverSpawnRuntime } from "../../../../content/q3/base/game/mover-spawn.ts";
@@ -60,9 +59,8 @@ import { SpawnVariables, spawnEntities } from "../../../../content/q3/base/game/
 import type { SpawnHandler, SpawnReport } from "../../../../content/q3/base/game/spawn.ts";
 import { ConnectionState, GameFlags, MAX_CLIENTS, MAX_GENTITIES } from "../../../../content/q3/base/game/state.ts";
 import type { GameEntity } from "../../../../content/q3/base/game/state.ts";
-import { TargetLocationState, targetSpawnHandlers } from "../../../../content/q3/base/game/targets.ts";
-import { spawnTeamPoint, TeamRuntime } from "../../../../content/q3/team-arena/team.ts";
-import { triggerSpawnHandlers } from "../../../../content/q3/base/game/triggers.ts";
+import { TargetLocationState } from "../../../../content/q3/base/game/targets.ts";
+import { TeamRuntime } from "../../../../content/q3/team-arena/team.ts";
 import { ConfigStringRegistry, findEntity, useTargets } from "../../../../content/q3/base/game/utilities.ts";
 import type { TargetUseContext } from "../../../../content/q3/base/game/utilities.ts";
 import { invulnerabilityEffect, logAccuracyHit, WeaponRuntime } from "../../../../content/q3/base/game/weapon.ts";
@@ -107,6 +105,8 @@ export class Q3SourceRuntime {
   private retired = false;
   private loadedGameType: number | null = null;
   private mapReport: SpawnReport | null = null;
+  /** Slots whose session carried over; only the first admission of each is a reconnect, later occupants are new connects. */
+  private readonly carriedSlots = new Set<number>();
   private readonly publishedEvents = new Map<OwnedActor, { readonly event: number; readonly time: number }>();
 
   constructor(readonly options: Q3SourceOptions, readonly host: Q3SourceHost,
@@ -117,6 +117,7 @@ export class Q3SourceRuntime {
       for (const client of options.sessionCarry.clients) {
         if (client.slot < 0 || client.slot >= options.maxClients) continue;
         host.cvars.set(`session${client.slot}`, client.session, true);
+        this.carriedSlots.add(client.slot);
         host.engine.setUserinfo(client.slot, client.userinfo);
       }
     }
@@ -184,7 +185,7 @@ export class Q3SourceRuntime {
       moveClient: (entity, command, options) => this.host.moveClient(entity, command, options),
       effects: { combat: this.combat }, frame: () => this.level,
       settings: () => ({ synchronousClients: this.integer("g_synchronousClients") !== 0, pmoveFixed: this.integer("pmove_fixed") !== 0,
-        debugMove: this.integer("g_debugMove"),
+        debugMove: this.integer("g_debugMove"), ladders: this.integer("pmove_ladders") !== 0,
         pmoveMsec: this.integer("pmove_msec"), gravity: this.number("g_gravity"), speed: this.number("g_speed"), dmflags: this.integer("dmflags"),
         smoothClients: this.integer("g_smoothClients") !== 0, forceRespawnSeconds: this.integer("g_forcerespawn"), singlePlayer: this.singlePlayerActive() }),
       setPmoveMsec: value => this.setCvar("pmove_msec", String(value)), intermissionThink: clientIntermissionThink,
@@ -199,6 +200,7 @@ export class Q3SourceRuntime {
       userCommand: host.engine.getUserCommand, handicap: number => this.userinfo(number, "handicap"),
       findIntermissionPoint: () => this.match.findIntermissionPoint(), moveToIntermission: entity => this.match.moveClientToIntermission(entity),
       selectedPlayer: (entity, pose) => host.spawnPlayer(entity, pose),
+      selectedWeaponAfterTargets: entity => host.selectSpawnWeapon(entity),
       killBox: entity => killBox(this.combat, entity), playerDie: this.death.playerDie, bodyDie: this.death.bodyDie,
       effects: () => this.effects(), targets: () => this.targets() }, this.clientSpawns);
     this.session = new GameSessionManager(this.sessionState(), { cvars: { get: name => this.engineCvar(name), set: (name, value) => this.setCvar(name, value) },
@@ -463,28 +465,12 @@ export class Q3SourceRuntime {
     const shared = { entities: this.pool, world: this.world, random: this.random, combat: () => this.combat, participants: this.useParticipants(),
       gravity: () => this.number("g_gravity"), soundIndex: (path: string) => this.config.soundIndex(path),
       remapShader: (oldName: string, newName: string, time: number) => this.remapShader(oldName, newName, time), warn: this.host.engine.print };
-    const handlers = new Map<string, SpawnHandler>([
-      ["info_player_start", spawnPlayerStart], ["info_player_deathmatch", spawnDeathmatchPoint],
-      // SP_info_player_intermission and SP_item_botroam have empty source bodies.
-      ["info_player_intermission", () => {}], ["item_botroam", () => {}],
-      ["team_CTF_redplayer", spawnTeamPoint], ["team_CTF_blueplayer", spawnTeamPoint],
-      ["team_CTF_redspawn", spawnTeamPoint], ["team_CTF_bluespawn", spawnTeamPoint],
-      ...miscSpawnHandlers({ missiles: this.missiles, itemRegistry: this.registeredItems, random: this.random, warn: this.host.engine.print }),
-      ...this.moverSpawns.handlers(),
-      ...triggerSpawnHandlers({ ...shared, setBrushModel: (entity, name) => this.setBrushModel(entity, name) }),
-      ...targetSpawnHandlers({ ...shared, itemLifecycle: this.itemLifecycle, locations: this.locations,
+    return createQ3SpawnHandlers({ product: this.options.product, team: this.team, movers: this.moverSpawns,
+      misc: { missiles: this.missiles, itemRegistry: this.registeredItems, random: this.random, warn: this.host.engine.print },
+      triggers: { ...shared, setBrushModel: (entity, name) => this.setBrushModel(entity, name) },
+      targets: { ...shared, itemLifecycle: this.itemLifecycle, locations: this.locations,
         addScore: (entity, origin, score) => this.death.addScore(entity, origin, score), returnFlag: team => this.team.returnFlag(team),
-        sendServerCommand: this.host.engine.sendServerCommand, setConfigstring: (index, value) => this.host.configstrings.set(index, value) }),
-    ]);
-    const remove = handlers.get("info_null");
-    if (remove === undefined) throw new Error("Source info_null handler is unavailable");
-    handlers.set("func_group", remove);
-    if (this.options.product === "missionpack") {
-      handlers.set("team_redobelisk", entity => this.team.spawnTeamObelisk(entity, Team.TEAM_RED));
-      handlers.set("team_blueobelisk", entity => this.team.spawnTeamObelisk(entity, Team.TEAM_BLUE));
-      handlers.set("team_neutralobelisk", entity => this.team.spawnNeutralObelisk(entity));
-    }
-    return handlers;
+        sendServerCommand: this.host.engine.sendServerCommand, setConfigstring: (index, value) => this.host.configstrings.set(index, value) } });
   }
 
   private remapTeams(levelTime = this.level.time): void {
@@ -563,9 +549,9 @@ export class Q3SourceRuntime {
       this.config.soundIndex("sound/player/gurp1.wav"); this.config.soundIndex("sound/player/gurp2.wav");
     }
     this.remapTeams(); this.settings.update(); this.loaded = true; this.loadedGameType = this.gameType;
-    const unknown = this.mapReport.outcomes.filter(outcome => outcome.kind === "unknown");
-    if (unknown.length !== 0 && this.options.foreignWorld !== true) throw new Error("Unimplemented authored Q3 spawns: " + unknown.map(outcome => outcome.classname).join(", "));
+    // G_CallSpawn warns about an entity with no spawn function and frees it; spawn.ts has already done both.
     this.host.configstrings.set(0, this.host.serverState.serverInfo());
+    this.log("-".repeat(60) + "\n"); this.log(gameFormat("InitGame: %s\n", [this.host.serverState.serverInfo()]));
     return this.mapReport;
   }
 
@@ -648,7 +634,7 @@ export class Q3SourceRuntime {
 
   admitPlayer(actor: OwnedActor, client: number): GameEntity {
     const entity = this.prepareClient(actor, client);
-    const restored = this.options.sessionCarry?.clients.some(saved => saved.slot === client) ?? false;
+    const restored = this.carriedSlots.delete(client);
     const rejected = this.admission.connect(client, !restored, false);
     if (rejected !== null) throw new Q3ClientAdmissionDenied(rejected);
     this.admission.begin(client);

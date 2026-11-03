@@ -27,6 +27,8 @@ export function registerDiagnosticTools(services: DiagnosticToolServices): () =>
 
 /** CL_Frame's cl_avidemo clock, shared by every renderer and screenshot format. */
 export function sourceCaptureFrame(elapsed: number, options: { readonly fps: number; readonly timescale: number; readonly active: boolean; readonly force: boolean }): { readonly milliseconds: number; readonly capture: boolean } {
+  // Users set these cvars from the console; a negative value just means no capture clock.
+  if (Number.isFinite(elapsed) && elapsed >= 0 && (!Number.isFinite(options.fps) || !Number.isFinite(options.timescale) || options.fps < 0 || options.timescale < 0)) return { milliseconds: elapsed, capture: false };
   if (![elapsed, options.fps, options.timescale].every(Number.isFinite) || elapsed < 0 || options.fps < 0 || options.timescale < 0) throw new RangeError("Invalid capture clock");
   const fps = Math.trunc(options.fps);
   if (fps === 0 || elapsed === 0) return { milliseconds: elapsed, capture: false };

@@ -10,6 +10,7 @@
  * profile. Grayscale expands to RGBA instead of LoadJPG's undersized buffer.
  */
 import { BinaryError } from "../../core/binary/index.ts";
+import { imageSizeAllowed } from "./limits.ts";
 
 export interface JpegImage {
   readonly width: number;
@@ -52,6 +53,8 @@ class Input {
   offset = 0;
   unreadMarker = 0;
   discardedBytes = 0;
+  fabricatedBytes = 0;
+  scans = 0;
   constructor(readonly bytes: Uint8Array, readonly source: string, readonly warnings: Warnings) {}
   fail(message: string): never {
     throw new BinaryError(this.source, this.offset, `JPEG: ${message}`);
@@ -111,6 +114,22 @@ class Input {
   }
 }
 
+/** jdhuff.c look-ahead: for each 8-bit prefix, (code length << 8) | symbol of the shortest matching code, or zero. */
+const lookaheads = new WeakMap<ReadonlyMap<number, number>, Uint16Array>();
+function lookaheadFor(table: ReadonlyMap<number, number>): Uint16Array {
+  let result = lookaheads.get(table);
+  if (result !== undefined) return result;
+  result = new Uint16Array(256);
+  for (let look = 0; look < 256; look++) {
+    for (let length = 1; length <= 8; length++) {
+      const value = table.get((1 << length) + (look >>> (8 - length)));
+      if (value !== undefined) { result[look] = (length << 8) | value; break; }
+    }
+  }
+  lookaheads.set(table, result);
+  return result;
+}
+
 class Entropy {
   private value = 0;
   private remaining = 0;
@@ -121,6 +140,8 @@ class Entropy {
       let next = 0;
       if (this.input.unreadMarker !== 0) {
         if (this.remaining >= required) break;
+        // Past the end of entropy data the decoder synthesizes zero bits without consuming input; bound that.
+        if (++this.input.fabricatedBytes > Math.max(65536, this.input.bytes.length * 16)) this.input.fail("entropy data ends far short of the declared image");
         if (!this.printedEnd) {
           this.input.warnings.emit("Corrupt JPEG data: premature end of data segment");
           this.printedEnd = true;
@@ -161,11 +182,8 @@ class Entropy {
     if (this.remaining < 8) this.fill(0);
     let minimum = 1;
     if (this.remaining >= 8) {
-      const look = (this.value >>> (this.remaining - 8)) & 255;
-      for (let length = 1; length <= 8; length++) {
-        const value = table.get((1 << length) + (look >>> (8 - length)));
-        if (value !== undefined) { this.remaining -= length; return value; }
-      }
+      const hit = lookaheadFor(table)[(this.value >>> (this.remaining - 8)) & 255] ?? 0;
+      if (hit !== 0) { this.remaining -= hit >> 8; return hit & 255; }
       minimum = 9;
     }
     let code = (1 << minimum) + this.bits(minimum);
@@ -268,6 +286,7 @@ function prepareFrame(input: Input, header: FrameHeader, buffered: boolean): Fra
   const { width, height, precision, progressive, components: descriptors } = header;
   const count = descriptors.length;
   if (width > 65500 || height > 65500) input.sourceFail("Maximum supported image dimension is 65500 pixels");
+  if (!imageSizeAllowed(width, height)) input.sourceFail(`JPEG dimensions ${width}x${height} exceed the decoder limit`);
   if (precision !== 8) input.sourceFail(`Unsupported JPEG data precision ${precision}`);
   if (count > 10) input.sourceFail(`Too many color components: ${count}, max 10`);
   let maxH = 1;
@@ -731,6 +750,7 @@ function readScan(input: Input, scanHeader: ScanHeader, frame: Frame, quantizers
   const workspace = new Float32Array(64);
   const strip = buffered ? null : new OnePassRows(input, frame, colorSpace);
   let restart = 0;
+  const pending: { index: number; column: number; row: number; block: Float32Array }[] = [];
   for (let mcu = 0; mcu < columns * rows; mcu++) {
     if (restartInterval !== 0 && mcu > 0 && mcu % restartInterval === 0) {
       entropy.restart(restart);
@@ -740,7 +760,7 @@ function readScan(input: Input, scanHeader: ScanHeader, frame: Frame, quantizers
     const column = mcu % columns;
     const row = Math.floor(mcu / columns);
     let blockIndex = 0;
-    const pending: { index: number; column: number; row: number; block: Float32Array }[] = [];
+    pending.length = 0;
     for (const [index, scan] of scans.entries()) {
       const h = single === undefined ? scan.component.h : 1;
       const v = single === undefined ? scan.component.v : 1;
@@ -1100,6 +1120,7 @@ export function decodeJpeg(bytes: Uint8Array, source = "<jpeg>", print: (text: s
     }
     else if (marker === 218) {
       if (state === undefined) return input.sourceFail("Invalid JPEG file structure: SOS before SOF");
+      if (++input.scans > 256) input.sourceFail("Too many scans");
       const scanHeader = readScanHeader(input, state.kind === "header" ? state.header : state.frame);
       if (state.kind === "ready" && !state.multipleScans) input.sourceFail("Didn't expect more than one scan");
       if (state.kind === "header") {

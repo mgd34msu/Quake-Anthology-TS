@@ -2,7 +2,7 @@
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Bounds } from "../../../contracts/math.ts";
 import type { Q1Monster } from "../foundation/entity.ts";
-export type BaseSpecies = "knight" | "enforcer" | "demon" | "ogre" | "hellknight" | "shambler" | "wizard" | "shalrath" | "tarbaby" | "fish" | "zombie" | "boss" | "oldone";
+export type BaseSpecies = "army" | "dog" | "knight" | "enforcer" | "demon" | "ogre" | "hellknight" | "shambler" | "wizard" | "shalrath" | "tarbaby" | "fish" | "zombie" | "boss" | "oldone";
 export interface MonsterSpecies {
   readonly species: Q1Monster["species"];
   readonly killString?: string;
@@ -24,7 +24,10 @@ export interface MonsterSpecies {
 const human: Bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 40 } };
 const large: Bounds = { min: { x: -32, y: -32, z: -24 }, max: { x: 32, y: 32, z: 64 } };
 const gibs: readonly string[] = ["gib1", "gib2", "gib3"];
+const large25: Bounds = { min: { x: -32, y: -32, z: -24 }, max: { x: 32, y: 32, z: 40 } };
 export const baseSpecies: readonly MonsterSpecies[] = [
+  { species: "army", killString: "$qc_ks_grunt", classnames: ["monster_army"], model: "soldier", head: "h_guard", health: 30, gibHealth: -35, gibs, bounds: human, stand: "army_stand1", walk: "army_walk1", run: "army_run1", sight: "soldier/sight1.wav", missile: "army_atk1", melee: false, movement: "walk" },
+  { species: "dog", killString: "$qc_ks_rottweiler", classnames: ["monster_dog"], model: "dog", head: "h_dog", health: 25, gibHealth: -35, gibs: ["gib3", "gib3", "gib3"], bounds: large25, stand: "dog_stand1", walk: "dog_walk1", run: "dog_run1", sight: "dog/dsight.wav", missile: "dog_leap1", melee: true, movement: "walk" },
   { species: "knight", killString: "$qc_ks_knight", classnames: ["monster_knight"], model: "knight", head: "h_knight", health: 75, gibHealth: -40, gibs, bounds: human, stand: "knight_stand1", walk: "knight_walk1", run: "knight_run1", sight: "knight/ksight.wav", missile: null, melee: true, movement: "walk" },
   { species: "enforcer", killString: "$qc_ks_enforcer", classnames: ["monster_enforcer"], model: "enforcer", head: "h_mega", health: 80, gibHealth: -35, gibs, bounds: human, stand: "enf_stand1", walk: "enf_walk1", run: "enf_run1", sight: "enforcer/sight1.wav", missile: "enf_atk1", melee: false, movement: "walk" },
   { species: "demon", killString: "$qc_ks_fiend", classnames: ["monster_demon1"], model: "demon", head: "h_demon", health: 300, gibHealth: -80, gibs: ["gib1", "gib1", "gib1"], bounds: large, stand: "demon1_stand1", walk: "demon1_walk1", run: "demon1_run1", sight: "demon/sight2.wav", missile: "demon1_jump1", melee: true, movement: "walk" },
@@ -43,6 +46,14 @@ export const baseSpecies: readonly MonsterSpecies[] = [
 /** progs106 monster spawn declarations, before model assignment and startup. */
 export function precacheId1Monster(game: Q1EntityServices, species: Q1Monster["species"]): undefined {
   switch (species) {
+    case "army":
+      for (const model of ["soldier", "h_guard", "gib1", "gib2", "gib3"]) game.precacheModel(`progs/${model}.mdl`);
+      for (const sound of ["soldier/death1.wav", "soldier/idle.wav", "soldier/pain1.wav", "soldier/pain2.wav", "soldier/sattck1.wav", "soldier/sight1.wav", "player/udeath.wav"]) game.precacheSound(sound);
+      return undefined;
+    case "dog":
+      game.precacheModel("progs/h_dog.mdl"); game.precacheModel("progs/dog.mdl");
+      for (const sound of ["dog/dattack1.wav", "dog/ddeath.wav", "dog/dpain1.wav", "dog/dsight.wav", "dog/idle.wav"]) game.precacheSound(sound);
+      return undefined;
     case "knight":
       game.precacheModel("progs/knight.mdl");
       game.precacheModel("progs/h_knight.mdl");
@@ -123,6 +134,7 @@ export function precacheId1Monster(game: Q1EntityServices, species: Q1Monster["s
     case "wizard":
       game.precacheModel("progs/wizard.mdl");
       game.precacheModel("progs/h_wizard.mdl");
+      if (game.sourceBloodyNightmare !== null) game.precacheModel("progs/w_spike2.mdl");
       game.precacheModel("progs/w_spike.mdl");
       game.precacheSound("wizard/hit.wav");
       game.precacheSound("wizard/wattack.wav");

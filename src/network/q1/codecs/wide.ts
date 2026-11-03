@@ -434,7 +434,7 @@ export function makeWideCodec(reader: MessageReader, protocol: number, name: str
             out.soundNum = fieldMask & SND_LARGESOUND ? reader.Short() & 0xffff : reader.Byte();
         },
         readStaticSoundIndex(version: number): number {
-            return version === 2 ? reader.Short() : reader.Byte();
+            return version === 2 ? reader.Short() & 0xffff : reader.Byte();
         },
     };
 }

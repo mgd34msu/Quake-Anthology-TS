@@ -37,12 +37,12 @@ test("invalid Q3 host and cvar records leave existing storage unchanged", () => 
   const source = server("validation");
   source.configstrings.set(10, "retained");
   const before = source.captureSaveState();
-  expect(() => source.restoreSaveState({ ...before, configstrings: [{ slot: 1024, value: "bad" }] })).toThrow();
+  expect(() => source.restoreSaveState({ ...before, configstrings: [{ slot: 1024, value: "bad" }] })).toThrow("q3.server.configstrings: invalid or duplicate source storage slot");
   expect(source.captureSaveState()).toEqual(before);
   const cvars = before.cvars;
-  expect(() => source.restoreSaveState({ ...before, cvars: { ...cvars, order: ["missing"] } })).toThrow();
+  expect(() => source.restoreSaveState({ ...before, cvars: { ...cvars, order: ["missing"] } })).toThrow("cvars: invalid cvar order");
   expect(source.captureSaveState()).toEqual(before);
   const wrong = new CvarRegistry({ dialect: "q1-netquake", context: { session: createIdentityOwner("wrong").session, origin: { kind: "server-console" } } });
-  expect(() => source.restoreSaveState({ ...before, cvars: wrong.captureSaveState() })).toThrow();
+  expect(() => source.restoreSaveState({ ...before, cvars: wrong.captureSaveState() })).toThrow("cvars.dialect: expected q3");
   expect(source.captureSaveState()).toEqual(before);
 });

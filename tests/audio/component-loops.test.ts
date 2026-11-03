@@ -62,3 +62,26 @@ test("component loop ownership survives wire and save remapping while old loops 
   expect(retained.some(event => event.kind === "q2" && event.event.kind === "sound" && event.event.loopOwner === undefined)).toBe(true);
   actors.close();
 });
+
+test("actors that leave the world release their audio entries and cannot exhaust the table", () => {
+  using audio = new UnifiedAudio({ milliseconds: () => 0, random: () => 0, maxActors: 8 });
+  audio.setListeners([{ seat: ids.seat(0), actor: null, origin, axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }], gain: 1, underwater: false }]);
+  for (let generation = 0; generation < 1000; generation++) {
+    const spawned = ids.actor(9, generation);
+    audio.updateActor(spawned, origin);
+    audio.retireAbsentActors([spawned]);
+  }
+  expect(() => { for (let slot = 0; slot < 8; slot++) audio.updateActor(ids.actor(slot + 20, 0), origin); }).toThrow("Audio actor capacity exhausted");
+});
+
+test("an actor with a playing loop keeps its audio entry until the loop ends", () => {
+  using audio = new UnifiedAudio({ milliseconds: () => 0, random: () => 0, maxActors: 3 });
+  audio.setListeners([{ seat: ids.seat(0), actor: null, origin, axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }], gain: 1, underwater: false }]);
+  const looping = ids.actor(30, 0);
+  audio.updateActor(looping, origin);
+  audio.loop({ family: "q2", actor: looping, origin: { kind: "actor", actor: looping }, audience: { kind: "world" }, volume: 1, attenuation: 1, velocity: origin, frameNumber: 1, lifetime: "persistent", sound: sound(1000) });
+  audio.endLoopFrame();
+  audio.retireAbsentActors([]);
+  audio.updateActor(ids.actor(31, 0), origin);
+  expect(() => { audio.updateActor(ids.actor(32, 0), origin); }).toThrow("Audio actor capacity exhausted");
+});

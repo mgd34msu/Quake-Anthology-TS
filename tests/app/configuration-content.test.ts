@@ -77,7 +77,7 @@ test('real initial configuration retains actual two-seat owners and mixed moveme
       await expect(resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) })).rejects.toThrow('Required resource is missing');
       expect(new TextDecoder().decode(await content.mounts.read('default.cfg'))).toBe('bind w +forward\n');
     } finally { await prepared.image?.close(); await prepared.scripts.close(); }
-    await expect(content.mounts.read('default.cfg')).rejects.toThrow();
+    await expect(content.mounts.read('default.cfg')).rejects.toThrow("Content mount plan is closed");
   } finally { session.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -90,7 +90,7 @@ test('configuration opens quake.rc/config with a missing map and leaves local re
     expect(new TextDecoder().decode(await content.mounts.read('config.cfg'))).toBe('set fixture q1-classic-id1\n');
     expect(content.selection.source).toEqual(preset.map.entities);
     await expect(resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) })).rejects.toThrow('Required resource is missing');
-    await content.close(); await expect(content.mounts.read('quake.rc')).rejects.toThrow(); await content.close();
+    await content.close(); await expect(content.mounts.read('quake.rc')).rejects.toThrow("Content mount plan is closed"); await content.close();
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

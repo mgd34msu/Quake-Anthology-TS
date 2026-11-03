@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { corpusFile } from "../../../support/corpus.ts";
 
-import { nativeFixture } from "../../../compat/q2/rerelease/native.test.ts";
+import { closeNativeSources, nativeFixture } from "../../../compat/q2/rerelease/native-fixture.ts";
 import { edictLayout, fieldOffset } from "../../../../src/compat/q2/rerelease/layouts.ts";
 import { readString } from "../../../../src/guest/runtime/common/memory.ts";
+
+afterEach(closeNativeSources);
 
 const available = await Bun.file(new URL(corpusFile("q2/rerelease/baseq2/game_x64.dll"), "file:///")).exists();
 test.skipIf(!available)("scanner native ReadLevelJson restores guest numeric fields", async () => {

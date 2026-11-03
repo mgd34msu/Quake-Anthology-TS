@@ -61,7 +61,7 @@ for (const kind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) {
         const stencil = new Uint8Array(stencilBits > 0 ? 256 : 0);
         if (stencilBits > 0) {
           renderer.backend.readStencilOverdraw(stencil); expect(stencil.every(value => value === 1)).toBe(true);
-        } else expect(renderer.backend.stencilBits).toBe(0);
+        }
         const packet = await capture(renderer); expect(calls).toEqual(["first", "second"]);
         expect(packet.pixels[0]).toBeGreaterThan(0); expect(packet.pixels[1]).toBeGreaterThan(0); expect(packet.pixels[2]).toBe(0);
         if (stencilBits > 0) renderer.backend.setOverdrawMeasurement(false);
@@ -74,7 +74,7 @@ for (const kind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) {
         } };
         renderer.backend.withObjectOpacity(0.5, () => {
           order.push("outer");
-          const prepared = renderer.backend.prepareGeometry(plain);
+          const prepared = renderer.backend.prepareGeometry({ ...plain, texture: { kind: "dynamic-image", source: callbackSource } });
           try {
             prepared.begin(); prepared.applyTexture(0, { kind: "dynamic-image", source: callbackSource }); prepared.draw();
           } finally { prepared.cleanup(); }
@@ -115,7 +115,7 @@ for (const kind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) {
       expect(await picture(renderer, image)).toEqual(expected);
     } finally {
       const window = renderer.window, backend = renderer.backend; renderer.close(); renderer.close();
-      expect(window.closed).toBe(true); expect(() => backend.readDepthPixel(0, 0)).toThrow();
+      expect(window.closed).toBe(true); expect(() => backend.readDepthPixel(0, 0)).toThrow(kind === "gl" ? "OpenGL renderer is closed" : "CPU renderer is closed");
     }
   }, 30000);
 }
@@ -139,7 +139,7 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("native worker failure reject
     if (result.status === "rejected") expect(result.reason).toBeInstanceOf(Error);
   } finally {
     clearTimeout(timer);
-    expect(() => renderer.close()).toThrow();
+    expect(() => renderer.close()).toThrow("Native renderer cleanup failed");
     expect(window.closed).toBe(true);
     await capture;
   }

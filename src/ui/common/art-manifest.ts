@@ -33,4 +33,9 @@ export const mainMenuBackground: MenuArtFile = {
   file: "assets/ui/main-menu-background.png", width: 1672, height: 941,
   sha256: "53630f6ca2d86492e983f7e54b54ce913cbebe58df6bd847c316753ef306a718",
 };
-export const menuArtFiles: readonly MenuArtFile[] = [menuBackground, menuPanel, menuFocus, mainMenuBackground];
+/** Drawn by the splash window only; listed here so its hash and size are checked with the other art. */
+export const splashTitle: MenuArtFile = {
+  file: "assets/ui/title.png", width: 1536, height: 1024,
+  sha256: "ca15d94fcdcd748449eddb73dd280a8af267f9d7d3aadd036de6e704f5988708",
+};
+export const menuArtFiles: readonly MenuArtFile[] = [menuBackground, menuPanel, menuFocus, mainMenuBackground, splashTitle];

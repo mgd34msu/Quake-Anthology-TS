@@ -3,7 +3,7 @@ import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
 import type { Q1EntityServices } from "../../foundation/entity-services.ts";
-import { POINT, ZERO, length, vadd, vscale, vsub } from "../../foundation/types.ts";
+import { POINT, length, vadd, vscale, vsub } from "../../foundation/types.ts";
 import { throwGib, throwHead } from "../../base/projectiles.ts";
 import type { MissionMonster } from "./runtime.ts";
 
@@ -53,8 +53,6 @@ export function missile(game: Q1EntityServices, owner: ActorId, classname: strin
   game.schedule(entity, seconds, game.named.action(entity, "SUB_Remove")); game.link(entity);
   return entity;
 }
-export function emptyPain(): undefined { return undefined; }
 export const humanBounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 40 } };
-export function setPointBounds(monster: MissionMonster): undefined { return monster.game.setBounds(monster.entity, { min: ZERO, max: ZERO }); }
 
 export const hullBounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };

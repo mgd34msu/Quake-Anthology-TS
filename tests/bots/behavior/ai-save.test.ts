@@ -35,7 +35,7 @@ test("AI retained heap restores byte cells, activation cycles, waypoint aliases 
   expect(restoredMemory.allocatedBytes).toBe(memory.allocatedBytes);
   result.inventory[17] = 99; expect(state.inventory[17]).toBe(86);
   expect(result.sourceAllocation).not.toBeNull();
-  expect(() => restored.restoreSaveState([], restoredMemory, () => null, (number, generation) => ({ number, generation }))).toThrow();
+  expect(() => restored.restoreSaveState([], restoredMemory, () => null, (number, generation) => ({ number, generation }))).toThrow("bot.states: incorrect bot state slot count");
 });
 
 test("parser checkpoint retains diagnostic session and current token", () => {
@@ -50,7 +50,7 @@ test("game allocations restore retained tails after allocator rewind", () => {
   const pointer = disk(memory.captureAllocation(allocation)); memory.initialize();
   const restored = new GameMemory(() => 0, () => {}); restored.restoreSaveState(disk(memory.captureSaveState()));
   expect(restored.restoreAllocation(pointer).readString()).toBe("retained"); expect(restored.allocatedBytes).toBe(0);
-  expect(() => restored.restoreAllocation({ offset: 262144, length: 1 })).toThrow();
+  expect(() => restored.restoreAllocation({ offset: 262144, length: 1 })).toThrow("q3.memory.pointer: allocation outside game pool");
 });
 
 test("cached bot cvar restores stale value until its next source update", () => {
@@ -70,5 +70,6 @@ test("AI pool disagreement is rejected before replacing saved state bytes", () =
   first.state.bytes[0] = 0;
   const restored = new BotStateStore("baseq3");
   expect(() => restored.restoreSaveState(disk(image), memory, () => null, (number, generation) => ({ number, generation }))).toThrow("disagree");
+  expect(restored.get(0)).toBeNull();
   expect(state.inuse).toBe(true);
 });

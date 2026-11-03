@@ -114,6 +114,8 @@ export interface Q2ServerNetworkOptions<TAddress extends NetworkAddress> {
     readonly host: Q2ApplicationServerHost;
     readonly random: () => number;
     readonly timeoutMilliseconds?: number;
+    /** Ignore KEX LAN datagrams from non-private addresses (NET-022). */
+    readonly trustedNetworksOnly?: boolean;
 }
 export interface Q2ClientNetworkOptions<TAddress extends NetworkAddress> {
     readonly transport: DatagramTransport<TAddress>;

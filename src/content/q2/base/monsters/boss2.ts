@@ -1,7 +1,7 @@
 /* Quake II m_boss2.c. id Software, GPL-2.0-or-later. */
 import { inFront, targetDistance } from "../../foundation/monsters/ai.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
-import { damagedSkin, finishCorpse, loopSound, move, muzzle, shot, sound } from "./common.ts";
+import { damagedSkin, finishCorpse, loopSound, move, muzzle, shot } from "./common.ts";
 import { bossCheckAttack, bossExplode } from "./boss-common.ts";
 import { boss2Moves } from "./tables/boss2.ts";
 
@@ -11,7 +11,7 @@ export const boss2Definition: Q2MonsterDefinition = {
   bounds: { min: { x: -56, y: -56, z: 0 }, max: { x: 56, y: 56, z: 80 } }, scale: 1, locomotion: "fly",
   initialMove: "boss2_move_stand", moves: boss2Moves, stand: move("boss2_move_stand"), walk: move("boss2_move_walk"), run,
   attack(context) { return context.setMove(targetDistance(context) <= 125 || context.game.host.random() <= 0.6 ? "boss2_move_attack_pre_mg" : "boss2_move_attack_rocket"); },
-  checkAttack(context) { return bossCheckAttack(context, true); }, search: sound("bosshovr/bhvunqv1.wav"),
+  checkAttack(context) { return bossCheckAttack(context, true); }, search({ entity, game }) { return game.host.random() < 0.5 ? game.sound(entity, "bosshovr/bhvunqv1.wav", 2, 1, 0) : undefined; },
   initialize(context) { context.entity.laserImmune = true; return loopSound(context, "bosshovr/bhvengn1.wav"); },
   pain(context, reaction) {
     damagedSkin(context);

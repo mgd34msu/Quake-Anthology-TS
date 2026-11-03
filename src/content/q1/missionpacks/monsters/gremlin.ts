@@ -68,8 +68,8 @@ function gorge(monster: MissionMonster, side: number): undefined {
     victim.fields.set("gorging", "1"); game.sound(entity, "player/udeath.wav");
     const heads: Readonly<Record<string, string>> = { monster_ogre: "h_ogre", monster_knight: "h_knight", monster_shambler: "h_shams", monster_demon1: "h_demon", monster_wizard: "h_wizard", monster_zombie: "h_zombie", monster_dog: "h_dog", monster_hell_knight: "h_hellkn", monster_enforcer: "h_mega", monster_army: "h_guard", monster_shalrath: "h_shal", monster_gremlin: "h_grem", monster_scourge: "h_scourg", monster_fish: "gib1" };
     throwHead(game, victim, heads[victim.classname] ?? "h_player", -15);
-    const amount = 150 + 100 * game.host.random(), health = game.health(entity.actor.id);
-    if (health > 0 && health < entity.maxHealth) game.host.combat.setHealth(entity.actor, Math.min(entity.maxHealth, health + Math.ceil(amount)));
+    // hipgrem.qc calls T_Heal from a think where other is world, so it refuses; the roll is still drawn.
+    game.host.random();
     split(monster);
   }
   monster.enemy = null; number(monster, "gorging", 0); return monster.play("gremlin_look1");

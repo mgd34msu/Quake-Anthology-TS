@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { ConsoleField } from "../../src/console/field.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 
 const names = ["vid_restart", "vid_ref", "VID_REF", "volume"];
 

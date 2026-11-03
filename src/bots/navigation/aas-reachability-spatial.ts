@@ -4,7 +4,7 @@ import { add3, angleVectors, cross3, dot3, length3, normalize3, scale3, sub3, ve
 import { nativeAtof, nativeAtoi } from "../../core/numeric.ts";
 import { parseEntities } from "../../formats/q3-map/entities.ts";
 import { convertContents, convertSurfaceFlags } from "../../world/collision/contents.ts";
-import { aasBBoxAreas, aasTraceAreas } from "./aas.ts";
+import { aasBBoxAreas, aasTraceAreas, aasTraceClientBBox, type AasTrace } from "./aas.ts";
 import { aasAt } from "./aas-reachability-geometry.ts";
 import type { AasReachabilityOptions } from "./aas-reachability.ts";
 import type { AasClientMove, AasMovementSettings, AasReachabilityWorld } from "./aas-reachability-types.ts";
@@ -12,13 +12,7 @@ import type { BotMovementPrediction } from "../behavior/q3/navigation-types.ts";
 
 const f = Math.fround, zero = vec3(0, 0, 0);
 const ma = (start: Vec3, amount: number, direction: Vec3): Vec3 => add3(start, scale3(direction, amount));
-const same = (a: Vec3, b: Vec3): boolean => a.x === b.x && a.y === b.y && a.z === b.z;
-const at = aasAt;
-interface AasTrace { readonly startSolid: boolean; readonly fraction: number; readonly end: Vec3; readonly entityNum: number; readonly lastArea: number; readonly area: number; readonly plane: number; }
-interface TracePiece { readonly start: Vec3; readonly end: Vec3; readonly node: number; readonly plane: number; }
 interface AreaLink { readonly area: number; readonly nextArea: AreaLink | null; }
-function finiteVector(point: Vec3): void { if (![point.x, point.y, point.z].every(Number.isFinite)) throw new RangeError("Non-finite AAS trace point"); }
-function clearTrace(end: Vec3, lastArea: number): AasTrace { return { startSolid: false, fraction: 1, end, entityNum: 0, lastArea, area: 0, plane: 0 }; }
 
 function decimalInteger(text: string): number {
   const prefix = /^[\t\n\v\f\r ]*([+-]?)([0-9]+)/.exec(text);
@@ -27,9 +21,8 @@ function decimalInteger(text: string): number {
     const digits = prefix[2];
     if (sign === undefined || digits === undefined) throw new Error("Integer prefix capture is absent");
     const magnitude = BigInt(digits);
-    if (magnitude > (sign === "-" ? 2147483648n : 2147483647n)) {
-      throw new RangeError("AAS integer epair conversion exceeds the source-defined int32 range");
-    }
+    // Map text is untrusted and atoi has no failure path; an oversized value saturates.
+    if (magnitude > (sign === "-" ? 2147483648n : 2147483647n)) return sign === "-" ? -2147483648 : 2147483647;
   }
   return nativeAtoi(text);
 }
@@ -181,48 +174,7 @@ export class AasReachabilitySpatial {
   };
   traceAreas(start: Vec3, end: Vec3, maximum: number) { return aasTraceAreas(this.world, start, end, maximum); }
   traceClientBBox(start: Vec3, end: Vec3, presence: number, _passEntity: number): AasTrace {
-    const world = this.world, print = (text: string) => this.options.print?.(3, text);
-    finiteVector(start); finiteVector(end);
-    const stack: TracePiece[] = [{ start: vec3(start.x, start.y, start.z), end: vec3(end.x, end.y, end.z), node: 1, plane: 0 }];
-    let lastArea = 0;
-    const push = (piece: TracePiece): boolean => {
-      stack.push(piece);
-      if (stack.length < 127) return true;
-      print("AAS_TraceBoundingBox: stack overflow\n");
-      return false;
-    };
-    const overflow = (): AasTrace => ({ startSolid: false, fraction: 0, end: vec3(0, 0, 0), entityNum: 0,
-      lastArea, area: 0, plane: 0 });
-    while (stack.length > 0) {
-      const piece = stack.pop();
-      if (piece === undefined) break;
-      if (piece.node <= 0) {
-        if (piece.node === 0 || (at(world.settings, -piece.node).presence & presence) === 0) {
-          const startSolid = same(piece.start, start), direction = startSolid ? zero : normalize3(sub3(end, start));
-          const fraction = startSolid ? 0 : f(length3(sub3(piece.start, start)) / length3(sub3(end, start)));
-          const hitEnd = startSolid ? piece.start : ma(piece.start, -0.125, direction);
-          const plane = dot3(direction, at(world.planes, piece.plane).normal) > 0 ? piece.plane ^ 1 : piece.plane;
-          return { startSolid, fraction, end: hitEnd, entityNum: 0, lastArea, area: piece.node === 0 ? 0 : -piece.node, plane };
-        }
-        lastArea = -piece.node;
-        continue;
-      }
-      const node = at(world.nodes, piece.node), plane = at(world.planes, node.plane);
-      let front = f(dot3(piece.start, plane.normal) - plane.distance);
-      const back = f(dot3(piece.end, plane.normal) - plane.distance);
-      if (front >= 0 && back >= 0) { if (!push({ ...piece, node: node.children[0] })) return overflow(); }
-      else if (front < 0 && back < 0) { if (!push({ ...piece, node: node.children[1] })) return overflow(); }
-      else {
-        if (front === back) front = f(front - f(0.001));
-        let fraction = f((front < 0 ? front + 0.125 : front - 0.125) / f(front - back));
-        if (fraction < 0) fraction = f(0.001);
-        else if (fraction > 1) fraction = f(0.999);
-        const middle = ma(piece.start, fraction, sub3(piece.end, piece.start)), side = front < 0 ? 1 : 0;
-        if (!push({ start: middle, end: piece.end, node: node.children[side === 0 ? 1 : 0], plane: node.plane })) return overflow();
-        if (!push({ start: piece.start, end: middle, node: node.children[side], plane: piece.plane })) return overflow();
-      }
-    }
-    return clearTrace(end, lastArea);
+    return aasTraceClientBBox(this.world, start, end, presence, text => this.options.print?.(3, text));
   }
   linkClientBounds(_entity: number, bounds: Bounds, presence: 2 | 4): AreaLink | null {
     const client = this.world.bboxes.find(box => box.presence === presence)?.bounds

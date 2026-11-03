@@ -1,6 +1,6 @@
 // Engine-owned metadata from Quake II sv_ccmds.c and q2repro src/server/save.c.
 import { BinaryReader, BinaryWriter } from "../core/binary/index.ts";
-import { readCString, readFixed, writeCString, writeFixed } from "./source-bytes.ts";
+import { readCString, readFixed, textBytes, writeCString, writeFixed } from "./source-bytes.ts";
 import { SaveFormatError } from "./value.ts";
 
 export interface SavedCvar { readonly name: string; readonly value: string; }
@@ -29,8 +29,13 @@ export function decodeQ2ClassicLevelMetadata(bytes: Uint8Array, configstringCoun
 }
 export function encodeQ2ClassicLevelMetadata(save: Q2LevelMetadata, configstringCount = 2080, width = 64): Uint8Array {
   const writer = new BinaryWriter(configstringCount * width + save.portalBytes.length); const values = new Map(save.configstrings.map(entry => [entry.index, entry.value] satisfies [number, string]));
-  for (let index = 0; index < configstringCount; index++) writeFixed(writer, values.get(index) ?? "", width);
+  for (let index = 0; index < configstringCount; index++) writeConfigstringSlot(writer, values.get(index) ?? "", width);
   writer.bytes(save.portalBytes); return writer.finish();
+}
+// id's SetConfigstring spills a long string (the status bar) into the following slots, so a slot can hold exactly `width` bytes with no terminator.
+function writeConfigstringSlot(writer: BinaryWriter, value: string, width: number): void {
+  if (value.length === width && !value.includes("\0")) writer.bytes(textBytes(value));
+  else writeFixed(writer, value, width);
 }
 export function decodeQ2RereleaseServer(bytes: Uint8Array): Q2RereleaseServerSave {
   const reader = new BinaryReader(bytes, "q2-rerelease/server.ssv");

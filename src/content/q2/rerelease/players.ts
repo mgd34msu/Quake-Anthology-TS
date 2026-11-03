@@ -170,7 +170,7 @@ export class Q2RereleasePlayers extends Q2Players {
       else for (const entry of state.spawnInventory) game.host.inventory.configure(entity.actor, entry);
       game.host.combat.setHealth(entity.actor, 100); game.host.combat.setArmor(entity.actor, { regular: { kind: "none" }, powered: { kind: "none" } });
       entity.maxHealth = 100; entity.flags &= ~(16 | 32 | 4096 | 0x400000 | 0x40000000); entity.powerCubes = 0;
-      state.god = false; state.notarget = false; state.selectedItem = state.useQ2Inventory ? "q2:weapon_blaster" : null;
+      state.god = false; state.notarget = false; state.selectedItem = state.useQ2Inventory ? (game.options.instagib === true ? "q2:weapon_railgun" : "q2:weapon_blaster") : null;
       game.host.combat.setTraits(entity.actor, { invulnerable: false });
       const weapon = this.weapons.states.get(entity.actor.id);
       if (weapon !== undefined) { weapon.weapon = "blaster"; weapon.pending = null; }
@@ -218,6 +218,12 @@ export class Q2RereleasePlayers extends Q2Players {
 
   /** Foreign weapon providers report actual shots to the selected campaign's squad rules. */
   recordWeaponFire(actor: ActorId, now: number): undefined { this.extra(actor).lastFiringUntil = now + 2.5; return undefined; }
+  /** g_ai.cpp visible(): null when the player is not cloaked, else the alpha a monster roll must not exceed. */
+  cloakAlpha(actor: ActorId, now: number): number | null {
+    const extra = this.rereleaseStates.get(actor);
+    if (extra === undefined || extra.invisibilityUntil <= now) return null;
+    return extra.invisibilityFadeUntil <= now ? 0 : Math.max(0.1, Math.min(1, (extra.invisibilityFadeUntil - now) / 2));
+  }
   revealInvisibility(actor: ActorId, until: number): undefined { this.extra(actor).invisibilityFadeUntil = until; return undefined; }
 
   /** Pass the actual selected movement provider's impact result before afterClientThink. */
@@ -366,6 +372,7 @@ export class Q2RereleasePlayers extends Q2Players {
     super.endFrame(entity, game);
     this.extension?.endPlayerFrame(entity, game);
     const extra = this.extra(entity.actor.id), now = game.host.now();
+    if ((this.weapons.states.get(entity.actor.id)?.lastFiringTime ?? 0) > now + 2.4) extra.invisibilityFadeUntil = now + 2;
     const alpha = this.intermission.kind === "playing" && (game.host.combat.read(entity.actor.id)?.health ?? 0) > 0 && extra.invisibilityUntil > now
       ? Math.max(0.1, Math.min(1, (extra.invisibilityFadeUntil - now) / 2)) : 1;
     this.rereleaseHooks.emit({ kind: "alpha", actor: entity.actor.id, alpha });
@@ -444,7 +451,7 @@ export class Q2RereleasePlayers extends Q2Players {
       else this.squadSpawns.set(entity.actor.id, target);
     }
     if (allowed) {
-      extra.coopRespawnState = "none"; state.spectator = false; state.requestedSpectator = false;
+      extra.coopRespawnState = "none"; state.requestedSpectator = false;
       this.respawn(entity, game); state.latchedButtons = 0;
     } else {
       if (extra.coopRespawnState === "none") extra.coopRespawnState = "waiting";

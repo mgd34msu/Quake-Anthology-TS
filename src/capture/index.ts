@@ -7,7 +7,7 @@ import type { ImageLevel } from "../contracts/render.ts";
 import { encodeTga } from "../formats/images/tga.ts";
 import { encodePng } from "../formats/images/png-encoder.ts";
 import { encodeJpeg } from "../formats/images/jpeg-encoder.ts";
-import { settingsPath, writeAtomic } from "../settings/config.ts";
+import { settingsPath, writeAtomic } from "../core/files/atomic.ts";
 
 export type ScreenshotFormat = "tga" | "png" | "jpg";
 export interface FrameReadback { readRgba(): ImageLevel | Promise<ImageLevel>; }
@@ -52,6 +52,8 @@ export class FrameCapture {
     this.writes = result.then(() => undefined, () => undefined);
     return result;
   }
+  /** First unnamed screenshot index to try per format, so a recording does not rescan earlier files. */
+  private readonly nextShot = new Map<ScreenshotFormat, number>();
   constructor(readonly root: string, private readonly readback: FrameReadback) {}
   async screenshot(options: { readonly format?: ScreenshotFormat; readonly name?: string; readonly quality?: number } = {}): Promise<CaptureResult> {
     const format = options.format ?? "png", image = await this.readback.readRgba(), bytes = encodeScreenshot(image, format, options.quality);
@@ -61,14 +63,14 @@ export class FrameCapture {
         path = settingsPath(this.root, `screenshots/${options.name}.${format}`); await writeAtomic(path, bytes);
       } else {
         path = "";
-        for (let index = 0; index < 10000; index++) {
+        for (let index = this.nextShot.get(format) ?? 0; index < 10000; index++) {
           const candidate = settingsPath(this.root, `screenshots/shot${String(index).padStart(4, "0")}.${format}`);
-          await mkdir(dirname(candidate), { recursive: true });
+          if (index === (this.nextShot.get(format) ?? 0)) await mkdir(dirname(candidate), { recursive: true });
           let file: FileHandle;
           try { file = await open(candidate, "wx"); }
           catch (error) { if (error instanceof Error && "code" in error && error.code === "EEXIST") continue; throw error; }
           try { await file.writeFile(bytes); } finally { await file.close(); }
-          path = candidate; break;
+          path = candidate; this.nextShot.set(format, index + 1); break;
         }
         if (path === "") throw new Error("No free screenshot filename between shot0000 and shot9999");
       }

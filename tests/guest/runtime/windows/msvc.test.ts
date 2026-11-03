@@ -62,8 +62,8 @@ test.skipIf(!existsSync(path))("retail MSVC stringstream grows, formats, seeks a
     const destructor = memory.readPointer(vtable); if (destructor === null) throw new Error("Missing actual stream destructor");
     runtime.invoke(context, destructor, ["pointer", "uint32"], "pointer", [p(virtualBase), { kind: "uint32", value: 0 }]);
   }
-  expect(() => memory.readUint8(putBase)).toThrow();
-  expect(() => memory.readUint8(destinationBytes)).toThrow();
+  expect(() => memory.readUint8(putBase)).toThrow("test:msvc-stream: read at 0x12b000 (1 bytes): range includes unmapped bytes");
+  expect(() => memory.readUint8(destinationBytes)).toThrow("test:msvc-stream: read at 0x12e000 (1 bytes): range includes unmapped bytes");
   const localeName = memory.allocate({ byteLength: 2 }); memory.write(localeName, new TextEncoder().encode("C\0"));
   const info = memory.allocate({ byteLength: 104 }), cvt = memory.allocate({ byteLength: 44 });
   call("??0_Locinfo@std@@QEAA@PEBD@Z", [p(info), p(localeName)]);
@@ -71,7 +71,7 @@ test.skipIf(!existsSync(path))("retail MSVC stringstream grows, formats, seeks a
   expect(memory.readUint32(memory.offset(cvt, 4n))).toBe(1); expect(memory.readUint32(memory.offset(cvt, 8n))).toBe(1);
   const savedName = memory.readPointer(memory.offset(info, 88n)); if (savedName === null) throw new Error("Missing locale name yarn");
   expect(memory.copy(savedName, 2)).toEqual(new Uint8Array([67, 0]));
-  call("??1_Locinfo@std@@QEAA@XZ", [p(info)]); expect(() => memory.readUint8(savedName)).toThrow();
+  call("??1_Locinfo@std@@QEAA@XZ", [p(info)]); expect(() => memory.readUint8(savedName)).toThrow("test:msvc-stream: read at 0x12a000 (1 bytes): range includes unmapped bytes");
   expect(runtime.coverage.filter(entry => entry.reached > 0 && entry.failed > 0)).toEqual([]);
   runtime.detach(image, { context, instructionBudget: 1000000 });
 });

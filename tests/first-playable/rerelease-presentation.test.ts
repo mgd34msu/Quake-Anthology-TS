@@ -1,5 +1,5 @@
 import { SaveReader } from "../../src/persistence/value.ts";
-import { testCorpusRoot } from "../support/corpus.ts";
+import { corpusFile } from "../support/corpus.ts";
 
 import { readQ1FoundationCheckpoint } from "../../src/persistence/q1-foundation.ts";
 import { expect, test } from "bun:test";
@@ -34,7 +34,7 @@ test("rerelease fog messages preserve wire colors, world heights and interrupted
   expect(fog.current(2.5).density).toBe(1); expect(fog.current(3).density).toBe(0.5); expect(fog.current(3.5).density).toBe(0);
 });
 
-test.skipIf(!existsSync(`${testCorpusRoot()}/q2/rerelease/Q2Game.kpf`))("source story and sky callbacks use retail localization and draw centered pixels for the selected seat", async () => {
+test.skipIf(!existsSync(corpusFile("q2/rerelease/Q2Game.kpf")))("source story and sky callbacks use retail localization and draw centered pixels for the selected seat", async () => {
   const command = parseApplicationCommand(["--game", "q2-rerelease-baseq2", "--map", "base1", "--renderer", "cpu", "--mode", "coop"]);
   if (command.kind !== "run") throw new Error("Expected application launch");
   const content = await loadApplicationContent(command.options), identity = createIdentityOwner("rerelease-presentation");
@@ -141,14 +141,14 @@ test("Q2 world and external brush lighting use the required donor default across
   }
 }, 60_000);
 
-test.skipIf(!existsSync(`${testCorpusRoot()}/q1/id1/PAK0.PAK`))("Q1 actor presentation preserves raw alpha and scale for real MDL, SPR and brush assets", async () => {
+test.skipIf(!existsSync(corpusFile("q1/id1/PAK0.PAK")))("Q1 actor presentation preserves raw alpha and scale for real MDL, SPR and brush assets", async () => {
   const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m1", "--dedicated", "--mode", "singleplayer"]);
   if (command.kind !== "run") throw new Error("Expected Q1 presentation launch");
   const content = await loadApplicationContent(command.options), identity = createIdentityOwner("q1-actor-opacity");
   const assets = new ApplicationAssets(content, { identity: Symbol("q1-actor-opacity"), session: identity.session, generation: 0 });
+  const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
+    skill: 1, mode: "singleplayer", seed: 1, maxClients: 1 });
   try {
-    const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
-      skill: 1, mode: "singleplayer", seed: 1, maxClients: 1 });
     const source = simulation.q1Source();
     if (source === null) throw new Error("Missing native Q1 source");
     await assets.loadWorld();
@@ -184,7 +184,7 @@ test.skipIf(!existsSync(`${testCorpusRoot()}/q1/id1/PAK0.PAK`))("Q1 actor presen
       actor.fields.set("alpha", "0"); actor.fields.set("scale", "0");
       expect(projected().alpha).toBe(1); expect(projected().scale).toBe(1);
     }
-  } finally { assets.close(); await content.close(); }
+  } finally { simulation.close(); assets.close(); await content.close(); }
 }, 30000);
 
 for (const appearance of ["q1", "q3"]) test(`Q1 player visuals preserve raw fields and older saves for ${appearance} third-person models`, async () => {

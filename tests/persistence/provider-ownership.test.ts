@@ -16,7 +16,7 @@ test("reserved host schemas require their exact provider and version", () => {
     { provider: "session:campaign-unit", schema: "q2:foundation", version: 1 },
     { provider: "session:unknown", schema: "session:unknown", version: 1 },
     { provider: "q1:official", schema: "q2:foundation", version: 1 },
-  ] satisfies readonly Omit<ProviderCheckpoint, "bytes">[]) expect(() => validateSaveProviderOwner({ ...record, bytes }, "q2:official")).toThrow();
+  ] satisfies readonly Omit<ProviderCheckpoint, "bytes">[]) expect(() => validateSaveProviderOwner({ ...record, bytes }, "q2:official")).toThrow(/has a different owner|Unsupported saved provider version|Unsupported session checkpoint/);
 });
 
 const fixture = process.env["QTS_SAVE_PROVIDER_FIXTURE"];
@@ -32,9 +32,9 @@ test.skipIf(fixture === undefined)("actual public save campaign envelope passes 
   expect(() => validateSimulationSave(unit.attach(image))).not.toThrow();
   const changed = (record: ProviderCheckpoint) => ({ ...image, providers: image.providers.map(value => value === campaign ? record : value) });
   for (const invalid of [{ ...campaign, provider: image.recipe.map.entities.provider }, { ...campaign, schema: "q2:foundation" }, { ...campaign, version: 2 }] satisfies readonly ProviderCheckpoint[]) {
-    expect(() => validateSimulationSave(changed(invalid))).toThrow();
-    expect(() => unit.restore(changed(invalid))).toThrow();
-    expect(() => unit.attach(changed(invalid))).toThrow();
+    expect(() => validateSimulationSave(changed(invalid))).toThrow(/has a different owner|Unsupported saved provider version|Unsupported session checkpoint/);
+    expect(() => unit.restore(changed(invalid))).toThrow(/has a different owner|Unsupported saved provider version|Unsupported session checkpoint/);
+    expect(() => unit.attach(changed(invalid))).toThrow(/has a different owner|Unsupported saved provider version|Unsupported session checkpoint/);
   }
   expect(() => validateSimulationSave({ ...image, providers: [...image.providers, campaign] })).toThrow("Duplicate");
   const foundation = simulationProviderCheckpoint(image, "q2:foundation");

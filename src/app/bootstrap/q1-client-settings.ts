@@ -82,7 +82,7 @@ export function q1ChaseCamera(camera: SceneCamera, angles: Vec3, settings: Q1Cha
   const desired = { x: offset(camera.origin.x, forward.x, right.x), y: offset(camera.origin.y, forward.y, right.y),
     z: math.store(math.add(camera.origin.z, settings.up)) };
   const common = { start: camera.origin, target: { kind: "world" }, policy: { kind: "q1", move: "normal", hull: null }, numeric, passActor: actor } satisfies Omit<Parameters<SceneQueries["trace"]>[0], "end" | "shape">;
-  const rear = scene.trace({ ...common, end: desired, shape: { kind: "box", bounds: { min: { x: -4, y: -4, z: -4 }, max: { x: 4, y: 4, z: 4 } } } });
+  const rear = scene.trace({ ...common, policy: { kind: "q1", move: "normal", hull: null, derived: true }, end: desired, shape: { kind: "box", bounds: { min: { x: -4, y: -4, z: -4 }, max: { x: 4, y: 4, z: 4 } } } });
   const origin = rear.startSolid || rear.allSolid ? camera.origin : rear.end;
   const far = { x: math.store(math.add(camera.origin.x, math.multiply(forward.x, 4096))),
     y: math.store(math.add(camera.origin.y, math.multiply(forward.y, 4096))), z: math.store(math.add(camera.origin.z, math.multiply(forward.z, 4096))) };

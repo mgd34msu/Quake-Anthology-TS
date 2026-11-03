@@ -11,8 +11,12 @@ import { decodeQ2Map } from "../../../../src/formats/q2-map/index.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable } from "../../../../src/world/actors/index.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
 import { GameplayAuthority, SharedInventoryTable } from "../../../../src/world/gameplay/index.ts";
-import { edictLayout, fieldOffset, guestPointer, rereleaseLinkBounds, rereleaseNetworkSolid, RereleaseSourceClient, RereleaseSourceEdict, retailRereleaseClientProfile } from "../../../../src/compat/q2/rerelease/index.ts";
-import type { RereleaseQ2GuestHost, RereleaseQ2HostOptions } from "../../../../src/compat/q2/rerelease/index.ts";
+import { edictLayout, fieldOffset } from "../../../../src/compat/q2/rerelease/layouts.ts";
+import { guestPointer } from "../../../../src/compat/q2/rerelease/module.ts";
+import { rereleaseLinkBounds, rereleaseNetworkSolid } from "../../../../src/compat/q2/rerelease/spatial.ts";
+import { RereleaseSourceClient, RereleaseSourceEdict } from "../../../../src/compat/q2/rerelease/source-state.ts";
+import { retailRereleaseClientProfile } from "../../../../src/compat/q2/rerelease/client-profile.ts";
+import type { RereleaseQ2GuestHost, RereleaseQ2HostOptions } from "../../../../src/compat/q2/rerelease/host.ts";
 
 function unavailable(): never { throw new Error("The native map fixture has no foreign actors or combat transport"); }
 const numeric: NumericProfile = { id: "q2-rerelease:source-f32", arithmetic: { kind: "binary32", round: "each-operation" }, scalarStorage: "binary32", floatToInt: "checked-c-truncation", integerOverflow: "wrap32" };
@@ -69,7 +73,7 @@ export async function nativeWorld(modelName: (index: number) => string | undefin
   const spatial: RereleaseQ2HostOptions["spatial"] = {
     areasConnected: (first, second) => scene.areasConnected(first, second),
     visibility: (kind, first, second, portals) => { const a = scene.pointLeaf(first), b = scene.pointLeaf(second); return scene.clusterVisible(scene.leafCluster(a), scene.leafCluster(b), kind) && (!portals || scene.areasConnected(scene.leafArea(a), scene.leafArea(b))); },
-    surfaceId: surface => { const index = world.textureInfo.findIndex(value => value === surface); if (index < 0) throw new Error("Trace surface is not part of the loaded BSP"); return index; },
+    surfaceId: surface => { const index = world.textureInfo.findIndex(value => value === surface || value.name === surface.name && value.flags === surface.flags && value.value === surface.value); return Math.max(0, index); },
     boxEdicts: (min, max, area) => scene.queryActors({ min, max }, area === 1 ? "solid" : "trigger").map(value => value.body.actor), inlineModel,
     linkMetadata: (actor, view) => {
       const linked = bodies.linked(actor.id); if (linked === null) throw new Error("Native body lacks a link snapshot");
@@ -79,7 +83,8 @@ export async function nativeWorld(modelName: (index: number) => string | undefin
       return { area, area2, networkSolid: rereleaseNetworkSolid(linked.state.bounds, solid, integer(actor.id, "svflags")) };
     },
   };
-  const semantics: RereleaseQ2HostOptions["semantics"] = { generation: view => view.bytes.getInt32(1472, true), foreignAddress: unavailable,
+  const foreignRequests: ActorId[] = [];
+  const semantics: RereleaseQ2HostOptions["semantics"] = { generation: view => view.bytes.getInt32(1472, true), foreignAddress: actor => { foreignRequests.push(actor); return unavailable(); },
     bind: (view, _actor, module) => {
       const source = new RereleaseSourceEdict(view, module), address = source.client;
       const client = address === null ? null : new RereleaseSourceClient(address, module, retailRereleaseClientProfile);
@@ -90,5 +95,5 @@ export async function nativeWorld(modelName: (index: number) => string | undefin
           use: (_self, other, activator) => { source.call("use", [guestPointer(other === null ? null : owner().addressForActor(other)), guestPointer(activator === null ? null : owner().addressForActor(activator))]); return undefined; }, touch: null, pain: null, die: null } };
     },
   };
-  return { engine, spatial, semantics, scene, world, outcomes, decisions, origin: start.get("origin") ?? "", get traceCalls() { return traceCalls; }, attach: (value: RereleaseQ2GuestHost) => { host = value; } };
+  return { engine, spatial, semantics, scene, world, outcomes, foreignRequests, decisions, origin: start.get("origin") ?? "", get traceCalls() { return traceCalls; }, attach: (value: RereleaseQ2GuestHost) => { host = value; } };
 }

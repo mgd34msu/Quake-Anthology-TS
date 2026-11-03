@@ -81,5 +81,5 @@ test("unchanged retail q64/rtest admits source misc_flare and target toggles pre
         expect(simulation.presentations().find(value => value.actor.equals(entity.actor.id))?.visible).toBe(true);
       }
     }
-  } finally { simulation.close(); await content.close(); }
+  } finally { simulation.close(); session.close(); await content.close(); }
 }, 30000);

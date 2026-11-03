@@ -1,6 +1,8 @@
 import { aasEstimateFixture, estimateGraph } from "./estimate-fixture.ts";
 import { Q3_SOURCE_POSTURES } from "../../../src/movement/q3/index.ts";
 import { SourceBotNavigation } from "../../../src/bots/behavior/q3/navigation.ts";
+import { AasBspEntities } from "../../../src/bots/behavior/library/bsp-entities.ts";
+import { BotMemory } from "../../../src/bots/behavior/library/memory.ts";
 import { BotActionBuffer } from "../../../src/bots/behavior/library/actions.ts";
 import { BotMoveStateStore } from "../../../src/bots/behavior/q3/movement-state.ts";
 import { RouteStopEvent } from "../../../src/bots/behavior/q3/navigation-types.ts";
@@ -56,11 +58,11 @@ test("selected outgoing traversal rejects actual movement failure and retries ra
 
 function sourceNavigation(runtime: NavigationRuntime) {
   const unavailable = (): never => { throw new Error("Route estimates must not invoke actor services"); };
-  return new SourceBotNavigation({ runtime, forClient: () => runtime,
+  return new SourceBotNavigation({ runtime, forClient: () => runtime, bspEntities: new AasBspEntities(() => undefined, new BotMemory()),
     moveStates: new BotMoveStateStore({ time: () => 0, print: unavailable, libVar: unavailable }),
     actions: new BotActionBuffer(null, { clientCommand: unavailable }), random: { nextInt: unavailable },
     crouchedBounds: Q3_SOURCE_POSTURES.crouched.bounds, time: () => 0, pointContents: unavailable, entityModelIndex: unavailable,
-    trace: unavailable, predictClientMovement: unavailable, modelInfo: unavailable, nextEntity: unavailable,
+    trace: unavailable, predictClientMovement: unavailable, modelInfo: unavailable, modelBounds: unavailable, nextEntity: unavailable,
     entityType: unavailable, entityWeapon: unavailable, travelWeapon: unavailable });
 }
 

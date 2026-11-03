@@ -301,6 +301,9 @@ export class SoftwareRenderer implements RendererBackend {
   private readonly mainFramebuffer: Framebuffer;
   private readonly mainShared: RowSharedFramebuffer;
   private rowPool: RowParallelPool | null | undefined;
+  private rowPoolFailureValue: string | null = null;
+  /** Why row-parallel drawing fell back to serial, when worker startup failed. */
+  get rowPoolFailure(): string | null { return this.rowPoolFailureValue; }
   private pendingSetups: TriangleSetup[] | null = null;
   private pendingPixels = 0;
   private opacityFramebuffer: Framebuffer | null = null;
@@ -385,6 +388,7 @@ export class SoftwareRenderer implements RendererBackend {
 
   /** Completed row-parallel batch dispatches (diagnostics/tests). */
   get rowParallelBatches(): number { return this.rowPool?.jobsRun ?? 0; }
+  get rowParallelLevelsSent(): number { return this.rowPool?.levelsSent ?? 0; }
 
   withObjectOpacity(opacity: number, draw: () => undefined): undefined {
     this.assertOpen();
@@ -548,9 +552,9 @@ export class SoftwareRenderer implements RendererBackend {
   readStencilOverdraw(destination: Uint8Array): undefined {
     this.assertOpen();
     if (this.stencil === null) throw new Error("CPU stencil readback requires stencil storage");
-    const stride = Math.ceil(this.width / 4) * 4;
-    if (destination.length < stride * (this.height - 1) + this.width)
-      throw new RangeError("CPU stencil destination is too small for PACK_ALIGNMENT=4");
+    // Rows are tightly packed, matching the GL backend's pack alignment of one.
+    const stride = this.width;
+    if (destination.length < stride * this.height) throw new RangeError("CPU stencil destination is too small");
     for (let row = 0; row < this.height; row++) for (let x = 0; x < this.width; x++) {
       const value = this.stencil[(this.height - 1 - row) * this.width + x];
       if (value === undefined) throw new RangeError("Missing CPU stencil pixel");
@@ -691,6 +695,8 @@ export class SoftwareRenderer implements RendererBackend {
           this.atlasTarget = null;
         }
         const target = this.atlasTarget ??= new SoftwareRenderer(image.width, image.height, this.owner, this.subpixelBits, 0);
+        // Atlas passes are small; a second pool would double the worker threads.
+        target.rowPool = null;
         target.colorWrite = false;
         // Atlas image row zero is V=0. Raster rows run from the top of the
         // target. Only pass rects are copied: cleared passes overwrite their
@@ -734,14 +740,15 @@ export class SoftwareRenderer implements RendererBackend {
           for (let index = 0; index + 2 < strip.length; index++)
             indices.push(index + index % 2, index + 1 - index % 2, index + 2);
           this.draw({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single", indices,
-            texture: { kind: "bind-image", image: operation.image }, state: this.retainedState,
+            texture: { kind: "bind-image", image: operation.image },
+            state: { ...this.retainedState, blend: { source: "one", destination: "zero" }, alphaTest: "none" },
             vertices: strip.map(vertex => ({ ...vertex, color: operation.color })) });
         }
         return;
       }
       case "shadow-volume":
       case "shadow-finish": {
-        if (this.stencilBits < 4) throw new Error("CPU stencil shadows require at least four stencil bits");
+        if (this.stencilBits < 4) return;
         const finishing = operation.kind === "shadow-finish", shade = Math.fround(finishing ? 0.6 : 0.2);
         const vertices = operation.positions.map(position => ({ position,
           color: { x: shade, y: shade, z: shade, w: 1 }, texCoord: { x: 0, y: 0 } }));
@@ -1161,7 +1168,7 @@ export class SoftwareRenderer implements RendererBackend {
     // is unchanged; the dispatch barrier is synchronous, so nothing outside
     // this call can observe a partially rasterized batch.
     if (this.framebuffer !== this.mainFramebuffer || this.opacityActive || this.pendingSetups !== null) { drawAll(); return; }
-    if (this.rowPool === undefined) this.rowPool = RowParallelPool.tryCreate(this.mainShared);
+    if (this.rowPool === undefined) this.rowPool = RowParallelPool.tryCreate(this.mainShared, reason => { this.rowPoolFailureValue = reason; });
     // Without a worker pool the setups would run serially anyway; execute
     // them immediately instead of collecting the whole batch first.
     if (this.rowPool === null) { drawAll(); return; }

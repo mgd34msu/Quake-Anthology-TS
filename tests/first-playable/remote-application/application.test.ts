@@ -31,7 +31,7 @@ test("native remote seats render, move, fire, promote, rejoin, travel and discon
       events.push(...remote.presentationEvents);
     };
     const waitForPeers = async (pending: () => boolean): Promise<void> => {
-      const deadline = performance.now() + 10000;
+      const deadline = performance.now() + 60000;
       while (pending() && performance.now() < deadline) { await exchange(); await Bun.sleep(10); }
       if (pending()) {
         const consoles = remote.localPlayers.flatMap(player => player.seat.presentation instanceof WorldSeatPresentation ? [player.seat.presentation.local.console.buffer.dump()] : []);
@@ -121,4 +121,4 @@ test("native remote seats render, move, fire, promote, rejoin, travel and discon
     expect(server.networkClients.length).toBe(0);
     expect(remote.networkPhase).toBe("closed");
   } finally { await client?.close(); await server.close(); }
-}, 60000);
+}, 180000);

@@ -1,3 +1,4 @@
+import { writeCapture } from "../../support/capture.ts";
 import { ApplicationInput } from "../../../src/app/bootstrap/input.ts";
 import { CommandBuffer, type CommandHandler } from "../../../src/core/commands/index.ts";
 import { SharedSimulation } from "../../../src/app/bootstrap/simulation/runtime.ts";
@@ -14,9 +15,11 @@ import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.ts";
 import { encodePng } from "../../../src/formats/images/png.ts";
 import { InputRouter } from "../../../src/input/router.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 for (const family of ["q2", "q3"]) test(`actual ${family} SDL console toggle and unprefixed command output`, async () => {
-  const root = await mkdtemp(join(tmpdir(), "quake-console-input-"));
+  const root = await tempDirectory("quake-console-input-");
   const parsed = parseApplicationCommand(["--game", family === "q2" ? "q2-classic-baseq2" : "q3-baseq3", "--map", family === "q2" ? "base1" : "q3dm1", "--renderer", "cpu", "--hidden", "--width", "640", "--height", "480", "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Missing options");
   const app = await Application.open(parsed.options, { print: () => undefined });
@@ -45,7 +48,7 @@ for (const family of ["q2", "q3"]) test(`actual ${family} SDL console toggle and
       console.field.setText("ec"); key(9); key(9, false);
       expect(console.field.text).toBe("/echo"); expect(console.selectedCompletionEntry?.name).toBe("echo");
       const image = app.captureNextFrame(); await app.step(100);
-      await Bun.write("/tmp/quake-console-selected-help640.png", encodePng(640, 480, await image));
+      await writeCapture("quake-console-selected-help640.png", encodePng(640, 480, await image));
       console.field.clear();
     }
     const history = console.history.lines.length; await submit(""); expect(console.history.lines.length).toBe(history);
@@ -245,7 +248,7 @@ test("local archived cvars retain seat ownership before fresh client initializat
     const console = presentation(app, 1).local.console; console.open(); console.field.setText("/set sv_mapname forbidden"); console.submit();
     await app.step(1); expect(console.buffer.dump()).toContain("sv_mapname is read only");
     const image = app.captureNextFrame(); await app.step(100);
-    await Bun.write(process.env["QUAKE_PROFILE_CAPTURE"] ?? "/tmp/quake-profile-console.png", encodePng(320, 240, await image));
+    await writeCapture("quake-profile-console.png", encodePng(320, 240, await image));
     presentation(app, 0).local.console.field.setText("/seta cg_drawFPS 9"); presentation(app, 0).local.console.submit();
     await app.step(1);
     await app.close(); app = null;

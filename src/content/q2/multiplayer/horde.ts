@@ -16,6 +16,8 @@ const POINT_CLASSNAMES: ReadonlySet<string> = new Set([
   "info_monster_start", "info_monster_start_flying", "info_monster_start_ranged", "info_monster_start_boss",
 ]);
 
+const MONSTER_BOUNDS = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
+const MASK_MONSTERSOLID = 0x2020003;
 /**
  * Unified Horde for Quake II sources: authored `horde_manager` maps spawn
  * escalating waves at `info_monster_start*` points on any Q2 program or
@@ -101,6 +103,7 @@ export class Q2Horde implements Q2SpawnModule {
       this.intermissionTicks = 0;
       this.wave++;
       this.spawnedThisWave = 0;
+      if (this.wave > TOTAL_WAVES) game.host.emit({ kind: "print", actor: null, level: "high", text: "Horde complete: all waves cleared.\n" });
       return;
     }
     if (this.wave === 0) this.wave = 1;
@@ -108,14 +111,18 @@ export class Q2Horde implements Q2SpawnModule {
     if (fallbackPool === undefined) return;
     const pool = WAVE_POOLS[Math.min(WAVE_POOLS.length - 1, Math.trunc((this.wave - 1) / 3))] ?? fallbackPool;
     const batch = Math.min(4, this.waveQuota() - this.spawnedThisWave, Math.max(0, 12 - alive));
+    let spawned = 0;
     for (let index = 0; index < batch; index++) {
       const point = this.points[(this.spawnedThisWave + index) % this.points.length];
       const classname = pool[(this.spawnedThisWave + index) % pool.length];
       if (point === undefined || classname === undefined) continue;
       const origin = game.body(point).origin;
+      const occupied = game.host.trace({ start: origin, end: origin, bounds: MONSTER_BOUNDS, ignore: point.actor.id, mask: MASK_MONSTERSOLID });
+      if (occupied.startSolid || occupied.hit.kind === "actor") break;
       const monster = game.spawn({ classname, ordinal: -1, values: new Map([["origin", `${origin.x} ${origin.y} ${origin.z}`], ["angle", "0"]]) });
       this.waveMonsters.add(monster.actor.id);
+      spawned++;
     }
-    this.spawnedThisWave += batch;
+    this.spawnedThisWave += spawned;
   }
 }

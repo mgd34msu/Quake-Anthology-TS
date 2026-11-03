@@ -109,7 +109,7 @@ export class QcMachine {
     }
     for (const region of options.inlineBoundary?.regions ?? []) {
       const fn = this.program.functionAt(region.functionIndex);
-      const end = this.program.functions.reduce((limit, other) => other.firstStatement > fn.firstStatement ? Math.min(limit, other.firstStatement) : limit, this.program.statements.length);
+      const end = this.program.functionEnd(fn);
       if (fn.namedBuiltin || fn.firstStatement <= 0 || !Number.isInteger(region.entry) || !Number.isInteger(region.exit)
         || region.entry < fn.firstStatement || region.exit <= region.entry || region.exit >= end || this.inlineRegions.has(region.entry))
         throw new QcProgramError("invalid inline source region");
@@ -485,7 +485,7 @@ export class QcMachine {
           }
           case QcOpcode.Done: case QcOpcode.Return:
             if (stop?.frame === this.frames.at(-1)) this.fail("inline source region returned before its continuation");
-            g.copyWords(g, a, 1, 3); this.leave(); break;
+            g.copyReturnWords(g, a, 1, 3); this.leave(); break;
           default: { const unreachable: never = opcode; this.fail(`unsupported opcode ${unreachable}`); }
         }
       }
@@ -497,14 +497,19 @@ export class QcMachine {
       profiling: [...this.profiling], traceEnabled: this.traceEnabled };
   }
   restore(snapshot: QcMachineSnapshot): void {
-    if (this.depth !== 0 || this.builtinDepth !== 0 || this.boundaryDepth !== 0) this.fail("restore requires an idle callback boundary");
-    if (snapshot.globals.length !== this.globals.bytes.length || snapshot.profiling.length !== this.profiling.length || snapshot.functionIndex !== 0) this.fail("incompatible machine checkpoint");
+    this.validateSnapshot(snapshot);
     this.strings.restore(snapshot.strings);
     this.entities.restore(snapshot.entities, snapshot.entityCount);
     this.globals.bytes.set(snapshot.globals);
     this.statement = snapshot.statement; this.functionIndex = 0; this.argumentCount = snapshot.argumentCount;
     this.traceEnabled = snapshot.traceEnabled;
     for (let index = 0; index < this.profiling.length; index++) this.profiling[index] = snapshot.profiling[index] ?? 0;
+  }
+  validateSnapshot(snapshot: QcMachineSnapshot): void {
+    if (this.depth !== 0 || this.builtinDepth !== 0 || this.boundaryDepth !== 0) this.fail("restore requires an idle callback boundary");
+    if (snapshot.globals.length !== this.globals.bytes.length || snapshot.profiling.length !== this.profiling.length || snapshot.functionIndex !== 0) this.fail("incompatible machine checkpoint");
+    if (snapshot.entities.byteLength !== this.entities.bytes.byteLength || !Number.isInteger(snapshot.entityCount) || snapshot.entityCount < 1 || snapshot.entityCount > this.entities.capacity)
+      this.fail("incompatible machine checkpoint");
   }
 }
 function byteCompare(left: string, right: string): number {

@@ -1,5 +1,5 @@
 import { SceneImageRegistry } from "../../src/render/scene/resources.ts";
-import { testCorpusRoot } from "../support/corpus.ts";
+import { corpusFile, corpusHasFile } from "../support/corpus.ts";
 
 import { classicCharset, resolveTextGlyph, type TextFontSelection } from "../../src/text/atlas.ts";
 import { layoutText } from "../../src/text/layout.ts";
@@ -44,9 +44,8 @@ test("localized subtitle cues follow source seek/loop time and retire on skip", 
   for (const command of text) { expect(command.origin.y).toBeGreaterThanOrEqual(20); expect(command.origin.y + 16).toBeLessThanOrEqual(100); }
 });
 
-test("actual supplied French Q2 subtitles parse with original cue timing", async () => {
-  const file = Bun.file(`${testCorpusRoot()}/q2/rerelease/baseq2/video/eou1__fr.srt`);
-  if (!await file.exists()) return;
+test.skipIf(!corpusHasFile("q2/rerelease/baseq2/video/eou1__fr.srt"))("actual supplied French Q2 subtitles parse with original cue timing", async () => {
+  const file = Bun.file(corpusFile("q2/rerelease/baseq2/video/eou1__fr.srt"));
   const captions = new SeatMediaCaptions(owner.seat(1), async path => path === "video/eou1__fr.srt" ? new Uint8Array(await file.arrayBuffer()) : null);
   await captions.prepare("video/eou1_.ogv", "french");
   const preferences = { subtitles: true, soundCaptions: true, speakers: true };

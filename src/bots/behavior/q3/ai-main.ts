@@ -91,8 +91,8 @@ function actionDescription(context: GameAiContext, state: BotState, withGoal: bo
     default: {
       if (!withGoal) return "roaming";
       const goal = context.library.goals.getTopGoal(state.gs);
-      if (goal === null) throw new Error("BotSetInfoConfigString reads an uninitialized source goal when the goal stack is empty");
-      return `roaming ${context.library.goals.goalName(goal.number)}`;
+      // The source prints whatever its uninitialized goal names; an empty stack reports an empty name.
+      return `roaming ${goal === null ? "" : context.library.goals.goalName(goal.number)}`;
     }
   }
 }
@@ -409,7 +409,7 @@ export class GameAi {
       if (split < 0) continue;
       const verb = buffer.slice(0, split), argumentsText = removeColorEscapeSequences(buffer.slice(split + 1));
       if (asciiEqual(verb, "print") || asciiEqual(verb, "chat") || asciiEqual(verb, "tchat")) {
-        if (argumentsText.length < 2) throw new Error("BotAI reads outside the source quoted server command buffer");
+        if (argumentsText.length < 2) continue;
         library.chat.queueConsoleMessage(state.cs, asciiEqual(verb, "print") ? 0 : 1, argumentsText.slice(1, -1));
       } else if (context.game.options.product === "missionpack") {
         if (asciiEqual(verb, "vchat")) botVoiceChatCommand(context, state, 0, argumentsText);
@@ -448,6 +448,7 @@ export class GameAi {
     }
     for (const name of ["bot_memorydump", "bot_saveroutingcache"]) {
       if (context.cvar(name).integerValue === 0) continue;
+      if (name === "bot_saveroutingcache") context.game.options.engine.print("bot_saveroutingcache: routing cache files are not supported by this build\n");
       library.variables.set(name.slice(4), "1");
       context.game.options.cvars.set(name, "0", true);
     }
@@ -496,7 +497,9 @@ export class GameAi {
   }
 
   private entityObservation(index: number): BotEntityUpdate | null {
-    const game = this.context.game, entity = game.entity(index), source = entity.state;
+    const game = this.context.game;
+    if (!game.observable(index)) return null;
+    const entity = game.entity(index), source = entity.state;
     if (!entity.present || !entity.linked || entity.hidden) return null;
     if (source.eType === EntityType.ET_MISSILE && source.weapon !== Weapon.WP_GRAPPLING_HOOK) return null;
     if (source.eType > EntityType.ET_EVENTS) return null;

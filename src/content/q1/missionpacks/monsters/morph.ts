@@ -28,7 +28,7 @@ function stab(monster: MissionMonster): undefined {
   const delta = vsub(target, monster.origin), distance = length(delta), direction = normalize(delta), basis = game.makeVectors(game.body(entity).angles);
   if (distance <= 90) {
     game.sound(entity, "enforcer/enfstop.wav", "weapon", 3); game.damage(monster.enemy, entity.actor.id, entity.actor.id, game.host.random() * 10 + 20);
-    game.host.emit({ kind: "particles", origin: monster.target ?? target, direction: vscale(basis.forward, 150), color: 73, count: 14 });
+    game.host.emit({ kind: "particles", origin: monster.target ?? target, direction: vscale(basis.forward, 15), color: 73, count: 28 });
   } else {
     entity.effects |= 2; const origin = vadd(vadd(vadd(monster.origin, vscale(basis.forward, 80)), vscale(basis.right, 4)), { x: 0, y: 0, z: 4 });
     launchLaser(game, entity.actor.id, origin, direction);

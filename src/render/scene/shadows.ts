@@ -267,9 +267,10 @@ function sameSignature(a: LightSignature | undefined, b: LightSignature): boolea
 export class Q2ShadowScene {
   private image: RendererImage | null = null;
   private cached = new Map<number, LightSignature>();
+  private epoch: number;
   /** Projected static-world draws per light/face; casters are re-projected per rebuild. */
   private worldDrawCache = new Map<string, readonly DepthAtlasDraw[]>();
-  constructor(readonly images: SceneImageRegistry) {}
+  constructor(readonly images: SceneImageRegistry) { this.epoch = images.backendEpoch; }
 
   private worldDraws(key: string, compute: () => readonly DepthAtlasDraw[]): readonly DepthAtlasDraw[] {
     const cached = this.worldDrawCache.get(key);
@@ -289,6 +290,8 @@ export class Q2ShadowScene {
       if (original === undefined || original.profile.kind !== "q2" || !eligibleShadowLight(original)) continue;
       candidates.push({ index, light, face: shadowMapResolution(original.profile.shadow.kind === "cast" ? original.profile.shadow.resolution : 0, options.resolutionCap), casters: casters.filter(lightContainsSphere(light)) });
     }
+    // A replaced backend restores the atlas to its creation contents, so signatures that say "cached" no longer hold.
+    if (this.epoch !== this.images.backendEpoch) { this.epoch = this.images.backendEpoch; this.cached.clear(); }
     if (options.enabled === false) this.close();
     if (candidates.length === 0) return { lighting: { lights, atlas: null }, operations: [], stats: { lights: 0, cachedLights: 0, rebuiltLights: 0, facesRendered: 0, entityCasters: 0 } };
     if (this.image === null) this.image = this.images.register("*q2-shadow-atlas", { kind: "depth32f",

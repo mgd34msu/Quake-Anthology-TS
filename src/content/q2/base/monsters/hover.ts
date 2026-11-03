@@ -7,7 +7,14 @@ import { aliveEnemy, beginDeath, damagedSkin, loopSound, move, muzzle, shot, sou
 import { hoverFrame, hoverMoves } from "./tables/hover.ts";
 
 function run(context: MonsterContext): undefined { return context.setMove(context.state.standGround ? "hover_move_stand" : "hover_move_run"); }
+const hoverDeadThink: Q2Think = (entity, game) => {
+  if (game.body(entity).ground === null && game.host.now() < entity.timestamp) return game.schedule(entity, 0.1, hoverDeadThink);
+  game.host.emit({ kind: "effect", effect: "q2:explosion1", origin: game.body(entity).origin, direction: zero, count: 1, color: 0 });
+  return game.remove(entity);
+};
+
 export const hoverDefinition: Q2MonsterDefinition = {
+  sourceCallbacks: { think: { "q2:base/hover_deadthink": hoverDeadThink } },
   classname: "monster_hover", kind: "hover", model: "models/monsters/hover/tris.md2", health: 240, gibHealth: -100, mass: 150,
   bounds: { min: { x: -24, y: -24, z: -24 }, max: { x: 24, y: 24, z: 32 } }, scale: 1, locomotion: "fly",
   initialMove: "hover_move_stand", moves: hoverMoves, stand: move("hover_move_stand"), walk: move("hover_move_walk"), run, attack: move("hover_move_start_attack"),
@@ -40,13 +47,8 @@ export const hoverDefinition: Q2MonsterDefinition = {
       state.corpse = true;
       game.move(entity, { bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: -8 } } });
       game.motion(entity, "toss");
-      const deadline = game.host.now() + 15;
-      const think: Q2Think = (self, services) => {
-        if (services.body(self).ground === null && services.host.now() < deadline) return services.schedule(self, 0.1, think);
-        services.host.emit({ kind: "effect", effect: "q2:explosion1", origin: services.body(self).origin, direction: zero, count: 1, color: 0 });
-        return services.remove(self);
-      };
-      return game.schedule(entity, 0.1, think);
+      entity.timestamp = game.host.now() + 15;
+      return game.schedule(entity, 0.1, hoverDeadThink);
     },
   },
 };

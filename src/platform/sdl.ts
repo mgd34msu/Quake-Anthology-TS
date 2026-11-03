@@ -5,6 +5,7 @@
 // Event offsets follow SDL2 SDL_events.h; key translation remains a client duty.
 // Q3 supplies window/event leases; Q1 supplies resize intent and Q2 swap-interval control.
 import { dlopen, linkSymbols, ptr, toArrayBuffer } from "bun:ffi";
+import { requireNoSignalHandlers } from "./signal-hint.ts";
 import type { Pointer } from "bun:ffi";
 import { endianness } from "node:os";
 import { isMainThread } from "node:worker_threads";
@@ -163,8 +164,7 @@ export function readSdlClipboard(): Uint8Array | null {
 
 function initializeSubsystem(subsystem: number, operation: string): void {
   const api = sdl();
-  if (api.SDL_SetHint(cString("SDL_NO_SIGNAL_HANDLERS"), cString("1")) !== 1)
-    throw new Error("SDL must leave signal handling to the Unix signal owner");
+  requireNoSignalHandlers(api.SDL_SetHint(cString("SDL_NO_SIGNAL_HANDLERS"), cString("1")));
   checked(api.SDL_InitSubSystem(subsystem), operation);
 }
 

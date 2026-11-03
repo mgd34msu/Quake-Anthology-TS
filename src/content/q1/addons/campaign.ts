@@ -102,7 +102,10 @@ export function registerCampaignAddons(context: Q1AddonContext): undefined {
     const body = game.body(entity), start = vadd(body.origin, { x: 0, y: 0, z: 6 });
     const floor = game.host.trace({ start, end: vadd(start, { x: 0, y: 0, z: -256 }), bounds: body.bounds, ignore: entity.actor.id, monsters: true });
     if (floor.allSolid || floor.fraction === 1) return game.remove(entity);
-    game.setBody(entity, { origin: floor.end, velocity: ZERO, ground: floor.actor }); return game.link(entity);
+    game.setBody(entity, { origin: floor.end, velocity: ZERO, ground: floor.actor }); game.link(entity);
+    // MG3 items.qc PlaceItem: flag 128 sigils start hidden until used.
+    if (context.program === "mg3" && (entity.spawnflags & 128) !== 0) { entity.model = ""; entity.solid = "none"; game.link(entity); }
+    return undefined;
   } });
   game.named.register(prefix + "use_targets", { action: (_game, entity) => useTargets(entity, entity.activator) });
   game.named.register(prefix + "indicator_use", { use: (_game, entity, _other, activator) => {
@@ -163,6 +166,7 @@ export function registerCampaignAddons(context: Q1AddonContext): undefined {
     entity.model = mission3 ? `progs/end${index + 1}.mdl` : `progs/mg1_rune${index + 1}.mdl`;
     entity.fields.set("netname", mission3 ? `$mg3_qc_rune${index + 1}` : `$qc_mg1_pickup_rune${index + 1}`);
     entity.solid = "trigger"; entity.movement = "toss"; entity.touch = game.named.touch(entity, prefix + "sigil_touch");
+    entity.originalModel = entity.model; if (spawned !== 0) entity.use = game.named.use(entity, "mg3:items:regenerate");
     game.setBounds(entity, { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } });
     return action(entity, "drop_item", 0.2);
   });

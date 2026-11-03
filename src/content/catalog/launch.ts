@@ -98,7 +98,8 @@ const FAMILY_BOUND_MATCH: Readonly<Record<string, string>> = {
 /** Family-by-role cross-check: every selected provider must name a known
  * family, and family-bound roles (match rules) must run on a world of that
  * family. Other roles deliberately cross families in the unified engine. */
-export function validateLaunchRoles(launch: SelectedLaunch, catalog: InstalledCatalog): void {
+/** Only the world family of a product is consulted, so callers may pass anything that can answer that. */
+export function validateLaunchRoles(launch: SelectedLaunch, catalog: { product(id: string): { readonly expectation: { readonly family: string | undefined } } }): void {
   const roles: readonly (readonly [string, ProviderReference])[] = [
     ["map entities", launch.map.entities], ["movement", launch.movement], ["character", launch.character.definition],
     ["engine behavior", launch.engineBehavior], ["combat", launch.combat], ["inventory", launch.inventory],

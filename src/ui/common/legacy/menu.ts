@@ -13,7 +13,7 @@ import {
   type ScriptDiagnostic,
   type ScriptToken,
   type SourceLocation,
-} from "./script/lexer.ts";
+} from "../../../content/legacy-script/lexer.ts";
 import {
   ScriptSourceReader,
   type IncludeResolver,
@@ -21,7 +21,7 @@ import {
   type ScriptSource,
   type ScriptSourcePosition,
   type ScriptTokenRecord,
-} from "./script/preprocessor.ts";
+} from "../../../content/legacy-script/preprocessor.ts";
 
 export interface UiMenuScriptSources {
   loadSourceHandle(path: string): number;
@@ -380,22 +380,10 @@ export interface UiMenuParseOptions {
   readonly assetSink?: UiMenuAssetSink;
   readonly initialAssets?: UiGlobalAssets;
   readonly initialFontRegistered?: boolean;
-  readonly menuSink?: UiMenuDefinitionSink;
   readonly reportDiagnostic?: (diagnostic: ScriptDiagnostic) => void;
 }
 
-export interface UiMenuDefinitionSink {
-  menuCount(): number;
-  publish(menu: UiMenuDefinition): Promise<void>;
-}
-
-export type UiMenuLoadPlan =
-  | { readonly kind: "ui"; readonly setPaths: readonly string[] }
-  | { readonly kind: "hud"; readonly setPath: string };
-
-export function defaultUiMenuPlan(): UiMenuLoadPlan {
-  return Object.freeze({ kind: "ui", setPaths: Object.freeze(["ui/menus.txt", "ui/ingame.txt"]) });
-}
+export type UiMenuLoadPlan = { readonly kind: "hud"; readonly setPath: string };
 
 export function defaultHudMenuPlan(): UiMenuLoadPlan {
   return Object.freeze({ kind: "hud", setPath: "ui/hud.txt" });
@@ -1029,33 +1017,11 @@ function int32(value: number): number {
   return value | 0;
 }
 
-function freezeWindow(window: MutableWindow): UiWindowDefinition {
-  return Object.freeze({
-    get rect() { return window.rect; }, set rect(value: UiRect) { window.rect = value; },
-    get clientRect() { return window.clientRect; }, set clientRect(value: UiRect) { window.clientRect = value; },
-    get rectEffects() { return window.rectEffects; }, set rectEffects(value: UiRect) { window.rectEffects = value; },
-    get rectEffects2() { return window.rectEffects2; }, set rectEffects2(value: UiRect) { window.rectEffects2 = value; },
-    get name() { return window.name; }, get group() { return window.group; }, get cinematic() { return window.cinematic; },
-    get style() { return window.style; }, get border() { return window.border; }, get ownerDraw() { return window.ownerDraw; },
-    get ownerDrawFlags() { return window.ownerDrawFlags; }, get borderSize() { return window.borderSize; },
-    get flags() { return window.flags; }, set flags(value: number) { window.flags = value; },
-    get nextTime() { return window.nextTime; }, set nextTime(value: number) { window.nextTime = value; },
-    get offsetTime() { return window.offsetTime; }, set offsetTime(value: number) { window.offsetTime = value; },
-    get cinematicHandle() { return window.cinematicHandle; }, set cinematicHandle(value: number) { window.cinematicHandle = value; },
-    get foreColor() { return window.foreColor; }, set foreColor(value: Vec4) { window.foreColor = value; },
-    get backColor() { return window.backColor; }, set backColor(value: Vec4) { window.backColor = value; },
-    get borderColor() { return window.borderColor; }, set borderColor(value: Vec4) { window.borderColor = value; },
-    get outlineColor() { return window.outlineColor; }, set outlineColor(value: Vec4) { window.outlineColor = value; },
-    get background() { return window.background; }, get backgroundHandle() { return window.backgroundHandle; },
-    setBackground(value: UiShaderReference, handle: number | undefined) { window.setBackground(value, handle); },
-  });
-}
-
 function freezeItem(item: MutableItem): UiItemDefinition {
   return Object.freeze({
-    location: item.location, allocationOffset: item.allocationOffset, window: freezeWindow(item.window),
+    location: item.location, allocationOffset: item.allocationOffset, window: item.window,
     get type() { return item.type; }, get parent() { return item.parent; }, set parent(value: UiMenuDefinition | undefined) { item.parent = value; },
-    get behavior() { return freezeBehavior(item.behavior); },
+    get behavior(): UiItemBehavior { return item.behavior; },
     get textRect() { return item.textRect; }, set textRect(value: UiRect) { item.textRect = value; },
     get alignment() { return item.alignment; }, get textAlignment() { return item.textAlignment; },
     get textAlignX() { return item.textAlignX; }, get textAlignY() { return item.textAlignY; },
@@ -1070,16 +1036,16 @@ function freezeItem(item: MutableItem): UiItemDefinition {
     get colorRanges() { return item.colorRanges; },
     get special() { return item.special; }, set special(value: number) { item.special = value; },
     get cursorPosition() { return item.cursorPosition; }, set cursorPosition(value: number) { item.cursorPosition = value; },
-    editData() { const data = item.editData(); return data === undefined ? undefined : freezeEdit(data); },
-    listData() { const data = item.listData(); return data === undefined ? undefined : freezeList(data); },
-    modelData() { const data = item.modelData(); return data === undefined ? undefined : freezeModel(data); },
-    multiData() { const data = item.multiData(); return data === undefined ? undefined : freezeMulti(data); },
+    editData() { return item.editData(); },
+    listData() { return item.listData(); },
+    modelData() { return item.modelData(); },
+    multiData() { return item.multiData(); },
   });
 }
 
 function freezeMenu(menu: MutableMenu): UiMenuDefinition {
   return Object.freeze({
-    location: menu.location, sourceIndex: menu.sourceIndex, window: freezeWindow(menu.window),
+    location: menu.location, sourceIndex: menu.sourceIndex, window: menu.window,
     get font() { return menu.font; }, get fullScreen() { return menu.fullScreen; }, get fontIndex() { return menu.fontIndex; },
     get cursorItem() { return menu.cursorItem; }, set cursorItem(value: number) { menu.cursorItem = value; },
     get fadeCycle() { return menu.fadeCycle; }, get fadeClamp() { return menu.fadeClamp; }, get fadeAmount() { return menu.fadeAmount; },
@@ -1088,79 +1054,6 @@ function freezeMenu(menu: MutableMenu): UiMenuDefinition {
     get items() { return menu.items; }, get itemCount() { return menu.itemCount; },
     itemAt(index: number) { return menu.item(index); },
   });
-}
-
-function freezeEdit(edit: MutableEditField): UiEditFieldDefinition {
-  return Object.freeze({
-    get minimum(): number { return edit.minimum; },
-    get maximum(): number { return edit.maximum; },
-    get defaultValue(): number { return edit.defaultValue; },
-    get range(): number { return edit.range; },
-    get maxChars(): number { return edit.maxChars; },
-    get maxPaintChars(): number { return edit.maxPaintChars; },
-    get paintOffset(): number { return edit.paintOffset; },
-    set paintOffset(value: number) { edit.paintOffset = value; },
-  });
-}
-
-function freezeList(list: MutableListBox): UiListBoxDefinition {
-  return Object.freeze({
-    get startPosition(): number { return list.startPosition; },
-    set startPosition(value: number) { list.startPosition = value; },
-    get endPosition(): number { return list.endPosition; },
-    set endPosition(value: number) { list.endPosition = value; },
-    get drawPadding(): number { return list.drawPadding; },
-    set drawPadding(value: number) { list.drawPadding = value; },
-    get cursorPosition(): number { return list.cursorPosition; },
-    set cursorPosition(value: number) { list.cursorPosition = value; },
-    get elementWidth(): number { return list.elementWidth; },
-    get elementHeight(): number { return list.elementHeight; },
-    get elementStyle(): number { return list.elementStyle; },
-    get columns(): readonly UiListColumn[] { return list.columns; },
-    get doubleClick() { return list.doubleClick; },
-    get notSelectable(): boolean { return list.notSelectable; },
-  });
-}
-
-function freezeMulti(multi: MutableMulti): UiMultiDefinition {
-  return Object.freeze({
-    get count(): number { return multi.count; },
-    get stringDefinition(): boolean { return multi.stringDefinition; },
-    label(index: number): string | undefined { return multi.label(index); },
-    stringValue(index: number): string | undefined { return multi.stringValue(index); },
-    numberValue(index: number): number { return multi.numberValue(index); },
-  });
-}
-
-function freezeModel(value: MutableModel): UiModelDefinition {
-  return Object.freeze({
-    get angle(): number { return value.angle; },
-    set angle(angle: number) { value.angle = angle; },
-    origin: value.origin,
-    get fieldOfViewX(): number { return value.fieldOfViewX; },
-    get fieldOfViewY(): number { return value.fieldOfViewY; },
-    get rotationSpeed(): number { return value.rotationSpeed; },
-  });
-}
-
-function freezeBehavior(behavior: MutableItemBehavior): UiItemBehavior {
-  switch (behavior.kind) {
-    case "text": return Object.freeze({ kind: "text", type: UiItemTypeCode.Text, get edit() { const data = behavior.edit; return data === undefined ? undefined : freezeEdit(data); } });
-    case "button": return Object.freeze({ kind: "button", type: UiItemTypeCode.Button });
-    case "radio-button": return Object.freeze({ kind: "radio-button", type: UiItemTypeCode.RadioButton });
-    case "check-box": return Object.freeze({ kind: "check-box", type: UiItemTypeCode.CheckBox });
-    case "edit-field": return Object.freeze({ kind: "edit-field", type: UiItemTypeCode.EditField, get edit() { return freezeEdit(behavior.edit); } });
-    case "combo": return Object.freeze({ kind: "combo", type: UiItemTypeCode.Combo });
-    case "list-box": return Object.freeze({ kind: "list-box", type: UiItemTypeCode.ListBox, get list() { return freezeList(behavior.list); } });
-    case "model": return Object.freeze({ kind: "model", type: UiItemTypeCode.Model, get model() { const data = behavior.model; return data === undefined ? undefined : freezeModel(data); } });
-    case "owner-draw": return Object.freeze({ kind: "owner-draw", type: UiItemTypeCode.OwnerDraw });
-    case "numeric-field": return Object.freeze({ kind: "numeric-field", type: UiItemTypeCode.NumericField, get edit() { return freezeEdit(behavior.edit); } });
-    case "slider": return Object.freeze({ kind: "slider", type: UiItemTypeCode.Slider, get edit() { return freezeEdit(behavior.edit); } });
-    case "yes-no": return Object.freeze({ kind: "yes-no", type: UiItemTypeCode.YesNo, get edit() { return freezeEdit(behavior.edit); } });
-    case "multi": return Object.freeze({ kind: "multi", type: UiItemTypeCode.Multi, get multi() { const data = behavior.multi; return data === undefined ? undefined : freezeMulti(data); } });
-    case "bind": return Object.freeze({ kind: "bind", type: UiItemTypeCode.Bind, get edit() { return freezeEdit(behavior.edit); } });
-    case "unknown": return Object.freeze({ kind: "unknown", type: behavior.type });
-  }
 }
 
 function freezeAssets(assets: MutableAssets): UiGlobalAssets {
@@ -1196,13 +1089,7 @@ export class UiMenuSourceParser {
   }
 
   async load(plan: UiMenuLoadPlan): Promise<UiMenuDefinitions> {
-    if (plan.kind === "ui") {
-      for (const path of plan.setPaths) {
-        await this.loadSet(path, false);
-      }
-    } else {
-      await this.loadSet(plan.setPath, true);
-    }
+    await this.loadSet(plan.setPath);
     return Object.freeze({
       memory: this.memory,
       menus: Object.freeze([...this.menus]),
@@ -1219,47 +1106,22 @@ export class UiMenuSourceParser {
 
   private async register(event: UiMenuRegistrationEvent): Promise<UiMenuRegistrationResult> {
     const frozen = Object.freeze({ ...event, location: sourceLocation(event.location) });
-    if (this.parseOptions.menuSink === undefined) this.registrations.push(frozen);
+    this.registrations.push(frozen);
     if (this.parseOptions.registrationSink !== undefined) {
       return this.parseOptions.registrationSink.register(frozen);
     }
     return undefined;
   }
 
-  private async loadSet(path: string, hud: boolean): Promise<void> {
-    if (hud && !("resolver" in this.host)) throw new TypeError("HUD menu sets require a bounded COM text resolver");
+  private async loadSet(path: string): Promise<void> {
+    if (!("resolver" in this.host)) throw new TypeError("HUD menu sets require a bounded COM text resolver");
     const source = this.resolveRoot(path, "menu set");
     this.loadedFiles.push(source.path);
-    if (hud && !(source instanceof UiMenuTokenCursor)) {
-      if (source.text.length > MAX_HUD_MENU_SET_BYTES) {
-        this.fail(`menu file too large: ${source.path}`, sourceLocation({ path: source.path, line: 1, column: 1 }));
-      }
-      await this.loadHudSet(source);
-      return;
+    if (source instanceof UiMenuTokenCursor) throw new TypeError("HUD menu sets require a bounded COM text resolver");
+    if (source.text.length > MAX_HUD_MENU_SET_BYTES) {
+      this.fail(`menu file too large: ${source.path}`, sourceLocation({ path: source.path, line: 1, column: 1 }));
     }
-    const cursor = this.openSource(source);
-    menuSet: while (true) {
-      const token = cursor.next();
-      if (token === undefined || tokenValue(token).length === 0 || tokenValue(token).startsWith("}")) {
-        break;
-      }
-      if (tokenValue(token).toLowerCase() !== "loadmenu") {
-        continue;
-      }
-      const opening = cursor.next();
-      if (opening === undefined || !tokenValue(opening).startsWith("{")) break;
-      while (true) {
-        const file = cursor.next();
-        if (file === undefined) break menuSet;
-        const value = tokenValue(file);
-        if (value.length === 0) break menuSet;
-        if (value.startsWith("}")) {
-          break;
-        }
-        await this.loadMenuFile(value, false);
-      }
-    }
-    cursor.dispose();
+    await this.loadHudSet(source);
   }
 
   private async loadHudSet(source: ScriptSource): Promise<void> {
@@ -1274,7 +1136,7 @@ export class UiMenuSourceParser {
         const path = parser.parse(cursor);
         if (path === "}") break;
         if (path.length === 0) return;
-        await this.loadMenuFile(path, true);
+        await this.loadMenuFile(path);
       }
     }
   }
@@ -1291,54 +1153,63 @@ export class UiMenuSourceParser {
     });
   }
 
-  private async loadMenuFile(path: string, hud: boolean): Promise<void> {
+  private async loadMenuFile(path: string): Promise<void> {
     let source = this.openFile(path);
-    if (source === undefined && hud && path !== "ui/testhud.menu") {
+    if (source === undefined && path !== "ui/testhud.menu") {
       source = this.openFile("ui/testhud.menu");
     }
     if (source === undefined) return;
-    await this.parseSource(source, hud);
+    await this.parseSource(source);
   }
 
-  async parseSource(source: ScriptSource | UiMenuTokenCursor, hud = false): Promise<void> {
+  async parseSource(source: ScriptSource | UiMenuTokenCursor): Promise<void> {
     if (source.path.length === 0) this.fail("menu file resolver returned an empty canonical path", sourceLocation({ path: source.path, line: 1, column: 1 }));
-    if (this.parseOptions.menuSink === undefined) this.loadedFiles.push(source.path);
-    else this.reported.length = 0;
+    this.loadedFiles.push(source.path);
     const cursor = this.openSource(source);
-    while (true) {
-      const token = cursor.next();
-      if (token === undefined || tokenValue(token).startsWith("}")) {
-        break;
-      }
-      const keyword = tokenValue(token).toLowerCase();
-      if (keyword === "assetglobaldef") {
-        try { await this.parseAssets(cursor, token.location, hud); }
-        catch (error) {
-          if (!(error instanceof MenuParseFailure) || error.cursor !== cursor) throw error;
+    try {
+      while (true) {
+        const token = cursor.next();
+        if (token === undefined || tokenValue(token).startsWith("}")) {
           break;
         }
-      } else if (keyword === "menudef") {
-        const sink = this.parseOptions.menuSink;
-        const index = sink === undefined ? this.menus.length : sink.menuCount();
-        if (index >= MAX_UI_MENUS) {
-          if (sink === undefined) this.fail(`more than ${MAX_UI_MENUS} menus defined`, token.location);
-          continue;
+        const keyword = tokenValue(token).toLowerCase();
+        if (keyword === "assetglobaldef") {
+          try { await this.parseAssets(cursor, token.location); }
+          catch (error) {
+            if (!(error instanceof MenuParseFailure) || error.cursor !== cursor) throw error;
+            break;
+          }
+        } else if (keyword === "menudef") {
+          const index = this.menus.length;
+          if (index >= MAX_UI_MENUS) this.fail(`more than ${MAX_UI_MENUS} menus defined`, token.location);
+          const menu = await this.parseMenu(cursor, token.location, index);
+          if (menu === undefined) continue;
+          // Menu_New increments the current count after parsing its original slot.
+          // A reentrant registration may already have advanced that count.
+          const publishedIndex = this.menus.length;
+          this.menus.push(publishedIndex === index ? menu
+            : new MutableMenu(this.storage.menuRecord(publishedIndex), sourceLocation(token.location)).definition);
         }
-        const menu = await this.parseMenu(cursor, token.location, index);
-        if (menu === undefined) continue;
-        // Menu_New increments the current count after parsing its original slot.
-        // A reentrant registration may already have advanced that count.
-        const publishedIndex = sink === undefined ? this.menus.length : sink.menuCount();
-        const published = publishedIndex === index ? menu
-          : new MutableMenu(this.storage.menuRecord(publishedIndex), sourceLocation(token.location)).definition;
-        if (sink === undefined) this.menus.push(published);
-        else await sink.publish(published);
       }
-    }
-    cursor.dispose();
+    } finally { cursor.dispose(); }
   }
 
-  private async parseAssets(cursor: UiMenuTokenCursor, start: SourceLocation, hud: boolean): Promise<void> {
+  private async parseFontAsset(cursor: UiMenuTokenCursor, location: SourceLocation, key: "textFont" | "smallFont" | "bigFont"): Promise<void> {
+    const reference = this.readFont(cursor, location);
+    await this.register({ kind: "font", reference, location });
+    this.assets[key] = reference;
+    this.parseOptions.assetSink?.publish({ field: key, value: reference });
+  }
+
+  private async parseSoundAsset(cursor: UiMenuTokenCursor, location: SourceLocation,
+    key: "menuEnterSound" | "menuExitSound" | "itemFocusSound" | "menuBuzzSound"): Promise<void> {
+    const reference = sound(this.readString(cursor, location) ?? null);
+    await this.register({ kind: "sound", reference, location });
+    this.assets[key] = reference;
+    this.parseOptions.assetSink?.publish({ field: key, value: reference });
+  }
+
+  private async parseAssets(cursor: UiMenuTokenCursor, start: SourceLocation): Promise<void> {
     this.expect(cursor, "{", "expected { after assetGlobalDef", start);
     while (true) {
       const field = this.expectAny(cursor, "end of file inside assetGlobalDef", start);
@@ -1348,30 +1219,11 @@ export class UiMenuSourceParser {
       }
       switch (value.toLowerCase()) {
         case "font": {
-          const reference = this.readFont(cursor, field.location);
-          await this.register({ kind: "font", reference, location: field.location });
-          this.assets.textFont = reference;
-          this.parseOptions.assetSink?.publish({ field: "textFont", value: reference });
-          if (!hud) {
-            this.fontRegistered = true;
-            this.parseOptions.assetSink?.publish({ field: "fontRegistered", value: true });
-          }
+          await this.parseFontAsset(cursor, field.location, "textFont");
           break;
         }
-        case "smallfont": {
-          const reference = this.readFont(cursor, field.location);
-          await this.register({ kind: "font", reference, location: field.location });
-          this.assets.smallFont = reference;
-          this.parseOptions.assetSink?.publish({ field: "smallFont", value: reference });
-          break;
-        }
-        case "bigfont": {
-          const reference = this.readFont(cursor, field.location);
-          await this.register({ kind: "font", reference, location: field.location });
-          this.assets.bigFont = reference;
-          this.parseOptions.assetSink?.publish({ field: "bigFont", value: reference });
-          break;
-        }
+        case "smallfont": await this.parseFontAsset(cursor, field.location, "smallFont"); break;
+        case "bigfont": await this.parseFontAsset(cursor, field.location, "bigFont"); break;
         case "gradientbar": {
           const reference = shader(this.readString(cursor, field.location) ?? null);
           await this.register({ kind: "picture", reference, location: field.location });
@@ -1379,34 +1231,10 @@ export class UiMenuSourceParser {
           this.parseOptions.assetSink?.publish({ field: "gradientBar", value: reference });
           break;
         }
-        case "menuentersound": {
-          const reference = sound(this.readString(cursor, field.location) ?? null);
-          await this.register({ kind: "sound", reference, location: field.location });
-          this.assets.menuEnterSound = reference;
-          this.parseOptions.assetSink?.publish({ field: "menuEnterSound", value: reference });
-          break;
-        }
-        case "menuexitsound": {
-          const reference = sound(this.readString(cursor, field.location) ?? null);
-          await this.register({ kind: "sound", reference, location: field.location });
-          this.assets.menuExitSound = reference;
-          this.parseOptions.assetSink?.publish({ field: "menuExitSound", value: reference });
-          break;
-        }
-        case "itemfocussound": {
-          const reference = sound(this.readString(cursor, field.location) ?? null);
-          await this.register({ kind: "sound", reference, location: field.location });
-          this.assets.itemFocusSound = reference;
-          this.parseOptions.assetSink?.publish({ field: "itemFocusSound", value: reference });
-          break;
-        }
-        case "menubuzzsound": {
-          const reference = sound(this.readString(cursor, field.location) ?? null);
-          await this.register({ kind: "sound", reference, location: field.location });
-          this.assets.menuBuzzSound = reference;
-          this.parseOptions.assetSink?.publish({ field: "menuBuzzSound", value: reference });
-          break;
-        }
+        case "menuentersound": await this.parseSoundAsset(cursor, field.location, "menuEnterSound"); break;
+        case "menuexitsound": await this.parseSoundAsset(cursor, field.location, "menuExitSound"); break;
+        case "itemfocussound": await this.parseSoundAsset(cursor, field.location, "itemFocusSound"); break;
+        case "menubuzzsound": await this.parseSoundAsset(cursor, field.location, "menuBuzzSound"); break;
         case "cursor": {
           const path = this.readStringReference(cursor, field.location);
           this.parseOptions.assetSink?.publish({ field: "cursorStr", value: path ?? null });

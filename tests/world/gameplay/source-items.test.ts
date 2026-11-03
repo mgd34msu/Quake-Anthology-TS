@@ -102,7 +102,7 @@ test("source item icons retain source ownership, authored type and explicit abse
       if (icon !== null) expect(() => readSourceItemIcon(new SaveReader(icon), "q3:classic:baseq3:installed")).toThrow("another content source");
     } finally { f.lease.close(); f.actors.close(); }
   }
-  expect(() => readItemIconDeclaration(new SaveReader({ kind: "image", path: "../outside.pcx" }))).toThrow();
+  expect(() => readItemIconDeclaration(new SaveReader({ kind: "image", path: "../outside.pcx" }))).toThrow("Invalid relative resource path: ../outside.pcx");
 });
 
 test("native item names retain the current canonical owner of the original descriptor", () => {

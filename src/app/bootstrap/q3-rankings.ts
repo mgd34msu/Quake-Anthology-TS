@@ -1,6 +1,7 @@
 import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
 import type { RankingAccountActions } from "../../ui/settings/rankings.ts";
 import { RankingLifecycle } from "../../network/services/rankings.ts";
+import { rankEncodeGameId } from "../../network/services/rank-codec.ts";
 import type { RankingAccountRequest, RankingPlayerState, RankingServiceProvider, RankingServiceState } from "../../network/services/rankings.ts";
 import type { EntityPool } from "../../content/q3/base/game/entities.ts";
 import type { GameLevel } from "../../content/q3/base/game/level.ts";
@@ -30,10 +31,11 @@ export class ApplicationQ3Rankings {
   private readonly detach: () => void;
   private readonly weapons = new Map<number, { weapon: number; since: number }>();
   private closed = false;
+  private gameKey = "";
   private ended = false;
   constructor(private readonly pool: EntityPool, private readonly level: GameLevel,
     provider: RankingServiceProvider | null, private readonly host: Q3RankingHost) {
-    this.lifecycle = new RankingLifecycle(provider, (slot, state) => host.status(slot, state), state => host.serviceStatus?.(state));
+    this.lifecycle = new RankingLifecycle(provider, (slot, state) => host.status(slot, state), state => { this.publishGame(state); host.serviceStatus?.(state); });
     this.detach = pool.rankings.attach(report => {
       if (this.lifecycle.state().kind !== "active" || this.ended) return;
       if (this.reports.append(report) === 0) {
@@ -42,9 +44,20 @@ export class ApplicationQ3Rankings {
       }
     }, () => level.warmupTime !== 0);
   }
+  /** SV_RankBegin passes the encoded game ID and key to clients (sv_rankings.c CS_GRANK); the GPL release has no CS_GRANK slot, so they ride in serverinfo. */
+  private publishGame(state: RankingServiceState): void {
+    let id = "";
+    if (state.kind === "active") {
+      const text = new Uint8Array(12);
+      rankEncodeGameId(state.gameId, text, () => undefined);
+      id = new TextDecoder().decode(text.subarray(0, text.indexOf(0)));
+    }
+    this.host.setCvar("sv_rankingsGameKey", state.kind === "active" ? this.gameKey : "");
+    this.host.setCvar("sv_rankingsGameID", id);
+  }
   private assertOpen(): void { if (this.closed) throw new Error("Ranking match owner is closed"); }
   async begin(enabled: boolean, singlePlayer: boolean, gameKey: string): Promise<void> {
-    this.assertOpen(); await this.lifecycle.begin(enabled, singlePlayer, gameKey); await this.frame();
+    this.assertOpen(); this.gameKey = gameKey; await this.lifecycle.begin(enabled, singlePlayer, gameKey); await this.frame();
   }
   account(slot: number, request: RankingAccountRequest): Promise<void> {
     this.assertClient(slot); return this.lifecycle.account(slot, request);

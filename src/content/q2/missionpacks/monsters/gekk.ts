@@ -4,9 +4,10 @@ import { angleVectorsRule, vectorToAnglesRule } from "../../../../core/math.ts";
 import { add, length, normalize, scale, subtract, zero } from "../../foundation/fields.ts";
 import { freeQ2Entity } from "../../foundation/callbacks.ts";
 import type { Q2Die, Q2Entity, Q2GameServices, Q2Touch } from "../../foundation/host.ts";
-import { checkBottom, enemyBody, enemyEye, health, MASK_SHOT, projectFlash, runAi, setDuck, targetDistance, traceGroundActor } from "../../foundation/monsters/ai.ts";
+import { checkBottom, enemyBody, enemyEye, finishDodge, health, MASK_SHOT, projectFlash, runAi, setDuck, targetDistance, traceGroundActor } from "../../foundation/monsters/ai.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
-import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
+import type { MonsterContext, MonsterMove, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
+import { blockedCheckJump, blockedCheckPlatform, monsterJumpFinished } from "../../rerelease/monsters/common.ts";
 import { aliveEnemy, finishCorpse, move, sound } from "../../base/monsters/common.ts";
 import { gekkFrame, gekkMoves } from "./tables/xatrix-gekk.ts";
 
@@ -97,6 +98,19 @@ function search(context: MonsterContext): undefined {
   return undefined;
 }
 
+/** game_x64.dll gekk_blocked jump moves (frames 74-81, ai_move, ending in gekk_run), read from the shipped DLL; classic has none. */
+const rereleaseJumpFrames = (first: string, firstDistance: number): MonsterMove["frames"] => Array.from({ length: 8 }, (_, index) => ({
+  ai: "move" as const, distance: index < 2 ? firstDistance : 0, actions: index === 0 ? [first] : index === 6 ? ["gekk_jump_wait_land"] : [], lerpFrame: -1 }));
+const rereleaseJumpMoves: readonly MonsterMove[] = [
+  { name: "gekk_move_jump", firstFrame: 74, lastFrame: 81, end: "gekk_run", sidestepScale: 0, frames: rereleaseJumpFrames("gekk_jump_down", 0) },
+  { name: "gekk_move_jump2", firstFrame: 74, lastFrame: 81, end: "gekk_run", sidestepScale: 0, frames: rereleaseJumpFrames("gekk_jump_up", -8) },
+];
+
+function launch(context: MonsterContext, forward: number, up: number): undefined {
+  const body = context.game.body(context.entity), axes = angleVectorsRule(body.angles, "native");
+  return context.game.move(context.entity, { velocity: add(body.velocity, add(scale(axes.forward, forward), scale(axes.up, up))) });
+}
+
 export function createGekkDefinition(monsters: Q2Monsters): Q2MonsterDefinition {
   const jumpTouch: Q2Touch = (entity, game, contact) => {
     const context = monsters.context(entity.actor.id); if (context === null) throw new Error("Gekk jump without its source controller");
@@ -121,7 +135,7 @@ export function createGekkDefinition(monsters: Q2Monsters): Q2MonsterDefinition 
   return {
     classname: "monster_gekk", kind: "gekk", model: "models/monsters/gekk/tris.md2", health: 125, gibHealth: -30, mass: 300,
     bounds: { min: { x: -24, y: -24, z: -24 }, max: { x: 24, y: 24, z: 24 } }, scale: 1,
-    initialMove: "gekk_move_stand", moves: gekkMoves, stand(context) { return context.setMove(wet(context) ? "gekk_move_standunderwater" : "gekk_move_stand"); }, walk: move("gekk_move_walk"), run: runStart, melee,
+    initialMove: "gekk_move_stand", moves: [...gekkMoves, ...rereleaseJumpMoves], stand(context) { return context.setMove(wet(context) ? "gekk_move_standunderwater" : "gekk_move_stand"); }, walk: move("gekk_move_walk"), run: runStart, melee,
     sight: sound("gek/gk_sght1.wav"), search, idle(context) { return context.setMove(wet(context) ? "gekk_move_swim_start" : "gekk_move_idle"); },
     afterSpawn(context) { if ((context.entity.spawnflags & 8) !== 0) context.setMove("gekk_move_chant"); return undefined; },
     sourceCallbacks: { touch: { gekk_jump_touch: jumpTouch, loogie_touch: loogieTouch }, die: { acid_gib_die: gibDie }, think: { G_FreeEdict: freeQ2Entity } },
@@ -134,6 +148,15 @@ export function createGekkDefinition(monsters: Q2Monsters): Q2MonsterDefinition 
       }
       return undefined;
     } },
+    blocked(context, distance) {
+      // Only the rerelease gekk_blocked exists: blocked_checkjump (256, 68), then blocked_checkplat.
+      const { game } = context;
+      if (game.options.edition !== "rerelease") return false;
+      const result = blockedCheckJump(context, distance, 256, 68);
+      if (result === "none") return blockedCheckPlatform(context, distance);
+      if (result !== "turn" && enemyBody(context) !== null) { finishDodge(context); context.setMove(result === "up" ? "gekk_move_jump2" : "gekk_move_jump"); }
+      return true;
+    },
     checkAttack(context) {
       if (!aliveEnemy(context)) return false;
       if (targetDistance(context) < 80) { context.state.attackState = "melee"; return true; }
@@ -196,6 +219,11 @@ export function createGekkDefinition(monsters: Q2Monsters): Q2MonsterDefinition 
         if (health(context.game, context.entity.enemy) >= 0 && context.game.host.random() > 0.7 && distance >= 80 && distance < 500) context.setMove("gekk_move_spit");
         return undefined;
       },
+      gekk_jump_up: context => launch(context, 200, 450), gekk_jump_down: context => launch(context, 100, 300),
+      gekk_jump_wait_land(context) {
+        const finished = monsterJumpFinished(context);
+        context.state.nextFrame = context.entity.frame + (finished || context.game.body(context.entity).ground !== null ? 1 : 0); return undefined;
+      },
       gekk_jump_takeoff(context) { return takeoff(context, false); }, gekk_jump_takeoff2(context) { return takeoff(context, true); },
       gekk_stop_skid(context) { if (context.game.body(context.entity).ground !== null) context.game.move(context.entity, { velocity: zero }, false); return undefined; },
       gekk_check_landing(context) {
@@ -204,6 +232,7 @@ export function createGekkDefinition(monsters: Q2Monsters): Q2MonsterDefinition 
       },
       gekk_preattack() { return undefined; },
       isgibfest(context) { return context.game.host.random() > 0.9 ? gibfest(context) : undefined; }, gekk_gibfest: gibfest,
+      gekk_shrink(context) { const body = context.game.body(context.entity); context.entity.serverFlags |= 2; return context.game.move(context.entity, { bounds: { ...body.bounds, max: { ...body.bounds.max, z: 0 } } }); },
       gekk_dead(context) { return wet(context) ? undefined : finishCorpse(context); },
       gekk_duck_down(context) { if (context.state.ducked) return undefined; setDuck(context, true); context.state.pauseTime = context.game.host.now() + 1; return undefined; },
       gekk_duck_up(context) { return setDuck(context, false); }, gekk_duck_hold(context) { context.state.holdFrame = context.game.host.now() < context.state.pauseTime; return undefined; },

@@ -84,6 +84,9 @@ export class Q3GuestSpatial implements QvmServerSpatialOperations {
     return result.startSolid || result.allSolid;
   }
 
+  /** CM_ModelBounds for a brush model number. */
+  modelBounds(index: number): Bounds { return this.scene.modelBounds(index); }
+
   setBrushModel(slot: number, name: string): void {
     if (!name.startsWith('*')) throw new Error(`SV_SetBrushModel: ${name} is not a brush model`);
     const index = nativeAtoi(name.slice(1)), bounds = this.scene.modelBounds(index);

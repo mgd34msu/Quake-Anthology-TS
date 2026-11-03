@@ -1,7 +1,7 @@
 // Adapted from the reference port common.ts and the reference port qcommon/files.ts.
 // id Software PACK header and ordered 64-byte directory. GPL-2.0-or-later.
 import { BinaryReader } from "../../core/binary/index.ts";
-import { ArchiveError, checkRange, normalizeEntryPath } from "./types.ts";
+import { ArchiveError, checkRange, tryNormalizeEntryPath } from "./types.ts";
 import type { PakEntry } from "./types.ts";
 
 export function readPakHeader(bytes: Uint8Array, source: string, fileSize: number) {
@@ -22,7 +22,9 @@ export function readPakDirectory(bytes: Uint8Array, source: string, fileSize: nu
     const dataOffset = reader.i32();
     const byteLength = reader.i32();
     checkRange(source, fileSize, dataOffset, byteLength);
-    const path = normalizeEntryPath(rawPath);
+    const path = tryNormalizeEntryPath(rawPath);
+    // An unaddressable member is skipped instead of rejecting the archive; it could never be looked up anyway.
+    if (path === null) continue;
     entries.push(Object.freeze({ format: "pak", ordinal: entries.length, path, rawPath, byteLength,
       compressedSize: byteLength, compressionMethod: 0, dataOffset, isDirectory: path.endsWith("/") }));
   }

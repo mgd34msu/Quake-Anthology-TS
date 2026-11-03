@@ -1,7 +1,8 @@
+import { writeCapture } from "../../support/capture.ts";
 import { expect, spyOn, test } from "bun:test";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { rendererBackends } from "../../support/gl.ts";
+import { mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -9,7 +10,9 @@ import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.t
 import { SceneImageRegistry } from "../../../src/render/scene/resources.ts";
 import type { RendererImage } from "../../../src/contracts/render.ts";
 import { encodePng } from "../../../src/formats/images/png.ts";
-import { KeyCode } from "../../../src/input/key-codes.ts";
+import { KeyCode } from "../../../src/core/key-codes.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 function pink(bytes: Uint8Array): number {
   let count = 0;
@@ -28,8 +31,8 @@ function red(bytes: Uint8Array): number {
   return count;
 }
 
-for (const interaction of ["console", "menu"]) for (const backend of ["cpu", "gl"]) test(`local ${backend} image ${interaction} refresh retains the world and retires replaced images`, async () => {
-  const users = await mkdtemp(join(tmpdir(), "quake-local-images-"));
+for (const interaction of ["console", "menu"]) for (const backend of rendererBackends) test(`local ${backend} image ${interaction} refresh retains the world and retires replaced images`, async () => {
+  const users = await tempDirectory("quake-local-images-");
   const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q2", "--character", "q2", "--renderer", backend, "--hidden", "--width", interaction === "menu" ? "640" : "320", "--height", interaction === "menu" ? "480" : "240"]);
   if (parsed.kind !== "run") throw new Error("Missing application options");
   const content = await loadApplicationContent(parsed.options);
@@ -111,16 +114,16 @@ for (const interaction of ["console", "menu"]) for (const backend of ["cpu", "gl
       await activate("ui:settings:r_override_textures");
       expect(assets.imagePolicy?.overrideLevel).toBe(1);
       const menu = await capture();
-      await Bun.write(`/tmp/image-video-menu-${backend}.png`, encodePng(640, 480, menu));
+      await writeCapture(`image-video-menu-${backend}.png`, encodePng(640, 480, menu));
       expect(await Bun.file(join(users, "settings/images.cfg")).text()).toContain('"png"');
       await resume(); expect(presentation.ui.controller.activeMenu).toBeNull();
       expect(pink(await capture())).toBeGreaterThan(baseline + 100);
       await video(); await activate("ui:settings:image-wall");
       expect(assets.imagePolicy?.overrideUsages.includes("wall")).toBe(false);
       const mask = await capture();
-      await Bun.write(`/tmp/image-video-menu-${backend}-mask.png`, encodePng(640, 480, mask));
+      await writeCapture(`image-video-menu-${backend}-mask.png`, encodePng(640, 480, mask));
       await resume(); const masked = await capture();
-      await Bun.write(`/tmp/image-video-world-${backend}-mask.png`, encodePng(640, 480, masked));
+      await writeCapture(`image-video-world-${backend}-mask.png`, encodePng(640, 480, masked));
       expect(pink(masked)).toBeLessThanOrEqual(baseline + 20);
       expect(red(masked)).toBeGreaterThan(red(baselinePixels) + 20);
       expect(assets.world).toBe(world); expect(application.simulation).toBe(simulation);
@@ -136,11 +139,11 @@ for (const interaction of ["console", "menu"]) for (const backend of ["cpu", "gl
       await command('r_override_textures 1;r_texture_formats "png"');
       const pixels = await capture();
       expect(pink(pixels)).toBeGreaterThan(baseline + 100);
-      if (cycle === 0) await Bun.write(`/tmp/local-image-settings-${backend}.png`, encodePng(320, 240, pixels));
+      if (cycle === 0) await writeCapture(`local-image-settings-${backend}.png`, encodePng(320, 240, pixels));
       if (cycle === 0) {
         await command("r_texture_overrides 1");
         const skin = await capture();
-        await Bun.write(`/tmp/local-image-settings-${backend}-skin.png`, encodePng(320, 240, skin));
+        await writeCapture(`local-image-settings-${backend}-skin.png`, encodePng(320, 240, skin));
         const provider = await assets.provider(gun.content), texture = await provider.textures.load("models/weapons/v_blast/skin.pcx", { family: "q2", usage: "skin", mipmap: true });
         expect(texture?.image.source.kind === "resource" ? texture.image.source.resource.requestedPath : null).toBe("models/weapons/v_blast/skin.png");
         expect(red(skin)).toBeGreaterThan(red(baselinePixels) + 20);

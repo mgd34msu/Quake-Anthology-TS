@@ -24,12 +24,13 @@ import type { ClientMedia } from "./media.ts";
 import type { ClientInfoStore } from "./players.ts";
 import type { ClientEntity, ClientGameState, ClientGameStaticState } from "./state.ts";
 import { UiRuntime } from "../../../ui/common/legacy/runtime.ts";
-import { KeyCode } from "../../../input/key-codes.ts";
+import { KeyCode } from "../../../core/key-codes.ts";
 import type { UiCapturedMenu, UiRuntimeAudio, UiRuntimeFeederItem, UiRuntimeResources, UiRuntimeSnapshot, UiWidgetAssets } from "../../../ui/common/legacy/runtime.ts";
 import { loadMenuDefinitions } from "../../../ui/common/legacy/menu.ts";
 import type { UiFontReference, UiGlobalAssets, UiMenuDefinitions, UiMenuRegistrationEvent, UiMenuRegistrationResult } from "../../../ui/common/legacy/menu.ts";
-import type { ScriptSource } from "../../../ui/common/legacy/script/preprocessor.ts";
+import type { ScriptSource } from "../../legacy-script/preprocessor.ts";
 import { TeamArenaUiMemory } from "../../../ui/common/legacy/team-arena/memory.ts";
+import { compressScriptText } from "../../legacy-script/memory.ts";
 import { MissionOwnerDraw } from "./mission-owner-draw.ts";
 
 export interface MissionHudHost {
@@ -80,7 +81,8 @@ function assetKey(path: string | null): string | null { return path === null ? n
 function scriptSource(path: string, bytes: Uint8Array): ScriptSource {
   let text = "";
   for (const byte of bytes) { if (byte === 0) break; text += String.fromCharCode(byte); }
-  return { path, text };
+  // trap_PC_LoadSource compresses the buffer, so comments and whitespace never reach the tokenizer.
+  return { path, text: compressScriptText(text) };
 }
 function zeroFont(): RegisteredFont {
   return { name: "", glyphScale: 0, glyphs: Array.from({ length: 256 }, () => ({ height: 0, top: 0, bottom: 0,
@@ -322,11 +324,11 @@ export class MissionHud {
         this.loaded = { definitions, runtime: this.loaded.runtime };
       } else {
         const owner = this;
-        const runtime = await UiRuntime.create({ definitions, cvars: this.host.cvars, commands: this.host.commands, commandContext: this.host.commandContext,
+        const runtime = await UiRuntime.create({ definitions, cvars: this.host.cvars, 
           cvarValue: name => gameAtof(this.host.cvars.get(name)?.value.slice(0, 127) ?? ""),
           resources: this.runtimeResources(), fonts: this.fonts, get widgetAssets() { return owner.widgetAssets; },
           zeroPicture: this.media.resources.picture(null), audio: this.host.audio, cinematics: this.host.cinematics,
-          paintModel: request => this.host.modelPainter.paint(request), context: { kind: "cgame" },
+          paintModel: request => this.host.modelPainter.paint(request),
           // CG_FeederItemImage returns handle zero; text-column optional images are a separate callback.
           feeder: { count: feeder => this.feederCount(feeder), image: () => undefined,
             item: (feeder, index, column) => this.feederItem(feeder, index, column),

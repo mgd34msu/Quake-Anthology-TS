@@ -83,7 +83,7 @@ test("profile validation finishes before source writes and actual files preserve
   const root = await mkdtemp(join(tmpdir(), "quake-server-profile-"));
   try {
     const { cvars, definitions, bindings } = q2Bindings();
-    expect(() => applyServerProfile({ version: 1, overrides: [{ id: "server:frag-limit", value: "9" }, { id: "server:time-limit", value: "NaN" }] }, bindings)).toThrow();
+    expect(() => applyServerProfile({ version: 1, overrides: [{ id: "server:frag-limit", value: "9" }, { id: "server:time-limit", value: "NaN" }] }, bindings)).toThrow("Time limit (minutes) is outside its allowed range");
     expect(cvars.variableValue("fraglimit")).toBe(0);
     writeServerSetting(binding(bindings, "server:q2.no-health"), "1");
     writeServerSetting(binding(bindings, "server:frag-limit"), "9");
@@ -119,6 +119,6 @@ test("ordered rotations use the selected source cvar and survive profile capture
     expect(cvars.variableString("g_map_list_shuffle")).toBe(rerelease ? "1" : "");
     expect(moveRotationMap(maps, 0, -1)).toBe(maps);
   }
-  expect(() => rotationMapName("../outside")).toThrow();
-  expect(() => rotationMapName("q2dm1;quit")).toThrow();
+  expect(() => rotationMapName("../outside")).toThrow("Enter a map name, such as q2dm1 or q64/outpost");
+  expect(() => rotationMapName("q2dm1;quit")).toThrow("Enter a map name, such as q2dm1 or q64/outpost");
 });

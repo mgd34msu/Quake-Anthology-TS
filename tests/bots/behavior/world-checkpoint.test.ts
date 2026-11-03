@@ -15,11 +15,12 @@ const corpus = testCorpusRoot();
 test.skipIf(!existsSync(resolve(corpus, "q1/rerelease/id1/pak0.pak")))("shared bot observation restore preserves IDs, pool and strings without startup side effects", async () => {
   const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-id1", "--map", "dm4", "--mode", "deathmatch", "--dedicated"]);
   if (launch.kind !== "run") throw new Error("Missing launch recipe");
-  const content = await loadApplicationContent(launch.options);
+  const content = await loadApplicationContent(launch.options), opened: SharedSimulation[] = [];
   try {
     const identity = createIdentityOwner("world-checkpoint");
     const simulation = new SharedSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
       mode: "deathmatch", skill: 3, seed: 7, maxClients: 4 });
+    opened.push(simulation);
     const cvars = new CvarRegistry({ dialect: "q3", context: { session: identity.session,
       origin: { kind: "local-seat", seat: identity.seat(0), client: identity.client(0, 0) } } });
     const options = { simulation, cvars, actor: () => null, connect: () => { throw new Error("unexpected connect"); },
@@ -44,7 +45,7 @@ test.skipIf(!existsSync(resolve(corpus, "q1/rerelease/id1/pak0.pak")))("shared b
     const first = saved.actors[0];
     if (first === undefined) throw new Error("Missing observation fixture");
     expect(after.entityId(simulation.actors.referenceSaved(first.actor, "current"))).toBe(first.id);
-    expect(() => after.restoreCheckpoint({ ...saved, freeIds: [first.id] }, actor => simulation.actors.referenceSaved(actor, "current"))).toThrow();
+    expect(() => after.restoreCheckpoint({ ...saved, freeIds: [first.id] }, actor => simulation.actors.referenceSaved(actor, "current"))).toThrow("sharedBotWorld.freeIds[0]: duplicate or active free observation entity");
     expect(after.checkpoint()).toEqual(saved);
     const second = saved.actors[1];
     if (second === undefined) throw new Error("Missing second observation fixture");
@@ -54,5 +55,5 @@ test.skipIf(!existsSync(resolve(corpus, "q1/rerelease/id1/pak0.pak")))("shared b
     expect(after.entityId(simulation.actors.referenceSaved(second.actor, "current"))).toBe(first.id);
     expect(after.checkpoint().nextEntity).toBe(saved.nextEntity);
     expect(after.checkpoint().nextGeneration).toBe(saved.nextGeneration + 2);
-  } finally { await content.close(); }
+  } finally { for (const simulation of opened) simulation.close(); await content.close(); }
 });

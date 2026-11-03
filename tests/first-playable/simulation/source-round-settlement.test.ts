@@ -1,5 +1,5 @@
-import { expect, spyOn, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect, spyOn } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -10,6 +10,7 @@ import type { FrameContext } from "../../../src/contracts/time.ts";
 import type { GameFamily } from "../../../src/contracts/content.ts";
 import { SaveReader, decodeCheckpointValue } from "../../../src/persistence/value.ts";
 import { EngineSession } from "../../../src/world/session/session.ts";
+const test = corpusTest("q3a/baseq3/pak0.pk3");
 
 function accounting(simulation: SharedSimulation) {
   simulation.drainPresentationEvents();

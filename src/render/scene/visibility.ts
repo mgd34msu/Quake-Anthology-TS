@@ -95,8 +95,11 @@ interface AncestorIndex {
   readonly leafParents: Int32Array;
   /** Shared or invalid children make single-parent marks unsafe. */
   readonly unsafe: boolean;
-  cache: AncestorCache | null;
+  /** Most recently used first; portal and split-screen views alternate between a few PVS states per frame. */
+  caches: AncestorCache[];
 }
+const ancestorCacheLimit = 4;
+const mergedPvs = new WeakMap<DecodedWorld, Map<string, Uint8Array | null>>();
 const ancestorIndexes = new WeakMap<DecodedWorld, AncestorIndex>();
 function ancestorIndex(map: DecodedWorld): AncestorIndex {
   let index = ancestorIndexes.get(map);
@@ -115,13 +118,15 @@ function ancestorIndex(map: DecodedWorld): AncestorIndex {
           if (child.index < 0 || child.index >= map.nodes.length || seenNodes[child.index] === 1) { unsafe = true; break; }
           seenNodes[child.index] = 1; nodeParents[child.index] = current; stack.push(child.index);
         } else {
-          if (child.index < 0 || child.index >= map.leaves.length || seenLeaves[child.index] === 1) { unsafe = true; break; }
+          // Q1 solid children all share leaf zero, which is never visible and never marks an ancestor.
+          const sharedSolid = map.kind === "q1-bsp" && child.index === 0;
+          if (child.index < 0 || child.index >= map.leaves.length || seenLeaves[child.index] === 1 && !sharedSolid) { unsafe = true; break; }
           seenLeaves[child.index] = 1; leafParents[child.index] = current;
         }
       }
     }
   }
-  index = { nodeParents, leafParents, unsafe, cache: null };
+  index = { nodeParents, leafParents, unsafe, caches: [] };
   ancestorIndexes.set(map, index);
   return index;
 }
@@ -169,9 +174,19 @@ export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: Wo
         second = (other.contents & 1) === 0 && other.cluster !== fromCluster ? other.cluster : null;
       }
       if (second !== null && second >= 0 && pvs !== null) {
-        const other = q2Pvs(map, second);
-        if (other === null) pvs = null;
-        else { pvs = Uint8Array.from(pvs); for (let i = 0; i < pvs.length; i++) pvs[i] = (pvs[i] ?? 0) | (other[i] ?? 0); }
+        // One merged buffer per cluster pair keeps the mark cache keyed by a stable identity.
+        let merged = mergedPvs.get(map);
+        if (merged === undefined) { merged = new Map<string, Uint8Array | null>(); mergedPvs.set(map, merged); }
+        const pairKey = `${fromCluster}|${second}`;
+        let combined = merged.get(pairKey);
+        if (combined === undefined) {
+          const other = q2Pvs(map, second);
+          if (other === null) combined = null;
+          else { combined = Uint8Array.from(pvs); for (let i = 0; i < combined.length; i++) combined[i] = (combined[i] ?? 0) | (other[i] ?? 0); }
+          if (merged.size >= 64) merged.clear();
+          merged.set(pairKey, combined);
+        }
+        pvs = combined;
       }
       break;
     }
@@ -200,21 +215,24 @@ export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: Wo
     const index = ancestorIndex(map);
     if (!index.unsafe) {
       const areas = options.visibleAreas === undefined || options.visibleAreas === null ? null : [...options.visibleAreas];
-      const cached = index.cache;
-      const hit = cached !== null && cached.fromCluster === fromCluster
+      const hitIndex = index.caches.findIndex(cached => cached.fromCluster === fromCluster
         && cached.pvsBuffer === (pvs?.buffer ?? null) && cached.pvsOffset === (pvs?.byteOffset ?? 0)
         && cached.pvsLength === (pvs?.byteLength ?? 0)
         && (cached.areas === null && areas === null || cached.areas !== null && areas !== null
-          && cached.areas.length === areas.length && cached.areas.every((area, position) => area === areas[position]));
-      if (hit) marks = cached.marks;
-      else {
+          && cached.areas.length === areas.length && cached.areas.every((area, position) => area === areas[position])));
+      const hit = hitIndex < 0 ? undefined : index.caches[hitIndex];
+      if (hit !== undefined) {
+        marks = hit.marks;
+        if (hitIndex > 0) { index.caches.splice(hitIndex, 1); index.caches.unshift(hit); }
+      } else {
         marks = new Uint8Array(map.nodes.length);
         for (let leafIndex = 0; leafIndex < map.leaves.length; leafIndex++) {
           if (!leafVisible(leafIndex)) continue;
           let parent = index.leafParents[leafIndex] ?? -1;
           while (parent >= 0 && marks[parent] === 0) { marks[parent] = 1; parent = index.nodeParents[parent] ?? -1; }
         }
-        index.cache = { pvsBuffer: pvs?.buffer ?? null, pvsOffset: pvs?.byteOffset ?? 0, pvsLength: pvs?.byteLength ?? 0, fromCluster, areas, marks };
+        index.caches.unshift({ pvsBuffer: pvs?.buffer ?? null, pvsOffset: pvs?.byteOffset ?? 0, pvsLength: pvs?.byteLength ?? 0, fromCluster, areas, marks });
+        if (index.caches.length > ancestorCacheLimit) index.caches.length = ancestorCacheLimit;
       }
     }
   }

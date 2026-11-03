@@ -1,4 +1,5 @@
 import { EventRing, type EventCursor } from "../../foundation/event-ring.ts";
+import { cacheEvictingRejection } from "./cached-promise.ts";
 import { presentationOwnerKey, samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
 import type { LocalPresentationMedia } from "./presentation-state.ts";
 import { mountedMusicTracks } from "./audio/playlist.ts";
@@ -84,6 +85,19 @@ export interface ApplicationAudioOptions {
 }
 
 /** The output device mixes independent local listeners without advancing the game. */
+/** First occurrence wins; actors are bucketed by slot and generation so the scan is linear. */
+function uniqueByActor<T>(items: readonly T[], actorOf: (item: T) => ActorId): T[] {
+  const buckets = new Map<string, ActorId[]>(), result: T[] = [];
+  for (const item of items) {
+    const id = actorOf(item), key = `${id.slot}:${id.generation}`, bucket = buckets.get(key);
+    if (bucket === undefined) buckets.set(key, [id]);
+    else if (bucket.some(other => other.equals(id))) continue;
+    else bucket.push(id);
+    result.push(item);
+  }
+  return result;
+}
+
 export class ApplicationAudio {
   readonly engine: UnifiedAudio;
   private readonly q3TeamGame: () => boolean;
@@ -92,7 +106,7 @@ export class ApplicationAudio {
   private readonly banks = new Map<ContentId, Promise<SoundBank>>();
   private readonly music: ApplicationMusic;
   private readonly random: GameRandom;
-  private readonly actorAudio: ActorAudio[] = [];
+  private readonly actorAudio = new Map<string, ActorAudio>();
   private readonly statics: StaticAudio[] = [];
   private nextStaticKey = 1;
   private readonly retiredOwners = new Set<string>();
@@ -291,16 +305,15 @@ export class ApplicationAudio {
     const existing = this.banks.get(content);
     if (existing !== undefined) return existing;
     const pending = this.content.forContent(content).then(mounts => new SoundBank(mounts));
-    this.banks.set(content, pending);
-    return pending;
+    return cacheEvictingRejection(this.banks, content, pending);
   }
 
   private actor(actor: ActorId): ActorAudio {
-    const existing = this.actorAudio.find(value => value.actor.equals(actor));
+    const key = `${actor.slot}:${actor.generation}`, existing = this.actorAudio.get(key);
     if (existing !== undefined) return existing;
     const selectedQ2 = this.content.catalog.product(this.content.recipe.character.definition.content).expectation.family === "q2";
     const state: ActorAudio = { actor, model: selectedQ2 ? this.characterModel : "male", underwater: null, chase: null, painTime: 0 };
-    this.actorAudio.push(state);
+    this.actorAudio.set(key, state);
     return state;
   }
 
@@ -312,8 +325,7 @@ export class ApplicationAudio {
     const prior = this.sounds.get(key);
     if (prior !== undefined) return prior;
     const pending = this.loadSound(content, path, family, model, fallback);
-    this.sounds.set(key, pending);
-    return pending;
+    return cacheEvictingRejection(this.sounds, key, pending);
   }
 
   async preloadSound(content: ContentId, path: string, selectedModel?: string): Promise<void> {
@@ -367,7 +379,7 @@ export class ApplicationAudio {
     let tracks: readonly string[] = [];
     if (product.family === "q2") {
       let pending = this.playlists.get(content);
-      if (pending === undefined) { pending = this.content.forContent(content).then(mountedMusicTracks); this.playlists.set(content, pending); }
+      if (pending === undefined) pending = cacheEvictingRejection(this.playlists, content, this.content.forContent(content).then(mountedMusicTracks));
       tracks = await pending;
     }
     if (!this.closed && request === this.musicRequest && (owner === undefined || !this.retiredOwners.has(presentationOwnerKey(owner)))) await this.music.play({ content, ...product }, bank, track,
@@ -406,8 +418,7 @@ export class ApplicationAudio {
       try { return parsePlayerAnimationConfig(new TextDecoder().decode(file.bytes), file.reference.requestedPath).footsteps; }
       catch { return "normal"; }
     })();
-    this.footsteps.set(content, pending);
-    return pending;
+    return cacheEvictingRejection(this.footsteps, content, pending);
   }
 
   private async characterSound(content: ContentId, event: Q3CharacterPresentationEvent, audience: AudioAudience): Promise<void> {
@@ -560,12 +571,12 @@ export class ApplicationAudio {
     this.seatScenes = seatEvents.flatMap(batch => batch.scene === undefined ? [] : [{ seat: batch.seat, scene: batch.scene }]);
     this.syncGeometry();
     this.engine.setEffectsVolume(this.effectsVolume); this.music.volume = this.musicVolume;
-    const snapshots = [snapshot, ...seatEvents.map(batch => batch.snapshot)];
-    const actors = snapshots.flatMap(value => value.actors), bodies = snapshots.flatMap(value => value.bodies);
-    this.snapshot = { ...snapshot, actors: actors.filter((actor, index) => actors.findIndex(other => other.id.equals(actor.id)) === index),
-      bodies: bodies.filter((body, index) => bodies.findIndex(other => other.actor.equals(body.actor)) === index) };
+    const snapshots = [...new Set([snapshot, ...seatEvents.map(batch => batch.snapshot)])];
+    this.snapshot = snapshots.length === 1 ? snapshot : { ...snapshot, actors: uniqueByActor(snapshots.flatMap(value => value.actors), actor => actor.id),
+      bodies: uniqueByActor(snapshots.flatMap(value => value.bodies), body => body.actor) };
     this.listeners = listeners;
     for (const body of this.snapshot.bodies) this.engine.updateActor(body.actor, body.body.origin);
+    this.engine.retireAbsentActors(this.snapshot.bodies.map(body => body.actor));
     this.engine.setListeners(listeners);
     for (let index = this.environmentSeats.length - 1; index >= 0; index--) {
       const seat = this.environmentSeats[index];
@@ -654,7 +665,7 @@ export class ApplicationAudio {
     if (this.closed) throw new Error("Application audio closed");
     this.music.stopPlayback("source");
     this.engine.resetRound();
-    this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0;
+    this.actorAudio.clear(); this.loops.length = 0; this.statics.length = 0;
     this.uiSounds.reset(); this.effectSounds.reset(); this.cgameFrames.reset();
     this.listeners = []; this.seatScenes = []; this.snapshot = null; this.environmentSeats.length = 0;
   }
@@ -664,7 +675,7 @@ export class ApplicationAudio {
     this.closed = true;
     this.geometry = null; this.geometryEnabled = false;
     this.music.stop(); this.engine.close(); this.banks.clear(); this.sounds.clear(); this.footsteps.clear();
-    this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0; this.uiSounds.reset(); this.effectSounds.reset(); this.cgameFrames.reset();
+    this.actorAudio.clear(); this.loops.length = 0; this.statics.length = 0; this.uiSounds.reset(); this.effectSounds.reset(); this.cgameFrames.reset();
     this.listeners = []; this.seatScenes = []; this.snapshot = null;
     return undefined;
   }

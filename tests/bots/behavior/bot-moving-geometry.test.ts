@@ -24,7 +24,7 @@ for (const initiallyRaised of [false, true]) retail(`authored Q2 lift ${initiall
   const launch = parseApplicationCommand(["--content-root", corpus, "--user-content-root", userRoot,
     "--game", "q2-rerelease-baseq2", "--map", "q2dm1", "--movement", "q2", "--character", "q2", "--mode", "deathmatch", "--dedicated"]);
   if (launch.kind !== "run") throw new Error("Expected mover launch");
-  const application = await Application.open(launch.options, { print: () => undefined });
+  const application = await Application.open(launch.options, { print: () => undefined }), transports: ApplicationBots[] = [];
   try {
     const world = application.simulation, source = world.q2Source();
     if (source === null) throw new Error("Missing Q2 world");
@@ -39,6 +39,7 @@ for (const initiallyRaised of [false, true]) retail(`authored Q2 lift ${initiall
       navigation, leafCount: application.content.world.leaves.length, configuration, automaticFrame: true,
       print: () => undefined, insertConsoleCommand: text => { const [name = "", ...args] = text.trim().split(/\s+/); if (name !== "") application.queueCommand(name, args, null); },
       openLog: openApplicationBotLog, resumeLog: resumeApplicationBotLog });
+    transports.push(transport);
     transport.consoleCommand(["addbot", "Ranger", "5"]); await application.step(100);
     const bot = transport.director.roster()[0];
     if (bot === undefined) throw new Error("Missing bot");
@@ -143,5 +144,5 @@ for (const initiallyRaised of [false, true]) retail(`authored Q2 lift ${initiall
     expect(aboard).toBe(true); expect(reached).toBe(true);
     expect(elevatorActions).toBeGreaterThan(20); expect(centeredRideFrames).toBeGreaterThan(10);
     expect(world.bodies.read(bot.actor.id)?.ground?.equals(mover.actor)).toBe(false);
-  } finally { await application.close(); await rm(userRoot, { recursive: true, force: true }); }
+  } finally { for (const transport of transports) transport.close(); await application.close(); await rm(userRoot, { recursive: true, force: true }); }
 }, 60000);

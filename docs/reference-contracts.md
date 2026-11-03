@@ -1,5 +1,7 @@
 # Source-backed reuse contracts
 
+> **Dated record, not current status.** Source-reuse selections from September 2026. The maintained status is [status.md](status.md). Where this page disagrees with it or with the code, trust those. The command near line 37 imports from a scrubbed placeholder path and cannot run.
+
 This W01 artifact selects starting mechanisms for consolidation. It does not accept imported code or establish runtime fidelity. The [source assessment](source-assessment.md) and [project plan](project-plan.md) define the scope. The W01 source census owns repository revisions and individual file hashes. Source IDs below refer to its repositories, including `q1-ironwail` for enhanced Q1 behavior and `q2-repro` for Q2 rerelease engine behavior.
 
 Three evidence labels apply throughout this document:

@@ -26,7 +26,7 @@ test("public account view preserves explicit provider unavailability", () => {
 import { ApplicationQ3Rankings } from "../../../src/app/bootstrap/q3-rankings.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
 import { Q3EntityRecords } from "../../../src/content/q3/base/records.ts";
 import { EntityPool } from "../../../src/content/q3/base/game/entities.ts";
 import { GameLevel } from "../../../src/content/q3/base/game/level.ts";
@@ -36,7 +36,7 @@ import type { RankingServiceReport } from "../../../src/network/services/ranking
 function rankingPool() {
   const actors = new SessionActorRegistry(createIdentityOwner("ranking-source")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   const records = new Q3EntityRecords({ actors, bodies, combat, inventory: new SharedInventoryTable(actors), callbacks,
     foreign: () => null, isPlayer: () => false, damageCall: () => null, schedule: () => undefined, runThink: () => undefined }, "q3:base", "baseq3");
   const level = new GameLevel();
@@ -68,7 +68,7 @@ test("TS source account activation reports gameplay and match metadata before lo
 
 import { registerRankingAccountMenu } from "../../../src/ui/settings/ranking-account.ts";
 import { NativeUiController, defaultUiSkin } from "../../../src/ui/common/index.ts";
-import { KeyCode } from "../../../src/input/key-codes.ts";
+import { KeyCode } from "../../../src/core/key-codes.ts";
 import type { RankingAccountRequest } from "../../../src/network/services/rankings.ts";
 
 test("ranking account menu submits through real seat keyboard controls and clears drafts on close", async () => {
@@ -86,6 +86,22 @@ test("ranking account menu submits through real seat keyboard controls and clear
   await Promise.resolve(); expect(requests).toHaveLength(1); menu.dispose(); expect(ui.activeMenu).toBeNull();
 });
 
+test("ranking account menu discards unsubmitted credential drafts when it closes", async () => {
+  const seat = createIdentityOwner("ranking-menu-draft").seat(0), requests: RankingAccountRequest[] = [];
+  const ui = new NativeUiController({ seat, now: () => 0, skin: () => defaultUiSkin("resource:test:font"),
+    bindings: () => [], focus: () => undefined, sound: () => undefined, executeScript: () => undefined });
+  const menu = registerRankingAccountMenu(ui, () => ({ service: () => ({kind:"active",gameId:1n}), player: () => ({kind:"new"}),
+    submit: async request => { requests.push(request); }, reset: async () => undefined, spectate: async () => undefined }));
+  const key = (code: number): void => { ui.input({kind:"key",seat,timeMilliseconds:0,code,down:true,repeat:false}); };
+  const pressSubmit = async (): Promise<void> => { key(KeyCode.Tab); key(KeyCode.Tab); key(KeyCode.Tab); key(KeyCode.Tab); key(KeyCode.Enter); await Bun.sleep(0); };
+  ui.openMenu(menu.root); ui.input({kind:"text",seat,timeMilliseconds:0,text:"player"}); key(KeyCode.Tab);
+  ui.input({kind:"text",seat,timeMilliseconds:0,text:"secret"});
+  ui.closeMenu(); ui.openMenu(menu.root);
+  await pressSubmit();
+  expect(requests).toEqual([]);
+  menu.dispose();
+});
+
 test("ranking backpressure marks optional service unavailable without throwing into source gameplay", async () => {
   const {pool,level} = rankingPool(), states: string[] = [], cleanup: string[] = [];
   const owner = new ApplicationQ3Rankings(pool,level,{
@@ -98,4 +114,33 @@ test("ranking backpressure marks optional service unavailable without throwing i
   expect(()=>{for(let i=0;i<33000;i++)pool.rankings.fireWeapon(0,5);}).not.toThrow();
   expect(owner.lifecycle.state().kind).toBe("unavailable"); expect(states.at(-1)).toBe("unavailable");
   await owner.frame(); await owner.close(); expect(cleanup).toEqual(["logout","finish"]);
+});
+
+import { rankEncodeGameId } from "../../../src/network/services/rank-codec.ts";
+import { inertAuthority } from "../../support/authority.ts";
+
+test("rank game ID codec matches sv_rankings.c SV_RankEncodeGameID", () => {
+  const out = new Uint8Array(12), debug: string[] = [];
+  rankEncodeGameId(0x0807060504030201n, out, text => debug.push(text));
+  // little-endian bytes 01..08 -> 6-bit groups over the 0-9a-zA-Z[] alphabet, 11 characters
+  expect(new TextDecoder().decode(out.subarray(0, 11))).toBe("0g8310k61Mw");
+  expect(out[11]).toBe(0);
+  const short = new Uint8Array(4).fill(7); rankEncodeGameId(1n, short, text => debug.push(text));
+  expect(short[0]).toBe(0); expect(debug).toEqual(["SV_RankEncodeGameID: result buffer too small\n"]);
+});
+
+test("active ranking service publishes the encoded game ID and key to serverinfo cvars and clears them on end", async () => {
+  const { pool, level } = rankingPool(), cvars = new Map<string, string>();
+  const owner = new ApplicationQ3Rankings(pool, level, {
+    endpoint: new URL("https://rankings.invalid"), begin: async () => ({ gameId: 0x0807060504030201n }),
+    login: async () => ({ kind: "active", account: { playerId: 2n, rank: 1 } }), join: async () => undefined, report: async () => undefined,
+    poll: async () => undefined, logout: async () => undefined, finish: async () => undefined,
+  }, { status: () => undefined, menu: () => undefined, spectator: () => undefined, activate: () => undefined, scoreboard: () => undefined,
+    dropBot: () => undefined, gameType: () => 0, cvar: () => "0", setCvar: (name, value) => { cvars.set(name, value); } });
+  await owner.begin(true, false, "provider-game-key");
+  expect(cvars.get("sv_rankingsGameKey")).toBe("provider-game-key");
+  expect(cvars.get("sv_rankingsGameID")).toBe("0g8310k61Mw");
+  await owner.close();
+  expect(cvars.get("sv_rankingsGameID")).toBe("");
+  expect(cvars.get("sv_rankingsGameKey")).toBe("");
 });

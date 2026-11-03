@@ -3,7 +3,8 @@ import type { Md5Model, ModelVertex, SkeletonJointPose } from "../../../src/cont
 import { quaternionRotationRows, rotateQuaternionRows, rotateQuaternionAxis } from "../../../src/formats/q3-model/quaternion.ts";
 import { at } from "../../../src/formats/q3-model/text.ts";
 import { test, expect } from "bun:test";
-import { createMd5Model, md2ReplacementSkinSelection, md5PathsFor, md5ReplacementAllowed, parseMd5Anim, parseMd5Mesh, sampleMd5Pose, skinMd5Mesh } from "../../../src/formats/q3-model/index.ts";
+import { createMd5Model, parseMd5Anim, parseMd5Mesh, sampleMd5Pose, skinMd5Mesh } from "../../../src/formats/q3-model/md5.ts";
+import { md2ReplacementSkinSelection, md5PathsFor, md5ReplacementAllowed } from "../../../src/formats/q3-model/replacements.ts";
 
 const mesh = `MD5Version 10
 commandline ""
@@ -104,4 +105,9 @@ test("MD5 joint rows stay per call and retain multi-weight accumulation and vali
   expect(skinMd5Mesh(surface,next)).not.toEqual(skinMd5Mesh(surface,first));
   expect(()=>skinMd5Mesh(surface,[])).toThrow("joint");
   expect(()=>skinMd5Mesh({...surface,weights:[]},[])).toThrow("weight");
+});
+
+test("MD5 animation rejects a frame count that expands far beyond its text", () => {
+  const bomb = animation.replace("numFrames 2", "numFrames 65535").replace("numJoints 2", "numJoints 256");
+  expect(() => parseMd5Anim(bomb)).toThrow("expands far beyond");
 });

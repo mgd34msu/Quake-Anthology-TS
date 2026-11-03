@@ -108,7 +108,7 @@ export class Q3PresentationFrameRuntime {
     for (let weapon = 1; weapon < count; weapon++) if ((owned & (1 << weapon)) !== 0) requiredWeapons.add(weapon);
     for (const entity of snapshot.entities) {
       const current = s.entityAt(entity.number).currentState;
-      if (current.eType === EntityType.ET_PLAYER) requiredWeapons.add(current.weapon);
+      if (current.eType === EntityType.ET_PLAYER) requiredWeapons.add(current.weapon > count ? 0 : current.weapon);
       else if (current.eType === EntityType.ET_MISSILE || current.eType === EntityType.ET_GRAPPLE)
         requiredWeapons.add(current.weapon > count ? 0 : current.weapon);
     }

@@ -7,17 +7,14 @@ import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q2GameServices } from "../host.ts";
 import { add, length, scale, subtract, zero } from "../fields.ts";
-import { changeYaw, chaseDirection, enemyBody, enemyEye, FL_NOTARGET, health, inFront, monsterSolidMask, MASK_OPAQUE, attackTraceMask, stepDirection, targetDistance, visible } from "./ai.ts";
+import { changeYaw, chaseDirection, enemyBody, enemyCloaked, facingIdeal, enemyEye, FL_NOTARGET, health, inFront, monsterSolidMask, MASK_OPAQUE, attackTraceMask, stepDirection, targetDistance, visible } from "./ai.ts";
 import type { MonsterContext, Q2MonsterSourceCombatHooks, Q2MonsterHintHooks } from "./types.ts";
 
 interface Sighting { readonly actor: ActorId; readonly time: number; }
 interface Noise extends Sighting { readonly owner: ActorId; readonly origin: Vec3; }
 interface TrailPoint { readonly origin: Vec3; readonly time: number; readonly yaw: number; }
 
-export function facingIdeal(context: MonsterContext): boolean {
-  const delta = ((context.game.body(context.entity).angles.y - context.state.idealYaw) % 360 + 360) % 360;
-  return delta <= 45 || delta >= 315;
-}
+export { facingIdeal };
 
 /** The species-specific M_CheckAttack slot; the controller handles turning and dispatch separately. */
 export interface Q2AttackChanceProfile { readonly standGround: number; readonly melee: number; readonly near: number; readonly mid: number; readonly far: number; readonly strafeScalar: number; }
@@ -25,7 +22,7 @@ const normalAttackChances: Q2AttackChanceProfile = { standGround: 0.7, melee: 0.
 export function defaultCheckAttack(context: MonsterContext, profile: Q2AttackChanceProfile = normalAttackChances): boolean {
   const { game, state, entity } = context;
   const target = enemyEye(context);
-  if (target === null) return false;
+  if (target === null || enemyCloaked(context)) return false;
   const rerelease = game.options.edition === "rerelease";
   const rogue = context.sourceCombatRules() === "rogue";
   const body = game.body(entity), start = { ...body.origin, z: body.origin.z + entity.viewHeight };
@@ -73,6 +70,7 @@ export function defaultCheckAttack(context: MonsterContext, profile: Q2AttackCha
     }
     state.attackState = next;
   } else if (rerelease && state.locomotion !== "fly" && state.pathing === null) state.attackState = "straight";
+  else if (rogue && !rerelease) state.attackState = game.host.random() < 0.4 ? "sliding" : "straight";
   return false;
 }
 
@@ -83,7 +81,7 @@ export class MonsterPerception {
   private readonly alerted = new Map<ActorId, Sighting>();
   private primary: Noise | null = null;
   private secondary: Noise | null = null;
-  private readonly noises = new Map<ActorId, { readonly primary: ActorId; readonly secondary: ActorId }>();
+  private readonly noises = new Map<ActorId, { readonly primary: ActorId; readonly secondary: ActorId; primaryRecord: Noise | null; secondaryRecord: Noise | null }>();
   private readonly trails = new Map<ActorId, TrailPoint[]>();
   private readonly playerOrigins = new Map<ActorId, Vec3>();
   private readonly hostile = new Map<ActorId, number>();
@@ -108,7 +106,7 @@ export class MonsterPerception {
     return structuredClone({ sightClient: saveQ2Actor(this.sightClient), sight: sight(this.sight),
       alerted: [...this.alerted].map(([id, value]) => ({ actor: actor(id), sighting: { ...value, actor: actor(value.actor) } })),
       primary: noise(this.primary), secondary: noise(this.secondary),
-      noises: [...this.noises].map(([id, value]) => ({ actor: actor(id), primary: actor(value.primary), secondary: actor(value.secondary) })),
+      noises: [...this.noises].map(([id, value]) => ({ actor: actor(id), primary: actor(value.primary), secondary: actor(value.secondary), primaryRecord: noise(value.primaryRecord), secondaryRecord: noise(value.secondaryRecord) })),
       trails: [...this.trails].map(([id, points]) => ({ actor: actor(id), points })),
       playerOrigins: [...this.playerOrigins].map(([id, origin]) => ({ actor: actor(id), origin })),
       hostile: [...this.hostile].map(([id, time]) => ({ actor: actor(id), time })), lastFrame: Number.isFinite(this.lastFrame) ? this.lastFrame : null });
@@ -124,7 +122,14 @@ export class MonsterPerception {
     this.secondary = saved.secondary === null ? null : { ...saved.secondary, actor: actor(saved.secondary.actor), owner: actor(saved.secondary.owner) };
     this.alerted.clear(); this.noises.clear(); this.trails.clear(); this.playerOrigins.clear(); this.hostile.clear();
     for (const value of saved.alerted) this.alerted.set(actor(value.actor), { ...value.sighting, actor: actor(value.sighting.actor) });
-    for (const value of saved.noises) this.noises.set(actor(value.actor), { primary: actor(value.primary), secondary: actor(value.secondary) });
+    const record = (value: typeof saved.primary): Noise | null => value === null ? null : { ...value, actor: actor(value.actor), owner: actor(value.owner) };
+    for (const value of saved.noises) {
+      const owner = actor(value.actor);
+      // Saves from before per-player records only kept the single most recent noise of each kind.
+      const primaryRecord = value.primaryRecord === null && this.primary?.owner === owner ? this.primary : record(value.primaryRecord);
+      const secondaryRecord = value.secondaryRecord === null && this.secondary?.owner === owner ? this.secondary : record(value.secondaryRecord);
+      this.noises.set(owner, { primary: actor(value.primary), secondary: actor(value.secondary), primaryRecord, secondaryRecord });
+    }
     for (const value of saved.trails) this.trails.set(actor(value.actor), [...value.points]);
     for (const value of saved.playerOrigins) this.playerOrigins.set(actor(value.actor), value.origin);
     for (const value of saved.hostile) this.hostile.set(actor(value.actor), value.time);
@@ -133,6 +138,15 @@ export class MonsterPerception {
   }
 
   release(actor: ActorId): undefined {
+    const pair = this.noises.get(actor), game = this.services;
+    if (pair !== undefined && game !== null) {
+      for (const id of [pair.primary, pair.secondary]) {
+        const noise = game.host.actors.isLive(id) ? game.entity(id) : null;
+        if (noise !== null) game.remove(noise);
+      }
+      if (this.primary?.owner === actor) this.primary = null;
+      if (this.secondary?.owner === actor) this.secondary = null;
+    }
     this.noises.delete(actor); this.alerted.delete(actor); this.trails.delete(actor); this.playerOrigins.delete(actor); this.hostile.delete(actor);
     return undefined;
   }
@@ -155,7 +169,8 @@ export class MonsterPerception {
       const previous = trail.at(-1);
       const observed = game.monsterTarget(player); if (observed === null) continue;
       const playerEye = { ...body.origin, z: body.origin.z + observed.viewHeight };
-      if (previous === undefined || game.host.trace({ start: playerEye, end: previous.origin, bounds: null, ignore: player, mask: MASK_OPAQUE }).fraction !== 1) {
+      const airborne = game.options.edition === "rerelease" && body.ground === null;
+      if (!airborne && (previous === undefined || game.host.trace({ start: playerEye, end: previous.origin, bounds: null, ignore: player, mask: MASK_OPAQUE }).fraction !== 1)) {
         const oldOrigin = this.playerOrigins.get(player) ?? body.origin;
         trail.push({ origin: oldOrigin, time: game.host.now(), yaw: previous === undefined ? body.angles.y : vectorToAnglesRule(subtract(oldOrigin, previous.origin), "native-ai").y });
         if (trail.length > 8) trail.shift();
@@ -176,20 +191,35 @@ export class MonsterPerception {
         noise.owner = actor; noise.visible = false; noise.serverFlags |= 1;
         game.move(noise, { bounds: { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } } }, false);
       }
-      pair = { primary: primary.actor.id, secondary: other.actor.id };
+      pair = { primary: primary.actor.id, secondary: other.actor.id, primaryRecord: null, secondaryRecord: null };
       this.noises.set(actor, pair);
     }
     const noise = game.entity(secondary ? pair.secondary : pair.primary);
     if (noise === null) return undefined;
     game.move(noise, { origin });
     const record = { actor: noise.actor.id, owner: actor, origin, time: game.host.now() };
-    if (secondary) this.secondary = record; else this.primary = record;
+    if (secondary) { this.secondary = record; pair.secondaryRecord = record; } else { this.primary = record; pair.primaryRecord = record; }
     return undefined;
   }
 
   private targetable(game: Q2GameServices, actor: ActorId): boolean {
     const observed = game.monsterTarget(actor);
-    return game.host.actors.isLive(actor) && health(game, actor) > 0 && observed !== null && !observed.notarget;
+    const violating = game.disguiseViolation?.actor === actor && game.disguiseViolation.until > game.host.now();
+    return game.host.actors.isLive(actor) && health(game, actor) > 0 && observed !== null && (!observed.notarget || violating);
+  }
+
+  /** AI_GetSoundClient: the nearest fresh noise among living players, each contributing its primary or else its secondary record. */
+  private nearestNoise(context: MonsterContext, recent: (record: Noise | null) => boolean): Noise | null {
+    const { game, entity } = context, origin = game.body(entity).origin;
+    let best: Noise | null = null, bestDistance = Infinity;
+    for (const [owner, pair] of this.noises) {
+      if (!game.host.actors.isLive(owner) || health(game, owner) <= 0) continue;
+      const record = recent(pair.primaryRecord) ? pair.primaryRecord : entity.enemy === null && (entity.spawnflags & 1) === 0 && recent(pair.secondaryRecord) ? pair.secondaryRecord : null;
+      if (record === null) continue;
+      const distance = length(subtract(record.origin, origin));
+      if (distance < bestDistance) { best = record; bestDistance = distance; }
+    }
+    return best;
   }
 
   private visualCandidate(context: MonsterContext, actor: ActorId): boolean {
@@ -214,7 +244,9 @@ export class MonsterPerception {
     if (state.goodGuy || state.combatPoint || state.dead) return false;
     const now = game.host.now(), recent = (record: Sighting | null): boolean => record !== null && record.time >= now - (game.options.edition === "classic" ? 0.1 : game.host.frameSeconds());
     let candidate: ActorId | null = null, noise: Noise | null = null;
-    if (game.options.edition === "rerelease") {
+    const violation = game.disguiseViolation;
+    if (violation !== null && violation.until > now && game.host.actors.isLive(violation.actor)) candidate = violation.actor;
+    else if (game.options.edition === "rerelease") {
       const candidates = game.host.players().filter(actor => {
         if (!this.targetable(game, actor)) return false;
         const target = game.host.bodies.read(actor);
@@ -223,15 +255,16 @@ export class MonsterPerception {
       candidate = candidates.length === 0 ? null : candidates[Math.floor(game.host.random() * candidates.length)] ?? null;
       if (candidate === entity.enemy && state.soundTarget === null) return false;
       if (candidate === null && (entity.spawnflags & 1) === 0) {
-        for (const sight of this.alerted.values()) if (recent(sight) && this.visualCandidate(context, sight.actor)) { candidate = sight.actor; break; }
+        for (const sight of this.alerted.values()) if (recent(sight) && game.entity(sight.actor)?.enemy !== entity.enemy && this.visualCandidate(context, sight.actor)) { candidate = sight.actor; break; }
       }
     } else if (recent(this.sight) && (entity.spawnflags & 1) === 0) {
       candidate = this.sight?.actor ?? null;
       if (game.entity(candidate)?.enemy === entity.enemy) return false;
     }
     if (candidate === null) {
-      if (recent(this.primary)) noise = this.primary;
-      else if (entity.enemy === null && (entity.spawnflags & 1) === 0 && recent(this.secondary)) noise = this.secondary;
+      if (game.options.edition === "rerelease") noise = this.nearestNoise(context, recent);
+      else if (recent(this.primary)) noise = this.primary;
+      if (game.options.edition !== "rerelease" && noise === null && entity.enemy === null && (entity.spawnflags & 1) === 0 && recent(this.secondary)) noise = this.secondary;
       if (noise !== null) candidate = noise.actor;
       else if (game.options.edition === "classic") candidate = this.sightClient;
     }
@@ -246,6 +279,7 @@ export class MonsterPerception {
       if (length(subtract(noise.origin, origin)) > 1000 || !game.host.areasConnected(origin, noise.origin)) return false;
       state.idealYaw = vectorToAnglesRule(subtract(noise.origin, origin), "native-ai").y;
       if (!state.manualSteering) changeYaw(context);
+      if (game.options.edition === "rerelease" && candidate === entity.enemy && facingIdeal(context) && length(subtract(noise.origin, origin)) < 8) return true;
       if (state.temporaryStandGround) { state.standGround = false; state.temporaryStandGround = false; }
       state.soundTarget = noise;
       entity.enemy = candidate;
@@ -285,10 +319,13 @@ export class MonsterPerception {
       const player = game.entity(entity.enemy);
       if (player !== null && this.sourceCombatRules === "rogue") player.flags &= ~0x8000;
       const record = { actor: entity.actor.id, time: game.host.now() };
-      this.sight = record; this.alerted.set(entity.enemy, record); this.hostile.set(entity.enemy, game.host.now() + 1);
+      this.sight = record; this.alerted.set(entity.enemy, record);
+      // g_ai.c sets show_hostile on the monster only; the rerelease also stamps its enemy.
+      if (game.options.edition === "rerelease") this.hostile.set(entity.enemy, game.host.now() + 1);
     }
     state.showHostile = game.host.now() + 1;
     if (game.options.edition === "rerelease") {
+      state.thirdEye = false;
       if (state.trailTime === 0) state.attackFinished = game.host.now() + 0.6;
       state.attackFinished += game.options.skill === 0 ? 0.4 : game.options.skill === 1 ? 0.2 : 0;
       state.savedGoal = enemy.origin; state.blindFireTarget = add(enemy.origin, scale(enemy.velocity, -0.1)); state.blindFireDelay = 0;
@@ -301,10 +338,14 @@ export class MonsterPerception {
       const route = mission.combatRoute();
       if (route.goal !== null) { state.combatPoint = true; state.moveTarget = entity.goal = route.goal; state.pauseTime = 0; return context.run(); }
     }
-    if (state.combatPoint) return undefined;
+    if (state.combatPoint && game.options.edition === "rerelease") return undefined;
     if (state.combatTarget.length === 0) return this.huntTarget(context);
     const target = game.pickTarget(state.combatTarget);
-    if (target === null) { game.host.diagnostic(`${entity.classname}: combattarget ${state.combatTarget} not found`); return this.huntTarget(context); }
+    if (target === null) {
+      game.host.diagnostic(`${entity.classname}: combattarget ${state.combatTarget} not found`);
+      if (game.options.edition === "classic") state.moveTarget = entity.enemy;
+      return this.huntTarget(context);
+    }
     state.combatTarget = entity.combatTarget = ""; state.combatPoint = true; state.moveTarget = target.actor.id; entity.goal = target.actor.id;
     if (game.options.edition === "classic") target.targetname = "";
     state.pauseTime = 0;
@@ -341,9 +382,12 @@ export class MonsterPerception {
 
   checkAttack(context: MonsterContext, check: (context: MonsterContext) => boolean): boolean {
     const { game, entity, state } = context;
-    if (state.combatPoint) return false;
+    if (state.combatPoint && (game.options.edition !== "rerelease" || entity.enemy !== null && targetDistance(context) > 100)) return false;
     if (state.soundTarget !== null) {
-      const fresh = this.primary?.actor === state.soundTarget.actor ? this.primary : this.secondary?.actor === state.soundTarget.actor ? this.secondary : state.soundTarget;
+      const target = state.soundTarget, pair = this.noises.get(target.owner);
+      const fresh = game.options.edition === "rerelease"
+        ? pair?.primaryRecord?.actor === target.actor ? pair.primaryRecord : pair?.secondaryRecord?.actor === target.actor ? pair.secondaryRecord : target
+        : this.primary?.actor === target.actor ? this.primary : this.secondary?.actor === target.actor ? this.secondary : target;
       state.soundTarget = fresh;
       if (game.host.now() - fresh.time <= 5) { state.showHostile = game.host.now() + 1; return false; }
       if (entity.goal === entity.enemy) entity.goal = state.moveTarget;
@@ -353,7 +397,8 @@ export class MonsterPerception {
     let enemy = enemyBody(context);
     const enemyHealth = health(game, entity.enemy);
     if (enemy === null || (state.medic ? enemyHealth > 0 : state.brutal ? game.options.edition === "classic" && enemyHealth <= -80 : enemyHealth <= 0)) {
-      if (this.sourceCombatRules === "rogue") state.medic = false;
+      // A medic whose patient is alive again has finished its errand; g_ai.c drops AI_MEDIC there.
+      if (this.sourceCombatRules === "rogue" || state.medic && enemy !== null) state.medic = false;
       entity.enemy = null; state.closeSightTripped = false;
       if (game.options.edition === "rerelease") entity.goal = null;
       if (state.oldEnemy !== null && health(game, state.oldEnemy) > 0) { entity.enemy = state.oldEnemy; state.oldEnemy = null; this.huntTarget(context); enemy = enemyBody(context); }
@@ -418,27 +463,59 @@ export class MonsterPerception {
     if (state.locomotion === "stationary" || game.body(entity).ground === null && state.locomotion === "walk") return false;
     const enemy = enemyBody(context);
     let goal = entity.goal === null ? null : game.host.bodies.read(entity.goal)?.origin ?? null;
-    if (!state.hintPath && !state.combatPoint && state.soundTarget === null && enemy !== null && !visible(context)) goal = this.pursuitGoal(context, distance);
+    if (!state.hintPath && !state.combatPoint && state.soundTarget === null && enemy !== null && !visible(context)) { const step = { distance }; goal = this.pursuitGoal(context, step); distance = step.distance; }
     else if (!state.hintPath && !state.combatPoint && state.soundTarget === null && enemy !== null) { state.lostSight = false; state.lastSighting = enemy.origin; state.trailTime = game.host.now(); }
     if (goal === null) return false;
-    if (!state.hintPath && enemy !== null && !state.combatPoint && state.soundTarget === null && this.closeEnough(context, enemy.origin, distance, entity.enemy)) return true;
-    if ((Math.floor(game.host.random() * 4) !== 1 || this.sourceCombatRules === "rogue" && state.charging) && stepDirection(context, state.idealYaw, distance)) return true;
+    const rerelease = game.options.edition === "rerelease";
+    if (!rerelease && !state.hintPath && enemy !== null && this.closeEnough(context, enemy.origin, distance, entity.enemy)) return true;
+    if (rerelease) {
+      const direct = this.directApproach(context, goal, distance);
+      if (direct !== null) return direct;
+    }
+    const now = game.host.now();
+    let reroll = Math.floor(game.host.random() * 4) === 1;
+    if (rerelease) {
+      reroll = state.randomChangeTime <= now && !state.charging && !state.alternateFly && Math.floor(game.host.random() * 4) === 1;
+      if (reroll) state.randomChangeTime = now + 1;
+    }
+    if ((!reroll || this.sourceCombatRules === "rogue" && state.charging) && stepDirection(context, state.idealYaw, distance)) return true;
     if (context.consumeSourceBlocked()) return false;
     if (!game.host.actors.isLive(entity.actor.id)) return false;
-    if (game.options.edition === "rerelease" && this.sourceCombatRules !== "rogue" && context.blocked(distance)) return true;
+    if (rerelease && this.sourceCombatRules !== "rogue" && context.blocked(distance)) return true;
     return chaseDirection(context, goal, distance);
+  }
+
+  /** M_MoveToGoal's straight-line approach: turn in place, then step along the heading to the goal while a traceline to it is clear. Null means fall back to the chase directions. */
+  private directApproach(context: MonsterContext, goalOrigin: Vec3, distance: number): boolean | null {
+    const { game, entity, state } = context, now = game.host.now();
+    if (state.badMoveTime > now || state.hintPath) return null;
+    const body = game.body(entity);
+    let goal = goalOrigin;
+    const goalEntity = entity.goal === null ? null : game.entity(entity.goal), goalBody = entity.goal === null ? null : game.host.bodies.read(entity.goal);
+    if (goalEntity !== null && goalBody !== null && (goalEntity.classname === "path_corner" || goalEntity.classname === "point_combat")
+      && goalOrigin.x + goalBody.bounds.min.x <= body.origin.x + body.bounds.max.x && goalOrigin.x + goalBody.bounds.max.x >= body.origin.x + body.bounds.min.x
+      && goalOrigin.y + goalBody.bounds.min.y <= body.origin.y + body.bounds.max.y && goalOrigin.y + goalBody.bounds.max.y >= body.origin.y + body.bounds.min.y) goal = { ...goalOrigin, z: body.origin.z };
+    const trace = game.host.trace({ start: body.origin, end: goal, bounds: null, ignore: entity.actor.id, mask: monsterSolidMask(game) });
+    const clear = trace.fraction === 1 || trace.hit.kind === "actor" && trace.hit.actor === entity.goal;
+    if (!clear) { state.badMoveTime = now + 5; return null; }
+    state.idealYaw = vectorToAnglesRule(subtract(goal, body.origin), "native-ai").y;
+    if (!facingIdeal(context)) { changeYaw(context); return true; }
+    return stepDirection(context, state.idealYaw, distance, true) ? true : null;
   }
 
   private closeEnough(context: MonsterContext, origin: Vec3, distance: number, actor: ActorId | null): boolean {
     const body = context.game.body(context.entity), target = actor === null ? null : context.game.host.bodies.read(actor);
     const bounds = target?.bounds ?? { min: zero, max: zero };
+    // sv_world.c widens absmin and absmax by one unit on each side, so both boxes grow by 2 between them.
+    distance += 2;
     return origin.x + bounds.min.x <= body.origin.x + body.bounds.max.x + distance && origin.x + bounds.max.x >= body.origin.x + body.bounds.min.x - distance &&
       origin.y + bounds.min.y <= body.origin.y + body.bounds.max.y + distance && origin.y + bounds.max.y >= body.origin.y + body.bounds.min.y - distance &&
       origin.z + bounds.min.z <= body.origin.z + body.bounds.max.z + distance && origin.z + bounds.max.z >= body.origin.z + body.bounds.min.z - distance;
   }
 
-  private pursuitGoal(context: MonsterContext, distance: number): Vec3 {
+  private pursuitGoal(context: MonsterContext, step: { distance: number }): Vec3 {
     const { game, entity, state } = context, body = game.body(entity);
+    const pursuitMask = game.options.edition === "rerelease" ? monsterSolidMask(game) : 0x02010003;
     let newGoal = false;
     if (!state.lostSight) { state.lostSight = true; state.pursuitLastSeen = true; state.pursueNext = false; state.pursueTemporary = false; newGoal = true; }
     if (state.pursueNext) {
@@ -446,27 +523,44 @@ export class MonsterPerception {
       if (state.pursueTemporary && state.savedGoal !== null) { state.pursueTemporary = false; state.lastSighting = state.savedGoal; newGoal = true; }
       else {
         const trail = entity.enemy === null ? [] : this.trails.get(entity.enemy) ?? [];
-        let marker = trail.find(point => point.time > state.trailTime);
-        if (state.pursuitLastSeen && marker !== undefined) {
+        const rerelease = game.options.edition === "rerelease";
+        const sees = (point: TrailPoint): boolean => game.host.trace({ start: body.origin, end: point.origin, bounds: null, ignore: entity.actor.id, mask: MASK_OPAQUE }).fraction === 1;
+        let marker: TrailPoint | undefined;
+        if (rerelease) {
+          if (state.pursuitLastSeen) marker = trail.find(point => point.time > state.trailTime && sees(point));
+          else {
+            const newer = trail.filter(point => point.time >= state.trailTime);
+            const closest = newer.reduce<TrailPoint | null>((best, point) => best === null || length(subtract(point.origin, body.origin)) < length(subtract(best.origin, body.origin)) ? point : best, null);
+            marker = closest === null ? undefined : trail[trail.indexOf(closest) + 1];
+          }
+        } else marker = trail.find(point => point.time > state.trailTime) ?? trail[0];
+        if (!rerelease && state.pursuitLastSeen && marker !== undefined) {
           const prior = trail[trail.indexOf(marker) - 1];
-          const trace = game.host.trace({ start: body.origin, end: marker.origin, bounds: null, ignore: entity.actor.id, mask: MASK_OPAQUE });
-          if (trace.fraction !== 1 && prior !== undefined && game.host.trace({ start: body.origin, end: prior.origin, bounds: null, ignore: entity.actor.id, mask: MASK_OPAQUE }).fraction === 1) marker = prior;
+          const eye = { ...body.origin, z: body.origin.z + entity.viewHeight };
+          const trace = game.host.trace({ start: eye, end: marker.origin, bounds: null, ignore: entity.actor.id, mask: MASK_OPAQUE });
+          if (trace.fraction !== 1 && prior !== undefined && game.host.trace({ start: eye, end: prior.origin, bounds: null, ignore: entity.actor.id, mask: MASK_OPAQUE }).fraction === 1) marker = prior;
         }
         state.pursuitLastSeen = false;
-        if (marker !== undefined) { state.lastSighting = marker.origin; state.trailTime = marker.time; state.idealYaw = marker.yaw; game.move(entity, { angles: { ...body.angles, y: marker.yaw } }, false); newGoal = true; }
+        if (marker !== undefined) {
+          state.lastSighting = marker.origin; state.trailTime = marker.time; state.idealYaw = marker.yaw; newGoal = true;
+          if (!rerelease) game.move(entity, { angles: { ...body.angles, y: marker.yaw } }, false);
+        }
       }
     }
     const d1 = length(subtract(state.lastSighting, body.origin));
-    if (d1 <= distance) state.pursueNext = true;
+    const reached = game.options.edition === "rerelease"
+      ? (["x", "y", "z"] as const).every(axis => state.lastSighting[axis] >= body.origin[axis] + body.bounds.min[axis] && state.lastSighting[axis] <= body.origin[axis] + body.bounds.max[axis])
+      : d1 <= step.distance;
+    if (reached) { state.pursueNext = true; if (game.options.edition !== "rerelease") step.distance = d1; }
     if (newGoal && d1 > 0) {
-      const center = game.host.trace({ start: body.origin, end: state.lastSighting, bounds: body.bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) });
+      const center = game.host.trace({ start: body.origin, end: state.lastSighting, bounds: body.bounds, ignore: entity.actor.id, mask: pursuitMask });
       if (center.fraction < 1) {
         const d2 = d1 * (center.fraction + 1) * 0.5;
         state.idealYaw = vectorToAnglesRule(subtract(state.lastSighting, body.origin), "native-ai").y;
         const basis = angleVectorsRule({ ...body.angles, y: state.idealYaw }, "native");
         const make = (forward: number, right: number): Vec3 => add(body.origin, add(scale(basis.forward, forward), scale(basis.right, right)));
-        const left = game.host.trace({ start: body.origin, end: make(d2, -16), bounds: body.bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) });
-        const right = game.host.trace({ start: body.origin, end: make(d2, 16), bounds: body.bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) });
+        const left = game.host.trace({ start: body.origin, end: make(d2, -16), bounds: body.bounds, ignore: entity.actor.id, mask: pursuitMask });
+        const right = game.host.trace({ start: body.origin, end: make(d2, 16), bounds: body.bounds, ignore: entity.actor.id, mask: pursuitMask });
         const centerFraction = d1 * center.fraction / d2;
         const side = left.fraction >= centerFraction && left.fraction > right.fraction ? -16 : right.fraction >= centerFraction && right.fraction > left.fraction ? 16 : 0;
         if (side !== 0) {
@@ -474,7 +568,7 @@ export class MonsterPerception {
           state.savedGoal = state.lastSighting; state.pursueTemporary = true; state.lastSighting = make(fraction < 1 ? d2 * fraction * 0.5 : d2, side);
           state.idealYaw = vectorToAnglesRule(subtract(state.lastSighting, body.origin), "native-ai").y;
         }
-        game.move(entity, { angles: { ...body.angles, y: state.idealYaw } }, false);
+        if (game.options.edition !== "rerelease") game.move(entity, { angles: { ...body.angles, y: state.idealYaw } }, false);
       }
     }
     return state.lastSighting;

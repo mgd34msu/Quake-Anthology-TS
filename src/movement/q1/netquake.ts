@@ -267,6 +267,9 @@ class NetQuakeMove {
       s.velocity = m.vec(s.waterJumpDirection.x, s.waterJumpDirection.y, s.velocity.z);
       return;
     }
+    if (c.options.sourceWaterDrag === true && s.waterLevel > 0 && s.moveType !== Q1_MOVE_NOCLIP) {
+      s.velocity = m.ma(s.velocity, -n.multiply(n.multiply(0.8, s.waterLevel), this.frameSeconds), s.velocity);
+    }
     this.ladder = s.moveType === Q1_MOVE_WALK && s.waterLevel < 2
       && c.ladderAhead(s.origin, m.angles(s.viewAngles).forward);
     if (s.moveType === Q1_MOVE_NOCLIP && this.input.profile.noClipAngleHack) this.alternateNoclip();
@@ -322,7 +325,8 @@ class NetQuakeMove {
     let direction = 0, steps = 0, previous = heights[0];
     if (previous === undefined) return;
     for (const height of heights.slice(1)) {
-      const step = n.subtract(height, previous); previous = height;
+      // sv_user.c declares step and dir as int, so each probe difference truncates toward zero.
+      const step = Math.trunc(n.subtract(height, previous)); previous = height;
       if (step > -0.1 && step < 0.1) continue;
       if (direction !== 0 && Math.abs(n.subtract(step, direction)) > 0.1) return;
       steps++; direction = step;

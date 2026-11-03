@@ -1,5 +1,7 @@
 # Source inventory reconciliation
 
+> **Dated record, not current status.** An inventory reconciliation from September 2026. The tools it tells you to run (`tools/inventory/...`) were deleted. The maintained status is [status.md](status.md). Where this page disagrees with it or with the code, trust those. 
+
 This checklist joins the concrete leads from the Q1, Q2 and Q3 declaration reports with the earlier [Q1](comparison-q1.md), [Q2](comparison-q2.md) and [Q3](comparison-q3.md) comparisons and their feature inventories: 180 Q1 requirements, 193 Q2 requirements, 104 Q3 requirements.
 
 The extraction uses unified commit `3dc9ca6ca404dc4522ab9e9669fff458805b0993` and each report's pinned donor commit. It preserves source, tests, tools, declarations, local variables, parameters and import bindings. Exact names, signatures, hashes and source-line overlaps identify review candidates; they do not prove equivalent behavior. All unmatched and ambiguous records remain in the raw artifacts. This is a bounded caller review, not an exhaustive semantic audit, and the extraction itself does not change the 477 requirement IDs or verdicts. Later finite verdict reviews are recorded below.
@@ -82,7 +84,7 @@ At source cutoff `e5e51456d04a911528da8b52af9a50b794738318`, exactly two existin
 Run the per-game commands in the linked declaration reports, then:
 
 ```sh
-bun tools/inventory/merge-integration-candidates.ts --input /tmp --out /tmp/quake-integration-combined
+# (command removed: tools/inventory/ was deleted in 949c337c and cannot be run)
 ```
 
 `/tmp/quake-integration-combined/combined.json` joins all 477 original feature rows, pins all three comparison documents, and references every full declaration/candidate/anchor/historical artifact by path and SHA-256. Broad import/name groups and declarations without feature anchors remain available for deeper review. Historical verdicts remain separate. The checklist above neither exhausts those records nor claims behavioral completeness.

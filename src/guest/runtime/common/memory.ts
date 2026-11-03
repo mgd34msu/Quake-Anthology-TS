@@ -109,6 +109,8 @@ export function nativeAllocationBytes(logicalBytes: number): number {
   return Math.max(4096, Math.ceil(logicalBytes / 4096) * 4096);
 }
 
-export function allocateNativeMemory(memory: MappedGuestMemory, logicalBytes: number, label: string): GuestAddress {
-  return memory.allocate({ byteLength: nativeAllocationBytes(logicalBytes), alignment: 4096n, label });
+/** `pooled` is for engine-owned scratch (strings, command records): its page comes from a shared slab and stays readable after release. Guest heap blocks stay individually mapped so a stale access still faults. */
+export function allocateNativeMemory(memory: MappedGuestMemory, logicalBytes: number, label: string, pooled = false): GuestAddress {
+  const byteLength = nativeAllocationBytes(logicalBytes);
+  return memory.allocate({ byteLength, alignment: 4096n, label, pooled: pooled && byteLength === 4096 });
 }

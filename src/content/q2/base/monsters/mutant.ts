@@ -82,7 +82,7 @@ export function createMutantDefinition(monsters: Q2Monsters, source: "classic" |
         context.state.nextFrame = context.game.host.now() > context.state.attackFinished ? mutantFrame.attack02 : mutantFrame.attack05;
         return undefined;
       },
-      mutant_dead(context) { finishCorpse(context); return flyCheck(context); },
+      mutant_dead(context) { finishCorpse(context); return flyCheck(context, true); },
     },
   };
 }

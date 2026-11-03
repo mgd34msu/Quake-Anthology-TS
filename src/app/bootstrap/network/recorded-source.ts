@@ -60,27 +60,33 @@ export class RecordedRemoteSource {
     realTime -= this.pausedMilliseconds;
     const playback = this.playback;
     const timedemo = this.timedemo || this.cvars.variableValue('timedemo') !== 0;
-    if (playback.kind === 'q1' || playback.kind === 'qw') {
-      const result = await playback.input.advance({ elapsedSeconds: milliseconds / 1000, frame, timedemo });
-      if (result.phase === 'ended') this.terminal = result.reason === 'recorded-disconnect' ? 'disconnected' : result.reason;
-      else this.state = result.phase;
-    } else if (playback.kind === 'q2') {
-      const target = this.milliseconds === null ? 0 : this.milliseconds + milliseconds;
-      const result = timedemo ? await playback.input.nextFrame() : await playback.input.advance(target);
-      if (result.kind === 'frame') {
-        this.milliseconds = this.milliseconds === null || timedemo || result.timeMilliseconds < target ? result.timeMilliseconds : target;
-        playback.remote.sampleDemo(this.milliseconds);
-        this.state = 'active';
-      } else this.terminal = result.kind;
-    } else {
-      const result = await playback.input.advanceFrame(realTime, { paused: false, timeNudge: this.cvars.variableValue('cl_timeNudge'),
-        timescale: this.cvars.variableValue('timescale'), freezeDemo: this.cvars.variableValue('cl_freezeDemo') !== 0, timedemo });
-      if (result.kind === 'end') {
-        this.terminal = result.end.reason === 'truncated-header' || result.end.reason === 'truncated-payload' ? 'truncated' : result.end.reason;
-        this.resultTiming = result.timing;
+    // Readers throw on a short or malformed trailing record; a partial recording ends playback like a Q3 truncation.
+    try {
+      if (playback.kind === 'q1' || playback.kind === 'qw') {
+        const result = await playback.input.advance({ elapsedSeconds: milliseconds / 1000, frame, timedemo });
+        if (result.phase === 'ended') this.terminal = result.reason === 'recorded-disconnect' ? 'disconnected' : result.reason;
+        else this.state = result.phase;
+      } else if (playback.kind === 'q2') {
+        const target = this.milliseconds === null ? 0 : this.milliseconds + milliseconds;
+        const result = timedemo ? await playback.input.nextFrame() : await playback.input.advance(target);
+        if (result.kind === 'frame') {
+          this.milliseconds = this.milliseconds === null || timedemo || result.timeMilliseconds < target ? result.timeMilliseconds : target;
+          playback.remote.sampleDemo(this.milliseconds);
+          this.state = 'active';
+        } else this.terminal = result.kind;
+      } else {
+        const result = await playback.input.advanceFrame(realTime, { paused: false, timeNudge: this.cvars.variableValue('cl_timeNudge'),
+          timescale: this.cvars.variableValue('timescale'), freezeDemo: this.cvars.variableValue('cl_freezeDemo') !== 0, timedemo });
+        if (result.kind === 'end') {
+          this.terminal = result.end.reason === 'truncated-header' || result.end.reason === 'truncated-payload' ? 'truncated' : result.end.reason;
+          this.resultTiming = result.timing;
+        }
+        else if (result.kind === 'frame') { playback.remote.samplePresentation(realTime); this.state = 'active'; }
+        else this.state = playback.input.phase === 'active' ? 'active' : 'loading';
       }
-      else if (result.kind === 'frame') { playback.remote.samplePresentation(realTime); this.state = 'active'; }
-      else this.state = playback.input.phase === 'active' ? 'active' : 'loading';
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      this.terminal = 'truncated';
     }
     if (timedemo && playback.kind !== 'q3') {
       if (this.terminal === null && this.state === 'active') {

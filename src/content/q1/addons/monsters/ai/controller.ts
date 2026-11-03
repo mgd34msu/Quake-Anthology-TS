@@ -12,6 +12,7 @@ function same(first: ActorId | null, second: ActorId | null): boolean {
 }
 
 /** Shares the base source animation/combat owner; MG3 supplies only its differing AI policy. */
+
 export class Mg3Monster extends BaseMonster {
   override makeVectors() { return this.game.makeVectors(this.game.body(this.entity).angles); }
   override attackFinished(seconds: number): undefined {
@@ -45,7 +46,7 @@ export class Mg3Monster extends BaseMonster {
     if (enemy === null || start === null || end === null) return false;
     const trace = game.host.trace({ start, end, bounds: POINT, ignore: entity.actor.id, monsters: true });
     if (trace.actor === null || !sameActor(trace.actor, enemy) || trace.inOpen && trace.inWater) return false;
-    const range = game.world?.number("enemy_range") ?? 0;
+    const range = this.word("enemy_range");
     if (range === 0 && spec.melee) { this.meleeAttack(); return true; }
     if (spec.missile === null || game.time < this.state.attackFinished || range === 3) return false;
     if (range === 0) this.state.attackFinished = 0;
@@ -53,10 +54,16 @@ export class Mg3Monster extends BaseMonster {
     if (game.host.random() >= chance) return false;
     this.play(spec.missile); this.attackFinished(2 * game.host.random()); return true;
   }
+  /** QC keeps these AI globals on world; a foreign world has no Q1 world actor, so they live in the game's saved sourceWorldWords. */
   sourceWord(name: string, value: number): undefined {
     const world = this.game.world;
-    if (world === null) throw new Error("MG3 AI requires the source world globals");
-    world.fields.set(name, String(Math.fround(value))); return undefined;
+    if (world !== null) world.fields.set(name, String(Math.fround(value)));
+    else this.game.sourceWorldWords.set(name, Math.fround(value));
+    return undefined;
+  }
+  word(name: string): number {
+    const world = this.game.world;
+    return world === null ? this.game.sourceWorldWords.get(name) ?? 0 : world.number(name);
   }
   rangeCategory(target = this.enemy): 0 | 1 | 2 | 3 {
     const distance = this.rangeDistance(target), nearSighted = (this.entity.spawnflags & 8192) !== 0;
@@ -107,10 +114,11 @@ export class Mg3Monster extends BaseMonster {
     const { game, entity } = this;
     if (entity.waterLevel === 0 || game.health(entity.actor.id) <= 0 || game.time < entity.number("dmgtime") || (entity.spawnflags & 16384) !== 0) return false;
     if (entity.waterType !== -4 && entity.waterType !== -5) return false;
-    const world = game.world; if (world === null) throw new Error("MG3 contents damage requires the world actor");
+    // A foreign world has no Q1 world actor; the monster is then the source of its own contents damage.
+    const source = game.world?.actor.id ?? entity.actor.id;
     const lava = entity.waterType === -5;
     entity.fields.set("dmgtime", String(Math.fround(game.time + (lava ? 0.2 : 1))));
-    game.damage(entity.actor.id, world.actor.id, world.actor.id, lava ? entity.classname === "monster_zombie" ? 120 : 30 * entity.waterLevel : 4 * entity.waterLevel);
+    game.damage(entity.actor.id, source, source, lava ? entity.classname === "monster_zombie" ? 120 : 30 * entity.waterLevel : 4 * entity.waterLevel);
     return lava && entity.classname === "monster_zombie" || game.health(entity.actor.id) <= 0;
   }
   override ai(mode: MonsterAi, distance: number): undefined {
@@ -131,7 +139,7 @@ export class Mg3Monster extends BaseMonster {
       default: return super.ai(mode, distance);
     }
   }
-  huntTarget(): undefined {
+  override huntTarget(): undefined {
     const target = this.target;
     if (target === null) return undefined;
     this.state.mode = "run"; this.entity.idealYaw = yawFor(vsub(target, this.origin));
@@ -158,7 +166,7 @@ export class Mg3Monster extends BaseMonster {
     if (this.searchForCoopTarget()) return undefined;
     this.updateRunKnowledge();
     if (entity.attackState === "missile" || entity.attackState === "melee") {
-      entity.idealYaw = game.world?.number("enemy_yaw") ?? 0; this.changeYaw();
+      entity.idealYaw = this.word("enemy_yaw"); this.changeYaw();
       const delta = ((game.body(entity).angles.y - entity.idealYaw) % 360 + 360) % 360;
       if (delta <= 45 || delta >= 315) {
         if (entity.attackState === "melee") this.meleeAttack(); else if (this.spec.missile !== null) this.play(this.spec.missile);
@@ -168,19 +176,19 @@ export class Mg3Monster extends BaseMonster {
     }
     if (seen && this.tryAttack()) return undefined;
     if (this.sliding) {
-      entity.idealYaw = game.world?.number("enemy_yaw") ?? 0; this.changeYaw();
+      entity.idealYaw = this.word("enemy_yaw"); this.changeYaw();
       const offset = this.lefty ? 90 : -90;
       if (game.host.walkMove(entity.actor, entity.idealYaw + offset, distance)) return undefined;
       this.lefty = !this.lefty;
       if (entity.classname === "monster_orb") { this.sliding = false; entity.attackState = "straight"; this.nextFrame = this.spec.run; return undefined; }
       game.host.walkMove(entity.actor, entity.idealYaw - offset, distance); return undefined;
     }
-    return (game.world?.number("isHordeMode") ?? 0) !== 0 ? this.pathToGoal(distance) : this.moveToEnemy(distance);
+    return (this.word("isHordeMode")) !== 0 ? this.pathToGoal(distance) : this.moveToEnemy(distance);
   }
   pathToGoal(distance: number): undefined {
-    const { entity, game } = this, target = this.target;
+    const { entity } = this, target = this.target;
     if (entity.number("allowPathFind") === 0 || target === null) return this.moveToEnemy(distance);
-    const seen = (game.world?.number("enemy_visible") ?? 0) !== 0, range = game.world?.number("enemy_range") ?? 0, style = entity.number("combat_style");
+    const seen = (this.word("enemy_visible")) !== 0, range = this.word("enemy_range"), style = entity.number("combat_style");
     if (!seen || style === 2 && range > 1 || style === 3 && range > 2) {
       if (walkMg3PathToGoal(this, distance, target) === Mg3PathResult.IN_PROGRESS) return undefined;
     }

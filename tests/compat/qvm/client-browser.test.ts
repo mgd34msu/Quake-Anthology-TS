@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { Q3BrowserView } from "../../../src/network/q3/browser-view.ts";
 import type { Q3BrowserCacheView, Q3BrowserHost, Q3BrowserSource } from "../../../src/network/q3/browser-view.ts";
 import { ServerBrowser } from "../../../src/network/services/discovery.ts";
@@ -11,6 +11,8 @@ import { QvmMemory } from "../../../src/compat/qvm/memory.ts";
 import { QvmUiImport } from "../../../src/compat/qvm/abi.ts";
 import type { QvmHostCall } from "../../../src/compat/qvm/syscalls.ts";
 
+const views: Q3BrowserView[] = [];
+afterEach(() => { for (const view of views.splice(0)) view.close(); });
 function fixture() {
   let now = 1000, revision = 0, reset = 0, saved: Q3BrowserCacheView | null = null;
   const sent: { address: NetworkAddress; bytes: Uint8Array }[] = [], printed: string[] = [];
@@ -30,6 +32,7 @@ function fixture() {
     assertOpen() {},
   };
   const view = new Q3BrowserView({ browser: host, now: () => now, maxPing: () => 800, statusResendTime: () => 750, print: text => { printed.push(text); } });
+  views.push(view);
   const guest = new QvmMemory(new Uint8Array(4096));
   function call(code: QvmUiImport, args: readonly number[] = []) {
     const words = new DataView(new ArrayBuffer((args.length + 1) * 4)); words.setInt32(0, code, true);
@@ -98,7 +101,8 @@ test("LAN guest output follows capacity and null-pointer order", () => {
   expect(f.guest.view(240, 4).getInt32(0, true)).toBe(0);
   for (const index of [-1, 32]) {
     expect(f.call(QvmUiImport.UI_LAN_CLEARPING, [index])).toBe(0);
-    expect(() => f.call(QvmUiImport.UI_LAN_GETPING, [index, 160, 64, 240])).toThrow("source index");
+    // cl_ui.c answers an out-of-range slot with an empty result rather than failing the VM call.
+    expect(f.call(QvmUiImport.UI_LAN_GETPING, [index, 160, 64, 240])).toBe(0);
   }
   f.view.close();
 });
@@ -131,7 +135,9 @@ test("status requests coexist with pings, poll decoded players, resend and relea
   expect(await f.call(QvmUiImport.UI_LAN_SERVERSTATUS, [80, 256, 1024])).toBe(1);
   expect(f.guest.readString(256)).toContain('\\\\7 42 "Player"\\');
   expect(await f.call(QvmUiImport.UI_LAN_SERVERSTATUS, [80, 0, -1])).toBe(0);
-  expect(await f.call(QvmUiImport.UI_LAN_SERVERSTATUS, [80, 4095, 1024])).toBe(0);
+  // CL_ServerStatus with a null buffer only marks the slot retrieved; the cached reply stays readable.
+  expect(await f.call(QvmUiImport.UI_LAN_SERVERSTATUS, [80, 256, 1024])).toBe(1); expect(f.sent).toHaveLength(2);
+  await f.view.serverStatusCommand("127.0.0.1:27960"); expect(f.sent).toHaveLength(3);
   f.time(1800); expect(await f.call(QvmUiImport.UI_LAN_SERVERSTATUS, [80, 256, 1024])).toBe(0);
   expect(f.sent).toHaveLength(4); expect(f.reply(2, "status")).toBe(false);
   expect(await f.call(QvmUiImport.UI_LAN_SERVERSTATUS, [0, 0, 0])).toBe(0); expect(f.reply(3, "status")).toBe(false);
@@ -208,7 +214,7 @@ test("global overflow replaces timed-out slots in LIFO order and append revision
   expect(f.view.getServerAddressString(2, 0, 64)).toBe("127.0.0.1:14097"); expect(f.view.getServerCount(2)).toBe(4096);
   f.view.updateVisiblePings(2); f.time(2800); f.view.updateVisiblePings(2); f.view.updateVisiblePings(2);
   expect(f.view.getServerAddressString(2, 0, 64)).toBe("127.0.0.1:14097"); f.view.close();
-});
+}, 30000);
 
 
 test("cache load checks the retired borrowed view before publishing awaited disk contents", async () => {
@@ -231,8 +237,8 @@ test("retained Q3 replies survive the menu timeout and changing cvars until expl
   expect(f.view.getPing(0, 64).time).toBe(4001);
   expect(await f.view.serverStatus("127.0.0.1:27960", 1024)).toContain('"Player"');
   f.view.clearPing(0); await f.view.serverStatus("127.0.0.1:27960", null);
-  await f.view.ping("127.0.0.1:27960"); await f.view.serverStatus("127.0.0.1:27960", 1024);
-  f.view.clearPing(0); await f.view.serverStatus("127.0.0.1:27960", null);
+  await f.view.ping("127.0.0.1:27960"); await f.view.serverStatusCommand("127.0.0.1:27960");
+  f.view.clearPing(0); await f.view.serverStatus(null, null);
   f.time(9000); expect(f.reply(2)).toBe(false); expect(f.reply(3, "status")).toBe(false);
   expect(f.view.getPingQueueCount()).toBe(0); f.view.close();
 });

@@ -269,6 +269,7 @@ export class DeathRuntime {
       self.activator.nextthink = frame.time;
     }
     client.ps.pmType = MoveType.PM_DEAD;
+    self.enemy = attacker instanceof GameEntity ? attacker : null;
     let killer = attacker instanceof GameEntity ? attacker.s.number : ENTITYNUM_WORLD;
     let killerName = attacker === null ? "<world>" : attacker instanceof GameEntity && attacker.client !== null ? attacker.client.pers.netname : "<non-client>";
     if (killer < 0 || killer >= MAX_CLIENTS) { killer = ENTITYNUM_WORLD; killerName = "<world>"; }

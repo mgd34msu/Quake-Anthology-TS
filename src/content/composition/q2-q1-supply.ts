@@ -1,4 +1,4 @@
-import type { ItemId } from "../../contracts/gameplay.ts";
+import { hipnoticOverlay, overlayOwners, overlayWeapons } from "./hipnotic-overlay.ts";
 import type { PickupSupplyProfile } from "../../contracts/pickups.ts";
 
 /** Q2 quantities feed Q1 capacities. Slugs become nails; energy weapons use lightning. */
@@ -38,11 +38,10 @@ export const Q2_Q1_SUPPLY_PROFILE: PickupSupplyProfile = {
   ],
 };
 
-const hipnoticWeapons = new Map<ItemId, readonly ItemId[]>([["q2:weapon_hyperblaster", ["q1:weapon/hipnotic:laser"]], ["q2:weapon_grenadelauncher", ["q1:weapon/hipnotic:proximity"]], ["q2:weapon_bfg", ["q1:weapon/hipnotic:mjolnir"]]]);
+const hipnoticWeapons = hipnoticOverlay([["q2:weapon_hyperblaster", ["q1:weapon/hipnotic:laser"]], ["q2:weapon_grenadelauncher", ["q1:weapon/hipnotic:proximity"]], ["q2:weapon_bfg", ["q1:weapon/hipnotic:mjolnir"]]]);
 
 export const Q2_HIPNOTIC_SUPPLY_PROFILE: PickupSupplyProfile = {
   ...Q2_Q1_SUPPLY_PROFILE, id: "composition:q2-hipnotic-supply",
-  weaponOwners: [...(Q2_Q1_SUPPLY_PROFILE.weaponOwners ?? []), ...[...hipnoticWeapons].flatMap(([source, destinations]) => destinations.map(item => ({ item, source })))],
-  weapons: Q2_Q1_SUPPLY_PROFILE.weapons.map(entry => ({ ...entry, destinations: [...entry.destinations,
-    ...(hipnoticWeapons.get(entry.source) ?? [])] })),
+  weaponOwners: [...(Q2_Q1_SUPPLY_PROFILE.weaponOwners ?? []), ...overlayOwners(hipnoticWeapons)],
+  weapons: overlayWeapons(Q2_Q1_SUPPLY_PROFILE.weapons, hipnoticWeapons),
 };

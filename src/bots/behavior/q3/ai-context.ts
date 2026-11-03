@@ -62,8 +62,8 @@ export class BotCvar implements VmCvar {
   update(): void {
     const source = this.name === null ? undefined : this.registry.find(this.name);
     if (source === undefined || source.modificationCount === this.modificationCount) return;
-    if (source.value.length > 255) throw new RangeError("Bot cvar value exceeds source storage");
-    this.value = source.value; this.numericValue = source.numericValue; this.integerValue = source.integerValue; this.modificationCount = source.modificationCount;
+    // The source cell holds 255 characters; a longer value is cut rather than ending the frame.
+    this.value = source.value.slice(0, 255); this.numericValue = source.numericValue; this.integerValue = source.integerValue; this.modificationCount = source.modificationCount;
   }
   writeInteger(value: number): void { if (!Number.isSafeInteger(value)) throw new RangeError("Bot cvar integer requires a safe integer"); this.integerValue = value | 0; }
 }

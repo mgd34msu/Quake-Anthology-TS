@@ -4,7 +4,8 @@ import { sameActor } from "../../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../../contracts/math.ts";
 import type { Q1Actor } from "../../../foundation/entity.ts";
 import { POINT, ZERO, normalize, vadd, vscale, vsub } from "../../../foundation/types.ts";
-import { BaseMonster } from "../../../base/monsters.ts";
+import type { BaseMonster } from "../../../base/monsters.ts";
+import { Mg3Monster } from "../ai/index.ts";
 import { throwGib } from "../../../base/projectiles.ts";
 import type { MonsterSpecies } from "../../../base/species.ts";
 import type { Q1AddonContext } from "../../context.ts";
@@ -19,7 +20,7 @@ for (const frame of frames.values()) for (const operation of frame.operations) i
   if (!(monster instanceof Q1ShubZombie)) throw new Error("Shub zombie callback received another controller"); return monster.action(operation.name);
 });
 
-export class Q1ShubZombie extends BaseMonster {
+export class Q1ShubZombie extends Mg3Monster {
   constructor(readonly context: Q1AddonContext, entity: Q1Actor) { super(context.game, entity, spec, context.base, { callbackPrefix: prefix, frames, actions }); }
   override spawn(): undefined {
     const { game, entity, context } = this; game.host.combat.setHealth(entity.actor, 60); entity.maxHealth = 60; entity.classname = "monster_szombie"; this.inPain = 2;
@@ -98,14 +99,6 @@ export function spawnShubZombie(context: Q1AddonContext): Q1Actor | null {
   const point = spawns[Math.floor(game.host.random() * (count - 1) + 0.5)]; if (point === undefined) throw new Error("Missing source zombie spawn"); point.wait = game.time + 8;
   const zombie = game.create("monster_szombie"); zombie.owner = point.actor.id; game.spawnEntity(zombie); return zombie;
 }
-export function spawnHomingFlame(context: Q1AddonContext, source: Q1Actor): Q1Actor {
-  const { game } = context, flame = game.create("homing_flame"); flame.classname = ""; flame.solid = "bbox"; flame.movement = "flymissile"; flame.model = "progs/flame2.mdl"; flame.effects = 64;
-  const enemy = source.monster?.enemy ?? source.references.get("enemy") ?? null; flame.references.set("enemy", game.isPlayer(enemy) ? enemy : game.host.players()[0] ?? null);
-  const target = flame.references.get("enemy") ?? null, origin = vadd(game.body(source).origin, { x: 0, y: 0, z: 4 }); flame.speed = 400;
-  game.setBody(flame, { origin, velocity: vscale(normalize(vsub(target === null ? ZERO : game.host.bodies.read(target)?.origin ?? ZERO, origin)), 400), bounds: POINT });
-  flame.projectile = "spike"; flame.touch = game.named.touch(flame, "projectile_touch"); context.setNumber(flame, "waitmin", game.time);
-  game.schedule(flame, 0.1, game.named.action(flame, `${prefix}:homing_flame_think`)); game.link(flame); game.remove(source); return flame;
-}
 export function registerShubZombie(context: Q1AddonContext): undefined {
   const { game } = context; registerBossControllers(context, prefix, "monster_szombie", entity => new Q1ShubZombie(context, entity));
   game.registerSpawn("info_szombie_spawn", (_game, entity) => { entity.wait = -1; return undefined; });
@@ -115,10 +108,5 @@ export function registerShubZombie(context: Q1AddonContext): undefined {
     if (game.host.combat.read(other)?.canTakeDamage === true) { game.damage(other, entity.actor.id, entity.owner, 10); game.sound(entity, "zombie/z_hit.wav", "weapon"); return game.remove(entity); }
     game.sound(entity, "zombie/z_miss.wav", "weapon"); game.setBody(entity, { velocity: ZERO }); entity.angularVelocity = ZERO; entity.touch = game.named.touch(entity, "SUB_Remove"); return undefined;
   } });
-  game.named.register(`${prefix}:homing_flame_think`, { action: (_game, entity) => {
-    const origin = game.body(entity).origin;
-    if (entity.number("waitmin") + 3 < game.time) { context.services.emit({ kind: "colored-explosion", origin, colorStart: 244, colorLength: 3 }); game.radiusDamage(entity.actor.id, entity.actor.id, 100, game.world?.actor.id ?? null, null); return game.remove(entity); }
-    entity.speed = Math.max(0, entity.speed - 10); const enemy = entity.references.get("enemy") ?? null, direction = normalize(vsub(enemy === null ? ZERO : game.host.bodies.read(enemy)?.origin ?? ZERO, origin));
-    game.setBody(entity, { velocity: vscale(vadd(vscale(direction, 0.3), vscale(normalize(game.body(entity).velocity), 0.7)), entity.speed) }); return game.schedule(entity, 0.1, game.named.action(entity, `${prefix}:homing_flame_think`));
-  } }); return undefined;
+  return undefined;
 }

@@ -11,7 +11,7 @@ import { requiredPointer } from "../../../guest/runtime/common/memory.ts";
 import type { GuestCallSignature } from "../../../guest/core/contracts.ts";
 import { cgameExports, cgameExportLayout, cgameImportLayout, cgameImports, gameExports, gameExportLayout, gameImportLayout, gameImports, getApiSignature, rereleaseAbi } from "./api.ts";
 import type { CgameExportName, CgameImportName, GameExportName, GameImportName } from "./api.ts";
-import { edictLayout, fieldOffset, pmoveLayout, rectangleLayout, usercmdLayout } from "./layouts.ts";
+import { edictLayout, fieldOffset, pmoveLayout, usercmdLayout } from "./layouts.ts";
 import { bindNativeModEntry, type NativeModEntryBinding } from "../native-mod-entries.ts";
 import { prepareRereleaseEquipmentMovement, withRereleaseEquipmentMovement } from "./equipment-movement.ts";
 import { writeRereleaseUserCommand } from "./player-state.ts";
@@ -38,6 +38,14 @@ export interface RereleaseModuleOptions {
   readonly serializationInstructionBudget?: number;
   readonly frameMilliseconds?: number;
 }
+/** Peers supply userinfo and social IDs, so oversized text is cut to the guest buffer rather than refused. */
+export function fitRereleaseText(text: string, capacity: number): string {
+  const end = text.indexOf("\0"), terminated = end < 0 ? text : text.slice(0, end), encoder = new TextEncoder();
+  if (encoder.encode(terminated).length < capacity) return terminated;
+  let low = 0, high = terminated.length;
+  while (low < high) { const middle = Math.ceil((low + high) / 2); if (encoder.encode(terminated.slice(0, middle)).length < capacity) low = middle; else high = middle - 1; }
+  return terminated.slice(0, low);
+}
 export class MissingRereleaseImport extends Error {
   constructor(readonly call: RereleaseImportCall) {
     super(`Missing Q2 rerelease ${call.api} import ${call.name} at 0x${call.context.callback.kind === "native-guest" ? call.context.callback.address.byteOffset.toString(16) : "unknown"}`);
@@ -52,6 +60,8 @@ export function resultPointer(result: GuestCallResult): GuestAddress | null {
   return result.value;
 }
 
+const zeroCommand = new Uint8Array(usercmdLayout.byteLength);
+
 /** One interpreter, memory and synchronous runner serve both API tables. */
 export class RereleaseGuestModule {
   readonly memory;
@@ -60,6 +70,8 @@ export class RereleaseGuestModule {
   readonly cgameImportAddress: GuestAddress;
   #game: GuestAddress | null = null;
   #cgame: GuestAddress | null = null;
+  readonly #commandRecords: GuestAddress[] = [];
+  #commandDepth = 0;
   #entityFields: { readonly base: GuestAddress; readonly stride: GuestAddress; readonly count: GuestAddress; readonly capacity: GuestAddress } | null = null;
   #entityTable: RawEntityTable | null = null;
   #movement: { readonly address: GuestAddress; readonly binding: NativeModEntryBinding } | null = null;
@@ -151,7 +163,8 @@ export class RereleaseGuestModule {
   init(): void { this.callGame("Init"); }
   prepFrame(): void { this.callGame("PrepFrame"); }
   runFrame(mainLoop: boolean): void { this.callGame("RunFrame", [guestBool(mainLoop)]); }
-  clientConnect(slot: number, userinfo: string, socialId: string, isBot: boolean): { readonly accepted: boolean; readonly userinfo: string } {
+  clientConnect(slot: number, requestedUserinfo: string, requestedSocialId: string, isBot: boolean): { readonly accepted: boolean; readonly userinfo: string } {
+    const userinfo = fitRereleaseText(requestedUserinfo, 2048), socialId = fitRereleaseText(requestedSocialId, 256);
     const infoBytes = new TextEncoder().encode(userinfo), socialBytes = new TextEncoder().encode(socialId);
     if (infoBytes.length >= 2048 || socialBytes.length >= 256 || userinfo.includes("\0") || socialId.includes("\0")) throw new RangeError("Rerelease client identity exceeds its source string limits");
     const info = this.memory.allocate({ byteLength: 2048, label: "Q2 mutable client userinfo" });
@@ -200,14 +213,18 @@ export class RereleaseGuestModule {
     this.#movement = { address, binding };
   }
   clientThink(slot: number, command: Q2RereleaseUserCommand, equipment?: EquipmentMovement): void {
-    const client = this.entities().atSlot(slot), address = this.memory.allocate({ byteLength: usercmdLayout.byteLength, alignment: 4n, label: "Q2 client command" });
+    const client = this.entities().atSlot(slot), depth = this.#commandDepth++;
+    // One command record per nesting depth is retained for the module's life instead of a mapping per command.
+    let address = this.#commandRecords[depth];
+    if (address === undefined) { address = this.memory.allocate({ byteLength: usercmdLayout.byteLength, alignment: 4n, label: "Q2 client command" }); this.#commandRecords[depth] = address; }
+    else this.memory.write(address, zeroCommand);
     if (equipment !== undefined) this.#equipment.push({ client, value: equipment, applied: false });
     try {
       if (equipment !== undefined || this.#inputMovement !== null) this.#bindMovement();
       writeRereleaseUserCommand(this.memory.borrow(address, usercmdLayout.byteLength), command); this.callGame("ClientThink", [guestPointer(client.address), guestPointer(address)], client);
     } finally {
       if (equipment !== undefined) this.#equipment.pop();
-      this.#releaseMovement(); this.memory.unmap(address, usercmdLayout.byteLength);
+      this.#releaseMovement(); this.#commandDepth--;
     }
   }
   clientDisconnect(slot: number): void { const client = this.entities().atSlot(slot); this.callGame("ClientDisconnect", [guestPointer(client.address)], client); }
@@ -247,10 +264,5 @@ export class RereleaseGuestModule {
     this.#entityTable = { module: memory.module, base, strideBytes, count, capacity, layout: edictLayout, atSlot,
       fromPointer: address => { memory.check(address, edictLayout.byteLength, "read"); const delta = address.byteOffset - base.byteOffset; if (delta < 0n || delta % stride !== 0n || delta / stride >= BigInt(capacity)) throw new RangeError("Pointer does not identify a Q2 edict"); return atSlot(Number(delta / stride)); } };
     return this.#entityTable;
-  }
-  /** Split index and server player number are independent ABI arguments. */
-  drawHud(split: number, serverData: GuestAddress, viewport: readonly [number, number, number, number], safeArea: readonly [number, number, number, number], scale: number, playerNumber: number, playerState: GuestAddress): void {
-    const rect = (values: readonly number[]): GuestCallValue => { const bytes = new Uint8Array(16), view = new DataView(bytes.buffer); values.forEach((value, index) => view.setInt32(index * 4, value, true)); return { kind: "aggregate", layout: rectangleLayout, bytes }; };
-    this.callCgame("DrawHUD", [guestInt(split), guestPointer(serverData), rect(viewport), rect(safeArea), guestInt(scale), guestInt(playerNumber), guestPointer(playerState)]);
   }
 }

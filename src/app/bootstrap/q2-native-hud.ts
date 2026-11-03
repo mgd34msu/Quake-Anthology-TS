@@ -1,13 +1,16 @@
 import type { ContentId, ResourceId } from "../../contracts/content.ts";
 import type { UiDrawCommand, UiDrawContext } from "../../contracts/ui.ts";
 import type { PictureAsset } from "../../text/draw2d.ts";
-import { q2NativeHudOperations, type NativeQ2HudFrame, type NativeQ2HudArsenal, type NativeQ2HudEnvironment, type NativeQ2HudOperation } from "../../ui/hud/q2-native.ts";
+import { q2NativeHudOperations, NativeQ2HudLayoutError, type NativeQ2HudFrame, type NativeQ2HudArsenal, type NativeQ2HudEnvironment, type NativeQ2HudOperation } from "../../ui/hud/q2-native.ts";
 import type { ApplicationAssets } from "./assets.ts";
 
 export interface NativeQ2HudRendering extends NativeQ2HudEnvironment { readonly font: ResourceId; readonly fontScale: number; }
 
 /** Uses mounted Q2 pictures and conchars with the normal seat-clipped UiDrawCommand renderer. */
+const MAXIMUM_PICTURES = 512;
+
 export class ApplicationQ2NativeHud {
+  private capReported = false;
   private readonly pictures = new Map<ResourceId, PictureAsset>();
   private readonly ids = new Map<string, ResourceId>();
   private content: ContentId | null = null;
@@ -15,7 +18,7 @@ export class ApplicationQ2NativeHud {
   private environment: NativeQ2HudRendering | undefined;
   private readonly table: import("../../ui/hud/q2-rerelease-layout.ts").NativeQ2HudTable = { rows: [], columns: [] };
   private preparedOperations: readonly NativeQ2HudOperation[] | null = null;
-  clear(): void { this.table.rows.length = 0; this.table.columns.length = 0; this.preparedOperations = null; this.environment = undefined; this.revision++; this.content = null; this.ids.clear(); this.pictures.clear(); }
+  clear(): void { this.table.rows.length = 0; this.table.columns.length = 0; this.preparedOperations = null; this.environment = undefined; this.revision++; this.content = null; this.ids.clear(); this.pictures.clear(); this.capReported = false; }
   picture(id: ResourceId): PictureAsset | undefined { return this.pictures.get(id); }
   async prepare(content: ContentId, assets: ApplicationAssets, frame: NativeQ2HudFrame, context: UiDrawContext, scale = 1,
     mode: "layout-overlay" | "replace-status" = "replace-status", assertCurrent: () => void = () => undefined, arsenal?: NativeQ2HudArsenal, environment?: NativeQ2HudRendering): Promise<void> {
@@ -25,13 +28,23 @@ export class ApplicationQ2NativeHud {
     const current = (): void => { assertCurrent(); if (revision !== this.revision) throw new Error("Native HUD media is retired"); };
     current();
     const area = context.binding.safeArea;
-    const ops = q2NativeHudOperations(frame, area.width / scale, area.height / scale, undefined, mode, arsenal, this.environment);
+    let ops: readonly NativeQ2HudOperation[];
+    try { ops = q2NativeHudOperations(frame, area.width / scale, area.height / scale, undefined, mode, arsenal, this.environment); }
+    catch (error) {
+      if (!(error instanceof NativeQ2HudLayoutError)) throw error;
+      assets.warnOnce("q2-native-hud-layout", `Native HUD layout skipped: ${error.message}\n`);
+      ops = [];
+    }
     this.preparedOperations = this.environment === undefined ? null : ops;
     const provider = await assets.provider(content);
     current();
     const numbers = ["num", "anum"].flatMap(prefix => [...Array.from({ length: 10 }, (_, digit) => `${prefix}_${digit}`), `${prefix}_minus`]);
     const names = new Set(["conchars", "field_3", ...numbers, ...ops.flatMap(op => op.kind === "picture" || op.kind === "sized-picture" ? [op.name] : [])]);
-    await Promise.all([...names].map(async name => {
+    // Layout names come from the game module; past the cap further pictures are left undrawn (once reported).
+    const room = Math.max(0, MAXIMUM_PICTURES - this.ids.size);
+    const wanted = [...names].filter(name => !this.ids.has(name));
+    if (wanted.length > room && !this.capReported) { this.capReported = true; assets.warnOnce("q2-native-hud-cap", `Native HUD layout names more than ${MAXIMUM_PICTURES} pictures; the rest are not drawn.\n`); }
+    await Promise.all(wanted.slice(0, room).map(async name => {
       if (this.ids.has(name)) return;
       const path = name.startsWith("/") || name.startsWith("\\") ? name.slice(1) : `pics/${name}.pcx`;
       let texture = await provider.textures.load(path, { family: "q2", mipmap: false, wrap: "clamp" });
@@ -46,7 +59,13 @@ export class ApplicationQ2NativeHud {
     mode: "layout-overlay" | "replace-status" = "replace-status", arsenal?: NativeQ2HudArsenal): readonly UiDrawCommand[] {
     const area = context.binding.safeArea, out: UiDrawCommand[] = [{ kind: "clip", rect: area }];
     const font = this.ids.get("conchars");
-    for (const op of this.preparedOperations ?? q2NativeHudOperations(frame, area.width / scale, area.height / scale, binding, mode, arsenal, this.environment)) {
+    let operations: readonly NativeQ2HudOperation[];
+    try { operations = this.preparedOperations ?? q2NativeHudOperations(frame, area.width / scale, area.height / scale, binding, mode, arsenal, this.environment); }
+    catch (error) {
+      if (!(error instanceof NativeQ2HudLayoutError)) throw error;
+      operations = [];
+    }
+    for (const op of operations) {
       if (op.kind === "fill") {
         out.push({ kind: "fill", rect: { x: area.x + op.x * scale, y: area.y + op.y * scale, width: op.width * scale, height: op.height * scale }, color: op.color });
       } else if (op.kind === "font-text") {

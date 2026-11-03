@@ -206,5 +206,7 @@ export const dot = dot3;
 export const length = length3;
 export function normalize(a: Vec3): Vec3 { const magnitude = length3(a); return magnitude === 0 ? ZERO : scale3(a, 1 / magnitude); }
 export function vectors(angles: Vec3): Q1Basis { return angleVectorsRule(angles, "q1"); }
+/** The time a monster at the end of its path stays put: pausetime = time + 999999 in single precision. */
+export function pathEndTime(time: number): number { return Math.fround(Math.fround(time) + 999999); }
 export function yawFor(direction: Vec3): number { const yaw = Math.atan2(direction.y, direction.x) * 180 / Math.PI; return yaw < 0 ? yaw + 360 : yaw; }
 export const overlaps = boundsOverlap;

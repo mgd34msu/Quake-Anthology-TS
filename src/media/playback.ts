@@ -1,6 +1,7 @@
 import { SaveReader } from "../persistence/value.ts";
 import { copyCinematicFrame, readCinematicFrame } from "./types.ts";
 import { CinPlayback } from "./cin-playback.ts";
+import { MAX_OGG_MOVIE_BYTES } from "./ogg.ts";
 import { OgvPlayback } from "./ogv-playback.ts";
 import { RoqPlayback } from "./roq-playback.ts";
 import { RoqDecoderScratch } from "./roq.ts";
@@ -89,8 +90,10 @@ export class CinematicPlayback {
     switch (source.format) {
       case "ogv": {
         const input = source.open();
-        try { this.movie = { kind: "ogv", playback: new OgvPlayback(readMedia(input, 0, input.byteLength), common, saved?.field("decoder").value) }; }
-        finally { input.close(); }
+        try {
+          if (input.byteLength > MAX_OGG_MOVIE_BYTES) throw new RangeError("Ogg movie exceeds 512 MiB");
+          this.movie = { kind: "ogv", playback: new OgvPlayback(readMedia(input, 0, input.byteLength), common, saved?.field("decoder").value) };
+        } finally { input.close(); }
         if (saved === null) { this.picture = this.movie.playback.currentFrame; this.dirty = true; }
         break;
       }
@@ -154,7 +157,8 @@ export class CinematicPlayback {
       if (tick.status === "held") { this.state = "held"; this.clock.pause(true); }
       else if (tick.status === "ended") { this.state = "ended"; this.finish("finished"); }
     }
-    return { status: this.state, frame: this.currentFrame, changed };
+    // The tick shares the retained picture; callers read it and copy only what they keep (currentFrame copies).
+    return { status: this.state, frame: this.picture, changed };
   }
 
   pause(paused: boolean): void {

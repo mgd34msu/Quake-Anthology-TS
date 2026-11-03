@@ -1,5 +1,6 @@
-import { expect, spyOn, test } from "bun:test";
-import { testCorpusRoot } from "../support/corpus.ts";
+import { writeCapture } from "../support/capture.ts";
+import { expect, spyOn } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../support/corpus.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +8,7 @@ import { FrontendPreferences, changedFrontendPreferences } from "../../src/app/b
 import { StartupApplication } from "../../src/app/bootstrap/startup.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { NativeUiController } from "../../src/ui/common/controller.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 import { encodePng } from "../../src/formats/images/png.ts";
 import { bindMouseMotionSettings } from "../../src/ui/settings/index.ts";
 import type { SettingBinding } from "../../src/ui/settings/index.ts";
@@ -16,6 +17,7 @@ import { defaultMouseTuning } from "../../src/input/mouse.ts";
 import { defaultGamepadTuning } from "../../src/input/gamepad.ts";
 import { ConfigStore } from "../../src/settings/config.ts";
 import { ApplicationInput } from "../../src/app/bootstrap/input.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q2/baseq2/pak0.pak");
 
 function control(bindings: readonly SettingBinding[], id: string): SettingBinding {
   const binding = bindings.find(binding => binding.id === `ui:input:${id}`);
@@ -56,7 +58,8 @@ test("saved mouse baseline reloads read-only beneath selected overrides", async 
     await one.saveSeat("input/seat-2.json", { ...profile, mouse: { ...profile.mouse, sensitivity: 14 } });
     await two.saveSeat("input/seat-1.json", { ...profile, mouse: { ...defaultMouseTuning, sensitivity: 9, acceleration: 1 } });
     const before = await one.loadText("input/seat-1.json"), beforeOther = await one.loadText("input/seat-2.json");
-    const preferences = new FrontendPreferences(() => "q1-netquake"), bindings = preferences.bindings();
+    // Startup always passes the shared settings store, so the baseline is exercised with one (no global tuning saved yet).
+    const preferences = new FrontendPreferences(() => "q1-netquake", new ConfigStore(join(root, "shared"))), bindings = preferences.bindings();
     const read = (id: string): number | boolean => { const binding = control(bindings, id); if (binding.kind !== "slider" && binding.kind !== "toggle") throw new Error("Expected mouse value"); return binding.read(); };
     await preferences.loadBaseline(one);
     expect(preferences.values).toEqual({}); expect(read("sensitivity")).toBe(7.5); expect(read("always-run")).toBe(true);
@@ -74,7 +77,7 @@ test("saved mouse baseline reloads read-only beneath selected overrides", async 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("startup reads selected product profiles, preserves other seats through play, and reloads on return", async () => {
+test("startup reads the first product profile, keeps the shared mouse tuning across product switches, preserves other seats through play, and reloads on return", async () => {
   const root = await mkdtemp(join(tmpdir(), "frontend-baseline-handoff-"));
   const q1 = new ConfigStore(join(root, "q1/id1")), q2 = new ConfigStore(join(root, "q2/baseq2"));
   const profile = { version: 1, bindings: [], gamepad: defaultGamepadTuning, mouse: { ...defaultMouseTuning,
@@ -107,12 +110,13 @@ test("startup reads selected product profiles, preserves other seats through pla
     expect(read("invert-mouse")).toBe(true); expect(read("filter")).toBe(true); expect(read("freelook")).toBe(false);
     focus("ui:settings:group:input:mouse"); key(KeyCode.Enter);
     focus("ui:input:acceleration"); key(KeyCode.Right); expect(startup.preferences.values.acceleration).toBe(0.8);
+    // Selecting Q2 does not apply the Q2 seat profile (sensitivity 9): persisted global tuning overlays every product baseline.
     startup.model.select("product", "q2-classic-baseq2"); await startup.step();
     expect(read("sensitivity")).toBe(7.5); expect(read("filter")).toBe(true); expect(read("acceleration")).toBe(0.8);
     startup.model.select("product", "q1-classic-id1"); await startup.step();
     expect(read("sensitivity")).toBe(7.5); expect(read("filter")).toBe(true);
     const capture = startup.captureNextFrame(); await startup.step();
-    await Bun.write("/tmp/frontend-mouse-baseline.png", encodePng(640, 480, await capture));
+    await writeCapture("frontend-mouse-baseline.png", encodePng(640, 480, await capture));
     key(KeyCode.Escape); key(KeyCode.Escape); key(KeyCode.Escape); focus("ui:startup:native"); key(KeyCode.Enter); focus("ui:startup:custom"); key(KeyCode.Enter); focus("ui:startup:play"); key(KeyCode.Enter);
     await startup.step();
     const result = prepared.mock.results.at(-1) ?? opened.mock.results.at(-1); if (result?.type !== "return") throw new Error(`Game did not open: ${prints.join("")}`);
@@ -171,11 +175,11 @@ for (const width of [320, 640]) test(`startup Controls at ${width} reaches share
     focus("ui:input:freelook"); key(KeyCode.Enter); expect(startup.preferences.values.freeLook).toBe(false);
     key(KeyCode.Escape); expect(controller.activeMenu).toBe("menu:settings:input:0");
     const first = startup.captureNextFrame(); await startup.step();
-    await Bun.write(`/tmp/frontend-mouse-${width}-controls.png`, encodePng(width, height, await first));
+    await writeCapture(`frontend-mouse-${width}-controls.png`, encodePng(width, height, await first));
     expect(controller.activeMenu).toBe("menu:settings:input:0");
     focus("ui:startup:gyro");
     const second = startup.captureNextFrame(); await startup.step();
-    await Bun.write(`/tmp/frontend-mouse-${width}-scrolled.png`, encodePng(width, height, await second));
+    await writeCapture(`frontend-mouse-${width}-scrolled.png`, encodePng(width, height, await second));
     key(KeyCode.Enter); expect(controller.activeMenu).toBe("menu:settings:gyro");
     key(KeyCode.Escape); expect(controller.activeMenu).toBe("menu:settings:input:0");
     focus("ui:settings:back"); key(KeyCode.Enter); expect(controller.activeMenu).toBe("menu:startup:options");

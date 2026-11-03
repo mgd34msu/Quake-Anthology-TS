@@ -105,7 +105,12 @@ export class ClientConsoleRuntime {
       const name = fold(argument(owned, 0));
       if (!this.handles(name)) return false;
       await this.dispatch(name, owned); this.open(); return true;
-    }).catch((error: unknown) => { this.dispose(); throw error; });
+    }).catch((error: unknown) => {
+      if (this.closed) throw error;
+      // A failed command is reported and the console stays usable; dispose is for lifecycle teardown only.
+      this.host.print(`Console command failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      return true;
+    });
     this.pending = next;
     return next;
   }

@@ -1,5 +1,6 @@
 // Quake II g_svcmds.c address masks and Quake III sv_main.c rcon. GPL-2.0-or-later.
 import { addressKey } from "../common/endpoint.ts";
+import { RconGuard, passwordMatches } from "../common/rcon-guard.ts";
 import type { Ipv4Address, NetworkAddress } from "../common/endpoint.ts";
 
 export interface Ipv4Filter { readonly mask: number; readonly compare: number; }
@@ -45,16 +46,33 @@ export class IpFilterList {
 
 export class FloodLimiter {
   private readonly entries = new Map<string, { tokens: number; time: number }>();
-  constructor(readonly burst: number, readonly intervalMilliseconds: number) {
-    if (burst <= 0 || intervalMilliseconds <= 0) throw new RangeError("Invalid flood limit");
+  constructor(readonly burst: number, readonly intervalMilliseconds: number, readonly maxEntries = 8192) {
+    if (burst <= 0 || intervalMilliseconds <= 0 || maxEntries < 1) throw new RangeError("Invalid flood limit");
   }
   allow(address: NetworkAddress, now: number): boolean {
-    const key = addressKey(address, false), old = this.entries.get(key);
+    const key = addressKey(address, false);
+    let old = this.entries.get(key);
+    if (old === undefined && this.entries.size >= this.maxEntries) {
+      this.expire(now);
+      if (this.entries.size >= this.maxEntries) return false;
+    }
+    old = this.entries.get(key);
     const tokens = old === undefined ? this.burst : Math.min(this.burst, old.tokens + Math.max(0, now - old.time) / this.intervalMilliseconds);
     this.entries.set(key, { tokens: tokens >= 1 ? tokens - 1 : tokens, time: now });
     return tokens >= 1;
   }
   expire(now: number): void { for (const [key, entry] of this.entries) if (now - entry.time > this.burst * this.intervalMilliseconds) this.entries.delete(key); }
+}
+
+/** Per-source and global budgets for unauthenticated replies, in the manner of ioquake3 SVC_RateLimit. */
+export class ConnectionlessGate {
+  private readonly perSource = new FloodLimiter(10, 200);
+  private readonly global = new FloodLimiter(400, 5, 1);
+  private static readonly everyone: NetworkAddress = { kind: "ipv4", host: [0, 0, 0, 0], port: 0 };
+  allow(address: NetworkAddress, now: number): boolean {
+    if (address.kind === "loopback") return true;
+    return this.perSource.allow(address, now) && this.global.allow(ConnectionlessGate.everyone, now);
+  }
 }
 
 /** Per-client source chat history; QW sv_user.c uses a ten-entry ring and realtime seconds. */
@@ -101,7 +119,8 @@ export function q3RconCommand(line: string): string {
 }
 export type RconResult = "throttled" | "disabled" | "denied" | "executed";
 export class RconService {
-  private lastTime = 0;
+  private readonly lastTimes = new Map<string, number>();
+  private readonly guard = new RconGuard();
   private tail: Promise<void> = Promise.resolve();
   constructor(readonly host: RconHost, readonly profile: "q3" | "unified" = "q3", readonly outputBytes = 1008) {
     if (!Number.isSafeInteger(outputBytes) || outputBytes < 5) throw new RangeError("Rcon output buffer must hold a complete character and terminator");
@@ -111,13 +130,16 @@ export class RconService {
     this.tail = operation.then(() => undefined, () => undefined); return operation;
   }
   private async run(from: NetworkAddress, suppliedPassword: string, command: string, milliseconds: number): Promise<RconResult> {
-    const time = this.profile === "q3" ? milliseconds >>> 0 : milliseconds;
-    const next = this.profile === "q3" ? (this.lastTime + 500) >>> 0 : this.lastTime + 500;
-    if (time < next) return "throttled";
-    this.lastTime = time;
+    const time = this.profile === "q3" ? milliseconds >>> 0 : milliseconds, source = addressKey(from, false), last = this.lastTimes.get(source) ?? 0;
+    const next = this.profile === "q3" ? (last + 500) >>> 0 : last + 500;
+    // The 500 ms slot is per source so that spoofed packets from other addresses cannot lock the administrator out.
+    if (this.lastTimes.has(source) && time < next || !this.guard.permitted(from, milliseconds)) return "throttled";
+    if (this.lastTimes.size >= 1024 && !this.lastTimes.has(source)) this.lastTimes.clear();
+    this.lastTimes.set(source, time);
     const password = this.host.password();
     if (password.length === 0) { this.host.reply(from, "No rconpassword set on the server.\n"); return "disabled"; }
-    if (password !== suppliedPassword) { this.host.reply(from, "Bad rconpassword.\n"); return "denied"; }
+    if (!passwordMatches(password, suppliedPassword)) { this.guard.failed(from, milliseconds); this.host.reply(from, "Bad rconpassword.\n"); return "denied"; }
+    this.guard.succeeded(from);
     let buffered = "";
     const flush = (): void => { if (buffered.length > 0) { this.host.reply(from, buffered); buffered = ""; } };
     const output = (text: string): void => {

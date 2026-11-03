@@ -152,6 +152,8 @@ export class MovementPlayer {
   flight = false;
   worldGravity = 800;
   buttons = 0;
+  /** Vertical move axis of the latest command; Q2 spectators read it as a chase-cycle jump press. */
+  upMove = 0;
   previousButtons = 0;
   lastSequence = -1;
   netQuakeCommand: Q1UserCommand | null = null;
@@ -388,7 +390,7 @@ export class MovementPlayer {
   private netQuakeOptions(): Q1MovementOptions {
     const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id), binding = this.host.netQuake;
     return { ...(sourcePunchAngles == null ? {} : { sourcePunchAngles }), viewHeight: this.viewHeight,
-      ...(binding === undefined ? {} : { jumpAuthority: binding.jumpAuthority }), hooks: {
+      ...(binding === undefined ? {} : { jumpAuthority: binding.jumpAuthority }), ...(binding?.jumpAuthority === "selected-movement" ? { sourceWaterDrag: true } : {}), hooks: {
         bodyShape: bounds => this.acceptBodyShape(bounds),
         ...(binding === undefined ? {} : { shape: () => {
           const body = this.host.bodies.read(this.actor.id);
@@ -523,6 +525,7 @@ export class MovementPlayer {
     this.state = this.readState();
     this.previousButtons = this.buttons;
     this.buttons = input.command.buttons;
+    this.upMove = "upMove" in input.command ? input.command.upMove : (input.command.buttons & (input.command.kind === "q2-rerelease" ? 8 : 2)) !== 0 ? 200 : 0;
     if (input.command.kind === "q1-netquake") this.viewAngles = input.command.viewAngles;
     else if (input.command.kind === "q1-quakeworld" || input.command.kind === "q2-rerelease") this.viewAngles = input.command.angles;
     else { const words = input.command.kind === "q2-classic" ? input.command.angleShorts : input.command.angleWords;
@@ -561,7 +564,8 @@ export class MovementPlayer {
     if (provider.kind === "q1-netquake" && profile.kind === "q1-netquake" && state.kind === "q1-netquake" && command.kind === "q1-netquake") {
       result = provider.move({ ...base, kind: "q1-netquake", profile, state, command }, this.services);
     } else if (provider.kind === "q1-quakeworld" && profile.kind === "q1-quakeworld" && state.kind === "q1-quakeworld" && command.kind === "q1-quakeworld") {
-      result = provider.move({ ...base, kind: "q1-quakeworld", profile, state, command }, this.services);
+      // SV_RunCmd copies the command's angles to pmove before the axes are built; a QuakeC host already wrote v_angle into the state.
+      result = provider.move({ ...base, kind: "q1-quakeworld", profile, state: this.host.quakeWorld === undefined ? { ...state, angles: command.angles } : state, command }, this.services);
     } else if (provider.kind === "q2-classic" && profile.kind === "q2-classic" && state.kind === "q2-classic" && command.kind === "q2-classic") {
       const move: Q2MovementInput = { ...base, kind: "q2-classic", profile, state, command };
       const moved = provider.move(move, this.services);

@@ -3,7 +3,7 @@ import type { ImageLevel, ImageResourceOperation, RenderImage, RendererImage, Re
 
 /** Session-owned images. Uploads and releases enter the same queue as their draws. */
 export class SceneImageRegistry {
-  private lifetime: { ordinal: number; operations: ImageResourceOperation[] } = { ordinal: 0, operations: [] };
+  private lifetime: { ordinal: number; operations: ImageResourceOperation[]; epoch: number } = { ordinal: 0, operations: [], epoch: 0 };
   private readonly children = new Set<SceneImageRegistry>();
   private parent: SceneImageRegistry | null = null;
   private readonly allocations = new Set<RendererImage>();
@@ -14,6 +14,10 @@ export class SceneImageRegistry {
   constructor(readonly owner: RendererResourceOwner, private readonly clock: MediaClock = { sample: () => performance.now() }) {}
 
   get isClosed(): boolean { return this.closed; }
+
+  /** Changes whenever the backend was replaced and image contents were rebuilt from the creation journal alone. */
+  get backendEpoch(): number { return this.lifetime.epoch; }
+  invalidateBackend(): void { this.lifetime.epoch++; }
 
   /** A separately releasable scope within this renderer's image namespace. */
   fork(clock: MediaClock = this.clock): SceneImageRegistry {

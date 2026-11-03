@@ -3,6 +3,7 @@ import { Q3ClientAdmissionDenied } from './q3/runtime.ts';
 import type { ClientId } from '../../../contracts/identity.ts';
 import { setInfoValue } from '../../../core/cvars/info.ts';
 import { CvarFlag } from '../../../core/cvars/index.ts';
+import { snapshotViewSource } from '../../../content/q3/team-arena/client-policy.ts';
 import { Q3ApplicationPackages } from '../network/q3-downloads.ts';
 import { q3InfoValue } from '../../../network/q3/admission.ts';
 import { Q3_PROTOCOL, toQ3UserCommand, fromQ3PlayerState } from '../../../network/q3/adapters.ts';
@@ -166,8 +167,8 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
         if (guest) return fromQ3PlayerState(source.records.player(player.sourceEntity), product);
         const entity = nativeSource().records.byActor(player.actor);
         if (entity?.client === null || entity?.client === undefined) throw new Error('Q3 snapshot player disappeared');
-        const ps = entity.client.ps, value = new PlayerStateRecord(product, ps.pmType, ps.weapon, ps.weaponState);
-        value.copyFrom({ ...ps, origin: ps.origin, velocity: ps.velocity, product: ps.product, events: slots(ps.events), eventParms: slots(ps.eventParms), stats: slots(ps.stats), persistant: slots(ps.persistant), powerups: slots(ps.powerups), ammo: slots(ps.ammo) });
+        const ps = entity.client.ps, view = snapshotViewSource(ps, number => nativeSource().pool.clientAt(number)), value = new PlayerStateRecord(product, ps.pmType, ps.weapon, ps.weaponState);
+        value.copyFrom({ ...ps, origin: view.origin, velocity: view.velocity, product: ps.product, events: slots(ps.events), eventParms: slots(ps.eventParms), stats: slots(view.stats), persistant: slots(ps.persistant), powerups: slots(ps.powerups), ammo: slots(view.ammo) });
         return value;
       })();
       const scene = simulation.scene;
@@ -175,8 +176,15 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
         entity: number => { const item = sharedEntity(number); return { state: wireEntity(number), linked: linked(number), flags: item.r.svFlags, singleClient: item.r.singleClient }; },
         link: number => { if (guest) return source.records.visibility(number);
           const item = nativeSource().pool.at(number), linked = simulation.bodies.linked(item.actor.id); if (linked === null) return undefined;
-          const leaves = scene.boxLeaves(linked.absoluteBounds, 128).leaves, areas = [...new Set(leaves.map(leaf => scene.leafArea(leaf)))], clusters = [...new Set(leaves.map(leaf => scene.leafCluster(leaf)).filter(cluster => cluster >= 0))];
-          return { areanum: areas[0] ?? -1, areanum2: areas[1] ?? -1, clusters, lastCluster: 0 }; },
+          const leaves = scene.boxLeaves(linked.absoluteBounds, 128).leaves, clusters = [...new Set(leaves.map(leaf => scene.leafCluster(leaf)).filter(cluster => cluster >= 0))];
+          let areanum = -1, areanum2 = -1;
+          for (const leaf of leaves) {
+            const area = scene.leafArea(leaf);
+            if (area === -1) continue;
+            if (areanum !== -1 && areanum !== area) areanum2 = area;
+            else areanum = area;
+          }
+          return { areanum, areanum2, clusters, lastCluster: 0 }; },
         collision: { pointLeafnum: point => scene.pointLeaf(point), leafArea: leaf => scene.leafArea(leaf), leafCluster: leaf => scene.leafCluster(leaf), areasConnected: (a, b) => cvars.variableValue("cm_noAreas") !== 0 || a >= 0 && b >= 0 && scene.areasConnected(a, b),
           writeAreaBits: (bytes, area) => { const bits = scene.areaBits(area); for (let index = 0; index < bits.length; index++) bytes[index] = (bytes[index] ?? 0) | (bits[index] ?? 0); return bits.length; },
           clusterPVS: cluster => ({ byteAt: index => { let value = 0; for (let bit = 0; bit < 8; bit++) if (scene.clusterVisible(cluster, index * 8 + bit, 'pvs')) value |= 1 << bit; return value; } }),

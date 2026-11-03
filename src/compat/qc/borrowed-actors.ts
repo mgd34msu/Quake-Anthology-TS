@@ -79,7 +79,7 @@ export class QcBorrowedActors {
       // behave exactly as they would on a native row.
       for (let current = word; current < word + words; current++) {
         const field = this.fieldsByWord.get(current);
-        if (field !== undefined && !privateFields.some(name => name === field))
+        if (field !== undefined && field !== "velocity" && !privateFields.some(name => name === field))
           throw new QcProgramError(`Original QC cannot mutate borrowed field ${field} outside its source owner`);
       }
       return;
@@ -90,6 +90,23 @@ export class QcBorrowedActors {
       if (field !== undefined && !requested.includes(field)) requested.push(field);
     }
     if (requested.length !== 0) this.refresh(borrowed, requested);
+  }
+  /** A QC write of a borrowed row's velocity (trigger_push, jump pads) lands on the canonical body. */
+  observeStore(store: { readonly reference: number; readonly word: number; readonly after: Uint8Array }): void {
+    const borrowed = this.bySlot.get(this.host.machine().entities.slot(store.reference));
+    if (borrowed === undefined || this.fieldsByWord.get(store.word) !== "velocity") return;
+    const body = this.host.bodies.read(borrowed.actor.id);
+    if (body === null) return;
+    const view = new DataView(store.after.buffer, store.after.byteOffset, store.after.byteLength);
+    const offset = this.fieldOffsets().get("velocity");
+    const first = offset === undefined ? store.word : offset, index = store.word - first;
+    const velocity = { x: body.velocity.x, y: body.velocity.y, z: body.velocity.z };
+    const axes = ["x", "y", "z"] as const;
+    for (let word = 0; word < store.after.byteLength / 4; word++) {
+      const axis = axes[index + word];
+      if (axis !== undefined) velocity[axis] = view.getFloat32(word * 4, true);
+    }
+    this.host.bodies.write(borrowed.actor, { ...body, velocity });
   }
   private fieldOffsets(): ReadonlyMap<ProjectionField, number> {
     if (this.offsets === null) {

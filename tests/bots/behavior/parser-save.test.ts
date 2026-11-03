@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { BotMemory } from "../../../src/bots/behavior/library/memory.ts";
 import { BotScriptSources } from "../../../src/bots/behavior/library/script-sources.ts";
-import { ScriptGlobalDefines } from "../../../src/ui/common/legacy/script/preprocessor.ts";
+import { ScriptGlobalDefines } from "../../../src/content/legacy-script/preprocessor.ts";
 import { decodeCheckpointValue, encodeCheckpointValue } from "../../../src/persistence/value.ts";
 
 const disk = (value: unknown): unknown => decodeCheckpointValue(encodeCheckpointValue(value));

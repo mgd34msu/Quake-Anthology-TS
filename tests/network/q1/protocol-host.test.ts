@@ -1,3 +1,4 @@
+import { writeCapture } from "../../support/capture.ts";
 import { expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -86,8 +87,8 @@ for (const version of [15, 666, 999]) test(`native Application protocol ${versio
     const fixtureBody=app.simulation.bodies.read(fixture.actor.id);if(fixtureBody===null)throw new Error('Missing fixture body');
     expect(Math.abs(update.state.origin.x-fixtureBody.origin.x)).toBeLessThan(version===999?0.063:0.126);
     const witness={version,baseline:baseline.state,update:{...update.state,frame:fixture.frame,origin:fixtureBody.origin,angles:fixtureBody.angles},payloads:payloads.map(value=>Array.from(value))};
-    await Bun.write(`/tmp/nq-protocol-${version}-witness.json`,JSON.stringify(witness));
-    await Bun.write(`/tmp/nq-protocol-${version}-witness.ts`,'export default '+JSON.stringify(witness)+';\n');
+    await writeCapture(`nq-protocol-${version}-witness.json`,JSON.stringify(witness));
+    await writeCapture(`nq-protocol-${version}-witness.ts`,'export default '+JSON.stringify(witness)+';\n');
     fixture.fields.set('alpha','-1');messages.length=0;await exchange();
     expect(messages.some(value=>value.kind==='entity'&&value.state.number===number)).toBe(version===15);
     const clientIdentity=player.client;await app.changeLevel('e1m2');
@@ -124,7 +125,7 @@ test('native RMQ host reaches normal hidden RemoteApplication visuals',async()=>
     const body=remote.remote.presentations().find(value=>!value.viewWeapon&&value.actor.equals(own.actor));
     expect(weapon?.alpha).toBeCloseTo((ENTALPHA_ENCODE(0.5)-1)/254,6);expect(body?.alpha).toBe(weapon?.alpha);expect(body?.scale).toBe(1.5);
     const capture=remote.captureNextFrame();await remote.step(1);const pixels=await capture;
-    expect(pixels.length).toBe(320*240*4);await Bun.write('/tmp/nq-rmq-remote-alpha.png',encodePng(320,240,pixels));
+    expect(pixels.length).toBe(320*240*4);await writeCapture('nq-rmq-remote-alpha.png',encodePng(320,240,pixels));
     expect(remote.networkPhase).toBe('active');expect(server.networkClients).toHaveLength(1);
   } finally {try {await remote?.close();await opened?.close();} finally {await rm(users,{recursive:true,force:true});}}
 },45000);

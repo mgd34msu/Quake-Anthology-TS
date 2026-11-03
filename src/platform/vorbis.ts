@@ -40,6 +40,9 @@ export interface VorbisPcmChunk {
   readonly channels: 1 | 2;
 }
 
+const OV_HOLE = -3;
+const MAXIMUM_HOLES = 1024;
+
 export class VorbisError extends Error {
   constructor(readonly operation: string, readonly code: number) {
     super(`${operation} failed with Vorbis error ${code}`);
@@ -121,11 +124,13 @@ export class VorbisDecoder {
     const { channels, sampleRate } = this.metadata;
     const samples = new Int16Array(maxFrames * channels);
     const bitstream = new Int32Array(1);
-    let sampleCount = 0;
+    let sampleCount = 0, holes = 0;
     while (sampleCount < samples.length) {
       const output = samples.subarray(sampleCount);
       const count = Number(vorbis().ov_read(storage, output, output.byteLength,
         endianness() === "BE" ? 1 : 0, 2, 1, bitstream));
+      // OV_HOLE is a recoverable gap in the data; libvorbisfile resumes at the next page.
+      if (count === OV_HOLE && ++holes <= MAXIMUM_HOLES) continue;
       if (count < 0) throw new VorbisError("ov_read", count);
       if (count === 0) break;
       if (count > output.byteLength || count % (channels * 2) !== 0)

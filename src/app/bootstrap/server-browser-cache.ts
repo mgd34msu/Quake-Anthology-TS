@@ -94,7 +94,11 @@ export function writeQ3BrowserCache(entries: readonly BrowserEntry[], view: Q3Br
   const serialized = JSON.stringify({ version: 1, protocol: "q3", entries: entries.flatMap(entry => {
     const sources = entry.sources.filter(source => source === "master" || source === "secondary-master" || source === "favorite");
     if (sources.length === 0) return [];
-    return [{ ...entry, sources, status: entry.status === null ? null : { ...entry.status, wire: undefined, protocol: 68, rules: [...entry.status.rules] } }];
+    const cached = entry.status === null ? null : { ...entry.status, wire: undefined, protocol: 68, rules: [...entry.status.rules] };
+    // A status the loader would refuse is dropped, so one odd server cannot stop the whole cache from saving.
+    let storable = cached;
+    if (cached !== null) { try { status(JSON.parse(JSON.stringify(cached))); } catch { storable = null; } }
+    return [{ ...entry, sources, status: storable }];
   }), view });
   readQ3BrowserCache(serialized);
   return serialized;

@@ -7,7 +7,7 @@ import { fireBullets } from "../../../foundation/weapons.ts";
 import { POINT, normalize, vscale, vsub } from "../../../foundation/types.ts";
 
 export const armySpecies: MonsterSpecies = { species: "army", classnames: ["monster_army"], model: "soldier", head: "h_guard", health: 30, gibHealth: -35, gibs: ["gib1", "gib2", "gib3"],
-  bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 40 } }, stand: "army_stand1", walk: "army_walk1", run: "army_run1", sight: "soldier/sight1.wav", missile: "army_atk1", melee: false, movement: "walk" };
+  bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, stand: "army_stand1", walk: "army_walk1", run: "army_run1", sight: "soldier/sight1.wav", missile: "army_atk1", melee: false, movement: "walk" };
 export const armyActions: ReadonlyMap<string, (monster: BaseMonster) => undefined> = new Map([
   ["army_fire", monster => {
     const { game, entity } = monster, target = monster.enemy === null ? null : game.host.bodies.read(monster.enemy); if (target === null) return undefined;

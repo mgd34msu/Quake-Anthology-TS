@@ -11,7 +11,7 @@ export const classicQ1Messages: ReadonlyMap<string, string> = new Map([
   ['$qc_already_have_rune', 'You already have a rune\n'],
   ['$qc_rune_resistance', 'Earth Magic\n\nRESISTANCE'], ['$qc_rune_strength', 'Black Magic\n\nSTRENGTH'],
   ['$qc_rune_haste', 'Hell Magic\n\nHASTE'], ['$qc_rune_regeneration', 'Edler Magic\n\nRegeneration'],
-  ['$qc_color_games', "You were told you can't change teams.\nGo play color games somewhere else.\n"], ['$qc_cannot_change_teams', 'You cannot change teams.\n'],
+  ['$qc_color_games', "You were told you can't change teams.\nGo play color games somewhere else.\n"], ['$qc_cannot_change_teams', 'You cannot change teams.\n'], ['$qc_suicided_too_much', 'You have suicided too much already.\n'], ['$qc_out_lava_nails', 'Out of Lava Nails\n'],
   ['$qc_ctf_disabled', 'Capture the Flag is not enabled.\n'], ['$qc_flag_missing', 'The flag is missing!\n'],
   ['$qc_flag_at_base', 'The flag is at base!\n'], ['$qc_flag_lying_about', 'The flag is lying about!\n'], ['$qc_you_have_flag', 'You have the flag!\n'],
   ['$qc_flag_screwed_up', 'The flag is screwed up!\n'], ['$qc_you_have_enemy_flag', 'You have the enemy flag.\n'],
@@ -21,6 +21,12 @@ export const classicQ1Messages: ReadonlyMap<string, string> = new Map([
   ['$qc_enemy_killed_bonus', 'Enemy flag carrier killed: {0} bonus frags\n'], ['$qc_enemy_killed_no_bonus', 'Enemy flag carrier killed, no bonus\n'],
   ['$qc_has_token', '{0} has the tag token!\n'], ['$qc_lost_token', '{0} lost the tag token!\n'], ['$qc_got_token', '{0} got the tag token!\n'],
   ['$qc_got_quad', 'You got the Quad Damage\n'],
+  ['$qc_item_health', 'You receive {0} health\n'], ['$qc_item_armor', 'You got armor\n'], ['$qc_got_item', 'You got {0}\n'],
+  ['$qc_double_shotgun', 'the Double-barrelled Shotgun'], ['$qc_nailgun', 'the nailgun'], ['$qc_super_nailgun', 'the Super Nailgun'], ['$qc_grenade_launcher', 'the Grenade Launcher'],
+  ['$qc_rocket_launcher', 'the Rocket Launcher'], ['$qc_thunderbolt', 'the Thunderbolt'], ['$qc_shells', 'the shells'], ['$qc_nails', 'the nails'], ['$qc_rockets', 'the rockets'], ['$qc_cells', 'the cells'],
+  ...['silver', 'gold'].flatMap(color => ['key', 'runekey', 'keycard'].map(kind => [`$qc_${color}_${kind}`, `the ${color} ${kind}`] satisfies [string, string])),
+  ['$qc_ring_fade', 'Ring of Shadows magic is fading\n'], ['$qc_protection_fade', 'Protection is almost burned out\n'], ['$qc_quad_fade', 'Quad Damage is wearing off\n'], ['$qc_biosuit_fade', 'Air supply in Biosuit expiring\n'],
+  ['$qc_pentagram_of_protection', 'the Pentagram of Protection'], ['$qc_ring_of_shadows', 'the Ring of Shadows'], ['$qc_biosuit', 'the Biosuit'], ['$qc_quad_damage', 'the Quad Damage'],
 ]);
 
 export function classicQ1Text(text: string, args: readonly (string | number)[] = []): string {

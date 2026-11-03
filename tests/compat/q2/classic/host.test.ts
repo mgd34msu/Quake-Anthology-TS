@@ -1,5 +1,5 @@
 import { dirname } from "node:path";
-import { testCorpusRoot } from "../../../support/corpus.ts";
+import { corpusFile } from "../../../support/corpus.ts";
 
 import { openMountPlan } from "../../../../src/content/mounts/index.ts";
 import { createMountIdentity } from "../../../../src/contracts/content.ts";
@@ -25,8 +25,9 @@ import { ClassicQ2GuestHost, CLASSIC_Q2_EXPORTS, CLASSIC_Q2_TRACE_LAYOUT, classi
 
 function unavailable(): never { throw new Error("This startup check does not provide a loaded collision world, clients, or network transport"); }
 function savedFiles() {
-  const files = new Map<string, Uint8Array>();
+  const files = new Map<string, Uint8Array>(), readPaths: string[] = [];
   const capabilities: WindowsCapabilities = { openFile: (path, options) => {
+    if (!options.write) readPaths.push(path);
     if (options.creation === 2) files.set(path, new Uint8Array());
     if (!files.has(path)) return null;
     let closed = false;
@@ -35,7 +36,7 @@ function savedFiles() {
       write: (offset, data) => { if (!options.write) throw new Error("Read-only save handle"); const previous = bytes(), next = new Uint8Array(Math.max(previous.length, offset + data.length)); next.set(previous); next.set(data, offset); files.set(path, next); return data.length; },
       size: () => bytes().length, truncate: length => { const next = new Uint8Array(length); next.set(bytes().subarray(0, length)); files.set(path, next); }, flush: () => { bytes(); }, close: () => { closed = true; } };
   } };
-  return { files, capabilities };
+  return { files, readPaths, capabilities };
 }
 function services() {
   const actors = new SessionActorRegistry(createIdentityOwner("classic-native-check")), callbacks = new ActorCallbackTable(actors);
@@ -57,7 +58,7 @@ function services() {
   };
   return { hostServices, prints, configuration, resources };
 }
-const retailPath = `${testCorpusRoot()}/q2/ctf/gamex86.dll`;
+const retailPath = corpusFile("q2/ctf/gamex86.dll");
 test.skipIf(!existsSync(retailPath))("actual CTF DLL runs attach, Init, SpawnEntities, RunFrame, source save IO and Shutdown", async () => {
   const bytes = await readFile(retailPath), hash = createHash("sha256").update(bytes).digest("hex");
   const module: ModuleIdentity = { id: "fixture:classic-ctf", artifactPath: retailPath, revision: hash, digest: createContentDigest(hash) };
@@ -98,7 +99,9 @@ test.skipIf(!existsSync(retailPath))("actual CTF DLL runs attach, Init, SpawnEnt
     expect(saves.files.get("save/game.sav")?.length).toBeGreaterThan(1000);
     host.save("WriteLevel", "save/level.sav");
     expect(saves.files.get("save/level.sav")?.length).toBeGreaterThan(1000);
+    saves.readPaths.length = 0;
     host.save("ReadGame", "save/game.sav");
+    expect(saves.readPaths).toContain("save/game.sav");
     expect(host.edicts.descriptor().capacity).toBe(1024);
     host.shutdown();
     expect(fixture.hostServices.engine.actors.ownedBy("q2:ctf-native")).toHaveLength(0);
@@ -108,13 +111,16 @@ test.skipIf(!existsSync(retailPath))("actual CTF DLL runs attach, Init, SpawnEnt
   }
 });
 
-test("API 3 printf uses promoted typed variadic arguments and rejects unsupported formats", () => {
+test("API 3 printf uses promoted typed variadic arguments and prints unsupported formats literally", () => {
   const module: ModuleIdentity = { id: "fixture:printf", artifactPath: "authored", revision: "1", digest: createContentDigest("33".repeat(32)) };
   const memory = new SparseGuestMemory({ module, pointerBytes: 4 });
   expect(classicPrintfLayouts("%s %*.*f %i %%").length).toBe(5);
   expect(classicPrintf(memory, "%04i %+.2f %%", [{ kind: "int32", value: -3 }, { kind: "float64", value: 1.5 }])).toBe("-003 +1.50 %");
   expect(classicPrintf(memory, "%#08x %.0i %f", [{ kind: "int32", value: 42 }, { kind: "int32", value: 0 }, { kind: "float64", value: -0 }])).toBe("0x00002a  -0.000000");
-  expect(() => classicPrintfLayouts("%I64d")).toThrow("Unsupported API 3 printf");
+  expect(classicPrintfLayouts("%I64d %lld %hd")).toEqual([{ kind: "scalar", storage: "int64" }, { kind: "scalar", storage: "int64" }, q2Int]);
+  expect(classicPrintfLayouts("100%! %n 50%")).toEqual([]);
+  expect(classicPrintf(memory, "100%! %n 50%", [])).toBe("100%! %n 50%");
+  expect(classicPrintf(memory, "%I64d %hd %hhu", [{ kind: "int64", value: -5000000000n }, { kind: "int32", value: 65537 }, { kind: "int32", value: 257 }])).toBe("-5000000000 1 1");
 });
 
 test("Pmove reenters source trace and contents callbacks synchronously on the same processor", () => {

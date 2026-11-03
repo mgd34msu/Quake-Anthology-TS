@@ -5,11 +5,14 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { Q1Actor } from "./entity.ts";
 import { moveDirection } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
-import { ZERO, vadd, vsub, vscale, dot, yawFor } from "./types.ts";
+import { ZERO, vadd, vsub, vscale, dot, yawFor, pathEndTime } from "./types.ts";
+import type { Q1PlayerState } from "./types.ts";
 import { precacheQ1World } from "./precache-world.ts";
 import { spawnPickup } from "./pickups.ts";
 import { spawnButton, spawnDoor, spawnPlat, spawnSecretDoor } from "./movers.ts";
-import { pathEndTime, spawnMonster } from "./monsters.ts";
+
+/** push_touch's per-player fly_sound limiter; it only rate-limits a sound, so it is not saved. */
+const windFlySound = new WeakMap<Q1PlayerState, number>();
 export { linkDoors } from "./movers.ts";
 
 /** An authored classname with no Q1 spawn implementation. Foreign-world
@@ -93,6 +96,7 @@ export function spawnMapActor(game: Q1EntityServices, entity: Q1Actor): undefine
   switch (entity.classname) {
     case "worldspawn": {
       game.world = entity; game.worldType = entity.number("worldtype"); entity.solid = "bsp"; if (game.usesId1Precaches) precacheQ1World(game);
+      for (const precache of game.worldPrecaches) precache();
       const styles = ["m", "mmnmmommommnonmmonqnmmo", "abcdefghijklmnopqrstuvwxyzyxwvutsrqponmlkjihgfedcba", "mmmmmaaaaammmmmaaaaaabcdefgabcdefg", "mamamamamama", "jklmnopqrstuvwxyzyxwvutsrqponmlkj", "nmonqnmomnmomomno", "mmmaaaabcdefgmmmmaaaammmaamm", "mmmaaammmaaammmabcdefaaaammmmabcdefmmmaaaa", "aaaaaaaazzzzzzzz", "mmamammmmammamamaaamammma", "abcdefghijklmnopqrrqponmlkjihgfedcba"];
       for (const [style, pattern] of styles.entries()) game.host.emit({ kind: "lightstyle", style, pattern }); return undefined;
     }
@@ -171,7 +175,6 @@ export function spawnMapActor(game: Q1EntityServices, entity: Q1Actor): undefine
     case "light": case "light_fluoro": case "light_fluorospark": return spawnLight(game, entity);
     case "ambient_comp_hum": case "ambient_drone": if (game.usesId1Precaches) game.precacheSound(entity.classname === "ambient_comp_hum" ? "ambience/comp1.wav" : "ambience/drone6.wav"); game.host.emit({ kind: "ambient", origin: game.body(entity).origin, path: entity.classname === "ambient_comp_hum" ? "ambience/comp1.wav" : "ambience/drone6.wav", volume: entity.classname === "ambient_comp_hum" ? 1 : 0.5, attenuation: 3 }); return undefined;
     case "misc_explobox": case "misc_explobox2": return spawnBarrel(game, entity);
-    case "monster_army": case "monster_dog": return spawnMonster(game, entity);
     default: throw new UnknownQ1SpawnError(entity.classname, entity.sourceOrdinal);
   }
 }
@@ -190,6 +193,7 @@ function multiFire(game: Q1EntityServices, entity: Q1Actor, activator: ActorId |
     if (sound !== "") game.sound(entity, sound);
     game.useTargets(entity, activator);
     if (!game.live(entity)) return undefined;
+    if (game.options.edition === "rerelease" && game.isPlayer(activator) && game.mapName === "e2m3" && entity.message === "$map_dopefish" && activator !== null) game.host.emit({ kind: "achievement", player: activator, id: "ACH_FIND_DOPEFISH" });
     if (entity.wait > 0) return game.schedule(entity, entity.wait, game.named.action(entity, "multi_wait"));
     entity.touch = null; return game.schedule(entity, 0.1, game.named.action(entity, "SUB_Remove"));
 }
@@ -202,12 +206,13 @@ function counterUse(game: Q1EntityServices, entity: Q1Actor, _other: ActorId | n
 }
 
 function teleportTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
-    if (entity.targetname !== "" && entity.nextThink < game.time) return undefined;
+    if (entity.targetname !== "" && entity.nextThink < game.time && !entity.fields.has("teleport.ignoreTargetname")) return undefined;
     const player = game.isPlayer(other); if ((entity.spawnflags & 1) !== 0 && !player) return undefined;
     if (game.health(other) <= 0 || !player && !game.sourceTarget(other).slidebox) return undefined;
     const target = game.find(entity.target)[0]; if (target === undefined) throw new Error("could not find teleport target");
     const owner = game.host.actors.resolveOwned(other), body = game.host.bodies.read(other); if (owner === null || body === null) return undefined;
     game.useTargets(entity, other); spawnTeleportFog(game, body.origin);
+    if (player && !game.options.coop && game.options.deathmatch === 0) game.sourceFogPush?.(other, target);
     const destination = game.body(target).origin, forward = game.makeVectors(target.mangle).forward;
     spawnTeleportFog(game, vadd(destination, vscale(forward, 32)));
     spawnTeledeath(game, destination, other);
@@ -229,8 +234,8 @@ function changelevelTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorI
         entity.activator = other; return game.schedule(entity, 0.1, game.named.action(entity, "execute_changelevel"));
 }
 
-function nextPathTarget(game: Q1EntityServices, corner: Q1Actor): { readonly name: string; readonly target: Q1Actor | null; readonly pauseUntil: number } {
-  const target = game.find(corner.target)[0] ?? null;
+function nextPathTarget(game: Q1EntityServices, corner: Q1Actor): { readonly name: string; readonly target: ActorId | null; readonly pauseUntil: number } {
+  const target = game.pathGoal(corner.target);
   return { name: target === null ? "" : corner.target, target, pauseUntil: target === null ? pathEndTime(game.time) : 0 };
 }
 
@@ -241,13 +246,13 @@ function pathTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): und
         if (follower != null) {
           if (follower.targetname !== entity.targetname || follower.enemy !== null) return undefined;
           const next = nextPathTarget(game, entity);
-          return follower.advance(next.name, next.target?.actor.id ?? null, next.pauseUntil);
+          return follower.advance(next.name, next.target, next.pauseUntil);
         }
         if (actor === null || actor === undefined || monster === null || monster === undefined || monster.path !== entity.targetname || monster.enemy !== null) return undefined;
         const next = nextPathTarget(game, entity);
         monster.path = next.name;
         if (next.target === null) { monster.pauseUntil = next.pauseUntil; actor.pathEnd?.(); }
-        else actor.idealYaw = yawFor(vsub(game.body(next.target).origin, game.body(actor).origin));
+        else actor.idealYaw = yawFor(vsub(game.host.bodies.read(next.target)?.origin ?? ZERO, game.body(actor).origin));
         return undefined;
 }
 function activateCoopSpawns(game: Q1EntityServices, entity: Q1Actor, activator: ActorId | null): undefined {
@@ -367,9 +372,12 @@ export function registerSpawnCallbacks(game: Q1EntityServices): undefined {
   } });
   game.named.register("hurt_on", { action: (runtime, entity) => { entity.solid = "trigger"; return runtime.link(entity); } });
   game.named.register("push_touch", { touch: (runtime, entity, other) => {
-    if (runtime.health(other) <= 0 && runtime.entity(other)?.classname !== "grenade") return undefined;
-    const actor = runtime.host.actors.resolveOwned(other), body = runtime.host.bodies.read(other); if (actor === null || body === null) return undefined;
-    runtime.host.bodies.write(actor, { ...body, velocity: vscale(entity.movedir, entity.speed * 10) });
+    const actor = runtime.host.actors.resolveOwned(other), body = runtime.host.bodies.read(other);
+    if (actor !== null && body !== null && (runtime.health(other) > 0 || runtime.entity(other)?.classname === "grenade")) {
+      runtime.host.bodies.write(actor, { ...body, velocity: vscale(entity.movedir, entity.speed * 10) });
+      const player = runtime.player(other);
+      if (player !== null && (windFlySound.get(player) ?? 0) < runtime.time) { windFlySound.set(player, runtime.time + 1.5); runtime.sound(actor, "ambience/windfly.wav"); }
+    }
     if ((entity.spawnflags & 1) !== 0) runtime.remove(entity); return undefined;
   } });
   game.named.register("movetarget_touch", { touch: pathTouch });

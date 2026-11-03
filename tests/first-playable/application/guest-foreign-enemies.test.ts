@@ -1,7 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { afterEach, expect } from "bun:test";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
@@ -12,7 +11,11 @@ import { q2MonsterSources } from "../../../src/content/monsters/q2.ts";
 import { readSelectedMonstersCheckpoint, type SelectedMonstersCheckpoint } from "../../../src/app/bootstrap/simulation/monster-checkpoint.ts";
 import { simulationProviderCheckpoint } from "../../../src/app/bootstrap/simulation/save.ts";
 import { decodeCheckpointValue, SaveReader } from "../../../src/persistence/value.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { testCorpusRoot, corpusTest, corpusDescribe } from "../../support/corpus.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q2/baseq2/pak0.pak", "q3a/baseq3/pak0.pk3");
+const describe = corpusDescribe("q1/id1/pak0.pak", "q2/baseq2/pak0.pak", "q3a/baseq3/pak0.pk3");
+const tempDirectory = trackedTempDirectories();
 
 // Selected TS enemies on guest-program worlds (native DLL lanes are covered
 // by q2-native-foreign-enemies.test.ts). Guests address trace hits by their
@@ -43,7 +46,7 @@ function selectedData(app: Application): SelectedMonstersCheckpoint {
 describe("selected enemies on guest worlds", () => {
   test("QuakeC guest world fights selected Q2 soldiers and survives save/load", async () => {
     const corpus = testCorpusRoot();
-    directory = await mkdtemp(join(tmpdir(), "guest-foreign-qc-"));
+    directory = await tempDirectory("guest-foreign-qc-");
     const parsed = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--progs", "progs.dat",
       "--map", "e1m1", "--movement", "q1", "--character", "q1", "--mode", "singleplayer", "--dedicated", "--user-content-root", directory]);
     if (parsed.kind !== "run") throw new Error("Missing QuakeC launch options");
@@ -87,17 +90,103 @@ describe("selected enemies on guest worlds", () => {
     expect(health).toBeLessThan(10000);
 
     const save = join(directory, "saves", "qc.sav");
+    const foreignPaths = (value: Application): string[] => value.simulation.presentations().filter(entry => entry.family === "q2").map(entry => entry.path).sort();
+    const pathsBefore = foreignPaths(application);
     await application.saveGame(save);
     await application.loadGame(save);
     expect(application.simulation.quakecSource()).not.toBeNull();
     expect(selectedData(application).authored).toHaveLength(data.authored.length);
-    expect(application.simulation.presentations().filter(entry => entry.family === "q2").length).toBeGreaterThanOrEqual(5);
+    expect(foreignPaths(application)).toEqual(pathsBefore);
     for (let step = 0; step < 10; step++) await application.step(50);
+  }, 300_000);
+
+  // GAPCOMPAT-001: original QC attack, projectile and trigger code must be able to reach borrowed foreign rows.
+  test("QuakeC guest world lets the player damage a selected foreign enemy with the axe and shotgun", async () => {
+    const corpus = testCorpusRoot();
+    directory = await tempDirectory("guest-foreign-qc-attack-");
+    const parsed = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--progs", "progs.dat",
+      "--map", "e1m1", "--movement", "q1", "--character", "q1", "--mode", "singleplayer", "--dedicated", "--user-content-root", directory]);
+    if (parsed.kind !== "run") throw new Error("Missing QuakeC launch options");
+    const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+    const q2Source = q2MonsterSources.find(source => source.edition === "classic");
+    if (q2Source === undefined) throw new Error("Missing Q2 classic monster source");
+    application = await Application.open(parsed.options, { saveDirectory: join(directory, "saves"), print: () => undefined },
+      await recipe(catalog, parsed.options, q2Source.provider, "q2-classic-baseq2", "monster_soldier"));
+    const simulation = application.simulation, game = simulation.quakecSource();
+    if (game === null) throw new Error("Missing QuakeC source");
+    await application.step(25);
+    const client = application.session.createClient(0);
+    const admission = simulation.admitPlayer(client.id);
+    const player = simulation.actors.resolveOwned(admission.actor);
+    if (player === null) throw new Error("Admitted player missing");
+    await application.step(25);
+    const entry = selectedData(application).authored[0];
+    const soldier = entry === undefined ? null : simulation.actors.resolveSaved(entry.actor);
+    const playerSlot = game.sourceSlot(player.id);
+    if (soldier === null || playerSlot === null) throw new Error("Missing soldier or player slot");
+    const machine = game.machine;
+    const fire = async (name: "W_FireAxe" | "W_FireShotgun"): Promise<number> => {
+      const soldierBody = simulation.bodies.read(soldier.id), playerBody = simulation.bodies.read(player.id);
+      if (soldierBody === null || playerBody === null) throw new Error("Missing bodies");
+      simulation.combat.setHealth(soldier, 100);
+      const origin = { x: soldierBody.origin.x - 40, y: soldierBody.origin.y, z: soldierBody.origin.z };
+      simulation.bodies.write(player, { ...playerBody, origin }); simulation.bodies.link(player);
+      const row = game.entities.at(playerSlot), field = (value: string): number => machine.fieldOffset(value);
+      row.setVector(field("origin"), origin); row.setVector(field("v_angle"), { x: 0, y: 0, z: 0 });
+      const globals = machine.globals, self = globals.int(machine.globalOffset("self"));
+      try {
+        globals.setInt(machine.globalOffset("self"), game.entities.reference(playerSlot));
+        row.setFloat(field("ammo_shells"), 25); row.setFloat(field("currentammo"), 25);
+        machine.execute(machine.program.functionNamed(name).index);
+      } finally { globals.setInt(machine.globalOffset("self"), self); }
+      return simulation.combat.read(soldier.id)?.health ?? 0;
+    };
+    expect(await fire("W_FireAxe")).toBeLessThan(100);
+    expect(await fire("W_FireShotgun")).toBeLessThan(100);
+  }, 300_000);
+
+  // GAPCOMPAT-001: the rocket explosion function of the original program reaches a borrowed foreign row.
+  test("QuakeC guest world reaches a selected foreign enemy through the T_RadiusDamage explosion path", async () => {
+    const corpus = testCorpusRoot();
+    directory = await tempDirectory("guest-foreign-qc-triggers-");
+    const parsed = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--progs", "progs.dat",
+      "--map", "e1m1", "--movement", "q1", "--character", "q1", "--mode", "singleplayer", "--dedicated", "--user-content-root", directory]);
+    if (parsed.kind !== "run") throw new Error("Missing QuakeC launch options");
+    const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+    const q2Source = q2MonsterSources.find(source => source.edition === "classic");
+    if (q2Source === undefined) throw new Error("Missing Q2 classic monster source");
+    application = await Application.open(parsed.options, { saveDirectory: join(directory, "saves"), print: () => undefined },
+      await recipe(catalog, parsed.options, q2Source.provider, "q2-classic-baseq2", "monster_soldier"));
+    const simulation = application.simulation, game = simulation.quakecSource();
+    if (game === null) throw new Error("Missing QuakeC source");
+    await application.step(25);
+    const admission = simulation.admitPlayer(application.session.createClient(0).id);
+    const player = simulation.actors.resolveOwned(admission.actor);
+    if (player === null) throw new Error("Admitted player missing");
+    await application.step(25);
+    const entry = selectedData(application).authored[0];
+    const soldier = entry === undefined ? null : simulation.actors.resolveSaved(entry.actor);
+    const playerSlot = game.sourceSlot(player.id);
+    if (soldier === null || playerSlot === null) throw new Error("Missing soldier or player slot");
+    const machine = game.machine, playerReference = game.entities.reference(playerSlot);
+    const soldierBody = simulation.bodies.read(soldier.id), playerBody = simulation.bodies.read(player.id);
+    if (soldierBody === null || playerBody === null) throw new Error("Missing bodies");
+    const origin = { x: soldierBody.origin.x - 40, y: soldierBody.origin.y, z: soldierBody.origin.z };
+    simulation.bodies.write(player, { ...playerBody, origin }); simulation.bodies.link(player);
+    machine.setEntityVector(playerReference, "origin", origin);
+    // T_RadiusDamage(inflictor, attacker, damage, ignore) takes entity parameters as integer words.
+    simulation.combat.setHealth(soldier, 100);
+    const globals = machine.globals;
+    globals.setInt(4, playerReference); globals.setInt(7, playerReference); globals.setFloat(10, 120); globals.setInt(13, 0);
+    machine.execute(machine.program.functionNamed("T_RadiusDamage").index, 4);
+    expect(simulation.combat.read(soldier.id)?.health ?? 0).toBeLessThan(100);
+    // hurt_touch is not called here: the damage layer accepts it only inside a real touch callback.
+    // trigger_push_touch left no velocity in the borrowed row when called directly, so trigger_push has no test.
   }, 300_000);
 
   test("QVM guest world admits selected Q1 grunts as thinking adjuncts", async () => {
     const corpus = testCorpusRoot();
-    directory = await mkdtemp(join(tmpdir(), "guest-foreign-qvm-"));
+    directory = await tempDirectory("guest-foreign-qvm-");
     const parsed = parseApplicationCommand(["--content-root", corpus, "--game", "q3-classic-lrctf", "--map-game", "q2-classic-baseq2",
       "--map", "base1", "--movement", "q3", "--character", "q3", "--mode", "deathmatch", "--dedicated", "--user-content-root", directory]);
     if (parsed.kind !== "run") throw new Error("Missing QVM launch options");
@@ -126,7 +215,7 @@ describe("selected enemies on guest worlds", () => {
 
   test("TS Q3 source hosts a Q2 map through the foreign world adjunct", async () => {
     const corpus = testCorpusRoot();
-    directory = await mkdtemp(join(tmpdir(), "foreign-world-q3-"));
+    directory = await tempDirectory("foreign-world-q3-");
     const parsed = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map-game", "q2-classic-baseq2",
       "--map", "base1", "--movement", "q3", "--character", "q3", "--mode", "singleplayer", "--dedicated", "--user-content-root", directory]);
     if (parsed.kind !== "run") throw new Error("Missing foreign launch options");
@@ -181,7 +270,7 @@ describe("selected enemies on guest worlds", () => {
   async function foreignLane(args: string[], authoredFamily: "q1" | "q2",
     sourceCheck: (app: Application) => boolean): Promise<void> {
     const corpus = testCorpusRoot();
-    const laneDirectory = await mkdtemp(join(tmpdir(), "foreign-world-ts-"));
+    const laneDirectory = await tempDirectory("foreign-world-ts-");
     directory = laneDirectory;
     const parsed = parseApplicationCommand(["--content-root", corpus, ...args, "--user-content-root", laneDirectory]);
     if (parsed.kind !== "run") throw new Error("Missing foreign lane options");

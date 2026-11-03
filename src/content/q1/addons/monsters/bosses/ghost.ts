@@ -30,7 +30,7 @@ export class Q1Ghost extends BaseMonster {
     entity.dest1 = this.origin; entity.dest2 = vadd(entity.dest1, vscale(game.makeVectors({ x: 0, y: game.host.random() * 360, z: 0 }).forward, entity.wait));
     this.play(spec.stand); entity.count = Math.floor(game.host.random() * 5 + 0.5) + 3; return undefined;
   }
-  override die(_attacker: ActorId | null): undefined { return this.play(this.entity.text("ghost.death")); }
+  override die(_attacker: ActorId | null): undefined { this.entity.damageable = false; this.entity.touch = null; return this.play(this.entity.text("ghost.death")); }
   action(name: string): undefined {
     const { game, entity } = this;
     switch (name) {

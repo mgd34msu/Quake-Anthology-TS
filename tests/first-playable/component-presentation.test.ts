@@ -44,7 +44,7 @@ test("component retirement and restore invalidate pending real static media, pre
     preload.mockClear(); await effects.prepare(snapshot, []); expect(preload.mock.calls.flatMap(call => call[0])).toHaveLength(1);
     effects.receive([{ kind: "presentation-owner", event: { kind: "retired", owner: { ...owner, generation: 2 } }, sequence: 6, content: source, seconds: 1 }]);
     preload.mockClear(); await effects.prepare(snapshot, []); expect(preload.mock.calls.flatMap(call => call[0])).toHaveLength(0);
-  } finally { preload.mockRestore(); effects.close(); assets.close(); }
+  } finally { preload.mockRestore(); effects.close(); assets.close(); await content.close(); }
 });
 
 test("native graph samples retain source colors across transport and retire during pending palette loading", async () => {
@@ -89,5 +89,5 @@ test("native graph samples retain source colors across transport and retire duri
     await drawings.prepareGraphs(async () => palette);
     drawings.drawGraphs(draw, view, { ...settings, debuggraph: 0 }, white); expect(commands).toHaveLength(0);
     drawings.drawGraphs(draw, view, settings, white); expect(commands.length).toBeGreaterThan(0);
-  } finally { drawings.clear(); assets.close(); }
+  } finally { drawings.clear(); assets.close(); await content.close(); }
 });

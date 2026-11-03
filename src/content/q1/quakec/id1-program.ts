@@ -159,7 +159,7 @@ function deriveNativeBinding(program: QcProgram, declaredDamage?: ModSourceCall)
   const pain = program.fieldsByName.get("th_pain"), die = program.fieldsByName.get("th_die");
   for (const fn of program.functions) {
     if (fn.firstStatement <= 0) continue;
-    const end = program.functions.reduce((limit, other) => other.firstStatement > fn.firstStatement ? Math.min(limit, other.firstStatement) : limit, program.statements.length);
+    const end = program.functionEnd(fn);
     for (let index = fn.firstStatement; index < end; index++) {
       const call = program.statements[index];
       if (call === undefined || call.opcode < QcOpcode.Call0 || call.opcode > QcOpcode.Call8) continue;

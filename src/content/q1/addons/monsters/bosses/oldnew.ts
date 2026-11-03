@@ -1,9 +1,11 @@
 /* quakec_mg3/monsters/mg3_oldone_new.qc. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../../contracts/identity.ts";
+import { mg3MonsterActivator } from "../startup.ts";
 import type { Vec3 } from "../../../../../contracts/math.ts";
 import type { Q1Actor } from "../../../foundation/entity.ts";
 import { POINT, vadd, vscale } from "../../../foundation/types.ts";
-import { BaseMonster } from "../../../base/monsters.ts";
+import type { BaseMonster } from "../../../base/monsters.ts";
+import { Mg3Monster } from "../ai/index.ts";
 import type { MonsterSpecies } from "../../../base/species.ts";
 import type { Q1AddonContext } from "../../context.ts";
 import { frames } from "./frames/oldnew.ts";
@@ -22,7 +24,7 @@ for (const frame of frames.values()) for (const operation of frame.operations) i
   if (!(monster instanceof Q1Oldnew)) throw new Error("Oldone callback received another controller"); return monster.action(operation.name);
 });
 
-export class Q1Oldnew extends BaseMonster {
+export class Q1Oldnew extends Mg3Monster {
   constructor(readonly context: Q1AddonContext, entity: Q1Actor) { super(context.game, entity, spec, context.base, { callbackPrefix: prefix, frames, actions }); }
   override spawn(): undefined {
     const { game, entity, context } = this; if (game.options.deathmatch !== 0) return game.remove(entity);
@@ -33,6 +35,7 @@ export class Q1Oldnew extends BaseMonster {
     entity.pain = game.named.pain(entity, `${prefix}:monster_pain`); entity.die = game.named.die(entity, `${prefix}:monster_die`); entity.use = game.named.use(entity, `${prefix}:monster_use`);
     entity.yawSpeed = 10; entity.idealYaw = game.body(entity).angles.y; game.totalMonsters++; game.host.emit({ kind: "monster-total", total: game.totalMonsters }); this.nextFrame = spec.stand; return this.delay(0.1);
   }
+  override use(activator: ActorId | null): undefined { return super.use(mg3MonsterActivator(this.game, activator)); }
   override pain(attacker: ActorId | null, _damage: number): undefined {
     this.retaliate(attacker); const { game, entity, context } = this; if (entity.number("boss_immune") !== 0) return undefined;
     let trigger = false;

@@ -42,6 +42,7 @@ export class Q3ApplicationPackages {
   pureChecksum(path: string): number | undefined {
     return this.packs.find(pack => this.members.get(pack.mount.identity.id)?.has(path.toLowerCase()))?.pack.pureChecksum;
   }
+  private readonly verified = new Map<string, { readonly size: bigint; readonly mtimeNs: bigint; readonly ctimeNs: bigint }>();
   openDownload(name: string): Q3DownloadReadFile | null {
     checkQ3DownloadName(name);
     const mounted = this.packs.find(pack => `${pack.pack.game}/${pack.pack.basename}.pk3`.toLowerCase() === name.toLowerCase());
@@ -52,11 +53,16 @@ export class Q3ApplicationPackages {
       if (!original.isFile() || !Number.isSafeInteger(size) || size <= 0 || size > 0x7fffffff) { closeSync(descriptor); return null; }
       const unchanged = (): void => { const current = fstatSync(descriptor, { bigint: true }); if (current.size !== original.size || current.mtimeNs !== original.mtimeNs || current.ctimeNs !== original.ctimeNs) throw new Error('Download archive changed after opening'); };
       // Mount identity guards the retained bytes; native pak fields use CRC-directory MD4 above.
-      const hash = createHash('sha256'), buffer = new Uint8Array(65536);
-      let offset = 0;
-      while (offset < size) { const count = readSync(descriptor, buffer, 0, Math.min(buffer.length, size - offset), offset); if (count === 0) throw new Error('Truncated mounted download'); hash.update(buffer.subarray(0, count)); offset += count; }
-      unchanged();
-      if (createContentDigest(hash.digest('hex')) !== mounted.mount.archiveDigest) throw new Error('Download archive changed after mount');
+      const key = mounted.mount.identity.id, seen = this.verified.get(key);
+      // A whole-file digest per request is expensive; an archive whose size and timestamps are unchanged since it was verified is not rehashed.
+      if (seen === undefined || seen.size !== original.size || seen.mtimeNs !== original.mtimeNs || seen.ctimeNs !== original.ctimeNs) {
+        const hash = createHash('sha256'), buffer = new Uint8Array(65536);
+        let offset = 0;
+        while (offset < size) { const count = readSync(descriptor, buffer, 0, Math.min(buffer.length, size - offset), offset); if (count === 0) throw new Error('Truncated mounted download'); hash.update(buffer.subarray(0, count)); offset += count; }
+        unchanged();
+        if (createContentDigest(hash.digest('hex')) !== mounted.mount.archiveDigest) throw new Error('Download archive changed after mount');
+        this.verified.set(key, { size: original.size, mtimeNs: original.mtimeNs, ctimeNs: original.ctimeNs });
+      }
       let position = 0, closed = false;
       return { size, read: target => { if (closed) throw new Error('Q3 download is closed'); unchanged(); const count = readSync(descriptor, target, 0, Math.min(target.length, size - position), position); position += count; return count; },
         close: () => { if (!closed) { closed = true; closeSync(descriptor); } } };

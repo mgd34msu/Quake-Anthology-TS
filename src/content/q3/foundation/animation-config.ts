@@ -83,7 +83,7 @@ export function parsePlayerAnimationConfig(text: string, source = "<animation.cf
   const print = (format: string, args: readonly string[]): string => {
     let position = 0;
     const message = format.replace(/%s/g, () => args[position++] ?? "");
-    if (message.length >= 1024) throw new RangeError("CG_Printf exceeds its 1024-byte source buffer");
+    if (message.length >= 1024) throw new PlayerAnimationParseError(source, (parser.line + 1) | 0, 1, "CG_Printf exceeds its 1024-byte source buffer");
     context?.print(message);
     return message;
   };
@@ -126,7 +126,7 @@ export function parsePlayerAnimationConfig(text: string, source = "<animation.cf
       const first = token.charAt(0);
       if (first >= "0" && first <= "9") { cursor.offset = previous; break; }
       warn("unknown token '%s' is %s\n", [token, source]);
-      if (previous === cursor.offset) throw new RangeError("CG animation prelude reached the source nonprogress cycle");
+      if (previous === cursor.offset) throw new PlayerAnimationParseError(source, (parser.line + 1) | 0, 1, "animation prelude reached the source nonprogress cycle");
     }
   }
 

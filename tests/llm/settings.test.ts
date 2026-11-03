@@ -55,6 +55,12 @@ describe("LLM settings", () => {
     await reopened.selectProvider("other-api");
     expect(await readFile(join(directory, "chatgpt.key"), "utf8")).toBe('{"version":1,"secret":');
     await expect(service.saveApiKey("chatgpt-api", "replacement")).rejects.toBeInstanceOf(LlmSettingsError);
+    // PLATFORM-017: removal and preference changes are the repair path for a malformed file.
+    await reopened.removeCredential("chatgpt-api");
+    expect(await readFile(join(directory, "chatgpt.key"), "utf8")).not.toContain('"secret":');
+    await writeFile(join(directory, "llm.json"), "{broken");
+    await reopened.selectProvider("other-api");
+    expect(await readFile(join(directory, "llm.json"), "utf8")).toContain("other-api");
   });
 
   test("imports plain pasted keys and rereads user edits before shared credential writes", async () => {
@@ -62,6 +68,33 @@ describe("LLM settings", () => {
     await writeFile(join(directory, "chatgpt.key"), "pasted-key\n");
     await service.saveApiKey("chatgpt-api", "replacement-key");
     expect(await readFile(join(directory, "chatgpt.key"), "utf8")).toContain("replacement-key");
+  });
+
+  test("a plain pasted key is imported as the API key and survives reopening", async () => {
+    const { directory } = await fixture();
+    await writeFile(join(directory, "chatgpt.key"), "pasted-key\n");
+    const reopened = await LlmSettingsService.open({ baseDirectory: directory });
+    cleanup.push(() => reopened.close());
+    expect(reopened.read().providers["chatgpt-api"].configured).toBe(true);
+    expect(reopened.read().providers["chatgpt-subscription"].configured).toBe(false);
+    expect(reopened.read().errors).toEqual([]);
+  });
+
+  test("saving an API key after sign-in keeps the subscription and a refresh token edited on disk", async () => {
+    const { service, directory } = await fixture({ callbackPort: 0, fetch: async () => tokens(), openBrowser: async url => { expect((await fetch(callbackUrl(url))).status).toBe(200); } });
+    await service.signInSubscription();
+    expect(service.read().providers["chatgpt-subscription"].configured).toBe(true);
+    const path = join(directory, "chatgpt.key");
+    expect(await readFile(path, "utf8")).toContain("test-refresh");
+    // The user edits the shared credential file between the service's last read and the key save.
+    await writeFile(path, (await readFile(path, "utf8")).replace("test-refresh", "edited-refresh"));
+    await service.saveApiKey("chatgpt-api", "later-key");
+    const after = await readFile(path, "utf8");
+    expect(after).toContain("edited-refresh");
+    expect(after).not.toContain("test-refresh");
+    expect(after).toContain("later-key");
+    expect(service.read().providers["chatgpt-subscription"].configured).toBe(true);
+    expect(service.read().providers["chatgpt-api"].configured).toBe(true);
   });
 });
 
@@ -97,19 +130,20 @@ describe("subscription OAuth", () => {
     expect(service.read().providers["chatgpt-api"].configured).toBe(true);
   });
 
-  test("rejects state mismatch without requesting tokens or reflecting provider text", async () => {
+  test("PLATFORM-015 a wrong-state request gets 400 without requesting tokens or reflecting provider text, and does not abort sign-in", async () => {
     let requests = 0;
-    const { service, directory } = await fixture({ callbackPort: 0, fetch: async () => { requests++; return tokens(); }, openBrowser: async url => {
+    const { service } = await fixture({ callbackPort: 0, fetch: async () => { requests++; return tokens(); }, openBrowser: async url => {
       const target = callbackUrl(url, "wrong-state-secret");
       target.searchParams.set("error", "provider-secret");
       const response = await fetch(target);
       expect(response.status).toBe(400);
       expect(await response.text()).not.toContain("secret");
+      expect(requests).toBe(0);
+      expect((await fetch(callbackUrl(url))).status).toBe(200);
     } });
-    await expect(service.signInSubscription()).rejects.toBeInstanceOf(LlmSettingsError);
-    expect(requests).toBe(0);
+    await service.signInSubscription();
     expect(JSON.stringify(service.read())).not.toContain("secret");
-    expect(await Bun.file(join(directory, "chatgpt.key")).exists()).toBe(false);
+    expect(requests).toBe(1);
   });
 
   test("cancel settles stalled browser, stops callback and prevents late saves", async () => {
@@ -159,7 +193,9 @@ describe("subscription OAuth", () => {
       return tokens();
     } }, credential, new AbortController().signal);
     expect(refreshed.refreshToken).toBe("test-refresh");
-    await expect(refreshSubscription({ fetch: async () => Response.json({ access_token: "new", expires_in: 3600 }) }, credential, new AbortController().signal)).rejects.toBeInstanceOf(LlmSettingsError);
+    // PLATFORM-014: a refresh response without a new refresh_token keeps the previous one (RFC 6749 section 6).
+    const kept = await refreshSubscription({ fetch: async () => Response.json({ access_token: "new", expires_in: 3600 }) }, credential, new AbortController().signal);
+    expect(kept.refreshToken).toBe(credential.refreshToken);
   });
 
   test("callback succeeds even when browser launcher stays running", async () => {
@@ -175,7 +211,7 @@ describe("subscription OAuth", () => {
     let callbackStatus = 0;
     const { service } = await fixture({ callbackPort: 0, callbackTimeoutMs: 8_000, fetch: async () => tokens(), openBrowser: async url => {
       const target = callbackUrl(url).toString();
-      const browser = Bun.spawn(["bash", "-c", `sleep 0.3; curl -sS -m 1 -o /dev/null -w %{http_code} "${target}"`], { stdout: "pipe", stderr: "pipe" });
+      const browser = Bun.spawn([process.execPath, "-e", "await Bun.sleep(300); console.log((await fetch(process.argv[1], { signal: AbortSignal.timeout(1000) })).status);", target], { stdout: "pipe", stderr: "pipe" });
       const answered = (async () => { callbackStatus = Number(await new Response(browser.stdout).text()); await browser.exited; })();
       const blockedUntil = performance.now() + 2000;
       let sink = 0;

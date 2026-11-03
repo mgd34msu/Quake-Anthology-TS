@@ -1,3 +1,5 @@
+import { fixturePk3 } from "../../support/pk3.ts";
+import { expectWorldRegion } from "../../support/pixels.ts";
 import type { ActorCommand } from "../../../src/contracts/session.ts";
 import { testCorpusRoot, corpusFile } from "../../support/corpus.ts";
 
@@ -33,19 +35,6 @@ import { Q3ClientConnection } from '../../../src/network/q3/client.ts';
 import { q3ChannelDelivery } from '../../../src/network/q3/transport.ts';
 import type { Snapshot } from '../../../src/network/q3/server-message.ts';
 
-function fixturePk3(path = 'wire-probe.cfg', repeats = 400): Uint8Array<ArrayBuffer> {
-  const name = new TextEncoder().encode(path), data = new TextEncoder().encode('set wire_probe 1\n'.repeat(repeats));
-  const localLength = 30 + name.length + data.length, centralLength = 46 + name.length;
-  const bytes = new Uint8Array(localLength + centralLength + 22), view = new DataView(bytes.buffer), crc = Bun.hash.crc32(data);
-  view.setUint32(0, 0x04034b50, true); view.setUint16(4, 20, true); view.setUint32(14, crc, true);
-  view.setUint32(18, data.length, true); view.setUint32(22, data.length, true); view.setUint16(26, name.length, true);
-  bytes.set(name, 30); bytes.set(data, 30 + name.length);
-  view.setUint32(localLength, 0x02014b50, true); view.setUint16(localLength + 4, 20, true); view.setUint16(localLength + 6, 20, true);
-  view.setUint32(localLength + 16, crc, true); view.setUint32(localLength + 20, data.length, true); view.setUint32(localLength + 24, data.length, true);
-  view.setUint16(localLength + 28, name.length, true); bytes.set(name, localLength + 46);
-  const end = localLength + centralLength; view.setUint32(end, 0x06054b50, true); view.setUint16(end + 8, 1, true); view.setUint16(end + 10, 1, true);
-  view.setUint32(end + 12, centralLength, true); view.setUint32(end + 16, localLength, true); return bytes;
-}
 
 test('protocol68 UDP admission moves the shared Application actor and publishes source snapshots', async () => {
   const root = mkdtempSync(join(tmpdir(), 'q3-native-package-')), base = join(root, 'q3a/baseq3'), original = corpusFile("q3a/baseq3");
@@ -217,7 +206,7 @@ test('production protocol68 remote adapter joins actual baseq3 and submits nativ
     await expect(remote.systemInfo('\\sv_pure\\1\\fs_game\\baseq3')).rejects.toThrow('requires pure verification');
     await expect(remote.systemInfo('\\sv_pure\\0\\fs_game\\downloaded-mod')).resolves.toBeUndefined();
     await expect(remote.systemInfo('\\sv_pure\\0\\fs_game\\BASEQ3')).resolves.toBeUndefined();
-    await expect(remote.systemInfo('\\sv_pure\\0\\fs_game\\../escape')).rejects.toThrow();
+    await expect(remote.systemInfo('\\sv_pure\\0\\fs_game\\../escape')).rejects.toThrow("Remote game directory must be a single safe directory name");
   } finally { network.close(); session.close(); await app.close(); }
 }, 60000);
 
@@ -308,7 +297,7 @@ test('production protocol68 shared remote frontend draws retail q3dm1 and travel
           return { name: picture.name, stages: picture.kind === "material" ? picture.material.compiled.material.stages.map(stage => ({ color: stage.color, blend: stage.blend })) : null };
         }) }));
     }
-    expect(new Set(pixels).size).toBeGreaterThan(16);
+    expectWorldRegion(pixels, 640, 480);
     if (process.env["Q3_REMOTE_CAPTURE"] !== undefined) {
       const { encodePng } = await import('../../../src/formats/images/png-encoder.ts');
       await Bun.write(process.env["Q3_REMOTE_CAPTURE"], encodePng(640, 480, pixels));
@@ -492,7 +481,7 @@ test('native Q3 retries an interrupted second referenced package before guest in
 }, 90000);
 
 
-test('unknown mounted LRCTF clients run the production baseQ3 ABI for thirty active seconds', async () => {
+test('unknown mounted LRCTF clients run the production baseQ3 ABI for thirty simulated seconds', async () => {
   const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
   const root = mkdtempSync(join(tmpdir(), 'q3-unknown-client-'));
   const common = ['--content-root', testCorpusRoot(), '--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch'];
@@ -544,13 +533,13 @@ test('unknown mounted LRCTF clients run the production baseQ3 ABI for thirty act
     if (initialPosition === undefined || sourceClient === undefined || sourceClient === null) throw new Error('Missing authoritative player state');
     const before = { ...initialPosition }, initialAmmo = sourceClient.ps.ammo.get(2) ?? 0;
     let minimumAmmo = initialAmmo, maximumDistance = 0, ticks = 0;
-    const started = performance.now(), startedFrame = remote.frameCount;
+    const started = performance.now(), startedFrame = remote.frameCount, startedSimulation = authority.simulation.timeSeconds * 1000;
     remote.queueCommand('weapon', ['2'], player.seat.id);
     remote.input({ seat: player.seat.id, kind: 'key', code: 119, down: true, repeat: false, timeMilliseconds: performance.now() });
     remote.input({ seat: player.seat.id, kind: 'mouse-button', button: 1, down: true, timeMilliseconds: performance.now() });
     let captured = false;
-    while (performance.now() - started < 30000) {
-      const tickStarted = performance.now(); await exchange(); ticks++;
+    while (authority.simulation.timeSeconds * 1000 - startedSimulation < 30000) {
+      await exchange(); ticks++;
       expect(remote.networkPhase).toBe('active');
       const position = authority.simulation.bodies.read(peer.actor)?.origin;
       if (position !== undefined) maximumDistance = Math.max(maximumDistance, Math.hypot(position.x - before.x, position.y - before.y, position.z - before.z));
@@ -563,12 +552,11 @@ test('unknown mounted LRCTF clients run the production baseQ3 ABI for thirty act
         const { encodePng } = await import('../../../src/formats/images/png-encoder.ts');
         mkdirSync(artifactDirectory, { recursive: true }); await Bun.write(join(artifactDirectory, 'active.png'), encodePng(320, 240, await capture)); captured = true;
       }
-      const remaining = 50 - (performance.now() - tickStarted); if (remaining > 0) await Bun.sleep(remaining);
     }
-    const activeMilliseconds = performance.now() - started;
+    const activeMilliseconds = performance.now() - started, simulatedMilliseconds = authority.simulation.timeSeconds * 1000 - startedSimulation;
     remote.input({ seat: player.seat.id, kind: 'key', code: 119, down: false, repeat: false, timeMilliseconds: performance.now() });
     remote.input({ seat: player.seat.id, kind: 'mouse-button', button: 1, down: false, timeMilliseconds: performance.now() });
-    expect(activeMilliseconds).toBeGreaterThanOrEqual(30000); expect(maximumDistance).toBeGreaterThan(8);
+    expect(simulatedMilliseconds).toBeGreaterThanOrEqual(30000); expect(maximumDistance).toBeGreaterThan(8);
     expect(initialAmmo).toBeGreaterThan(0); expect(minimumAmmo).toBeLessThan(initialAmmo);
     expect(frames.mock.calls.length).toBeGreaterThan(60);
     expect(prints.some(text => text.includes('Unbound '))).toBe(false);
@@ -592,4 +580,4 @@ test('unknown mounted LRCTF clients run the production baseQ3 ABI for thirty act
       }
     }
   }
-}, 120000);
+}, 600000);

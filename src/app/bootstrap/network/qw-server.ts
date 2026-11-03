@@ -7,8 +7,10 @@ import type { DownloadSource } from '../../../network/services/downloads.ts';
 import type { IpAddress } from '../../../network/common/endpoint.ts';
 import { nativeAtoi } from '../../../core/numeric.ts';
 import { parseQ1Token } from '../../../core/common-parse.ts';
-import { SourceChatFlood } from '../../../network/services/admin.ts';
-import { sameAddress } from '../../../network/common/endpoint.ts';
+import { ConnectionlessGate, SourceChatFlood } from '../../../network/services/admin.ts';
+import { addressKey, sameAddress } from '../../../network/common/endpoint.ts';
+import { DiagnosticBudget, printablePeerText } from '../../../network/common/diagnostics.ts';
+import { MovementBudget } from '../../../network/common/movement-budget.ts';
 import { QuakeWorldChannel } from '../../../network/q1/channels.ts';
 import { decodeQuakeWorldClient, QuakeWorldCommandReplay } from '../../../network/q1/commands.ts';
 import { QuakeWorldMasterHeartbeat, quakeWorldShutdown, QuakeWorldChallenges, QuakeWorldConnectionlessServer, quakeWorldCommandArguments, quakeWorldInfo } from '../../../network/q1/handshake.ts';
@@ -22,6 +24,7 @@ import type { ApplicationNetwork, ApplicationNetworkPhase } from './types.ts';
 import type { QwApplicationPlayer, QwApplicationServerHost, QwServerMessage, QwServerNetworkOptions } from './qw-server-types.ts';
 
 const protocol = { kind: 'q1-quakeworld', version: 28 } satisfies Extract<ApplicationNetwork['wire'], { kind: 'source' }>['protocol'];
+const MAX_PEERS_PER_ADDRESS = 8;
 interface Frame { readonly sequence: number; readonly states: readonly QwEntityStateT[]; }
 interface PingFrame { readonly sequence: number; readonly sent: number; ping: number; }
 interface Peer {
@@ -30,6 +33,7 @@ interface Peer {
     readonly channel: QuakeWorldChannel;
     signon: QuakeWorldSignonServer;
     replay: QuakeWorldCommandReplay;
+    readonly budget: MovementBudget;
     baselines: ReadonlyMap<number, QwEntityStateT>;
     readonly reliable: BoundedQueue<Uint8Array>;
     reliableLength: number;
@@ -44,18 +48,21 @@ interface Peer {
     readonly pingFrames: Map<number, PingFrame>;
     readonly chatFlood: SourceChatFlood;
 }
+function peerPing(peer: Peer): number {
+    const samples = [...peer.pingFrames.values()].filter(frame => frame.ping > 0);
+    return samples.length === 0 ? 9999 : Math.trunc(samples.reduce((sum, frame) => sum + frame.ping, 0) / samples.length);
+}
 export class QwServerNetwork implements ApplicationNetwork {
     readonly role = 'server';
     readonly wire: ApplicationNetwork['wire'] = { kind: 'source', protocol };
     private host: QwApplicationServerHost;
     private readonly peers: Peer[] = [];
-    clientPings(): ReadonlyMap<ClientId, number> { return new Map(this.peers.filter(peer => peer.active).map(peer => {
-        const samples = [...peer.pingFrames.values()].filter(frame => frame.ping > 0);
-        return [peer.player.client, samples.length === 0 ? 9999 : Math.trunc(samples.reduce((sum, frame) => sum + frame.ping, 0) / samples.length)];
-    })); }
+    clientPings(): ReadonlyMap<ClientId, number> { return new Map(this.peers.filter(peer => peer.active).map(peer => [peer.player.client, peerPing(peer)])); }
     private readonly connectionless: QuakeWorldConnectionlessServer;
     private readonly masterHeartbeat = new QuakeWorldMasterHeartbeat();
     private ended = false;
+    private readonly gate = new ConnectionlessGate();
+    private readonly diagnostics = new DiagnosticBudget();
     constructor(readonly options: QwServerNetworkOptions) {
         this.validate(options.host); this.host = options.host;
         const currentHost = (): QwApplicationServerHost => this.host;
@@ -76,17 +83,19 @@ export class QwServerNetwork implements ApplicationNetwork {
                     this.remove(existing, 'Reconnecting');
                 }
                 if (this.peers.length >= this.host.maxClients) return { kind: 'rejected', reason: 'Server is full' };
+                if (this.peers.filter(peer => sameAddress(peer.remote, request.from, false)).length >= MAX_PEERS_PER_ADDRESS) return { kind: 'rejected', reason: 'Too many connections from this address' };
                 const admitted = this.host.admit(request);
                 if (admitted.kind === 'rejected') return admitted;
                 try {
                     const binding = this.bind(admitted.player);
                     const rate = quakeWorldInfo(request.userinfo).get('rate');
                     const peer: Peer = { remote: request.from, player: admitted.player, channel: new QuakeWorldChannel('server', request.qport, 1450, rate ? this.rate(rate) : 2500),
-                        signon: binding.signon, baselines: binding.baselines, replay: new QuakeWorldCommandReplay(), reliable: new BoundedQueue<Uint8Array>(8), frames: new Map<number, Frame>(),
+                        signon: binding.signon, baselines: binding.baselines, replay: new QuakeWorldCommandReplay(), budget: new MovementBudget(), reliable: new BoundedQueue<Uint8Array>(8), frames: new Map<number, Frame>(),
                         reliableLength: 0, active: false, reply: false, delta: null, choked: 0, lastReceived: now,
                         messageLevel: nativeAtoi(quakeWorldInfo(request.userinfo).get('msg') ?? '0'), lossPercent: 0,
                         pingFrames: new Map<number, PingFrame>(), chatFlood: new SourceChatFlood(4, 4, 10) };
                     this.peers.push(peer);
+                    this.host.networkInfo?.(admitted.player, { address: () => addressKey(peer.remote, false), ping: () => peerPing(peer) });
                 } catch (error) { this.host.disconnect(admitted.player, 'Signon failed'); throw error; }
                 return { kind: 'accepted' };
             }
@@ -187,7 +196,9 @@ export class QwServerNetwork implements ApplicationNetwork {
     }
     disconnectClient(client: ClientId, reason: string): boolean {
         const peer = this.peers.find(value => value.player.client.equals(client)); if (peer === undefined) return false;
-        this.options.transport.send(peer.remote, peer.channel.transmit(this.bytes([{ kind: 'disconnect' }]), peer.lastReceived, true));
+        // The farewell is best effort: an exhausted or overflowing channel must not stop the peer from being removed.
+        try { this.options.transport.send(peer.remote, peer.channel.transmit(this.bytes([{ kind: 'disconnect' }]), peer.lastReceived, true)); }
+        catch (error) { this.host.print(`QW farewell failed: ${error instanceof Error ? error.message : String(error)}\n`); }
         this.remove(peer, reason); return true;
     }
     changeWorld(host: QwApplicationServerHost): void {
@@ -216,6 +227,7 @@ export class QwServerNetwork implements ApplicationNetwork {
             let owner: Peer | undefined;
             try {
                 if (packet.payload.length >= 4 && new DataView(packet.payload.buffer, packet.payload.byteOffset).getUint32(0, true) === 0xffffffff) {
+                    if (!this.gate.allow(packet.from, now)) continue;
                     for (const reply of await this.connectionless.receive(packet.payload, packet.from, now)) this.options.transport.send(packet.from, reply);
                     continue;
                 }
@@ -231,13 +243,18 @@ export class QwServerNetwork implements ApplicationNetwork {
                 const nextSequence = owner.channel.outgoingSequence;
                 owner.pingFrames.set(nextSequence & 63, { sequence: nextSequence, sent: now, ping: -1 });
                 owner.remote = packet.from; owner.lastReceived = now; owner.reply = canReply; owner.delta = null;
+                let moved = false;
+                const budget = owner.budget;
                 for (const message of decodeQuakeWorldClient(delivery.payload, protocol, delivery.sequence)) {
                     if (!this.peers.includes(owner)) break;
                     if (message.kind === 'delta') owner.delta = message.sequence;
                     else if (message.kind === 'move' && owner.active) {
+                        // sv_user.c ignores a second clc_move in one packet.
+                        if (moved) continue;
+                        moved = true;
                         owner.lossPercent = message.bundle.lossPercent;
                         const commands: QwUserCommand[] = [];
-                        owner.replay.run(message.bundle, delivery.dropped, this.host.paused, command => commands.push(command));
+                        owner.replay.run(message.bundle, delivery.dropped, this.host.paused, command => { if (budget.admit(command.milliseconds, now)) commands.push(command); });
                         if (commands.length !== 0) this.host.commandGroup(owner.player, commands, delivery.sequence);
                     } else if (message.kind === 'string-command') {
                         const [name, ...args] = quakeWorldCommandArguments(message.text);
@@ -284,13 +301,16 @@ export class QwServerNetwork implements ApplicationNetwork {
                     }
                 }
             } catch (error) {
-                const reason = error instanceof Error ? error.message : String(error); this.host.print(reason);
+                const reason = error instanceof Error ? error.message : String(error); if (this.diagnostics.allow()) this.host.print(printablePeerText(reason));
                 if (owner !== undefined) this.disconnectClient(owner.player.client, reason);
             }
         }
         for (const peer of [...this.peers]) {
             if (now - peer.lastReceived > (this.options.timeoutMilliseconds ?? 65000)) this.disconnectClient(peer.player.client, 'Client timed out');
-            else if (!peer.active) this.send(peer, null, now);
+            else if (!peer.active) {
+                try { this.send(peer, null, now); }
+                catch (error) { this.disconnectClient(peer.player.client, error instanceof Error ? error.message : String(error)); }
+            }
         }
         return [];
     }

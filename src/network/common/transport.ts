@@ -76,6 +76,8 @@ export class UdpTransport implements DatagramTransport<IpAddress> {
     const socket = await Bun.udpSocket({ hostname: options.host, port: portNumber(options.port, true), binaryType: "uint8array", socket: {
       data(_socket, payload, port, host, flags) {
         let from: IpAddress;
+        // A source port of 0 cannot be answered or attributed; it is dropped rather than reported.
+        if (port === 0) return;
         try { from = ipAddress(host, port); }
         catch (error) { queue.push({ kind: "error", error: error instanceof Error ? error : new Error(String(error)) }); return; }
         queue.accept(from, payload, flags.truncated);
@@ -124,13 +126,17 @@ export class UdpTransport implements DatagramTransport<IpAddress> {
   }
   poll(): ReceiveEvent<IpAddress> | null {
     this.opened();
-    const event = this.queue.poll(), relay = this.socks?.relay;
-    if (event?.kind === "packet" && relay !== undefined && relay !== null && event.from.kind === "ipv4"
-      && event.from.port === relay.port && event.from.host.every((value, index) => value === relay.host[index])) {
-      const decoded = readSocksDatagram(event.payload);
-      return decoded === null ? null : { kind: "packet", ...decoded, receivedAt: event.receivedAt };
+    for (;;) {
+      const event = this.queue.poll(), relay = this.socks?.relay;
+      if (event?.kind === "packet" && relay !== undefined && relay !== null && event.from.kind === "ipv4"
+        && event.from.port === relay.port && event.from.host.every((value, index) => value === relay.host[index])) {
+        const decoded = readSocksDatagram(event.payload);
+        // A malformed relay datagram is skipped; null must keep meaning an empty queue.
+        if (decoded === null) continue;
+        return { kind: "packet", ...decoded, receivedAt: event.receivedAt };
+      }
+      return event;
     }
-    return event;
   }
   subscribeReadable(listener: () => void): () => void { this.opened(); return this.queue.subscribe(listener); }
   close(): void {

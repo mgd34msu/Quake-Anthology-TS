@@ -19,9 +19,9 @@ for (const source of ["q1", "q2", "q3"] satisfies readonly ("q1" | "q2" | "q3")[
     expect(target.get(3)?.equals(after.actor(8, 1))).toBe(true);
     expect(target.get(7)?.equals(after.actor(8, 2))).toBe(true);
     expect(target.get(3)?.equals(first)).toBe(false);
-    expect(() => restoredCodec.restoreCheckpoint(saved, value => after.actor(value.slot, value.generation), () => 3)).toThrow();
+    expect(() => restoredCodec.restoreCheckpoint(saved, value => after.actor(value.slot, value.generation), () => 3)).toThrow("invalid or duplicate weapon handle mapping");
     expect(restoredCodec.checkpoint()).toEqual(codec.checkpoint());
-    expect(() => restoredCodec.restoreCheckpoint(saved, value => after.actor(value.slot, value.generation), () => { throw new Error("unknown restored library handle"); })).toThrow();
+    expect(() => restoredCodec.restoreCheckpoint(saved, value => after.actor(value.slot, value.generation), () => { throw new Error("unknown restored library handle"); })).toThrow("unknown restored library handle");
     expect(restoredCodec.checkpoint()).toEqual(codec.checkpoint());
   });
 }

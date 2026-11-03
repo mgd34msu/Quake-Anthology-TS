@@ -32,3 +32,15 @@ test("seat-owned localization retains its public identity and formatting contrac
   expect(catalog.seat).toBe(seat); expect(catalog.profile).toBe("q2-rerelease");
   expect(catalog.localize("$line", ["Marine"])).toBe("Hello Marine");
 });
+
+test("escaped braces load, unquoted escapes decode, and file errors reach the supplied log", async () => {
+  const warnings: string[] = [];
+  const table = await loadServerLocalizationResources("english", async path => path === "localization/loc_english.txt"
+    ? new TextEncoder().encode('brace="x {{y}} z"\nopen="lit {{ open"\nmixed="{0} and {{1}}"\nplain=plain\\nword\nbad "oops"') : null,
+  "q1-rerelease", { warn: text => { warnings.push(text); } });
+  expect(table.lookup("$brace")).toBe("x {y}} z");
+  expect(table.lookup("$open")).toBe("lit { open");
+  expect(table.localize("$mixed", ["A"])).toBe("A and {1}}");
+  expect(table.lookup("$plain")).toBe("plain\nword");
+  expect(warnings.some(text => text.includes("expected"))).toBe(true);
+});

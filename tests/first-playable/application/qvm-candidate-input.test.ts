@@ -1,6 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { ApplicationInput } from "../../../src/app/bootstrap/input.ts";
@@ -11,9 +10,11 @@ import { QvmMemory } from "../../../src/compat/qvm/memory.ts";
 import type { QvmHostCall } from "../../../src/compat/qvm/syscalls.ts";
 import { bindConsoleSettings } from "../../../src/ui/settings/console.ts";
 import type { SettingBinding } from "../../../src/ui/settings/index.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 test("actual QVM candidate initialization isolates input and shared settings then publishes retained owners once", async () => {
-  const root = await mkdtemp(join(tmpdir(), "qvm-candidate-input-"));
+  const root = await tempDirectory("qvm-candidate-input-");
   const parsed = parseApplicationCommand(["--game", "q3-classic-lrctf", "--map", "q3ctf1", "--movement", "q3", "--character", "q3",
     "--mode", "deathmatch", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Missing guest launch");

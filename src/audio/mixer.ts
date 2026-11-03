@@ -51,15 +51,7 @@ interface PreparedSound {
     dopplerSums?: Float64Array;
     readonly sound: PcmSound;
     readonly step256: number;
-    readonly memory: MixerSoundMemory | null;
     readonly outputFrames: number;
-}
-/** Engine sound handles borrow the bank's current resampled chunk allocation. */
-export interface MixerSoundMemory {
-    frameCount(sound: PcmSound): number;
-    hasData(sound: PcmSound): boolean;
-    sample(sound: PcmSound, frame: number): number;
-    touch(sound: PcmSound, milliseconds: number): undefined;
 }
 interface VoicePolicy {
     readonly attenuation: number;
@@ -230,6 +222,7 @@ export function spatializeSoundOrigin(position: Vec3, listenerOrigin: Vec3, list
     const left = Math.max(0, Math.trunc(Math.fround(volume * Math.fround((1 - distanceLoss) * leftScale))));
     return { left, right };
 }
+const MAXIMUM_VOICES = 128;
 /** PCM mixing with a borrowed allocation clock and no device ownership. */
 export class AudioMixer {
     readonly outputRate: number;
@@ -267,7 +260,6 @@ export class AudioMixer {
         if (gain === undefined) { gain = this.transmission(position); this.transmissionCache.set(key, gain); }
         return gain === 1 ? volume : { left: Math.trunc(volume.left * gain), right: Math.trunc(volume.right * gain) };
     }
-    private musicVolume = 0.25;
     private dopplerEnabled = true;
     private listenerEntity = 0;
     private listenerOrigin: Vec3 = vec3(0, 0, 0);
@@ -278,6 +270,7 @@ export class AudioMixer {
     private readonly loops = new Map<number, LoopVoice>();
     private loopChannels: LoopMix[] = [];
     private readonly rawSamples = new Int32Array(RAW_SAMPLE_CAPACITY * 2);
+    private readonly paintScratch = new Float64Array(PAINTBUFFER_SIZE * 2);
     private paintedTime = 0;
     private sourceBeginOffset = 0;
     private sourceScheduleOrder = 0;
@@ -286,7 +279,6 @@ export class AudioMixer {
     private enabled = true;
     private soundCvars: CvarRegistry | null = null;
     private consoleOutput: ConsoleOutput | null = null;
-    private soundMemory: MixerSoundMemory | null = null;
     constructor(outputRate: number, private readonly milliseconds: () => number, capacity = 96, readonly outputChannels: 1 | 2 = 2, private readonly entityCapacity = MAX_GENTITIES) {
         requirePositiveInteger(outputRate, "output rate");
         requirePositiveInteger(capacity, "channel capacity");
@@ -305,7 +297,6 @@ export class AudioMixer {
     setPlaybackEnabled(enabled: boolean): void { this.enabled = enabled; }
     bindSoundCvars(cvars: CvarRegistry): void { this.soundCvars = cvars; }
     bindConsoleOutput(output: ConsoleOutput): void { this.consoleOutput = output; }
-    bindSoundMemory(memory: MixerSoundMemory): void { this.soundMemory = memory; }
     /** S_Update walks the actual one-shot slots, excluding silent channels and loops. */
     *channelVolumes(): Generator<{
         readonly sound: PcmSound;
@@ -344,8 +335,6 @@ export class AudioMixer {
     get rawEnd(): number {
         return this.rawEndTime;
     }
-    /** S_GetRawSamplePointer returns the live interleaved sample-pair allocation. */
-    getRawSamplePointer(): Int32Array { return this.rawSamples; }
     setListener(entity: number, origin: Vec3, axis: Axis): void {
         this.transmissionCache.clear();
         if (!this.enabled)
@@ -382,7 +371,6 @@ export class AudioMixer {
     }
     setMusicVolume(volume: number): void {
         requireGain(volume, "music volume");
-        this.musicVolume = volume;
     }
     /** Global permission; a source s_doppler cvar may further disable its own loops. */
     setDopplerEnabled(enabled: boolean): void {
@@ -405,8 +393,7 @@ export class AudioMixer {
     startSharedSound(sound: PcmSound, options: Omit<StartSoundOptions, "channel">, channelCommand: SoundChannelCommand, sourceName: string | null = null, asset: SoundAsset | null = null): boolean {
         if (!this.enabled)
             return false;
-        if (this.soundMemory === null)
-            validateSound(sound, false);
+        validateSound(sound, false);
         if (options.origin.kind === "fixed") {
             if (!Number.isInteger(options.entity) || int32(options.entity) !== options.entity) {
                 throw new RangeError("fixed-origin entity must be a signed 32-bit integer");
@@ -442,14 +429,13 @@ export class AudioMixer {
         const allowed = options.entity === this.listenerEntity ? 8 : 4;
         if (sameSoundCount > allowed)
             return false;
-        this.soundMemory?.touch(sound, time);
         this.replaceChannel(options.entity, channelCommand);
-        const free = this.freeChannels.at(-1);
-        const channel = free ?? this.voices.length;
+        const acquired = this.acquireChannel(options.entity);
+        if (acquired === null)
+            return false;
+        const channel = acquired.index;
         // Sample the allocation clock again when reusing a free slot.
-        if (free !== undefined)
-            this.freeChannels.pop();
-        const allocatedAt = free === undefined ? time : this.allocationTime();
+        const allocatedAt = acquired.reused ? this.allocationTime() : time;
         this.voices[channel] = {
             voiceId: this.allocateVoiceId(), asset, notification: "pending",
             prepared,
@@ -490,7 +476,7 @@ export class AudioMixer {
         if (sound.channels !== 1 || sound.frameCount < 1) throw new Error("Source effects require nonempty mono PCM");
         if (!Number.isFinite(options.volume) || options.volume < 0 || !Number.isFinite(options.attenuation) || options.attenuation < 0) throw new RangeError("Invalid source sound gain or attenuation");
         const ratio = sound.sampleRate / this.outputRate;
-        const prepared: PreparedSound = { sound, memory: null, step256: ratio * 256, outputFrames: Math.trunc(sound.frameCount / ratio) };
+        const prepared: PreparedSound = { sound, step256: ratio * 256, outputFrames: Math.trunc(sound.frameCount / ratio) };
         if (prepared.outputFrames < 1) throw new Error("Sound resamples to zero frames");
         const marker = policy.loopStart ?? (sound.loopStart === null ? null : Math.trunc(sound.loopStart / ratio));
         if (marker !== null && (marker < 0 || marker >= prepared.outputFrames)) throw new RangeError("Sound loop outside PCM");
@@ -506,8 +492,10 @@ export class AudioMixer {
         if (scheduled === null) voice.stereoVolume = this.policySpatialize(voice);
         if (scheduled === null && policy.role === "effect" && voice.stereoVolume.left === 0 && voice.stereoVolume.right === 0) return false;
         if (scheduled === null) this.replaceChannel(options.entity, command);
-        const free = this.freeChannels.pop(), index = free ?? this.voices.length;
-        this.voices[index] = voice;
+        const acquired = this.acquireChannel(voice.entity);
+        if (acquired === null)
+            return false;
+        this.voices[acquired.index] = voice;
         this.voiceStarted(voice);
         return true;
     }
@@ -562,8 +550,7 @@ export class AudioMixer {
     updateLoopingSound(sound: PcmSound, options: FrameLoopingSoundOptions): void {
         if (!this.enabled)
             return;
-        if (this.soundMemory === null)
-            validateSound(sound, false);
+        validateSound(sound, false);
         requireEntity(options.entity, this.entityCapacity);
         requireFrameNumber(options.frameNumber);
         requireChannelVolume(options.volume ?? 127);
@@ -606,8 +593,7 @@ export class AudioMixer {
     updateRealLoopingSound(sound: PcmSound, options: RealLoopingSoundOptions): void {
         if (!this.enabled)
             return;
-        if (this.soundMemory === null)
-            validateSound(sound, false);
+        validateSound(sound, false);
         requireEntity(options.entity, this.entityCapacity);
         requireChannelVolume(options.volume ?? 90);
         const prepared = this.prepare(sound);
@@ -664,6 +650,9 @@ export class AudioMixer {
             }
         }
     }
+    entityActive(entity: number): boolean {
+        return this.loops.get(entity)?.active === true || this.voices.some(voice => voice !== null && voice.entity === entity);
+    }
     stopEntity(entity: number): void {
         requireEntity(entity, this.entityCapacity);
         for (const [index, voice] of this.voices.entries()) {
@@ -709,39 +698,6 @@ export class AudioMixer {
         this.beginRawWrite();
         const outputFrames = this.rawOutputFrames(sound);
         this.appendRaw(sound, integerVolume, outputFrames);
-        if (this.rawEndTime > this.soundTime + RAW_SAMPLE_CAPACITY) {
-            this.rawDebugPrint(`S_RawSamples: overflowed ${this.rawEndTime} > ${this.soundTime}\n`);
-        }
-    }
-    /** S_RawSamples before PCM normalization, including signed stereo byte samples. */
-    queueRawBytes(samples: number, rate: number, width: number, channels: number, data: Uint8Array, volume: number): void {
-        if (!this.enabled)
-            return;
-        if (!Number.isInteger(samples) || int32(samples) !== samples || !Number.isInteger(rate) || rate <= 0) {
-            throw new RangeError("Raw sample count and rate require source signed integers and a positive rate");
-        }
-        let integerVolume = Math.trunc(Math.fround(256 * Math.fround(volume)));
-        if (!Number.isInteger(integerVolume) || int32(integerVolume) !== integerVolume)
-            throw new RangeError("raw volume has an undefined signed-int gain conversion");
-        this.beginRawWrite();
-        if ((channels === 1 || channels === 2) && (width === 1 || width === 2)) {
-            const scale = Math.fround(rate / this.outputRate);
-            if (width === 1)
-                integerVolume = Math.imul(integerVolume, 256);
-            const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-            for (let index = 0;; index++) {
-                const source = channels === 2 && width === 2 && scale === 1 ? index : Math.trunc(Math.fround(index * scale));
-                if (source >= samples)
-                    break;
-                const destination = this.rawEndTime & (RAW_SAMPLE_CAPACITY - 1);
-                this.rawEndTime++;
-                const sourceIndex = source * channels;
-                const sample = (index: number): number => width === 2 ? view.getInt16(index * 2, true)
-                    : channels === 2 ? view.getInt8(index) : view.getUint8(index) - 128;
-                this.rawSamples[destination * 2] = Math.imul(sample(sourceIndex), integerVolume);
-                this.rawSamples[destination * 2 + 1] = Math.imul(sample(sourceIndex + channels - 1), integerVolume);
-            }
-        }
         if (this.rawEndTime > this.soundTime + RAW_SAMPLE_CAPACITY) {
             this.rawDebugPrint(`S_RawSamples: overflowed ${this.rawEndTime} > ${this.soundTime}\n`);
         }
@@ -793,9 +749,6 @@ export class AudioMixer {
             this.rawSamples[destination * 2 + 1] = Math.imul(right, integerVolume);
         }
     }
-    queueMusic(sound: PcmSound): void {
-        this.queueRaw(sound, this.musicVolume);
-    }
     /** Numeric calls consume directly; explicit ranges paint without advancing device sound time. */
     mix(request: number | SoundPaintRange): Int16Array {
         const startFrame = typeof request === "number" ? this.paintedTime : request.startFrame;
@@ -823,7 +776,7 @@ export class AudioMixer {
             this.issueScheduledSounds();
             let count = Math.min(PAINTBUFFER_SIZE, endFrame - this.paintedTime);
             for (const voice of this.voices) if (voice?.start.kind === "scheduled") count = Math.min(count, voice.start.sample - this.paintedTime);
-            const paint = new Float64Array(count * 2);
+            const paint = this.paintScratch.subarray(0, count * 2).fill(0);
             this.paintRaw(paint, count);
             const mergedVoices = new Set<OneShotVoice>();
             for (const voice of this.voices) {
@@ -859,8 +812,6 @@ export class AudioMixer {
                 }
             }
             for (const loop of this.loopChannels) {
-                if (this.soundMemory !== null && (!this.soundMemory.hasData(loop.prepared.sound) || loop.prepared.outputFrames === 0))
-                    continue;
                 this.paintLoop(paint, count, loop, effectsGain);
             }
             // S_TransferPaintBuffer replaces each completed source paint block.
@@ -890,11 +841,6 @@ export class AudioMixer {
         return setting.integerValue;
     }
     private prepare(sound: PcmSound): PreparedSound {
-        if (this.soundMemory !== null) {
-            const memory = this.soundMemory;
-            memory.frameCount(sound);
-            return { sound, memory, step256: 256, get outputFrames() { return memory.frameCount(sound); } };
-        }
         const scale = Math.fround(sound.sampleRate / this.outputRate);
         const outputFrames = Math.trunc(Math.fround(Math.fround(sound.frameCount) / scale));
         if (!Number.isSafeInteger(outputFrames) || outputFrames < 0) {
@@ -902,7 +848,6 @@ export class AudioMixer {
         }
         return {
             sound,
-            memory: null,
             step256: Math.trunc(scale * 256),
             outputFrames,
         };
@@ -920,6 +865,30 @@ export class AudioMixer {
         for (let index = 0; index < this.voices.length; index++)
             this.freeChannels.push(index);
         this.rawDebugPrint("Channel memory manager started\n");
+    }
+    /** Source MAX_CHANNELS: a full mixer steals the oldest ordinary effect (the listener's own sounds only for the listener) or refuses the new sound. */
+    private acquireChannel(entity: number): { readonly index: number; readonly reused: boolean } | null {
+        const free = this.freeChannels.pop();
+        if (free !== undefined)
+            return { index: free, reused: true };
+        if (this.voices.length < Math.max(MAXIMUM_VOICES, this.capacity))
+            return { index: this.voices.length, reused: false };
+        let victim = -1, oldest = Infinity;
+        for (const [index, voice] of this.voices.entries()) {
+            if (voice === null || voice.entity === this.listenerEntity && entity !== this.listenerEntity)
+                continue;
+            if (voice.policy !== null && voice.policy.role !== "effect")
+                continue;
+            if (voice.allocatedAt < oldest) {
+                oldest = voice.allocatedAt;
+                victim = index;
+            }
+        }
+        if (victim < 0)
+            return null;
+        this.freeChannel(victim, "replaced");
+        this.freeChannels.pop();
+        return { index: victim, reused: true };
     }
     private freeChannel(index: number, reason: "ended" | "stopped" | "replaced" = "stopped"): void {
         const voice = this.voices[index];
@@ -984,8 +953,6 @@ export class AudioMixer {
         return this.transmit(position, spatializeSoundOrigin(position, this.listenerOrigin, this.listenerAxis, volume, this.outputChannels));
     }
     private effectSample(prepared: PreparedSound, outputFrame: number): number {
-        if (prepared.memory !== null)
-            return prepared.memory.sample(prepared.sound, outputFrame);
         const sourceFrame = Math.trunc(outputFrame * prepared.step256 / 256);
         return checkedSample(prepared.sound.samples, sourceFrame);
     }
@@ -996,11 +963,12 @@ export class AudioMixer {
             const sampleOffset = absoluteFrame % loop.prepared.outputFrames;
             const count = Math.min(frames - outputFrame, loop.prepared.outputFrames - sampleOffset);
             if (!this.dopplerEnabled || !loop.doppler || loop.dopplerScale === 1) {
+                const volume = { left: loop.leftVolume, right: loop.rightVolume };
                 for (let index = 0; index < count; index++) {
                     if (sampleOffset + index < 0)
                         throw new RangeError("loop sound reached an invalid negative sample access");
                     const sample = this.effectSample(loop.prepared, sampleOffset + index);
-                    this.paintEffect(paint, outputFrame + index, sample, { left: loop.leftVolume, right: loop.rightVolume }, effectsGain);
+                    this.paintEffect(paint, outputFrame + index, sample, volume, effectsGain);
                 }
             }
             else {
@@ -1077,8 +1045,6 @@ export class AudioMixer {
     }
     private dopplerSample(prepared: PreparedSound, chunk: number, sampleOffset: number): number {
         const outputFrame = chunk * SND_CHUNK_SIZE + (sampleOffset & (SND_CHUNK_SIZE - 1));
-        if (prepared.memory !== null)
-            return prepared.memory.sample(prepared.sound, outputFrame);
         // The source reads uninitialized tail storage in the final sndBuffer when
         // Doppler outruns soundLength. Deterministic mixing explicitly stabilizes
         // that undefined memory as zero.
@@ -1094,7 +1060,6 @@ export class AudioMixer {
     }
     private collectLoopMixes(): LoopMix[] {
         this.loopChannels = [];
-        const time = this.soundMemory === null ? null : this.allocationTime();
         const mixes: LoopMix[] = [];
         const loops = [...this.loops.values()].filter(loop => loop.active).sort((left, right) => left.entity - right.entity);
         const merged = new Set<number>();
@@ -1103,8 +1068,6 @@ export class AudioMixer {
             if (loop === undefined || merged.has(loop.entity))
                 continue;
             const volume = this.spatializeOrigin(this.positionForEntity(loop.entity), loop.volume);
-            if (time !== null)
-                this.soundMemory?.touch(loop.prepared.sound, time);
             let leftVolume = volume.left;
             let rightVolume = volume.right;
             for (let later = index + 1; later < loops.length; later++) {
@@ -1113,8 +1076,6 @@ export class AudioMixer {
                     continue;
                 merged.add(candidate.entity);
                 const candidateVolume = this.spatializeOrigin(this.positionForEntity(candidate.entity), candidate.volume);
-                if (time !== null)
-                    this.soundMemory?.touch(candidate.prepared.sound, time);
                 leftVolume += candidateVolume.left;
                 rightVolume += candidateVolume.right;
             }

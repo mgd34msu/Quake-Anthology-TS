@@ -33,6 +33,7 @@ export interface ClientThinkFrame {
 
 export interface ClientThinkSettings {
   readonly debugMove: number;
+  readonly ladders?: boolean;
   readonly synchronousClients: boolean;
   readonly pmoveFixed: boolean;
   readonly pmoveMsec: number;
@@ -198,6 +199,7 @@ export class ClientThinkRuntime {
       debugLevel: settings.debugMove,
       traceMask, fixedMsec: fixed ? settings.pmoveMsec : null, gauntletHit,
       noFootsteps: (settings.dmflags & 32) !== 0,
+      ...(settings.ladders === true ? { ladders: true } : {}),
     });
     if (ps.eventSequence !== oldEventSequence) entity.eventTime = frame.time;
     if (settings.smoothClients) playerStateToEntityStateExtraPolate(ps, entity.s, ps.commandTime, true);

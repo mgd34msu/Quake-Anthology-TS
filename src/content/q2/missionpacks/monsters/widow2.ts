@@ -150,6 +150,7 @@ export function createWidow2Definition(monsters: Q2Monsters, weapons: Q2MissionP
       widow2_run: run, Widow2Beam: beam, Widow2SaveBeamTarget: saveBeam, Widow2StartSweep: saveBeam,
       Widow2BeamTargetRemove(context) { context.entity.pos1 = zero; context.entity.pos2 = zero; return undefined; },
       widow2_attack_beam: move("widow2_move_attack_beam"),
+      widow2_step(context) { return context.game.sound(context.entity, "widow/bwstep1.wav", 4); },
       widow2_reattack_beam(context) {
         context.state.manualSteering = false;
         if (context.entity.enemy !== null && inFront(context, context.entity.enemy) && context.game.host.random() <= 0.5) return context.setMove(context.game.host.random() < 0.7 || widowSlotsLeft(context) < 2 ? "widow2_move_attack_beam" : "widow2_move_spawn");

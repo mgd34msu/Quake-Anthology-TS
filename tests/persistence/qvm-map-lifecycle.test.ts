@@ -8,7 +8,7 @@ import { createSimulation } from "../../src/app/bootstrap/simulation/index.ts";
 import type { Q3GuestMapTransition } from "../../src/app/bootstrap/simulation/q3/guest-runtime.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
-import { UserFileStore } from "../../src/platform/files/writable.ts";
+import { UserFileStore } from "../../src/core/files/writable.ts";
 import { EngineSession } from "../../src/world/session/session.ts";
 
 test("actual LRCTF full map lifecycle writes connected sessions before retirement and reconnects both teams without first-time admission", async () => {

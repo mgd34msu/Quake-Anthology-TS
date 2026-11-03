@@ -5,7 +5,7 @@ import { SaveReader } from "../../../persistence/value.ts";
  */
 import type { Vec3 } from "../../../core/math.ts";
 import { nativeAtof, nativeAtoi } from "../../../core/numeric.ts";
-import { LexerFlag, ScriptLanguageError, ScriptLexer, type ScriptToken } from "../../../ui/common/legacy/script/lexer.ts";
+import { LexerFlag, ScriptLanguageError, ScriptLexer, type ScriptToken } from "../../../content/legacy-script/lexer.ts";
 import { BotMemory, type BotMemoryAllocation } from "./memory.ts";
 
 export type AasBspNumberResult =
@@ -49,9 +49,8 @@ function decimalInteger(text: string): number {
     const digits = prefix[2];
     if (sign === undefined || digits === undefined) throw new Error("Integer prefix capture is absent");
     const magnitude = BigInt(digits);
-    if (magnitude > (sign === "-" ? 2147483648n : 2147483647n)) {
-      throw new RangeError("AAS integer epair conversion exceeds the source-defined int32 range");
-    }
+    // Map text is untrusted and atoi has no failure path; an oversized value saturates.
+    if (magnitude > (sign === "-" ? 2147483648n : 2147483647n)) return sign === "-" ? -2147483648 : 2147483647;
   }
   return nativeAtoi(text);
 }

@@ -1,27 +1,16 @@
+import { recipeFixture } from "../../support/save-fixtures.ts";
 import { expect, test } from 'bun:test';
-import type { ExecutableRecipe, ProviderReference, ResolvedResourceReference } from '../../../src/contracts/content.ts';
-import { createContentDigest, createResourceId } from '../../../src/contracts/content.ts';
+import type { ExecutableRecipe } from '../../../src/contracts/content.ts';
+
 import { createIdentityOwner } from '../../../src/contracts/identity.ts';
-import { LoopbackHub } from '../../../src/network/common/loopback.ts';
+import { LoopbackHub } from '../../support/loopback.ts';
 import { UnifiedChannel } from '../../../src/network/unified/channel.ts';
 import { decodeUnifiedPacket } from '../../../src/network/unified/packet.ts';
 import { createUnifiedComposition } from '../../../src/app/bootstrap/network/unified-content.ts';
 import { UnifiedServerNetwork } from '../../../src/app/bootstrap/network/unified-server.ts';
 import { encodeUnifiedHandshake, decodeUnifiedHandshake, encodeUnifiedControl, encodeUnifiedInputs } from '../../../src/app/bootstrap/network/unified-control.ts';
 import type { UnifiedApplicationServerHost } from '../../../src/app/bootstrap/simulation/network-unified.ts';
-function recipe(): ExecutableRecipe {
-  const content = "q1:classic:id1:fixture";
-  const provider = (role: string): ProviderReference => ({ provider: `q1:${role}`, content });
-  const raw: Omit<ResolvedResourceReference, "id"> = { requestedPath: "maps/start.bsp", provenance: { kind: "loose", memberPath: "maps/start.bsp", mount: { kind: "loose", identity: { id: "mount:q1:fixture", content, generation: 2 }, rootPath: "/fixture" } },
-    digest: createContentDigest("0".repeat(64)), byteLength: 123, resolution: { kind: "default-order", plan: "mount-plan:fixture:1", rank: 0 } };
-  const geometry = { ...raw, id: createResourceId(raw) };
-  return { schemaVersion: 3, id: "recipe:fixture:1", preset: "recipe:fixture:1", map: { geometryContent: content, geometry, entities: provider("game") }, campaign: { kind: "campaign", mission: provider("mission"), gamecode: provider("game") },
-    movement: provider("movement"), character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
-    presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: content, hud: provider("hud"), effects: provider("effects"), audio: provider("audio") }, engineBehavior: provider("engine"), combat: provider("combat"), inventory: provider("inventory"), match: provider("match"), transition: provider("transition"),
-    execution: [{ kind: "typescript", owner: provider("game"), implementation: "q1:official", role: "server-game", api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } }],
-    mounts: { id: "mount-plan:fixture:1", mounts: [raw.provenance.mount], defaultOrder: [raw.provenance.mount.identity.id], prefixOrders: [] }, resources: [geometry], timing: [],
-    ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } } };
-}
+const recipe = (): ExecutableRecipe => recipeFixture();
 
 async function fixture(command: () => void = () => {}, componentCommand?: NonNullable<UnifiedApplicationServerHost["componentCommand"]>) {
   const hub = new LoopbackHub(), transport = hub.bind('server'), socket = hub.bind('client');
@@ -59,12 +48,13 @@ test('later same-poll disconnect removes inputs already queued for the authorita
   } finally { f.server.close(); f.hub.close(); }
 });
 
-test('authoritative command failures retain their original cause instead of becoming packet rejection', async () => {
+test('a command failure costs only that peer its connection and leaves the authority running', async () => {
   const failure = new Error('source command failed'), f = await fixture(() => { throw failure; });
   try {
     f.channel.queueReliable(encodeUnifiedControl({ kind: 'command', epoch: 1, name: 'source_command', args: [] }));
     for (const bytes of f.channel.flush(10)) f.socket.send(f.transport.address, bytes);
-    await expect(f.server.poll(10)).rejects.toBe(failure);
+    expect(await f.server.poll(10)).toEqual([]);
+    expect(f.disconnected()).toBe(1); expect(f.server.clients).toEqual([]); expect(f.server.phase).toBe('active');
   } finally { f.server.close(); f.hub.close(); }
 });
 

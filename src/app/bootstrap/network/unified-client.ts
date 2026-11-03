@@ -49,7 +49,7 @@ export class UnifiedClientNetwork<TAddress extends NetworkAddress> implements Ap
       if(this.composition===null&&now-this.lastHandshake>=1000){this.lastHandshake=now;this.options.transport.send(this.options.remote,encodeUnifiedHandshake(this.token===null?{kind:'hello',nonce:this.nonce}:{kind:'connect',nonce:this.nonce,token:this.token}));}
       for(;;){
         const packet=this.options.transport.poll();if(packet===null)break;
-        if(packet.kind==='error')throw packet.error;if(packet.kind!=='packet'||!sameAddress(packet.from,this.options.remote))continue;
+        if(packet.kind!=='packet'||!sameAddress(packet.from,this.options.remote))continue;
         const handshake=decodeUnifiedHandshake(packet.payload);
         if(handshake!==null){if(handshake.kind==='challenge'&&handshake.nonce===this.nonce&&this.composition===null){
           if(this.token!==null&&this.token!==handshake.token)continue;

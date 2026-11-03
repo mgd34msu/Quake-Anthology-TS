@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
 import type { MonsterSelectionTarget, ProviderReference } from "../../../src/contracts/content.ts";
 import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../../../src/content/catalog/monsters.ts";
@@ -7,6 +7,7 @@ import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../
 import { applicationPreset, loadApplicationContent, resolveApplicationTravel } from "../../../src/app/bootstrap/content.ts";
 import { monsterSource } from "../../../src/content/monsters/definitions.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
+const test = corpusTest("q2/baseq2/pak0.pak", "q2/rerelease/baseq2/pak0.pak");
 
 const q1: ProviderReference = { provider: "q1:monsters/rerelease/id1", content: "q1:rerelease:id1:test" };
 const q2: ProviderReference = { provider: "q2:monsters/rerelease/baseq2", content: "q2:rerelease:baseq2:test" };
@@ -94,7 +95,7 @@ test("all Quake II monster sources replace Quake dogs with parasites while prese
 
 test("installed Quake dog rosters retain their source behavior and resources across Q2 campaign travel", async () => {
   const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
-  const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1"]);
+  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q2-classic-baseq2", "--map", "base1"]);
   if (parsed.kind !== "run") throw new Error("Expected launch command");
   const preset = applicationPreset(catalog, parsed.options);
   for (const source of monsterSources.filter(source => source.family === "q1")) {
@@ -123,7 +124,7 @@ test("installed Quake dog rosters retain their source behavior and resources acr
 test("actual Q2 base1 and Q1 e1m1 recipes resolve automatic campaign rosters without per-class setup", async () => {
   const catalog = await discoverInstalledContent({ corpusRoot: `${testCorpusRoot()}`, discoverMods: false });
   for (const [game, map, family, source] of [["q2-rerelease-baseq2", "base1", "q2", q1], ["q1-rerelease-id1", "e1m1", "q1", q2]] satisfies readonly (readonly [string, string, "q1" | "q2", ProviderReference])[]) {
-    const parsed = parseApplicationCommand(["--game", game, "--map", map]);
+    const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", game, "--map", map]);
     if (parsed.kind !== "run") throw new Error("Expected launch command");
     const preset = applicationPreset(catalog, parsed.options), selected = { ...source, content: catalog.require(source === q1 ? "q1-rerelease-id1" : "q2-rerelease-baseq2").id }, enemies = defaultMonsterRoster(family, selected);
     const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });

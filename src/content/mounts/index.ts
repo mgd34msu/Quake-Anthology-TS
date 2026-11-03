@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { defaultUserContentRoot } from "../user-data.ts";
@@ -67,10 +67,14 @@ function scheduleDiskDigestSave(): void {
       try {
         const entries = await loadDiskDigests();
         for (const [path, fingerprint] of verifiedDigests) entries.set(path, fingerprint);
-        const file = digestCacheFile();
+        // Entries for archives that were deleted or moved would otherwise accumulate forever.
+        for (const path of [...entries.keys()]) if (!verifiedDigests.has(path) && !await stat(path).then(() => true, () => false)) entries.delete(path);
+        const file = digestCacheFile(), temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
         await mkdir(dirname(file), { recursive: true });
-        await writeFile(`${file}.tmp`, JSON.stringify(Object.fromEntries(entries)));
-        await rename(`${file}.tmp`, file);
+        try {
+          await writeFile(temporary, JSON.stringify(Object.fromEntries(entries)));
+          await rename(temporary, file);
+        } finally { await rm(temporary, { force: true }); }
       } catch { /* The cache is an optimization only. */ }
     })();
   }, 250);
@@ -311,8 +315,17 @@ export class MountedContent {
       const bytes = await source.archive.readEntry(entry);
       return { bytes, provenance: { kind: "archive", mount: source.mount, memberPath: entry.path, memberIndex: entry.ordinal } };
     }
-    const path = await findContentPath(source.mount.rootPath, memberPath, this.options.looseComparison);
-    if (path === null || !(await stat(path)).isFile()) return null;
+    // Cached listings serve repeated probes; a miss is re-checked against the disk so new files are never hidden.
+    const cached = async (directory: string): Promise<readonly string[]> => {
+      const entries = await this.#listing(directory);
+      if (entries === null) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return entries.map(entry => entry.name);
+    };
+    let path = await findContentPath(source.mount.rootPath, memberPath, this.options.looseComparison, cached);
+    if (path === null) path = await findContentPath(source.mount.rootPath, memberPath, this.options.looseComparison);
+    if (path === null) return null;
+    try { if (!(await stat(path)).isFile()) return null; }
+    catch (error) { if (isMissingFile(error)) return null; throw error; }
     const actualPath = relative(source.mount.rootPath, path).replaceAll("\\", "/");
     return { bytes: await readLooseEntry(source.mount.rootPath, actualPath), provenance: { kind: "loose", mount: source.mount, memberPath: actualPath } };
   }
@@ -332,7 +345,9 @@ export class MountedContent {
   async #open(plan: ResolvedMountPlan, path: string, acceptMount: (mount: ContentMount) => boolean,
     openedResources: Map<number, ResolvedResourceReference>): Promise<OpenedResource | null> {
     this.assertOpen();
-    const requestedPath = normalizeResourcePath(path);
+    // Servers, maps and mods supply these names, so one that can't name a resource is a miss rather than a fault.
+    let requestedPath: string;
+    try { requestedPath = normalizeResourcePath(path); } catch (error) { if (error instanceof RangeError) return null; throw error; }
     if (this.#userMounts.size !== 0) for (const [rank, id] of plan.defaultOrder.entries()) {
       if (!this.#userMounts.has(id)) continue;
       const source = this.#sources.get(id);

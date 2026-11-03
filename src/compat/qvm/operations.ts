@@ -42,9 +42,9 @@ export function evaluateQvmUnary(opcode: QvmUnaryOpcode, word: number): number {
   }
 }
 
+/** The compiled module's x86 shifts take the count from CL, so only the low five bits matter. */
 function shiftCount(word: number): number {
-  if (word < 0 || word > 31) throw new RangeError("QVM shift count outside 0..31");
-  return word;
+  return word & 31;
 }
 
 /** Left is source r1 and right is r0. Integer overflow follows the wrap32 profile. */
@@ -83,7 +83,9 @@ export function evaluateQvmBinary(opcode: QvmBinaryOpcode, left: number, right: 
   }
 }
 
-/** Compare source r1 with r0; floating conditions use IEEE unordered comparisons. */
+/** Compare source r1 with r0; floating conditions use IEEE unordered comparisons.
+ * These follow vm_interpreted.c. id's x86 JIT (vm_x86.c) branches on NaN for EQF, LTF and LEF and not for NEF, GTF and GEF,
+ * so the two engines differ on NaN operands for EQF, NEF, LTF and LEF; GTF and GEF agree. */
 export function evaluateQvmBranch(opcode: QvmBranchOpcode, left: number, right: number): boolean {
   switch (opcode) {
     case QvmOpcode.OP_EQ: return left === right;

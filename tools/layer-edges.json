@@ -1,0 +1,26 @@
+{
+  "bots": [
+    "app"
+  ],
+  "compat": [
+    "app"
+  ],
+  "content": [
+    "audio",
+    "bots",
+    "compat",
+    "network",
+    "render",
+    "text",
+    "ui"
+  ],
+  "persistence": [
+    "compat"
+  ],
+  "world": [
+    "app",
+    "compat",
+    "network",
+    "ui"
+  ]
+}

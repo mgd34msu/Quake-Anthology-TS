@@ -92,7 +92,9 @@ export class Q2CharacterActor {
   }
   private context(): Q2CharacterContext {
     const actor = this.actor, host = this.host;
-    return { entity: this.entity, state: this.state, rules: this.rules, movement: host.movement(actor.id), hooks: { noise: (id, origin) => host.noise(id, origin) },
+    return { entity: this.entity, state: this.state, rules: this.rules, movement: host.movement(actor.id),
+      // PlayerNoise ignores self noises during a landmark fall and for 0.1 s after it.
+      hooks: { noise: (id, origin) => this.state.landmarkFreeFall || this.state.landmarkNoiseTime >= host.now() || (this.entity.flags & 0x8000) !== 0 ? undefined : host.noise(id, origin) },
       powerups: () => host.powerups(actor.id), weaponState: () => host.weapon(actor.id), environmentDamage: (amount, means, flags) => host.environmentDamage(actor, amount, means, flags),
       game: { host: { now: () => host.now(), random: () => host.random(), combat: host.combat, inventory: host.inventory, pointContents: point => host.pointContents(point), emit: event => host.emit(event) },
         options: { mode: this.options.mode, deathmatchFlags: this.options.deathmatchFlags, edition: this.options.edition ?? "classic" }, body: () => this.body(),

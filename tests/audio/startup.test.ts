@@ -9,10 +9,12 @@ import { PreparedStartup } from "../../src/app/bootstrap/prepared-startup.ts";
 import { ConsoleScriptFiles } from "../../src/app/bootstrap/config-scripts.ts";
 import { CvarRegistry } from "../../src/core/cvars/index.ts";
 import type { CommandContext, CommandDialect } from "../../src/contracts/common.ts";
-import { expect, spyOn, test } from "bun:test";
+import { afterAll, expect, spyOn, test } from "bun:test";
 import { ApplicationMusic, worldMusicTrack } from "../../src/app/bootstrap/audio/music.ts";
 import { SoundBank, UnifiedAudio, remapQ2MusicTrack } from "../../src/audio/index.ts";
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StartupAudio } from "../../src/app/bootstrap/startup-audio.ts";
 import { FrontendPreferences } from "../../src/app/bootstrap/frontend-preferences.ts";
@@ -31,7 +33,8 @@ import type { PcmStream } from "../../src/audio/streams.ts";
 import { CdMusic, MusicControls, MusicPlayer } from "../../src/audio/music.ts";
 import { MemoryPcmStream } from "../../src/audio/streams.ts";
 
-const evidence = join(import.meta.dir, "../../.artifacts/resume-20260913");
+const evidence = mkdtempSync(join(tmpdir(), "audio-startup-"));
+afterAll(() => { rmSync(evidence, { recursive: true, force: true }); });
 test("frontend audio uses saved gains, preserves selected overrides, and saves the matching product", async () => {
   await mkdir(evidence, { recursive: true });
   const directory = await mkdtemp(join(evidence, "audio-preferences-"));

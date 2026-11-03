@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../../support/corpus.ts";
+import { expect } from "bun:test";
+import { corpusTest, corpusFile } from "../../../support/corpus.ts";
 
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
@@ -9,7 +9,7 @@ import { openArchive } from "../../../../src/content/archive/index.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
 import { Q1_DONOR_PROFILE } from "../../../../src/core/numeric.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { Q1Foundation } from "../../../../src/content/q1/foundation/runtime.ts";
 import type { Q1Event, Q1FoundationHost } from "../../../../src/content/q1/foundation/types.ts";
 import { ZERO, PLAYER_BOUNDS, vadd } from "../../../../src/content/q1/foundation/types.ts";
@@ -21,9 +21,11 @@ import { setTeam } from "../../../../src/content/q1/addons/ctf/teams.ts";
 import { touchFlag, dropFlag } from "../../../../src/content/q1/addons/ctf/flags.ts";
 import { fireHook, hookTouch } from "../../../../src/content/q1/addons/ctf/grapple.ts";
 import type { ItemId } from "../../../../src/contracts/gameplay.ts";
+import { impulseAuthority } from "../../../support/authority.ts";
+const test = corpusTest("q1/rerelease/ctf/pak0.pak");
 
 async function map(name: string): Promise<Q1Map> {
-  const archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/ctf/pak0.pak`);
+  const archive = await openArchive(corpusFile("q1/rerelease/ctf/pak0.pak"));
   try { const path = `maps/${name}.bsp`, entry = archive.findEntries(path)[0]; if (entry === undefined) throw new Error(`Missing ${path}`); return readQ1Bsp(await archive.readEntry(entry), { source: path }); }
   finally { archive.close(); }
 }
@@ -32,7 +34,7 @@ function world(map: Q1Map, coop = false) {
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const pending = new Map<OwnedActor, number>(), events: Q1Event[] = [], players: ActorId[] = [];
   const scores = new Map<ActorId, number>(), captures = new Map<CtfTeam, number>(), observers = new Set<ActorId>(), inputs = new Map<ActorId, CtfInput>(), statuses = new Map<ActorId, CtfStatus>(), weapons = new Map<ActorId, ItemId>(), cvars = new Map<string, number>([["teamplay", 130]]);
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: (actor, impulse) => { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, velocity: vadd(body.velocity, impulse) }); return undefined; }, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = impulseAuthority(actors, callbacks, bodies);
   const inventory = new SharedInventoryTable(actors); let runtime: Q1Foundation | null = null;
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
     trace: request => {
@@ -88,6 +90,7 @@ test("actual rerelease CTF maps spawn flags, team starts, runes and named saved 
     const state = world(await map(name)); state.advance(0.5);
     expect(state.ctf.flag("red")?.solid).toBe("trigger"); expect(state.ctf.flag("blue")?.solid).toBe("trigger");
     expect([...state.game.entities.values()].filter(entity => entity.classname.startsWith("item_rune_")).length).toBe(4);
+    for (const team of ["info_player_team1", "info_player_team2"]) expect([...state.game.entities.values()].filter(entity => entity.classname === team).length).toBeGreaterThan(0);
     expect(state.game.totalMonsters).toBe(0); expect(() => state.game.capture()).not.toThrow(); state.actors.close();
   }
 });

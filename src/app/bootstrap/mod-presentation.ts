@@ -30,7 +30,7 @@ import type { QvmHostCall, QvmHostResult } from "../../compat/qvm/syscalls.ts";
 import { worldMarkProjector } from "../../content/q3/presentation/mark-projector.ts";
 import type { Q3SceneContent } from "../../content/q3/presentation/scene.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
-import { ScriptGlobalDefines } from "../../ui/common/legacy/script/preprocessor.ts";
+import { ScriptGlobalDefines } from "../../content/legacy-script/preprocessor.ts";
 import { CollisionMapSettings } from "../../world/collision/q3/settings.ts";
 import type { SharedSceneQueries } from "../../world/collision/index.ts";
 import type { ActiveModPresentation } from "../../world/session/mod-presentations.ts";

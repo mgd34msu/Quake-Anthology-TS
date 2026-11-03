@@ -28,6 +28,8 @@ export interface QwApplicationServerHost {
     recordingPlayer?(client: ClientId): QwApplicationPlayer;
     recordingSignon?(player: QwApplicationPlayer): readonly Uint8Array[];
     clientInfo(player: QwApplicationPlayer): ReadonlyMap<string, string>;
+    /** Gives the simulation the network facts QuakeWorld's infokey("ip") and infokey("ping") read. */
+    networkInfo?(player: QwApplicationPlayer, info: { address(): string; ping(): number }): void;
     commandPhase(player: QwApplicationPlayer, action: () => void, emit: (recipient: QwApplicationPlayer, message: QwServerMessage) => void): void;
     disconnect(player: QwApplicationPlayer, reason: string): void;
     signon(player: QwApplicationPlayer): QuakeWorldSignonHost;

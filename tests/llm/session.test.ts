@@ -8,7 +8,7 @@ function fixture() {
   const session = new LlmSession(async input => {
     calls.push(input);
     if (input.prompt.includes("READY only")) return "READY";
-    if (input.prompt === "bad") throw new Error("transport failed");
+    if (input.prompt.endsWith("bad")) throw new Error("transport failed");
     return `answer:${input.prompt}`;
   }, () => config);
   return { calls, session, setConfig: (value: string) => { config = value; } };
@@ -29,8 +29,8 @@ test("one session primes once, keeps its ID and transcript across games, and upd
   expect(calls[1]?.instructions).toContain("turn one");
 
   await session.request({ prompt: "second", instructions: "turn two", sessionInstructions: "CATALOG ONE" });
-  expect(calls[2]?.instructions).toContain("User: first");
-  expect(calls[2]?.instructions).toContain("Assistant: answer:first");
+  expect(calls[2]?.prompt).toContain("User: first");
+  expect(calls[2]?.prompt).toContain("Assistant: answer:first");
   expect(session.id).toBe(id);
 
   await session.prime("CATALOG TWO");
@@ -38,7 +38,7 @@ test("one session primes once, keeps its ID and transcript across games, and upd
   expect(calls).toHaveLength(4);
   await session.request({ prompt: "third", instructions: "turn three", sessionInstructions: "CATALOG TWO" });
   expect(calls[4]?.instructions).toContain("CATALOG TWO");
-  expect(calls[4]?.instructions).toContain("User: second");
+  expect(calls[4]?.prompt).toContain("User: second");
   expect(calls.every(call => call.sessionId === id)).toBe(true);
 });
 
@@ -53,7 +53,7 @@ test("provider or model fingerprint change starts fresh provider context without
   expect(session.id).not.toBe(firstId);
   expect(calls).toHaveLength(4);
   expect(calls[2]?.prompt).toContain("starts an ongoing session");
-  expect(calls[3]?.instructions).not.toContain("User: first");
+  expect(calls[3]?.prompt).not.toContain("User: first");
   expect(calls[3]?.sessionId).toBe(session.id);
 });
 
@@ -63,15 +63,15 @@ test("explicit invalidation and failed turns do not poison the retained transcri
   await expect(session.request({ prompt: "bad", instructions: "turn", sessionInstructions: "CATALOG" })).rejects.toThrow("transport failed");
   await session.request({ prompt: "next", instructions: "turn", sessionInstructions: "CATALOG" });
   const next = calls.at(-1);
-  expect(next?.instructions).toContain("User: kept");
-  expect(next?.instructions).not.toContain("User: bad");
+  expect(next?.prompt).toContain("User: kept");
+  expect(next?.prompt).not.toContain("User: bad");
 
   const oldId = session.id;
   session.invalidate();
   expect(session.id).not.toBe(oldId);
   expect(session.active).toBe(false);
   await session.request({ prompt: "fresh", instructions: "turn", sessionInstructions: "CATALOG" });
-  expect(calls.at(-1)?.instructions).not.toContain("User: kept");
+  expect(calls.at(-1)?.prompt).not.toContain("User: kept");
 });
 
 test("close rejects later session work", async () => {
@@ -79,4 +79,12 @@ test("close rejects later session work", async () => {
   session.close();
   await expect(session.prime("CATALOG")).rejects.toThrow("LLM session is closed");
   await expect(session.request({ prompt: "hello", instructions: "turn" })).rejects.toThrow("LLM session is closed");
+});
+
+test("PLATFORM-013 a request cancelled during warm-up aborts the warm-up transport call", async () => {
+  const signals: (AbortSignal | undefined)[] = [];
+  const session = new LlmSession(async input => { signals.push(input.signal); return "READY"; });
+  const controller = new AbortController();
+  await session.request({ prompt: "hi", instructions: "turn", sessionInstructions: "CATALOG", signal: controller.signal });
+  expect(signals[0]).toBe(controller.signal);
 });

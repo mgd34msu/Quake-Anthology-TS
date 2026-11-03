@@ -58,9 +58,10 @@ export class ClassicGuestSource {
       const stack = memory.allocate({ byteLength: 1_048_576, alignment: 16n, label: 'classic game stack' });
       const returned = memory.allocate({ byteLength: 16, permissions: 'read-execute', label: 'classic game return' });
       const callbacks = new GuestCallbackTable(memory);
+      // sys_win.c runs _controlfp(_PC_24, _MCW_PC) before every frame, so retail game code computes at single precision.
       const state = createGuestProcessorState({ architecture: 'i386', instructionPointer: 0n, stackPointer: stack.byteOffset + 1_048_560n,
-        flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
-      const cpu = new I386Cpu({ state, memory, hostCall: address => callbacks.enter(address) });
+        flags: 2n, x87ControlWord: 0x7f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+      const cpu = new I386Cpu({ state, memory, callbacks });
       let host: ClassicQ2GuestHost | null = null;
       const runner = new GuestCallRunner({ cpu, callbacks, returnAddress: returned, variadicLayouts: (callback, fixed) => {
         if (host === null) throw new Error('Classic API imports have not been bound');
@@ -128,6 +129,7 @@ export class ClassicGuestSource {
     if (this.phase === 'closed') return;
     if (this.host.options.runner.depth !== 0) throw new Error('Classic guest shutdown requires a completed game call');
     const initialized = this.phase !== 'created', errors: unknown[] = [];
+    this.host.options.runner.recover();
     if (initialized) { try { this.host.shutdown(); } catch (error) { errors.push(error); } }
     try { this.runtime.detach(this.image, { context: this.context, instructionBudget: this.budget }); } catch (error) { errors.push(error); }
     try { this.discard(); } catch (error) { errors.push(error); }

@@ -1,5 +1,8 @@
 import type { ActorCollision } from '../spatial/index.ts';
-import type { PointContentsResult, TracePolicy, TraceResult, BspPlane } from '../../contracts/scene.ts';
+import type { PointContentsResult, TracePolicy, TraceResult, BspPlane, Q2SurfaceInfo } from '../../contracts/scene.ts';
+
+/** cmodel.c's nullsurface: what every Q2 trace reports when no textured brush side was hit. */
+export const Q2_NULL_SURFACE: Q2SurfaceInfo = Object.freeze({ name: '', flags: 0, value: 0, material: '' });
 export type CollisionFamily = 'q1' | 'q2' | 'q3';
 /** Source flags stay in their geometry; only the selected gameplay boundary maps them. */
 export function convertContents(contents: number, from: CollisionFamily, to: CollisionFamily): number {
@@ -70,6 +73,8 @@ export function contentsBlock(contents: number, family: CollisionFamily, policy:
 export function blocksQ1Contents(contents: number, policy: TracePolicy): boolean { return contentsBlock(contents, 'q1', policy); }
 /** Convert a gameplay mask to the geometry's native flag namespace. */
 export function geometryMask(policy: TracePolicy, family: 'q2' | 'q3'): number {
+    if (policy.kind === family)
+        return policy.contentsMask | 0;
     let mask = 0;
     for (let bit = 0; bit < 32; bit++) {
         const flag = 1 << bit;
@@ -90,7 +95,7 @@ export function adaptTraceResult(result: TraceResult, policy: TracePolicy): Trac
         return result;
     const fields = { fraction: result.fraction, end: result.end, startSolid: result.startSolid, allSolid: result.allSolid,
         contact: result.contact, hit: result.hit };
-    const nativeContents = result.kind === 'q1' ? 'contents' in result && typeof result.contents === 'number' ? result.contents : result.startSolid || result.hit.kind !== 'none' ? -2 : -1 : result.contents;
+    const nativeContents = result.kind === 'q1' ? result.contents ?? (result.startSolid || result.hit.kind !== 'none' ? -2 : -1) : result.contents;
     const contents = convertContents(nativeContents, result.kind, policy.kind);
     const sourcePlane = planeWithType(result);
     switch (policy.kind) {

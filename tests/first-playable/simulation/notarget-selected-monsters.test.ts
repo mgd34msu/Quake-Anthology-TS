@@ -13,7 +13,7 @@ import { BaseMonster } from "../../../src/content/q1/base/monsters.ts";
 
 const corpus = testCorpusRoot();
 for (const edition of ["classic", "rerelease"] satisfies readonly ("classic" | "rerelease")[]) {
-  test.skipIf(!existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))(`Q2 notarget stops already alerted ${edition} Q1 monsters with Q3 character and QuakeWorld movement`, async () => {
+  test.skipIf(!existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))(`Q2 notarget does not make already alerted ${edition} Q1 monsters with Q3 character and QuakeWorld movement`, async () => {
     const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q1", "--character", "q3", "--dedicated", "--mode", "singleplayer"]);
     if (launch.kind !== "run") throw new Error("Expected mixed source launch");
     const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false }), preset = applicationPreset(catalog, launch.options);
@@ -30,31 +30,27 @@ for (const edition of ["classic", "rerelease"] satisfies readonly ("classic" | "
       for (let frame = 0; frame < 12; frame++) simulation.step({ elapsedMilliseconds: 100, commands: [] });
       const monster = monsters.find(value => value.game.live(value.entity));
       if (monster === undefined) throw new Error("Selected Q1 monster did not start");
-      const army = [...monster.game.entities.values()].find(value => value.monster?.species === "army");
-      if (army === undefined || army.monster === null) throw new Error("Selected Q1 army did not start");
+      const armyController = monsters.find(value => value.spec.species === "army" && value.game.live(value.entity));
+      if (armyController === undefined) throw new Error("Selected Q1 army did not start");
       const source = simulation.q2Source(), player = source?.game.entity(actor);
       if (source === null || player === undefined || player === null) throw new Error("Missing authoritative Q2 player");
       monster.found(actor); monster.state.oldEnemy = actor;
-      army.monster.enemy = actor; army.monster.oldEnemy = actor;
-      army.monster.mode = "attack"; army.monster.firstFrame = 81; army.monster.sequence = Array.from({ length: 9 }, () => 0); army.monster.frameIndex = 4;
+      armyController.state.enemy = actor; armyController.state.oldEnemy = actor; armyController.state.mode = "run";
       expect(monster.enemy?.equals(actor)).toBe(true);
       simulation.playerCommand(actor, "notarget", []);
       expect((player.flags & 32) !== 0).toBe(true);
       expect(source.players.states.get(actor)?.notarget).toBe(true);
       expect(monster.game.monsterTarget(actor)?.notarget).toBe(true);
+      monster.play("enf_atk6");
       const entitiesBefore = monster.game.entities.size, healthBefore = monster.game.health(actor);
       const yawBefore = monster.game.body(monster.entity).angles.y;
-      monster.play("enf_atk6");
-      monster.game.named.action(army, "monster_frame")();
+      armyController.play("army_run1");
       expect(monster.game.entities.size).toBe(entitiesBefore);
       expect(monster.game.health(actor)).toBe(healthBefore);
       expect(monster.game.body(monster.entity).angles.y).toBe(yawBefore);
-      expect(army.monster.enemy).toBeNull();
-      expect(army.monster.oldEnemy).toBeNull();
-      expect(army.monster.mode).not.toBe("attack");
-      expect(monster.enemy).toBeNull();
-      expect(monster.state.oldEnemy).toBeNull();
-      expect(monster.entity.attackState).toBe("straight");
+      // FL_NOTARGET is read only by FindTarget, so a monster already chasing keeps its enemy (RR ai.qc:650).
+      expect(armyController.state.enemy?.equals(actor)).toBe(true);
+      expect(monster.enemy?.equals(actor)).toBe(true);
       expect(monster.findTarget()).toBe(false);
       simulation.playerCommand(actor, "notarget", []);
       expect((player.flags & 32) !== 0).toBe(false);

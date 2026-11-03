@@ -37,15 +37,17 @@ export class ApplicationViewSettings {
     return { id: "ui:view:field-of-view", get label() { return `Field of view (${settings.fieldOfView})`; }, category: "display", kind: "slider", enabled: () => true,
       minimum: 60, maximum: 160, step: 5, read: () => this.fieldOfView, write: value => this.setFieldOfView(value) };
   }
-  async load(store: ConfigStore): Promise<void> {
+  async load(store: ConfigStore, warn: (text: string) => void = () => {}): Promise<void> {
     const text = await store.loadText("view.json"); if (text === null) return;
     // Text that is not JSON keeps the defaults, like absence; parsed
     // values still face validation.
     let value: unknown;
     try { value = JSON.parse(text); } catch { return; }
-    if (typeof value !== "object" || value === null || !("version" in value) || value.version !== 1
-      || !("fieldOfView" in value) || typeof value.fieldOfView !== "number") throw new Error("Invalid view preferences");
-    this.setFieldOfView(value.fieldOfView);
+    try {
+      if (typeof value !== "object" || value === null || !("version" in value) || value.version !== 1
+        || !("fieldOfView" in value) || typeof value.fieldOfView !== "number") throw new Error("Invalid view preferences");
+      this.setFieldOfView(value.fieldOfView);
+    } catch (error) { warn(`Ignoring view.json: ${error instanceof Error ? error.message : String(error)}\n`); }
   }
   async save(store: ConfigStore): Promise<void> {
     if (this.explicit) await store.dump("view.json", JSON.stringify({ version: 1, fieldOfView: this.fieldOfView }) + "\n");

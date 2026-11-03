@@ -13,7 +13,9 @@ export function isSpawnPointEmpty(game: Q1EntityServices, point: Q1Actor): boole
   for (const actor of radiusActors(game, game.body(point).origin, 64)) {
     if (actor === point.actor.id) continue;
     const other = game.entity(actor);
-    if (((other?.movementFlags ?? 0) & 32) !== 0 || game.host.classname(actor) === "player" || other?.think != null) return false;
+    // QuakeC never clears think, so every item that ran PlaceItem keeps blocking the point; the port clears it before each callback.
+    const placedItem = other !== null && (other.classname.startsWith("item_") || other.classname.startsWith("weapon_"));
+    if (((other?.movementFlags ?? 0) & 32) !== 0 || game.host.classname(actor) === "player" || other?.think != null || placedItem) return false;
   }
   return true;
 }
@@ -65,7 +67,7 @@ function smash(monster: MissionMonster): undefined {
   if (monster.target === null || monster.distance > 100) return undefined;
   const damage = 20 + game.host.random() * 10; game.sound(entity, "s_wrath/smash.wav", "weapon"); game.damage(monster.enemy, entity.actor.id, entity.actor.id, damage);
   const target = eye(game, monster.enemy) ?? monster.target, direction = normalize(vsub(target, monster.origin));
-  game.host.emit({ kind: "particles", origin: vsub(monster.target, vscale(direction, 30)), direction: vscale(direction, -100), color: 73, count: damage });
+  game.host.emit({ kind: "particles", origin: vsub(monster.target, vscale(direction, 30)), direction: vscale(direction, -10), color: 73, count: damage * 2 });
   return undefined;
 }
 function melee(monster: MissionMonster): undefined { const r = monster.game.host.random(); return monster.play(r < 0.33 ? "overlord_at_a01" : r < 0.66 ? "overlord_at_b01" : "overlord_at_c01"); }

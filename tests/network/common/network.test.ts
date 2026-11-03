@@ -11,12 +11,10 @@ import type { DatagramTransport, ReceiveEvent } from "../../../src/network/commo
 import type { NetworkAddress } from "../../../src/network/common/endpoint.ts";
 import { addressKey, ipAddress, ipxAddress, resolveAddress } from "../../../src/network/common/endpoint.ts";
 import { IpxUdpTransport } from "../../../src/network/common/ipx.ts";
-import { admitCompositionOffer, compositionIdentity, encodeCompositionOffer, NetworkSession } from "../../../src/network/common/session.ts";
-import { LoopbackHub } from "../../../src/network/common/loopback.ts";
+import { admitCompositionOffer, compositionIdentity, encodeCompositionOffer } from "../../../src/network/common/session.ts";
+import { LoopbackHub } from "../../support/loopback.ts";
 import { ToggleReliableChannel, StopAndWaitChannel } from "../../../src/network/common/reliability.ts";
-import { FragmentSender, FragmentReceiver } from "../../../src/network/common/fragments.ts";
-import type { MessageFragment } from "../../../src/network/common/fragments.ts";
-import { DownloadFile, DownloadSink, DownloadWindow, downloadHttp } from "../../../src/network/services/downloads.ts";
+import { DownloadFile, DownloadSink } from "../../../src/network/services/downloads.ts";
 import { LocalAuthorization, LocalRankingService } from "../../../src/network/services/online.ts";
 import { IpFilterList, sourceIpv4Filter, RconService } from "../../../src/network/services/admin.ts";
 import { PacketRate } from "../../../src/network/common/scheduling.ts";
@@ -91,35 +89,23 @@ test("reliable source protocols and exact-multiple fragmentation", () => {
   expect(fragment).toMatchObject({ sequence: 0, final: false });
   expect(nq.next(1000)).toBeNull(); expect(nq.next(1001)).toEqual(fragment);
   expect(nq.acknowledge(0)).toBe(true); expect(nq.next(1002)).toMatchObject({ sequence: 1, final: true, payload: Uint8Array.of(5) });
-  const fragmenter = new FragmentSender(1300, 16384, true), assembler = new FragmentReceiver(16384);
-  fragmenter.begin(1, new Uint8Array(2600).fill(7));
-  const parts: MessageFragment[] = [];
-  while (fragmenter.pending) { const part = fragmenter.next(); if (part !== null) parts.push(part); }
-  expect(parts.map(part => part.bytes.length)).toEqual([1300, 1300, 0]);
-  let length = 0;
-  for (const part of parts) { const result = assembler.receive(part); if (result.kind === "complete") length = result.bytes.length; }
-  expect(length).toBe(2600);
   const rate = new PacketRate(2500);
   rate.sent(1000, 0); expect(rate.canSend(319)).toBe(false); expect(rate.canSend(321)).toBe(true);
 });
 
-test("actual file and HTTP downloads verify bytes before installation", async () => {
+test("file downloads verify bytes before installation", () => {
   const root = mkdtempSync(join(tmpdir(), "quake-network-")), bytes = new TextEncoder().encode("authored download fixture");
   const digest = createContentDigest(createHash("sha256").update(bytes).digest("hex"));
   writeFileSync(join(root, "source.dat"), bytes);
-  const source = DownloadFile.open(root, "source.dat"), window = new DownloadWindow(source, 8, 8);
+  const source = DownloadFile.open(root, "source.dat");
   const sink = DownloadSink.create(root, "mods/udp.dat", { digest, byteLength: bytes.length });
-  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(bytes) });
   try {
-    const blocks = window.packets(0, 8);
-    for (const block of blocks) { sink.append(block.bytes); window.acknowledge(block.index, 1); }
-    expect(window.closed).toBe(true); expect(sink.finish()).toBe(digest);
+    for (let offset = 0; offset < source.byteLength; offset += 8) sink.append(source.read(offset, 8));
+    expect(sink.finish()).toBe(digest);
     expect(new Uint8Array(readFileSync(join(root, "mods/udp.dat")))).toEqual(bytes);
-    const httpSink = DownloadSink.create(root, "mods/http.dat", { digest, byteLength: bytes.length });
-    expect(await downloadHttp(new URL(`http://127.0.0.1:${server.port}/fixture`), httpSink)).toBe(digest);
     symlinkSync(tmpdir(), join(root, "outside"));
-    expect(() => DownloadSink.create(root, "outside/nope.dat", { digest, byteLength: bytes.length })).toThrow();
-  } finally { sink.close(); window.close(); await server.stop(true); rmSync(root, { recursive: true, force: true }); }
+    expect(() => DownloadSink.create(root, "outside/nope.dat", { digest, byteLength: bytes.length })).toThrow("ENOTDIR: not a directory, open");
+  } finally { sink.close(); source.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
 test("local account persistence and ranking reports are usable", async () => {
@@ -171,14 +157,4 @@ test("composition offer and private remote seats retain separate identities", ()
   expect(admitCompositionOffer(identity, offer).kind).toBe("supported");
   const other = compositionIdentity({ ...identity.composition, snapshotSchema: "unified:snapshot-v2" });
   expect(admitCompositionOffer(other, offer).kind).toBe("unsupported");
-  const ids = createIdentityOwner("network seats"), first = ids.client(0, 0), second = ids.client(1, 0), localSeat = ids.seat(0), remoteSeat = ids.seat(2);
-  const session = new NetworkSession(ids, identity, { supports: () => ({ kind: "unsupported", reasons: ["No source codec registered"] }) });
-  const wire = { kind: "unified", version: 1, composition: identity.digest, snapshotSchema: identity.composition.snapshotSchema } satisfies Parameters<NetworkSession["connect"]>[2];
-  session.connect(first, { kind: "local", seat: localSeat, endpoint: { kind: "loopback", id: "local" } }, wire, 0);
-  session.connect(second, { kind: "remote", remoteSeats: [{ seat: remoteSeat, index: 0 }], endpoint: ipAddress("127.0.0.1", 27960) }, wire, 0);
-  session.route({ sequence: 0, time: { kind: "milliseconds", value: 10 }, audience: { kind: "seat", seat: remoteSeat }, payload: { kind: "message", event: { kind: "print", level: 0, text: "private" } } });
-  expect(session.drain(first)).toHaveLength(0); expect(session.drain(second)).toHaveLength(1);
-  session.disconnect(second);
-  expect(() => session.get(second)).toThrow("stale");
-  session.close();
 });

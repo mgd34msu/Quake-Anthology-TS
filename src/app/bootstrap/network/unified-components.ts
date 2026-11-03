@@ -9,7 +9,7 @@ import { qvmPlayerStateBytes, readSourceQvmPlayerState, writeSourceQvmPlayerStat
 import { qvmEntityStateBytes, readSourceQvmEntityState, writeSourceQvmEntityState } from "../../../compat/qvm/entity-record.ts";
 import { readModIdentity } from "../../../persistence/mods.ts";
 import { SaveReader, namespaced } from "../../../persistence/value.ts";
-import { actor, wireActor } from "./unified-frame-values.ts";
+import { actor, finiteVectors, wireActor } from "./unified-frame-values.ts";
 import type { UnifiedIdentityDecoder } from "./unified-types.ts";
 
 export interface UnifiedComponentIdentity {
@@ -63,7 +63,10 @@ function readState(reader: SaveReader): SourceGameStateRecord {
   const count = integer(reader.field("dataCount"), 0, 16000), data = bytes(reader.field("stringData"), 16000);
   const offsets = reader.field("stringOffsets").list(offset => integer(offset, 0, Math.max(0, count - 1)));
   if (offsets.length !== 1024 || data[0] !== 0) return reader.fail("invalid original gameState_t");
-  for (const offset of offsets) if (offset !== 0 && (data.indexOf(0, offset) < 0 || data.indexOf(0, offset) >= count)) return reader.fail("unterminated original configstring");
+  // One backward pass finds each position's next NUL, so validating 1024 offsets does not rescan the table.
+  const nextNul = new Int32Array(data.length + 1).fill(-1);
+  for (let index = data.length - 1; index >= 0; index--) nextNul[index] = data[index] === 0 ? index : nextNul[index + 1] ?? -1;
+  for (const offset of offsets) if (offset !== 0 && ((nextNul[offset] ?? -1) < 0 || (nextNul[offset] ?? -1) >= count)) return reader.fail("unterminated original configstring");
   return { stringOffsets: Int32Array.from(offsets), stringData: data, dataCount: count };
 }
 function readCommands(reader: SaveReader): QvmSceneContext["commands"] {
@@ -100,6 +103,7 @@ export function readComponentFrames(reader: SaveReader, identity: UnifiedIdentit
   const sources = reader.field("sources").list(source => {
     const abi = source.field("abi").choice("q3-modern", "q3-1.16n-base"), snapshot = source.field("snapshot");
     const playerState = readSourceQvmPlayerState(view(bytes(snapshot.field("playerState"), qvmPlayerStateBytes(abi))), abi);
+    finiteVectors(snapshot.field("playerState"), [playerState.origin, playerState.velocity, playerState.grapplePoint, playerState.viewAngles]);
     const bindings = source.field("bindings").list(binding => ({ actor: actor(binding.field("actor"), identity), slot: integer(binding.field("slot"), 0, 1023), owned: binding.field("owned").boolean() }));
     if (bindings.length > 1024 || new Set(bindings.map(binding => binding.slot)).size !== bindings.length) return source.fail("duplicate source actor slots");
     const scene = source.field("scene").nullable(value => {

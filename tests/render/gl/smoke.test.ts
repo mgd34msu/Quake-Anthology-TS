@@ -416,9 +416,12 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("stage uniform values preserv
       { ...world, lights: [{ ...light, origin: { ...light.origin, x: NaN } }] },
       { ...world, atlas: null, lights: [light] },
     ] satisfies readonly import("../../../src/contracts/render.ts").BatchLighting[];
-    for (const malformed of invalid) {
+    const rejections = ["Q2 fragment lighting accepts at most eight selected lights per draw", "Q2 shadow atlas texel size and near plane must be positive",
+      "Q2 fragment light radius must be positive", "OpenGL lighting uniforms must be finite float32 values", "Q2 shadow receiver is missing its atlas"];
+    for (const [index, malformed] of invalid.entries()) {
+      const message = rejections[index] ?? "";
       for (let repeat = 0; repeat < 2; repeat++) {
-        freshReference(); expect(() => reference.use(null, "none", malformed)).toThrow(); expect(() => cached.use(null, "none", malformed)).toThrow();
+        freshReference(); expect(() => reference.use(null, "none", malformed)).toThrow(message); expect(() => cached.use(null, "none", malformed)).toThrow(message);
         expect(trace.state).toEqual(referenceTrace.state);
       }
       use(null, "none", lighting());
@@ -436,8 +439,8 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("stage uniform values preserv
     resolutionCalls++; return missing ? -1 : resolveLocation(...args);
   }, resolveLocation);
   try {
-    expect(() => restarted.use(null, "none", lighting())).toThrow("uniform is missing: secondaryMode");
-    expect(() => restarted.use(null, "none", lighting())).toThrow("uniform is missing: secondaryMode");
+    expect(() => restarted.use(null, "none", lighting())).toThrow("OpenGL stage uniform is missing: u_fog_mode");
+    expect(() => restarted.use(null, "none", lighting())).toThrow("OpenGL stage uniform is missing: u_fog_mode");
     expect(resolutionCalls).toBe(2);
     missing = false;
     restarted.use(null, "none", lighting()); expect(restartTrace.calls).toBeGreaterThan(5);

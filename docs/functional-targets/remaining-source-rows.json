@@ -32,7 +32,13 @@
           "functionalArea": "content-assets",
           "classification": {
             "area": "content-assets"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Quake 64 products (classic, rerelease, QuakeWorld) are catalogued with content directory, base product, required archives, program and map witness with no unresolved reason, and discovery of the q64 content directory is tested.",
+          "currentPaths": [
+            "src/content/catalog/products.ts",
+            "tests/content/catalog/anchor-discovery.test.ts"
+          ]
         },
         {
           "id": "q1.services.addon-discovery",
@@ -53,7 +59,14 @@
               "menus-hud"
             ],
             "note": "Local/online add-on discovery includes service/UI joins; assigned to content discovery."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The add-on library lists installed and Quaddicted catalog packages and offers install, update, remove and play, with status and error feedback.",
+          "currentPaths": [
+            "src/app/bootstrap/addon-library.ts",
+            "src/content/catalog/index.ts",
+            "tests/app/addon-library-purge.test.ts"
+          ]
         },
         {
           "id": "q2.content.discovered-addons",
@@ -69,7 +82,14 @@
           "functionalArea": "content-assets",
           "classification": {
             "area": "content-assets"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Non-stock Q2 add-ons that ship gamex86.dll or game_x64.dll are discovered by the catalog and selected for native guest execution, so runtime dispatch is not limited to known programs.",
+          "currentPaths": [
+            "src/content/catalog/index.ts",
+            "src/app/bootstrap/content.ts",
+            "tests/app/q2-native-selection.test.ts"
+          ]
         },
         {
           "id": "q3.content.demo-product-profiles",
@@ -85,7 +105,15 @@
           "functionalArea": "content-assets",
           "classification": {
             "area": "content-assets"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Demo-product restriction is applied: demo mount restriction, fs_restrict, demoRestricted in server and client admission, and a demo sv_keywords entry.",
+          "currentPaths": [
+            "src/content/q3/product-restriction.ts",
+            "src/app/bootstrap/startup-source.ts",
+            "src/app/bootstrap/simulation/network-q3.ts",
+            "tests/app/q3-product-policy.test.ts"
+          ]
         },
         {
           "id": "q3.formats.ibsp44-compatibility",
@@ -100,7 +128,15 @@
           "functionalArea": "content-assets",
           "classification": {
             "area": "content-assets"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "normalizeQ3Bsp converts IBSP44 maps to the version-46 layout before parsing and classifyBsp accepts versions 44 and 46; tests cover IBSP44 decoding and hostile-input rejection.",
+          "currentPaths": [
+            "src/formats/q3-map/ibsp44.ts",
+            "src/formats/q3-map/decode.ts",
+            "src/formats/bsp-kind.ts",
+            "tests/formats/q3-map/decode.test.ts"
+          ]
         },
         {
           "id": "q3.progression.catalog",
@@ -120,7 +156,15 @@
               "progression-services"
             ],
             "note": "Arena/bot catalog discovery supports progression but is a content inventory behavior."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The base arena catalog is read from mounted content and arenaSelection builds a tier-classified, availability-aware arena list in startup and in-game menus that launches the chosen map at a chosen skill.",
+          "currentPaths": [
+            "src/app/bootstrap/base-arena-catalog.ts",
+            "src/app/bootstrap/base-arena-selection.ts",
+            "src/app/bootstrap/base-arena-menu.ts",
+            "tests/app/base-arena-selection.test.ts"
+          ]
         }
       ]
     },
@@ -146,7 +190,15 @@
           "functionalArea": "rendering",
           "classification": {
             "area": "rendering"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q1 addon fog events are consumed by a presentation fog owner and Q1MapFog, with map worldspawn fog, transitions and save/restore, and the fog is passed into the scene frame.",
+          "currentPaths": [
+            "src/app/bootstrap/q1-fog.ts",
+            "src/app/bootstrap/presentation-state.ts",
+            "src/app/bootstrap/effects.ts",
+            "tests/first-playable/q1-fog.test.ts"
+          ]
         },
         {
           "id": "q1.render.model-effects-particles",
@@ -163,7 +215,15 @@
           "functionalArea": "rendering",
           "classification": {
             "area": "rendering"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The Q1 presentation projection publishes raw actor alpha and scale (with clamping), the scene applies them and shadow casting, and the effect-bit consumers (trails, dlights, particles) are joined.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/app/bootstrap/presentation-scene.ts",
+            "src/app/bootstrap/effects.ts",
+            "tests/first-playable/rerelease-presentation.test.ts"
+          ]
         },
         {
           "id": "q1.video.mode-restart-capture",
@@ -180,7 +240,14 @@
           "functionalArea": "rendering",
           "classification": {
             "area": "rendering"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "vid_restart [cpu|gl] restarts the renderer between source frames on the retained client and republishes the window to input, with rollback on failure.",
+          "currentPaths": [
+            "src/app/bootstrap/video-restart.ts",
+            "src/app/bootstrap/renderer.ts",
+            "src/app/bootstrap/application.ts"
+          ]
         },
         {
           "id": "q2.config.renderer-restart",
@@ -196,7 +263,14 @@
           "functionalArea": "rendering",
           "classification": {
             "area": "rendering"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "vid_restart [cpu|gl] and the Apply renderer setting switch the renderer in a live session through ApplicationVideoRestart, which republishes the window and rebuilds presentation.",
+          "currentPaths": [
+            "src/app/bootstrap/video-restart.ts",
+            "src/ui/settings/services.ts",
+            "tests/first-playable/application/renderer-restart.test.ts"
+          ]
         },
         {
           "id": "q2.world.flashlight",
@@ -213,7 +287,14 @@
           "functionalArea": "rendering",
           "classification": {
             "area": "rendering"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Flashlight events are consumed by the effects layer, which keeps a per-actor flashlight scene light; toggling in the rerelease module also plays the on/off sounds.",
+          "currentPaths": [
+            "src/app/bootstrap/effects.ts",
+            "src/content/q2/rerelease/entities.ts",
+            "src/content/q2/rerelease/index.ts"
+          ]
         },
         {
           "id": "q3.presentation.materials-cpu-gl",
@@ -232,7 +313,15 @@
           "functionalArea": "rendering",
           "classification": {
             "area": "rendering"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The application shader registry supplies a materialMovie provider that resolves videoMap stages through MaterialCinematic, with fallback when the movie is absent; the rest of the CPU/GL material pipeline was already listed as implemented.",
+          "currentPaths": [
+            "src/app/bootstrap/assets.ts",
+            "src/materials/material.ts",
+            "src/media/material.ts",
+            "tests/media/cinematic.test.ts"
+          ]
         },
         {
           "id": "q3.presentation.visual-options-restart",
@@ -249,7 +338,15 @@
           "functionalArea": "rendering",
           "classification": {
             "area": "rendering"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "vid_restart is registered by ApplicationVideoRestart with cpu/gl backend switch and r_smp worker option, and the Q3 client derives its hardware class from the live renderer string via the five-class q3Hardware classifier (only ragepro vs generic reaches effects).",
+          "currentPaths": [
+            "src/app/bootstrap/video-restart.ts",
+            "src/render/q3-hardware.ts",
+            "src/app/bootstrap/q3-client.ts",
+            "tests/first-playable/application/renderer-restart.test.ts"
+          ]
         }
       ]
     },
@@ -275,7 +372,15 @@
           "functionalArea": "audio-music",
           "classification": {
             "area": "audio-music"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Cinematic soundtrack blocks are mixed through a per-cinematic RawAudioStream lane in the shared mixer from CampaignCinematic, and a test asserts campaign cinematic PCM reaches the world audience.",
+          "currentPaths": [
+            "src/app/bootstrap/campaign-cinematic.ts",
+            "src/media/audio.ts",
+            "src/audio/streams.ts",
+            "tests/first-playable/application/q2-campaign-cinematic.test.ts"
+          ]
         },
         {
           "id": "q2.media.cin-soundtrack",
@@ -297,7 +402,15 @@
               "cinematics-media"
             ],
             "note": "CIN synchronization remains a cross-media dependency; this row is assigned to its soundtrack behavior."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The CIN soundtrack is decoded with the video, queued on the cinematic's own mixer lane and paused, checkpointed and resumed with the picture clock; tests assert PCM output and pause behaviour.",
+          "currentPaths": [
+            "src/app/bootstrap/campaign-cinematic.ts",
+            "src/media/cin.ts",
+            "src/media/audio.ts",
+            "tests/media/cinematic.test.ts"
+          ]
         },
         {
           "id": "q2.music.menu-shuffle",
@@ -313,7 +426,15 @@
           "functionalArea": "audio-music",
           "classification": {
             "area": "audio-music"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Frontend menu music is owned by StartupAudio with an archived music_menu_track choice, and the archived music_shuffle toggle drives the Q2 gameplay playlist shuffle; a test exercises both bindings.",
+          "currentPaths": [
+            "src/app/bootstrap/audio/music.ts",
+            "src/app/bootstrap/audio/playlist-settings.ts",
+            "src/ui/settings/index.ts",
+            "tests/audio/startup.test.ts"
+          ]
         },
         {
           "id": "q2.music.pause-resume-gain",
@@ -329,7 +450,14 @@
           "functionalArea": "audio-music",
           "classification": {
             "area": "audio-music"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Music pause and resume run through the cd pause and cd resume commands and source pause events, and music gain is a continuous setter; a startup test checks pause, resume and gain preservation.",
+          "currentPaths": [
+            "src/app/bootstrap/audio/music.ts",
+            "src/app/bootstrap/audio.ts",
+            "tests/audio/startup.test.ts"
+          ]
         },
         {
           "id": "q3.audio.a3d-geometry-contract",
@@ -347,7 +475,15 @@
           "classification": {
             "area": "audio-music",
             "note": "The A3D geometry contract remains an audio obligation."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Per-source geometry transmission (trace-based obstruction with thickness attenuation) is applied by the engine when s_geometryAcoustics is on; it is a documented replacement policy, not A3D SDK math.",
+          "currentPaths": [
+            "src/audio/geometry.ts",
+            "src/app/bootstrap/audio.ts",
+            "src/audio/engine.ts",
+            "tests/audio/geometry.test.ts"
+          ]
         },
         {
           "id": "q3.audio.background-music",
@@ -364,7 +500,15 @@
           "functionalArea": "audio-music",
           "classification": {
             "area": "audio-music"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "World/cgame intro-loop music, frontend menu track selection through the shared mixer, and the win/loss postgame music command (music music/win|loss) issued on base-arena completion are all wired.",
+          "currentPaths": [
+            "src/app/bootstrap/audio/music.ts",
+            "src/app/bootstrap/startup-audio.ts",
+            "src/app/bootstrap/base-arena-postgame.ts",
+            "tests/audio/startup.test.ts"
+          ]
         },
         {
           "id": "q3.audio.raw-pcm-output-diagnostics",
@@ -381,7 +525,15 @@
           "functionalArea": "audio-music",
           "classification": {
             "area": "audio-music"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Output format is selectable through s_outputRate/s_outputBits/s_outputChannels (s_khz alias) applied by snd_restart, and soundinfo/soundlist/play report the real device format; physical audibility is not claimed.",
+          "currentPaths": [
+            "src/app/bootstrap/audio/output-settings.ts",
+            "src/audio/engine.ts",
+            "src/app/bootstrap/audio.ts",
+            "tests/settings/audio-output-callers.test.ts"
+          ]
         }
       ]
     },
@@ -408,7 +560,15 @@
           "functionalArea": "input-seats",
           "classification": {
             "area": "input-seats"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Per-seat controller and mouse tuning UI exposes deadzone shape, deadzone, exponent and outer threshold for both sticks, with persistence and device-profile fallback.",
+          "currentPaths": [
+            "src/ui/settings/index.ts",
+            "src/input/gamepad.ts",
+            "src/settings/config.ts",
+            "src/app/bootstrap/input.ts"
+          ]
         },
         {
           "id": "q1.seats.connections-lifecycle",
@@ -425,7 +585,14 @@
           "functionalArea": "input-seats",
           "classification": {
             "area": "input-seats"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "local_join and local_drop add and remove seats at runtime with UI buttons and staged presentation; a drop quits only when every local seat leaves and no lobby exists, otherwise it returns to the lobby.",
+          "currentPaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/ui.ts",
+            "tests/core/local-seat-change.test.ts"
+          ]
         },
         {
           "id": "q1.seats.presentation-ownership",
@@ -450,7 +617,14 @@
               "menus-hud"
             ],
             "note": "The row explicitly crosses presentation services; its single organizing behavior is seat ownership."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Effects, listeners and modal input are seat-owned, and local demo recording is bound to a specific recorded seat (recordingSeat) with its own view angles.",
+          "currentPaths": [
+            "src/app/bootstrap/presentation.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/demo-local-recording.ts"
+          ]
         },
         {
           "id": "q1.seats.qw-native-extension",
@@ -471,7 +645,15 @@
               "networking"
             ],
             "note": "Local seat ownership crosses native wire limits; assigned once to seats."
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Native QW remote play accepts one to four seats and QW plays locally on the shared simulation, but non-dedicated graphical QW hosting for wire clients is rejected (native QW serving requires dedicated deathmatch); split-screen transport extensions and multi-seat prediction were not verified.",
+          "currentPaths": [
+            "src/app/bootstrap/content.ts",
+            "src/app/bootstrap/remote-application.ts",
+            "src/network/q1/quakeworld.ts",
+            "tests/first-playable/application/qw-local-play.test.ts"
+          ]
         },
         {
           "id": "q2.input.binds-keyboard-mouse",
@@ -488,7 +670,15 @@
           "functionalArea": "input-seats",
           "classification": {
             "area": "input-seats"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Bindings are persisted per seat through ConfigStore.saveSeat on save and reloaded at startup; keyboard and mouse bindings and mouse settings survive restart in tests.",
+          "currentPaths": [
+            "src/app/bootstrap/input.ts",
+            "src/settings/config.ts",
+            "tests/input/mouse-application.test.ts",
+            "tests/first-playable/startup-input-profile.test.ts"
+          ]
         },
         {
           "id": "q2.input.per-player-tuning",
@@ -505,7 +695,14 @@
           "functionalArea": "input-seats",
           "classification": {
             "area": "input-seats"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "ApplicationInput loads per-seat input documents at startup and saveSettings writes bindings, gamepad tuning, mouse tuning and controller selection per seat, plus archived input cvars; tests exercise reload.",
+          "currentPaths": [
+            "src/app/bootstrap/input.ts",
+            "src/settings/config.ts",
+            "tests/first-playable/startup-input-profile.test.ts"
+          ]
         },
         {
           "id": "q2.seats.remote-network",
@@ -521,7 +718,14 @@
           "functionalArea": "input-seats",
           "classification": {
             "area": "input-seats"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "RemoteApplication adds up to four local seats, each with its own native Q2 channel and connection, and the host admits split seats; the one-player-per-connection check is the adapter design, not a missing feature.",
+          "currentPaths": [
+            "src/app/bootstrap/remote-application.ts",
+            "src/app/bootstrap/remote-seats.ts",
+            "src/app/bootstrap/network/q2.ts"
+          ]
         },
         {
           "id": "q3.input.joystick-profiles-hotplug",
@@ -538,7 +742,15 @@
           "functionalArea": "input-seats",
           "classification": {
             "area": "input-seats"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "InputDevices owns a SourceInputState (Linux/Windows joystick profiles, hat/ball keys, device add/remove handling), publishes it to the input router and restarts it on in_joystick/profile/seat changes.",
+          "currentPaths": [
+            "src/app/bootstrap/input-devices.ts",
+            "src/input/source-input.ts",
+            "src/input/source-joystick.ts",
+            "tests/input/device-lifetime.test.ts"
+          ]
         },
         {
           "id": "q3.input.midi-controller",
@@ -556,7 +768,15 @@
           "classification": {
             "area": "input-seats",
             "note": "MIDI device configuration and note input belong to input alongside other controllers."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "InputDevices runs SourceMidiInput with in_midi, device, channel and seat cvars, a settings menu with device choices, midiinfo and restart handling, and releases keys on reassign/disconnect/focus loss.",
+          "currentPaths": [
+            "src/app/bootstrap/input-devices.ts",
+            "src/input/midi.ts",
+            "src/input/source-midi.ts",
+            "tests/input/device-lifetime.test.ts"
+          ]
         },
         {
           "id": "q3.input.multiple-local-players",
@@ -572,7 +792,14 @@
           "functionalArea": "input-seats",
           "classification": {
             "area": "input-seats"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Remote application now supports one to four graphical local seats joining a remote match, with a Q3 remote seat view building an ApplicationQ3Client per seat.",
+          "currentPaths": [
+            "src/app/bootstrap/remote-application.ts",
+            "src/app/bootstrap/remote-seat-view.ts",
+            "src/app/bootstrap/application.ts"
+          ]
         }
       ]
     },
@@ -599,7 +826,15 @@
           "functionalArea": "console-config",
           "classification": {
             "area": "console-config"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Command buffer, aliases, exec, wait, console editing, history and completion are connected, writeconfig is joined, and tests cover shared aliases and completion.",
+          "currentPaths": [
+            "src/core/commands/index.ts",
+            "src/console/commands.ts",
+            "src/console/session.ts",
+            "tests/console/completion.test.ts"
+          ]
         },
         {
           "id": "q1.config.persistence-migration",
@@ -616,7 +851,15 @@
           "functionalArea": "console-config",
           "classification": {
             "area": "console-config"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Archived cvars and per-seat input settings are written, and ConsoleScriptFiles reads legacy home and per-game config files (newest wins) without overwriting seat archives.",
+          "currentPaths": [
+            "src/settings/config.ts",
+            "src/app/bootstrap/configuration.ts",
+            "src/app/bootstrap/application.ts",
+            "tests/settings/console-scripts.test.ts"
+          ]
         },
         {
           "id": "q2.config.archived-state",
@@ -633,7 +876,15 @@
           "functionalArea": "console-config",
           "classification": {
             "area": "console-config"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Startup loads per-seat, movement and product cvar archives through loadCvarArchive and the application saves them back, covering binds and archived cvars.",
+          "currentPaths": [
+            "src/app/bootstrap/configuration.ts",
+            "src/app/bootstrap/cvar-archives.ts",
+            "src/app/bootstrap/application.ts",
+            "tests/app/cvar-archive-data.test.ts"
+          ]
         },
         {
           "id": "q3.configuration.console-scripts",
@@ -651,7 +902,15 @@
           "functionalArea": "console-config",
           "classification": {
             "area": "console-config"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The application input, prepared-startup and configuration command buffers all supply readScript backed by ConsoleScriptFiles (user and mounted scopes), so exec reads the requested script.",
+          "currentPaths": [
+            "src/app/bootstrap/input.ts",
+            "src/app/bootstrap/prepared-startup.ts",
+            "src/app/bootstrap/config-scripts.ts",
+            "tests/settings/console-scripts.test.ts"
+          ]
         },
         {
           "id": "q3.configuration.persistence-startup",
@@ -669,7 +928,15 @@
           "functionalArea": "console-config",
           "classification": {
             "area": "console-config"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "q3config.cfg archive load, writeconfig, autoexec and safe-mode handling are joined in the startup configuration owner and prepared startup; frontend preferences persist separately.",
+          "currentPaths": [
+            "src/app/bootstrap/startup-config.ts",
+            "src/app/bootstrap/prepared-startup.ts",
+            "src/app/bootstrap/cvar-archives.ts",
+            "tests/app/prepared-startup.test.ts"
+          ]
         }
       ]
     },
@@ -697,7 +964,14 @@
               "menus-hud"
             ],
             "note": "Message routing and presentation coexist; assigned to communication behavior."
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Local Q1 say and say_team are implemented, but private tell has no Q1 implementation (the UI target argument is passed to say and would be appended to the text), so private messages are missing.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/input.ts"
+          ]
         },
         {
           "id": "q1.network.hosting-lifecycle",
@@ -713,7 +987,14 @@
           "functionalArea": "networking",
           "classification": {
             "area": "networking"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "NQ listen and dedicated plus dedicated QW hosting are joined, but QW hosting is rejected unless dedicated deathmatch, so a local graphical QW host or join-in-place is not available.",
+          "currentPaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/content.ts",
+            "src/app/bootstrap/network/q1.ts"
+          ]
         },
         {
           "id": "q1.network.native-session-negotiation",
@@ -730,7 +1011,14 @@
           "functionalArea": "networking",
           "classification": {
             "area": "networking"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The unified native session offer carries the full composition identity (normalized recipe including execution, ordering clock and content mounts, snapshot schema) and the client replies with a matching digest and userinfo before admission; Q1 recipes are tested.",
+          "currentPaths": [
+            "src/app/bootstrap/network/unified-control.ts",
+            "src/app/bootstrap/network/unified-content.ts",
+            "tests/network/unified/server.test.ts"
+          ]
         },
         {
           "id": "q1.network.nq-wire",
@@ -747,7 +1035,14 @@
           "functionalArea": "networking",
           "classification": {
             "area": "networking"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "NQ 15, 666 and 999 host and client wire are joined and tested, but native hosting still requires Q1 character presentation, rerelease messages use the known-retail set unless private, and extensions beyond the listed codec flags are not implemented.",
+          "currentPaths": [
+            "src/network/q1/netquake.ts",
+            "src/app/bootstrap/network/q1.ts",
+            "src/app/bootstrap/content.ts"
+          ]
         },
         {
           "id": "q1.network.qw-prediction",
@@ -764,7 +1059,15 @@
           "functionalArea": "networking",
           "classification": {
             "area": "networking"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Protocol 28 remote and dedicated hosting work with spectator cameras, but protocol 29 is replay-only (the lobby rejects it live), there is no extension negotiation, and no other-player prediction path was found.",
+          "currentPaths": [
+            "src/network/q1/quakeworld.ts",
+            "src/network/q1/profile.ts",
+            "src/app/bootstrap/network/remote-qw.ts",
+            "src/app/bootstrap/startup.ts"
+          ]
         },
         {
           "id": "q1.network.retail-kex-boundary",
@@ -780,7 +1083,13 @@
           "functionalArea": "networking",
           "classification": {
             "area": "networking"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Boundary documented in docs/protocol.md (Retail online services are not part of the wire). Remaining: the rerelease Quake session layer (Steam/Xbox party lobby) is not implemented; the binaries (rerelease/quake_x64_steam.exe, PartyWin.dll) are present but not disassembled, and an online lobby cannot be exercised offline.",
+          "currentPaths": [
+            "docs/protocol.md",
+            "SECURITY.md"
+          ]
         },
         {
           "id": "q2.network.classic-protocol",
@@ -796,7 +1105,14 @@
           "functionalArea": "networking",
           "classification": {
             "area": "networking"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Protocol 34 server and client downloads are implemented (Q2PeerDownload, HTTP download queue, permission policy), alongside the framing and command paths.",
+          "currentPaths": [
+            "src/app/bootstrap/network/q2.ts",
+            "src/app/bootstrap/network/q2-downloads.ts",
+            "tests/first-playable/network/q2-downloads.test.ts"
+          ]
         },
         {
           "id": "q3.content.pure-policy",
@@ -819,7 +1135,14 @@
               "mods-vms"
             ],
             "note": "Pure-policy enforcement belongs to network admission, using package and mod/filesystem identity."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Remote Q3 clients parse sv_pure/sv_paks, build the pure mount policy, reset content on change and construct referenced-pure proofs that require actually loaded cgame/ui modules.",
+          "currentPaths": [
+            "src/app/bootstrap/network/q3-client-content.ts",
+            "src/app/bootstrap/simulation/network-q3.ts",
+            "tests/network/q3/client-content.test.ts"
+          ]
         },
         {
           "id": "q3.network.ipx-transport",
@@ -835,7 +1158,15 @@
           "classification": {
             "area": "networking",
             "note": "Historical IPX remains a transport obligation within networking."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "IPX transport ships for Q3 server and client (DOSBox relay or native AF_IPX via --ipx-dosbox/--ipx-native) with LAN-only behavior; no master heartbeat over IPX.",
+          "currentPaths": [
+            "src/app/bootstrap/network/q3.ts",
+            "src/app/bootstrap/network/q3-client.ts",
+            "src/app/bootstrap/options.ts",
+            "tests/network/common/ipx.test.ts"
+          ]
         },
         {
           "id": "q3.network.snapshots-prediction",
@@ -852,7 +1183,15 @@
           "functionalArea": "networking",
           "classification": {
             "area": "networking"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The Q3 remote client consumes network snapshots and owns presentation prediction with capture on snapshot and map restart.",
+          "currentPaths": [
+            "src/app/bootstrap/network/remote-q3.ts",
+            "src/app/bootstrap/network/q3-client.ts",
+            "src/app/bootstrap/remote-application.ts",
+            "tests/network/q3/application.test.ts"
+          ]
         }
       ]
     },
@@ -877,7 +1216,15 @@
           "functionalArea": "downloads",
           "classification": {
             "area": "downloads"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "QW sound, model, map and skin transfers are joined, the server enforces allow_download and per-category cvars, and mod gamedirs are admitted as safe single-directory selections; a native UDP test covers every category.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/network-qw.ts",
+            "src/app/bootstrap/network/qw-downloads.ts",
+            "src/content/catalog/index.ts",
+            "tests/network/q1/qw-host-download-policy.test.ts"
+          ]
         }
       ]
     },
@@ -902,7 +1249,15 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q1 name and color are set through name/color console commands and the settings UI, mapped to userinfo for each local seat, with saved QW pre-connect identity and live color updates.",
+          "currentPaths": [
+            "src/app/bootstrap/q1-client-settings.ts",
+            "src/app/bootstrap/player-userinfo.ts",
+            "src/app/bootstrap/remote-application.ts",
+            "tests/console/q1-client-settings.test.ts"
+          ]
         },
         {
           "id": "q1.multiplayer.pause-kick-status",
@@ -918,7 +1273,13 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q1 pause, status, ping and kick are registered and handled with operator feedback; pause is authorized by pausable and the requesting origin.",
+          "currentPaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/q1-client-commands.ts"
+          ]
         },
         {
           "id": "q1.multiplayer.setup",
@@ -939,7 +1300,15 @@
               "modes-objectives"
             ],
             "note": "Match configuration includes a public setup workflow; assigned to hosting administration."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Startup offers single player, coop and deathmatch, match rules including Horde, CTF products, protocol and hosting profile selection, seats, and a host server-settings menu with map rotation and profiles.",
+          "currentPaths": [
+            "src/app/bootstrap/startup-selection.ts",
+            "src/ui/settings/server.ts",
+            "src/app/bootstrap/ui.ts",
+            "tests/first-playable/startup-selection.test.ts"
+          ]
         },
         {
           "id": "q1.network.admission-admin",
@@ -959,7 +1328,15 @@
               "networking"
             ],
             "note": "Admission wire behavior and operator policy share one row; assigned to administration."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "QW hosting enforces player and spectator passwords, maxspectators, rcon, IP filter commands (addip, removeip, listip) and chat flood protection; NQ hosts apply the IP reject filter.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/network-qw.ts",
+            "src/app/bootstrap/server-administration.ts",
+            "src/app/bootstrap/network/qw-server.ts",
+            "tests/network/q1/qw-host-transport.test.ts"
+          ]
         },
         {
           "id": "q1.network.discovery",
@@ -976,7 +1353,15 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The startup server browser supports direct connect, LAN broadcast search for NQ and QW, HTTP master lists, filters, sorting and a details view.",
+          "currentPaths": [
+            "src/app/bootstrap/server-browser.ts",
+            "src/network/q1/discovery.ts",
+            "src/app/bootstrap/startup-menu.ts",
+            "tests/first-playable/server-browser-masters.test.ts"
+          ]
         },
         {
           "id": "q2.admin.masters-heartbeat",
@@ -991,7 +1376,14 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The Q2 server adapter sends master heartbeats on a schedule and at shutdown to masters from the administration owner, which also exposes master configuration.",
+          "currentPaths": [
+            "src/app/bootstrap/network/q2.ts",
+            "src/app/bootstrap/server-administration.ts",
+            "tests/network/q2/application-control.test.ts"
+          ]
         },
         {
           "id": "q2.admin.player-identity",
@@ -1008,7 +1400,14 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Per-seat name, skin, hand and fov cvars are registered as userinfo, exposed in the settings menu, and changes are published to the running simulation or native guest each frame.",
+          "currentPaths": [
+            "src/app/bootstrap/player-userinfo.ts",
+            "src/ui/settings/gameplay.ts",
+            "src/app/bootstrap/application.ts"
+          ]
         },
         {
           "id": "q2.admin.spectator-chase",
@@ -1025,7 +1424,13 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "primaryUi redirects to the chased player's combat, inventory and HUD state when a spectator has a chase target, and a test covers the chase HUD.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/runtime.ts",
+            "tests/first-playable/simulation/q2-viewweapon.test.ts"
+          ]
         },
         {
           "id": "q2.admin.status-kick",
@@ -1042,7 +1447,14 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Local status prints only slot, score, ping and name and dumpuser works; kick now delivers its reason over UDP to peers, but the stock status columns (address, last message, qport) are absent and wire/profile qualification of the whole path is unverified.",
+          "currentPaths": [
+            "src/app/bootstrap/q2-console.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/network/q2.ts"
+          ]
         },
         {
           "id": "q2.browser.master-lan",
@@ -1058,7 +1470,15 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "StartupServerBrowser constructs a ServerBrowser per protocol including Q2 and is opened by startup, with master, LAN and favorite discovery sources.",
+          "currentPaths": [
+            "src/app/bootstrap/server-browser.ts",
+            "src/app/bootstrap/server-master-list.ts",
+            "src/app/bootstrap/startup.ts",
+            "tests/first-playable/server-browser-masters.test.ts"
+          ]
         },
         {
           "id": "q2.browser.sort-filter",
@@ -1074,7 +1494,13 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The browser supports text filter, favorites-only, hide empty and full, and ping, name, map and player-count sort orders.",
+          "currentPaths": [
+            "src/app/bootstrap/server-browser.ts",
+            "tests/first-playable/server-browser-sort-filter.test.ts"
+          ]
         },
         {
           "id": "q2.browser.status-details",
@@ -1090,7 +1516,14 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The browser details view lists server name, map, player count, per-player name, score and ping, and sorted server rules from the status response.",
+          "currentPaths": [
+            "src/app/bootstrap/server-browser.ts",
+            "src/app/bootstrap/startup-menu.ts",
+            "tests/first-playable/server-browser-masters.test.ts"
+          ]
         },
         {
           "id": "q2.content.rotation-editor",
@@ -1111,7 +1544,15 @@
               "menus-hud"
             ],
             "note": "Persisted rotation editing is assigned to server administration."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The in-game server settings menu has an ordered rotation editor (add, reorder, remove) with a rerelease shuffle toggle, backed by sv_maplist/g_map_list, saved in server profiles and consumed by the Q2 player module at map end.",
+          "currentPaths": [
+            "src/ui/settings/rotation.ts",
+            "src/settings/server/rotation.ts",
+            "src/content/q2/base/player/index.ts",
+            "tests/settings/server-profile.test.ts"
+          ]
         },
         {
           "id": "q2.content.server-map-lists",
@@ -1131,7 +1572,12 @@
               "modes-objectives"
             ],
             "note": "Map eligibility and selection are assigned to server setup."
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Authored titles are shown for mapdb starts, but for Q2 (and Q3) maps the startup list accepts every BSP without checking spawn points or objectives; only Q1 maps are filtered by info_player classes, so mode eligibility filtering is missing.",
+          "currentPaths": [
+            "src/app/bootstrap/startup-selection.ts"
+          ]
         },
         {
           "id": "q2.network.connectionless-rcon",
@@ -1151,7 +1597,14 @@
               "networking"
             ],
             "note": "Connectionless packet support serves status/ping/challenge/rcon administration."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The Q2 connectionless switch handles status, info, ping, getchallenge, connect and authorized rcon with replies, backed by the server administration owner.",
+          "currentPaths": [
+            "src/app/bootstrap/network/q2.ts",
+            "src/app/bootstrap/server-administration.ts",
+            "tests/first-playable/network/q2-application.test.ts"
+          ]
         },
         {
           "id": "q3.admin.operator-rcon-filters",
@@ -1168,7 +1621,14 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The Q3 endpoint handles authenticated rcon through RconService, and the application joins operator filters, setmaster/heartbeat, kick/map/restart and G_LogPrintf logging to g_log with g_logSync.",
+          "currentPaths": [
+            "src/app/bootstrap/network/q3.ts",
+            "src/network/services/admin.ts",
+            "src/app/bootstrap/application.ts"
+          ]
         },
         {
           "id": "q3.admin.pause-flood-inactivity",
@@ -1185,7 +1645,14 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "SV_CheckPaused eligibility (one connected human) drives sv_paused and halts the Q3 server frame; flood and inactivity policies also run.",
+          "currentPaths": [
+            "src/app/bootstrap/frame-time.ts",
+            "src/app/bootstrap/application.ts",
+            "tests/first-playable/application/frame-time.test.ts"
+          ]
         },
         {
           "id": "q3.admin.permissions-cheats-passwords",
@@ -1203,7 +1670,15 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Password admission and cheat policy are joined, and the levelshot capture is now called: a clientLevelShot server command queues screenshot levelshot, which the capture service writes as a 128x128 TGA.",
+          "currentPaths": [
+            "src/app/bootstrap/application.ts",
+            "src/capture/index.ts",
+            "src/content/q3/team-arena/client-admission.ts",
+            "tests/app/q3-local-round.test.ts"
+          ]
         },
         {
           "id": "q3.discovery.lan-global-favorites",
@@ -1219,7 +1694,15 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The startup server browser joins LAN, primary and secondary master lists, and persisted favorites with refresh and a master-list fetch.",
+          "currentPaths": [
+            "src/app/bootstrap/server-browser.ts",
+            "src/app/bootstrap/server-master-list.ts",
+            "src/app/bootstrap/startup-menu.ts",
+            "tests/first-playable/server-browser-masters.test.ts"
+          ]
         },
         {
           "id": "q3.discovery.ping-status-cache-filters",
@@ -1235,7 +1718,15 @@
           "functionalArea": "server-browser-admin",
           "classification": {
             "area": "server-browser-admin"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The browser owns ping/status queries, a persisted Q3 cache, text and favorites filters, and eight sort orders, with tests for each.",
+          "currentPaths": [
+            "src/app/bootstrap/server-browser.ts",
+            "src/app/bootstrap/server-browser-cache.ts",
+            "tests/first-playable/server-browser-persistence.test.ts",
+            "tests/first-playable/server-browser-sort-filter.test.ts"
+          ]
         }
       ]
     },
@@ -1265,7 +1756,15 @@
               "menus-hud"
             ],
             "note": "Provider/gamecode selection spans discovery and launch UI; assigned once to execution selection."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Launch selection separates game/gamecode product, map content, movement, character, weapons and monsters; the campaign gamecode follows the selected product while geometry follows mapProduct, and selected Q1 arsenals cover id1, hipnotic, rogue, dopa, mg1 and mg3 on any map.",
+          "currentPaths": [
+            "src/app/bootstrap/startup-selection.ts",
+            "src/app/bootstrap/content.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "tests/first-playable/startup-selection.test.ts"
+          ]
         },
         {
           "id": "q1.execution.builtin-typescript-gameplay",
@@ -1282,7 +1781,14 @@
           "functionalArea": "mods-vms",
           "classification": {
             "area": "mods-vms"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "First-party Q1 gameplay (id1, mission packs, addons, CTF, horde) runs as strict TypeScript through the Q1 source composition; external QuakeC execution is a separate optional path.",
+          "currentPaths": [
+            "src/content/composition/q1/runtime.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "tests/composition/q1/source.test.ts"
+          ]
         },
         {
           "id": "q1.execution.nq-qw-host-abi",
@@ -1299,7 +1805,14 @@
           "functionalArea": "mods-vms",
           "classification": {
             "area": "mods-vms"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "NetQuake and QuakeWorld run through one QuakeC source with separate host bindings (entity layout and edict limits, aim defaults, message services, 32-client QW cap, spectator connect/think/disconnect callbacks); arbitrary external programs are still not admitted, which is a separate compatibility limit.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/quakec-source.ts",
+            "src/app/bootstrap/content.ts",
+            "tests/first-playable/application/quakeworld-spectator.test.ts"
+          ]
         },
         {
           "id": "q2.game.provider-selection",
@@ -1315,7 +1828,14 @@
           "functionalArea": "mods-vms",
           "classification": {
             "area": "mods-vms"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Base, expansion, CTF, LMCTF and rerelease programs dispatch to real providers, and unknown Q2 add-ons with a native game library run through the prepared native guest path.",
+          "currentPaths": [
+            "src/app/bootstrap/content.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/content/composition/q2/index.ts"
+          ]
         },
         {
           "id": "q3.content.mod-selection",
@@ -1331,7 +1851,15 @@
           "functionalArea": "mods-vms",
           "classification": {
             "area": "mods-vms"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q3 mod directories with vm/qagame.qvm are discovered as catalog products, selectable at startup and run as QVM guests; base product return is a normal selection. Live set fs_game plus restart is not supported (rejected at startup).",
+          "currentPaths": [
+            "src/content/catalog/index.ts",
+            "src/content/catalog/launch.ts",
+            "src/app/bootstrap/content.ts",
+            "tests/app/startup-commands.test.ts"
+          ]
         },
         {
           "id": "q3.execution.qvm-roles",
@@ -1348,7 +1876,14 @@
           "functionalArea": "mods-vms",
           "classification": {
             "area": "mods-vms"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Game, cgame and UI QVM roles all run: Q3QvmServerGame is built by the runtime and the q3 client creates QvmApplicationScalars, QvmCgame and QvmUi.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/app/bootstrap/q3-client/qvm.ts",
+            "src/compat/qvm/ui.ts"
+          ]
         }
       ]
     },
@@ -1374,7 +1909,14 @@
           "functionalArea": "movement-bodies",
           "classification": {
             "area": "movement-bodies"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Rerelease edition marks Q1 corpses as box solids with a corpse flag; traces hit them with point or zero-size shapes but never block sized bodies, and gib/head construction and bounce movement are in place.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/actor-execution.ts",
+            "src/world/collision/index.ts",
+            "tests/world/collision/retail.test.ts"
+          ]
         },
         {
           "id": "q2.rerelease.q64-movement",
@@ -1391,7 +1933,15 @@
           "functionalArea": "movement-bodies",
           "classification": {
             "area": "movement-bodies"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The server publishes the n64 physics config and rerelease protocol admission is supported, and the remote client builds its prediction profile from the received n64 setting so native prediction matches.",
+          "currentPaths": [
+            "src/movement/q2/index.ts",
+            "src/app/bootstrap/simulation/network.ts",
+            "src/app/bootstrap/network/remote.ts",
+            "tests/movement/q2/movement.test.ts"
+          ]
         }
       ]
     },
@@ -1416,7 +1966,15 @@
           "functionalArea": "ai-navigation",
           "classification": {
             "area": "ai-navigation"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The rerelease bot service drives real movement, combat and traversal in singleplayer, coop and deathmatch Q1 worlds; the legacy admission restriction applies only to the Q3-definition fallback.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/bot-rerelease.ts",
+            "src/app/bootstrap/simulation/navigation.ts",
+            "src/bots/behavior/rerelease/brain.ts",
+            "tests/bots/behavior/rerelease/behavior.test.ts"
+          ]
         },
         {
           "id": "q1.bots.ctf-coop-horde",
@@ -1435,7 +1993,14 @@
               "modes-objectives"
             ],
             "note": "Bot participation requires mode-specific objective policies; its primary behavior is AI."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Rerelease bot objectives report Q1 CTF, coop and horde game types with team and flag-carrier hooks; the botAdmissionError rejection now applies only to classic-data legacy bots.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/bot-objectives.ts",
+            "src/app/bootstrap/simulation/bot-rerelease.ts",
+            "src/app/bootstrap/simulation/bots.ts"
+          ]
         },
         {
           "id": "q1.bots.knowledge-skill",
@@ -1451,7 +2016,14 @@
           "functionalArea": "ai-navigation",
           "classification": {
             "area": "ai-navigation"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q1 maps load the rerelease Quake 1 bot knowledge, characters and localization (with sibling lookup of the installed rerelease product); baseq3 definitions are used only for Q3 maps or when no rerelease bot data is installed.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/bot-assets.ts",
+            "src/bots/behavior/rerelease/data/knowledge-q1.ts",
+            "tests/bots/behavior/rerelease/data.test.ts"
+          ]
         },
         {
           "id": "q1.bots.population",
@@ -1467,7 +2039,14 @@
           "functionalArea": "ai-navigation",
           "classification": {
             "area": "ai-navigation"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Where Q1 rerelease bot definitions are installed, the native Q1 bot service handles manual and autofill bots without the id1-deathmatch limit; classic-only installs fall back to the restricted legacy policy (deathmatch, id1, no teamplay).",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/bot-rerelease.ts",
+            "src/app/bootstrap/simulation/bot-assets.ts",
+            "src/app/bootstrap/simulation/bots.ts"
+          ]
         },
         {
           "id": "q2.bots.combat-campaign-goals",
@@ -1483,7 +2062,14 @@
           "functionalArea": "ai-navigation",
           "classification": {
             "area": "ai-navigation"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Bots receive objective data for Q2 CTF, LMCTF, Tag, DeathBall and coop/campaign points of interest, and the rerelease guidance returns a path whenever native navigation is loaded.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/bot-objectives.ts",
+            "src/app/bootstrap/simulation/bot-rerelease-world.ts",
+            "src/app/bootstrap/simulation/bots.ts"
+          ]
         },
         {
           "id": "q2.navigation.dynamic-obstacles",
@@ -1499,7 +2085,13 @@
           "functionalArea": "ai-navigation",
           "classification": {
             "area": "ai-navigation"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Live door/plat enabled and locked state, destinations, hazard volumes, elevators and train routes feed route validation; only trains and nav-type-6 elevators get dedicated mover traversal, other moving-floor mover edges fall back to generic walk prediction and are rejected if not admitted. Full coverage of every mover type was not verified.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/navigation.ts",
+            "src/bots/navigation/runtime.ts"
+          ]
         },
         {
           "id": "q2.navigation.foreign-map-construction",
@@ -1516,7 +2108,15 @@
           "functionalArea": "ai-navigation",
           "classification": {
             "area": "ai-navigation"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Constructed graphs drive bot movement, combat and item access on maps without NAV2, and admitted bots now include the CTF, Tag, DeathBall and coop objective play via the shared objective binding.",
+          "currentPaths": [
+            "src/bots/navigation/construct.ts",
+            "src/app/bootstrap/simulation/navigation.ts",
+            "src/app/bootstrap/simulation/bot-objectives.ts",
+            "tests/bots/navigation/construction-lifetime.test.ts"
+          ]
         },
         {
           "id": "q3.bots.aas-reachability-clustering",
@@ -1532,7 +2132,15 @@
           "functionalArea": "ai-navigation",
           "classification": {
             "area": "ai-navigation"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Ports of AAS reachability, clustering, optimization and writing exist and are round-trip tested, but nothing in the application calls them; navigation loads a shipped .aas/.nav or falls back to sampled construction.",
+          "currentPaths": [
+            "src/bots/navigation/aas-reachability.ts",
+            "src/bots/navigation/aas-cluster.ts",
+            "src/bots/navigation/load.ts",
+            "tests/bots/navigation/aas-authoring.test.ts"
+          ]
         },
         {
           "id": "q3.bots.foreign-map-construction",
@@ -1548,7 +2156,14 @@
           "functionalArea": "ai-navigation",
           "classification": {
             "area": "ai-navigation"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Navigation is constructed for Q1, Q2 and Q3 worlds with a world adapter covering doors, plats, trains and hazards of each source; botAdmissionError no longer rejects foreign maps. Remaining objective-mode gaps belong to q3.modes.foreign-objective-adaptation.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/navigation.ts",
+            "src/app/bootstrap/simulation/bot-mover-connections.ts",
+            "src/bots/navigation/construct.ts"
+          ]
         }
       ]
     },
@@ -1574,7 +2189,15 @@
           "functionalArea": "combat-rosters-equipment",
           "classification": {
             "area": "combat-rosters-equipment"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Native Armagon behavior is registered and offered as a selectable hipnotic monster; the expansion test places it as a replacement on a foreign map with save continuation. Authored bosses on foreign maps are deliberately kept map-defined.",
+          "currentPaths": [
+            "src/content/q1/missionpacks/monsters/index.ts",
+            "src/content/monsters/expansions.ts",
+            "src/content/monsters/roster.ts",
+            "tests/first-playable/simulation/selected-q1-expansions.test.ts"
+          ]
         },
         {
           "id": "q1.hipnotic.monster-gremlin",
@@ -1591,7 +2214,15 @@
           "functionalArea": "combat-rosters-equipment",
           "classification": {
             "area": "combat-rosters-equipment"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Native Hipnotic gremlin behavior is registered, the monster catalog now offers it as a hipnotic/rogue-style source, and selected-monster admission includes monster_gremlin; tests place it on a foreign Q2 map and verify save continuation.",
+          "currentPaths": [
+            "src/content/q1/missionpacks/monsters/index.ts",
+            "src/content/monsters/expansions.ts",
+            "src/app/bootstrap/simulation/monster-runtime.ts",
+            "tests/first-playable/simulation/selected-q1-expansions.test.ts"
+          ]
         },
         {
           "id": "q1.hipnotic.monster-scourge",
@@ -1608,7 +2239,15 @@
           "functionalArea": "combat-rosters-equipment",
           "classification": {
             "area": "combat-rosters-equipment"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Native Hipnotic scourge behavior is registered, the monster catalog now offers it as a hipnotic/rogue-style source, and selected-monster admission includes monster_scourge; tests place it on a foreign Q2 map and verify save continuation.",
+          "currentPaths": [
+            "src/content/q1/missionpacks/monsters/index.ts",
+            "src/content/monsters/expansions.ts",
+            "src/app/bootstrap/simulation/monster-runtime.ts",
+            "tests/first-playable/simulation/selected-q1-expansions.test.ts"
+          ]
         },
         {
           "id": "q1.mg3.lavasuit",
@@ -1625,7 +2264,14 @@
           "functionalArea": "combat-rosters-equipment",
           "classification": {
             "area": "combat-rosters-equipment"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "item_artifact_lavasuit is registered with a 30-second timed powerup, wearing-out warnings, HUD timer, save/restore, and lava/slime immunity in the damage path.",
+          "currentPaths": [
+            "src/content/q1/addons/items/lavasuit.ts",
+            "src/content/q1/foundation/entity-services.ts",
+            "tests/gameplay/q1-addons/items/items.test.ts"
+          ]
         },
         {
           "id": "q2.inventory.power-armor",
@@ -1642,7 +2288,14 @@
           "functionalArea": "combat-rosters-equipment",
           "classification": {
             "area": "combat-rosters-equipment"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Toggle, absorption and cell accounting run, and the common HUD adds a prompt line showing active power screen or shield and remaining cells (text, not the original armor icon).",
+          "currentPaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/content/q2/base/player/view.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ]
         },
         {
           "id": "q2.powerup.invulnerability",
@@ -1658,7 +2311,14 @@
           "functionalArea": "combat-rosters-equipment",
           "classification": {
             "area": "combat-rosters-equipment"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Invulnerability remaining time is in the Q2 powerup timer list and reaches the HUD timer renderer.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/powerup-timers.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/ui/hud/powerups.ts"
+          ]
         },
         {
           "id": "q2.powerup.quad",
@@ -1675,7 +2335,14 @@
           "functionalArea": "combat-rosters-equipment",
           "classification": {
             "area": "combat-rosters-equipment"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Quad Damage is included in the Q2 powerup timer list that ApplicationSeatUi passes to the HUD timer renderer.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/powerup-timers.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/ui/hud/powerups.ts"
+          ]
         },
         {
           "id": "q2.rerelease.guardian",
@@ -1692,7 +2359,14 @@
           "functionalArea": "combat-rosters-equipment",
           "classification": {
             "area": "combat-rosters-equipment"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Boss healthbar events are consumed by the per-seat HUD state (localized name, fraction, visibility) and drawn as HUD health bars.",
+          "currentPaths": [
+            "src/content/q2/rerelease/monsters/guardian.ts",
+            "src/app/bootstrap/seat-hud-state.ts",
+            "src/ui/hud/index.ts"
+          ]
         },
         {
           "id": "q2.rerelease.instanced-items",
@@ -1709,7 +2383,14 @@
           "functionalArea": "combat-rosters-equipment",
           "classification": {
             "area": "combat-rosters-equipment"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Item-visibility events are consumed by the rerelease presentation, and the presentation scene hides items per local seat using that state.",
+          "currentPaths": [
+            "src/content/q2/rerelease/index.ts",
+            "src/app/bootstrap/rerelease-presentation.ts",
+            "src/app/bootstrap/presentation.ts"
+          ]
         },
         {
           "id": "q2.rogue.double-damage",
@@ -1725,7 +2406,14 @@
           "functionalArea": "combat-rosters-equipment",
           "classification": {
             "area": "combat-rosters-equipment"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Double Damage remaining time is in the Q2 powerup timer list and reaches the HUD timer renderer; multiplier and expiry live in the mission pack items.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/powerup-timers.ts",
+            "src/content/q2/missionpacks/items.ts",
+            "src/app/bootstrap/ui.ts"
+          ]
         },
         {
           "id": "q2.xatrix.quadfire",
@@ -1741,7 +2429,14 @@
           "functionalArea": "combat-rosters-equipment",
           "classification": {
             "area": "combat-rosters-equipment"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "DualFire Damage remaining time is in the Q2 powerup timer list and reaches the HUD timer renderer; modifier and expiry live in the mission pack items.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/powerup-timers.ts",
+            "src/content/q2/missionpacks/items.ts",
+            "src/app/bootstrap/ui.ts"
+          ]
         }
       ]
     },
@@ -1772,7 +2467,15 @@
               "combat-rosters-equipment"
             ],
             "note": "Foreign entity fields and target graphs span adapters and roster admission; assigned to authored map behavior."
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Selected-monster admission only preserves ordinary authored classes and plain spawn flags; other authored classes or flags (bosses, dormant/triggered monsters) throw 'does not yet preserve authored obligations', and foreign spawn text with unimplemented classes throws rather than being carried through.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/monster-runtime.ts",
+            "src/app/bootstrap/simulation/monster-placement.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "tests/first-playable/simulation/selected-q1-expansions.test.ts"
+          ]
         },
         {
           "id": "q2.campaign.hub-endings",
@@ -1789,7 +2492,15 @@
           "functionalArea": "maps-campaigns",
           "classification": {
             "area": "maps-campaigns"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "End-of-unit reports list per-level kills and secrets, the help computer and objectives reach the HUD, and campaign cinematics plus nextserver travel are joined and exercised by a mixed-campaign test.",
+          "currentPaths": [
+            "src/app/bootstrap/campaign-cinematic.ts",
+            "src/app/bootstrap/seat-hud-state.ts",
+            "src/app/bootstrap/q2-travel.ts",
+            "tests/first-playable/application/q2-campaign-cinematic.test.ts"
+          ]
         },
         {
           "id": "q2.campaign.unit-backtracking",
@@ -1805,7 +2516,14 @@
           "functionalArea": "maps-campaigns",
           "classification": {
             "area": "maps-campaigns"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "CampaignUnit retains departed world bytes and restores them on revisit, and native classic and rerelease guests keep a visited-level map restored on return in single-player.",
+          "currentPaths": [
+            "src/app/bootstrap/campaign-unit.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "tests/first-playable/campaign-unit.test.ts"
+          ]
         },
         {
           "id": "q2.content.native-starts",
@@ -1822,7 +2540,15 @@
           "functionalArea": "maps-campaigns",
           "classification": {
             "area": "maps-campaigns"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Rerelease mapdb.json is parsed into ordered authored starts including start items; application launch loads them and applies the start items to the simulation.",
+          "currentPaths": [
+            "src/content/catalog/start-maps.ts",
+            "src/app/bootstrap/authored-start.ts",
+            "src/app/bootstrap/application.ts",
+            "tests/content/catalog/start-maps.test.ts"
+          ]
         },
         {
           "id": "q2.content.start-map-discovery",
@@ -1842,7 +2568,15 @@
               "content-assets"
             ],
             "note": "Map metadata discovery serves campaign-start resolution."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The catalog loads mapdb.json through a shared parser that keeps authored unit order and start items, startup lists those starts first, and BSP discovery and the maplist file path cover the rest.",
+          "currentPaths": [
+            "src/content/catalog/start-maps.ts",
+            "src/app/bootstrap/startup-selection.ts",
+            "src/app/bootstrap/q2-console.ts",
+            "tests/content/catalog/start-maps.test.ts"
+          ]
         }
       ]
     },
@@ -1868,7 +2602,14 @@
           "functionalArea": "modes-objectives",
           "classification": {
             "area": "modes-objectives"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "CTF capture/drop/return logic is installed and its ctf-status and ctf-capture events are consumed by the seat HUD state (score, flag state, runes, capture banner).",
+          "currentPaths": [
+            "src/content/q1/addons/ctf/index.ts",
+            "src/app/bootstrap/seat-hud-state.ts",
+            "tests/ui/hud/source-state.test.ts"
+          ]
         },
         {
           "id": "q1.ctf.grapple-observer-vote",
@@ -1891,7 +2632,15 @@
               "server-browser-admin"
             ],
             "note": "One retained row combines grapple, observer and voting requirements; it is not split or duplicated."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Observer team prompts and vote exits are consumed by the seat game-prompt menu which sends the chosen impulse; a first-playable test drives the team prompt, observer promotion and prompt clearing.",
+          "currentPaths": [
+            "src/content/q1/addons/ctf/index.ts",
+            "src/app/bootstrap/game-prompt.ts",
+            "src/app/bootstrap/ui.ts",
+            "tests/first-playable/game-prompt.test.ts"
+          ]
         },
         {
           "id": "q1.horde.launch-waves",
@@ -1908,7 +2657,15 @@
           "functionalArea": "modes-objectives",
           "classification": {
             "area": "modes-objectives"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Horde is a launch preset and --rules option; the runtime sets the horde cvar and adjoins the MG1 horde addon on any Q1 program, so waves, lifecycle and travel run on authored horde maps.",
+          "currentPaths": [
+            "src/content/q1/addons/horde/index.ts",
+            "src/content/composition/q1/runtime.ts",
+            "src/app/bootstrap/startup-selection.ts",
+            "tests/composition/q1/source.test.ts"
+          ]
         },
         {
           "id": "q2.mode.deathball",
@@ -1925,7 +2682,14 @@
           "functionalArea": "modes-objectives",
           "classification": {
             "area": "modes-objectives"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Match selection supports q2:deathball, startup builds DeathBall presets and accepts --rules deathball, and foreign-world DeathBall also runs in the runtime.",
+          "currentPaths": [
+            "src/content/composition/q2/match-selection.ts",
+            "src/app/bootstrap/startup-selection.ts",
+            "tests/app/match-modes.test.ts"
+          ]
         },
         {
           "id": "q2.mode.deathmatch-limits",
@@ -1942,7 +2706,15 @@
           "functionalArea": "modes-objectives",
           "classification": {
             "area": "modes-objectives"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Native Q2 deathmatch construction binds dmflags, timelimit and fraglimit cvars to the live rules, and the player module ends the match on time or frag limit.",
+          "currentPaths": [
+            "src/settings/server/q2-owner.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/content/q2/base/player/index.ts",
+            "tests/settings/q2-source-cvars.test.ts"
+          ]
         },
         {
           "id": "q2.mode.dm-options",
@@ -1959,7 +2731,14 @@
           "functionalArea": "modes-objectives",
           "classification": {
             "area": "modes-objectives"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Native Q2 construction derives deathmatchFlags from dmflags (and rerelease g_dm_* cvars) and passes them to the game, with read/write service so in-game changes persist.",
+          "currentPaths": [
+            "src/settings/server/q2-owner.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "tests/settings/q2-source-cvars.test.ts"
+          ]
         },
         {
           "id": "q2.mode.rerelease-options",
@@ -1976,7 +2755,14 @@
           "functionalArea": "modes-objectives",
           "classification": {
             "area": "modes-objectives"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Rerelease deathmatch and weapon cvars (instant switch, weapons stay, infinite ammo, no-items, force respawn, etc.) are registered, bound to rules and merged into dmflags at construction.",
+          "currentPaths": [
+            "src/settings/server/q2-owner.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "tests/settings/q2-source-cvars.test.ts"
+          ]
         },
         {
           "id": "q2.mode.tag",
@@ -1993,7 +2779,14 @@
           "functionalArea": "modes-objectives",
           "classification": {
             "area": "modes-objectives"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Match selection supports q2:tag, startup builds Tag presets and accepts --rules tag, and foreign-world Tag also runs in the runtime.",
+          "currentPaths": [
+            "src/content/composition/q2/match-selection.ts",
+            "src/app/bootstrap/startup-selection.ts",
+            "tests/app/match-modes.test.ts"
+          ]
         },
         {
           "id": "q2.rerelease.squad-respawn-lives",
@@ -2009,7 +2802,14 @@
           "functionalArea": "modes-objectives",
           "classification": {
             "area": "modes-objectives"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Rerelease coop options (squad respawn, instanced items, lives, life count) are bound to g_coop_* cvars that feed the live rules object, and the player module runs the lives, waiting and coop respawn flow.",
+          "currentPaths": [
+            "src/content/q2/rerelease/players.ts",
+            "src/settings/server/q2-owner.ts",
+            "tests/settings/q2-source-cvars.test.ts"
+          ]
         },
         {
           "id": "q3.modes.foreign-objective-adaptation",
@@ -2026,7 +2826,14 @@
           "functionalArea": "modes-objectives",
           "classification": {
             "area": "modes-objectives"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Only Q2-style flag and team spawn classnames are translated to Q3 roles; the runtime never passes explicit objective placements, so 1FCTF, Overload and Harvester (and CTF on Q1 or flagless Q2 maps) fail with missing-objectives instead of being adapted.",
+          "currentPaths": [
+            "src/content/q3/team-arena/foreign-objectives.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "tests/app/match-modes.test.ts"
+          ]
         },
         {
           "id": "q3.modes.single-player-arena",
@@ -2042,7 +2849,15 @@
           "functionalArea": "modes-objectives",
           "classification": {
             "area": "modes-objectives"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Base arena single-player flow is joined: catalog-driven selection with unlock gating, spmap launch at chosen skill, completion recording, and retry/next return paths in the application.",
+          "currentPaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/base-arena-selection.ts",
+            "src/app/bootstrap/base-arena-menu.ts",
+            "tests/app/base-arena-selection.test.ts"
+          ]
         }
       ]
     },
@@ -2067,7 +2882,13 @@
           "functionalArea": "saves-recovery",
           "classification": {
             "area": "saves-recovery"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Level-start autosave is joined for Q1 source worlds (singleplayer, sv_autosave), but the registered sv_autosave_interval cvar is never read, so no timed autosave exists, and multiplayer or seat policy is not addressed.",
+          "currentPaths": [
+            "src/app/bootstrap/application.ts",
+            "tests/first-playable/application/level-autosave.test.ts"
+          ]
         },
         {
           "id": "q1.saves.classic-v5",
@@ -2085,7 +2906,15 @@
           "functionalArea": "saves-recovery",
           "classification": {
             "area": "saves-recovery"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "save <name> v5 exports and load imports the original NetQuake version 5 format for an idle singleplayer QuakeC source world; mixed compositions are refused with a message.",
+          "currentPaths": [
+            "src/persistence/q1.ts",
+            "src/app/bootstrap/save-requests.ts",
+            "src/app/bootstrap/original-save.ts",
+            "tests/persistence/source-saves.test.ts"
+          ]
         },
         {
           "id": "q1.saves.kex-v6",
@@ -2102,7 +2931,15 @@
           "functionalArea": "saves-recovery",
           "classification": {
             "area": "saves-recovery"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "save <name> v6 exports the KEX-style version 6 header with game directories, and load imports it through the same original-save path. Retail v6 fixtures are not in the tree, so compatibility rests on the format codec tests.",
+          "currentPaths": [
+            "src/persistence/q1.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/original-save.ts",
+            "tests/persistence/kex-saves.test.ts"
+          ]
         },
         {
           "id": "q2.save.autosave-transition",
@@ -2118,7 +2955,14 @@
           "functionalArea": "saves-recovery",
           "classification": {
             "area": "saves-recovery"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Autosaves go through the common saveGame path (autosaveLevel, sv_autosave) but the native guest capture hard-codes autosave false for both rerelease and classic originals, so the source autosave flag and autosave-specific client treatment are never exercised; SavePurpose transition/autosave only gates eligibility.",
+          "currentPaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/persistence/save-policy.ts"
+          ]
         },
         {
           "id": "q2.save.eligibility-paths",
@@ -2134,7 +2978,15 @@
           "functionalArea": "saves-recovery",
           "classification": {
             "area": "saves-recovery"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The live save command resolves its name inside the save directory, saveGame applies saveUnavailable eligibility (no deathmatch, intermission, dead player or network authority) and writeContainedSave rejects escapes and the reserved current slot; a test covers these.",
+          "currentPaths": [
+            "src/persistence/save-policy.ts",
+            "src/app/bootstrap/application.ts",
+            "src/persistence/saved-game.ts",
+            "tests/persistence/save-policy.test.ts"
+          ]
         },
         {
           "id": "q2.save.poi-health-story",
@@ -2150,7 +3002,15 @@
           "functionalArea": "saves-recovery",
           "classification": {
             "area": "saves-recovery"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The rerelease module checkpoints story, POI, health bars and mission state, and restore re-emits sky, story, fog and POI presentation while health bars re-emit every player frame; a gameplay test covers resumePresentation.",
+          "currentPaths": [
+            "src/content/q2/rerelease/checkpoint.ts",
+            "src/content/q2/rerelease/index.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "tests/gameplay/q2-rerelease/rerelease.test.ts"
+          ]
         },
         {
           "id": "q3.persistence.complete-world-save",
@@ -2166,7 +3026,14 @@
           "functionalArea": "saves-recovery",
           "classification": {
             "area": "saves-recovery"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q3 world saves capture q3:native game memory, world:q3-runtime (arsenals, movement, last attacks), bots and simulation state, with a restore path; a persistence test covers it. Tag/LMCTF/DeathBall foreign-match state on other families is still rejected, which is outside this row.",
+          "currentPaths": [
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/app/bootstrap/simulation/player-checkpoint.ts",
+            "tests/persistence/q3-native-runtime.test.ts"
+          ]
         }
       ]
     },
@@ -2196,7 +3063,14 @@
               "localization-accessibility"
             ],
             "note": "Choice prompts include localized text; assigned to the interactive prompt workflow."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q1 prompt and clear-prompt events are routed to a paged seat prompt menu that sends the chosen impulse.",
+          "currentPaths": [
+            "src/app/bootstrap/game-prompt.ts",
+            "src/app/bootstrap/ui.ts",
+            "tests/first-playable/game-prompt.test.ts"
+          ]
         },
         {
           "id": "q1.ui.hud-inventory",
@@ -2212,7 +3086,14 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The seat HUD state consumes Q1 ctf-status and ctf-capture events and shows team scores, flag state, runes and capture banners alongside health, armor, ammo and expansion weapons.",
+          "currentPaths": [
+            "src/app/bootstrap/seat-hud-state.ts",
+            "src/app/bootstrap/ui.ts",
+            "tests/ui/hud/source-state.test.ts"
+          ]
         },
         {
           "id": "q1.ui.options-and-reset",
@@ -2229,7 +3110,15 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Settings cover language, output sample rate, autosave, pickup weapon switching, lookspring, lookstrafe and restore-defaults for settings and bindings.",
+          "currentPaths": [
+            "src/ui/settings/index.ts",
+            "src/ui/settings/gameplay.ts",
+            "src/ui/settings/bindings.ts",
+            "src/app/bootstrap/frontend-preferences.ts"
+          ]
         },
         {
           "id": "q1.ui.radial-weapon-wheel",
@@ -2247,7 +3136,15 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The application reads the authored wwheel.txt for rerelease Q1 products, parses it, maps slot impulses to items and feeds the radial selector; invalid files fall back to the default wheel.",
+          "currentPaths": [
+            "src/app/bootstrap/q1-wheel.ts",
+            "src/ui/hud/q1-wheel.ts",
+            "src/app/bootstrap/ui.ts",
+            "tests/ui/hud/authored-wheel.test.ts"
+          ]
         },
         {
           "id": "q1.ui.save-load-menus",
@@ -2264,7 +3161,15 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "In-game Save and Load menus with named slots and overwrite exist, startup lists native saves, and Q1 single-player level autosave (autosave.sav) is written on load; the timed autosave interval cvar has no reader.",
+          "currentPaths": [
+            "src/ui/saves/menu.ts",
+            "src/app/bootstrap/ui.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/startup-saves.ts"
+          ]
         },
         {
           "id": "q1.ui.weapon-quickswitch",
@@ -2282,7 +3187,15 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "An authored Q1 weapon wheel adapter maps wheel slots to exact source items and expansion impulses, and impulses 1-8, 10 and 12 plus weapnext/weapprev/use are wired through the application.",
+          "currentPaths": [
+            "src/ui/hud/q1-wheel.ts",
+            "src/app/bootstrap/q1-wheel.ts",
+            "src/content/composition/q1/commands.ts",
+            "tests/ui/hud/authored-wheel.test.ts"
+          ]
         },
         {
           "id": "q2.config.audio-video-input-menus",
@@ -2307,7 +3220,15 @@
               "input-seats"
             ],
             "note": "One row covers settings across several services; assigned to the public menu workflow."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Settings menus apply display (renderer, fullscreen, resolution, vsync, brightness), audio and input settings live, with ConfigStore persistence for audio and input; the old gap was a qualification status, not missing code. The GL restart test is gated behind QUAKE_GL_SMOKE.",
+          "currentPaths": [
+            "src/ui/settings/services.ts",
+            "src/ui/settings/index.ts",
+            "src/app/bootstrap/frontend-preferences.ts",
+            "src/app/bootstrap/startup.ts"
+          ]
         },
         {
           "id": "q2.hud.boss-health-bars",
@@ -2324,7 +3245,15 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The rerelease module emits healthbar events every player frame (including a clearing event) and SeatSourceHud keeps them per slot and seat and draws them in the HUD.",
+          "currentPaths": [
+            "src/app/bootstrap/seat-hud-state.ts",
+            "src/content/q2/rerelease/entities.ts",
+            "src/ui/hud/index.ts",
+            "tests/ui/hud/source-state.test.ts"
+          ]
         },
         {
           "id": "q2.hud.centerprints-notifications",
@@ -2340,7 +3269,14 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Per-seat localized centerprints and notifications are drawn, but no Q2 local emitter sets instant or durationSeconds, so local centerprints always fall to instant with a five second hold; the typewriter policy is only honoured on the network service path.",
+          "currentPaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/content/q2/foundation/host.ts",
+            "src/app/bootstrap/network/q2-service-presentation.ts"
+          ]
         },
         {
           "id": "q2.hud.compass-help-path",
@@ -2357,7 +3293,15 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "help-path events are consumed by SeatSourceHud and drawn as the compass route in the common HUD, with source-time lifetime; navigation returns a path when native navigation exists.",
+          "currentPaths": [
+            "src/app/bootstrap/seat-hud-state.ts",
+            "src/ui/hud/index.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "tests/ui/hud/source-state.test.ts"
+          ]
         },
         {
           "id": "q2.hud.damage-feedback",
@@ -2373,7 +3317,15 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Directional damage indicators (with the pickup damage picture) and pickup icons with a three second timer are bound through SeatSourceHud into the HUD; damage blend and kick also exist.",
+          "currentPaths": [
+            "src/app/bootstrap/seat-hud-state.ts",
+            "src/app/bootstrap/ui.ts",
+            "src/app/bootstrap/effects/q2-view.ts",
+            "tests/ui/hud/source-state.test.ts"
+          ]
         },
         {
           "id": "q2.hud.inventory",
@@ -2390,7 +3342,15 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "svc_inventory is bound to the native inventory layout and to an inventory menu opened by the source inventory event, with selected-row and use bindings.",
+          "currentPaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/app/bootstrap/seat-hud-state.ts",
+            "src/ui/hud/q2-native.ts",
+            "tests/ui/hud/q2-native.test.ts"
+          ]
         },
         {
           "id": "q2.hud.poi-stages",
@@ -2407,7 +3367,15 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "SeatSourceHud consumes poi, keyed-poi and remove-poi events, loads their pictures and publishes them as source points; the module checkpoints poi stage state.",
+          "currentPaths": [
+            "src/app/bootstrap/seat-hud-state.ts",
+            "src/app/bootstrap/ui.ts",
+            "src/content/q2/rerelease/entities.ts",
+            "tests/ui/hud/source-state.test.ts"
+          ]
         },
         {
           "id": "q2.hud.powerup-wheel",
@@ -2423,7 +3391,15 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Powerup selection, counts and active timers work, but wheelIcons is filled only for weapon items, so powerup wheel entries have icon null and draw as text labels instead of item art.",
+          "currentPaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/ui/hud/wheel.ts",
+            "src/ui/hud/index.ts",
+            "tests/ui/hud/powerups.test.ts"
+          ]
         },
         {
           "id": "q2.hud.profile-selection",
@@ -2440,7 +3416,15 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The Q2 native HUD layout stream is driven by the protocol identity (classic vs rerelease/kex) and is prepared and drawn from the application presentation path; tests cover both grammars.",
+          "currentPaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/ui/hud/q2-native.ts",
+            "src/app/bootstrap/network/q2-layout.ts",
+            "tests/ui/hud/q2-native.test.ts"
+          ]
         },
         {
           "id": "q2.hud.score-help",
@@ -2457,7 +3441,15 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Scoreboard rows, the help computer and end-of-unit report are consumed by SeatSourceHud and the native svc_layout path, and are drawn through the common and native HUD; tests cover both.",
+          "currentPaths": [
+            "src/app/bootstrap/seat-hud-state.ts",
+            "src/ui/hud/q2-native.ts",
+            "src/app/bootstrap/ui.ts",
+            "tests/ui/hud/source-state.test.ts"
+          ]
         },
         {
           "id": "q2.hud.weapon-carousel",
@@ -2473,7 +3465,14 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "weapnext and weapprev call ApplicationSeatUi.cycleWeapon for the rerelease dialect, which drives SeatWeaponWheel.cycle with timed preview, attack confirmation and a weapon lock.",
+          "currentPaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/ui/hud/wheel.ts",
+            "src/app/bootstrap/input.ts"
+          ]
         },
         {
           "id": "q2.hud.weapon-wheel",
@@ -2489,7 +3488,14 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The wheel is joined to source selection and ApplicationSeatUi now loads per-weapon icons into wheelIcons and passes them to wheel items.",
+          "currentPaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/ui/hud/wheel.ts",
+            "src/ui/hud/index.ts"
+          ]
         },
         {
           "id": "q3.progression.podium-postgame",
@@ -2510,7 +3516,15 @@
               "modes-objectives"
             ],
             "note": "Postgame display/navigation crosses match progression; assigned to its public presentation workflow."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The spPostgame command is parsed into a podium, awards and unlocked-movie result, persisted, and shown by the base arena menu with retry/next/main controls; Team Arena postgame feeds the results menu with next/retry/quit.",
+          "currentPaths": [
+            "src/app/bootstrap/base-arena-postgame.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/base-arena-menu.ts",
+            "tests/app/base-arena-progression.test.ts"
+          ]
         },
         {
           "id": "q3.ui.base-demos-cinematics-configs",
@@ -2532,7 +3546,15 @@
               "console-config"
             ],
             "note": "Retained row explicitly requires menus over multiple services."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Startup menu exposes Demos, Movies and Configurations library menus backed by demo listing/playback, mounted video listing and config library services.",
+          "currentPaths": [
+            "src/app/bootstrap/startup-menu.ts",
+            "src/app/bootstrap/startup.ts",
+            "src/ui/library/menu.ts",
+            "tests/ui/library/menu.test.ts"
+          ]
         },
         {
           "id": "q3.ui.base-host-browser-ingame",
@@ -2552,7 +3574,14 @@
               "server-browser-admin"
             ],
             "note": "Host/browser behavior is represented here by its UI row; no backend row is duplicated."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Common frontend provides a Host a game menu, the shared server browser with favorites/sort/filter, and a Q3 in-game match menu (team, vote, callvote, addbot, kick). It is a common-frontend equivalent, not a port of the original ui.qvm layout.",
+          "currentPaths": [
+            "src/app/bootstrap/startup-menu.ts",
+            "src/ui/library/match.ts",
+            "src/app/bootstrap/server-browser.ts"
+          ]
         },
         {
           "id": "q3.ui.base-settings",
@@ -2568,7 +3597,14 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Common settings cover bindings, audio, video basics, accessibility and character model, but the Q3 setup menus (graphics quality, network rate, full player setup, apply/restart behavior) are not present in the common frontend; no r_picmip, rate or cl_maxpackets controls exist.",
+          "currentPaths": [
+            "src/ui/settings/index.ts",
+            "src/app/bootstrap/ui.ts",
+            "src/app/bootstrap/startup-menu.ts"
+          ]
         },
         {
           "id": "q3.ui.team-arena-scripts-feeders-visibility",
@@ -2585,7 +3621,15 @@
           "functionalArea": "menus-hud",
           "classification": {
             "area": "menus-hud"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "The legacy menu runtime loads Team Arena scripts only for the mission HUD (ui/testhud.menu); the Team Arena front-end menus (ui/menus.txt, feeders, server refresh, mod/media services) are replaced by common frontend menus rather than executed.",
+          "currentPaths": [
+            "src/ui/common/legacy/runtime.ts",
+            "src/ui/common/legacy/menu.ts",
+            "src/content/q3/presentation/mission-hud.ts",
+            "src/app/bootstrap/startup-menu.ts"
+          ]
         },
         {
           "id": "q3.ui.team-arena-skirmish",
@@ -2606,7 +3650,15 @@
               "progression-services"
             ],
             "note": "Skirmish launch/next-match flow is a UI entry point with mode dependencies."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Team Arena skirmish levels 1-5 are built in startup selection (player/opponent teams, map, skill) and launched through the application; the results menu offers next, retry, demo and quit.",
+          "currentPaths": [
+            "src/app/bootstrap/team-arena-skirmish.ts",
+            "src/app/bootstrap/startup-selection.ts",
+            "src/app/bootstrap/application.ts",
+            "tests/first-playable/team-arena-skirmish.test.ts"
+          ]
         }
       ]
     },
@@ -2632,7 +3684,15 @@
           "functionalArea": "localization-accessibility",
           "classification": {
             "area": "localization-accessibility"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Settings expose high-contrast, reduced-flash, bold typeface and blue-yellow or monochrome color modes, persisted per seat through shared settings and applied to the HUD and menu fonts and skin colors.",
+          "currentPaths": [
+            "src/ui/settings/accessibility.ts",
+            "src/ui/common/accessibility.ts",
+            "src/app/bootstrap/ui.ts",
+            "tests/ui/accessibility-preferences.test.ts"
+          ]
         },
         {
           "id": "q1.accessibility.subtitles-captions",
@@ -2649,7 +3709,15 @@
           "functionalArea": "localization-accessibility",
           "classification": {
             "area": "localization-accessibility"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Timed sidecar captions (SRT/VTT) are consumed by the seat HUD for sound voices and cinematics, selected by language; OGV playback exists. Q1 captions come from source-authored sidecars, not a separate mapping table.",
+          "currentPaths": [
+            "src/text/media-captions.ts",
+            "src/app/bootstrap/sound-captions.ts",
+            "src/app/bootstrap/ui.ts",
+            "tests/text/sound-captions.test.ts"
+          ]
         },
         {
           "id": "q1.text.localization-overlays",
@@ -2667,7 +3735,15 @@
           "functionalArea": "localization-accessibility",
           "classification": {
             "area": "localization-accessibility"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q1 messages are resolved through Q1MessageLocalization with ordered base, fallback and mod overlay tables, bound to the selected language; the finale shares the same instance, so it is not English-only.",
+          "currentPaths": [
+            "src/app/bootstrap/q1-localization.ts",
+            "src/app/bootstrap/presentation.ts",
+            "src/app/bootstrap/finale.ts",
+            "tests/first-playable/application/q1-localization.test.ts"
+          ]
         },
         {
           "id": "q2.accessibility.color-and-captions",
@@ -2684,7 +3760,15 @@
           "functionalArea": "localization-accessibility",
           "classification": {
             "area": "localization-accessibility"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "SeatSoundCaptions follows actual mixer voices and sidecars into the HUD captions list, and cinematic subtitles are produced by SeatMediaCaptions; color modes are non-color-only alternatives.",
+          "currentPaths": [
+            "src/app/bootstrap/sound-captions.ts",
+            "src/app/bootstrap/ui.ts",
+            "src/ui/common/accessibility.ts",
+            "tests/text/sound-captions.test.ts"
+          ]
         },
         {
           "id": "q2.accessibility.contrast-typeface",
@@ -2701,7 +3785,15 @@
           "functionalArea": "localization-accessibility",
           "classification": {
             "area": "localization-accessibility"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "High contrast, blue-yellow and monochrome color modes and a bold alternate typeface are settings bindings per seat, stored in archived cvars and applied to HUD and menu fonts; a test covers persistence.",
+          "currentPaths": [
+            "src/ui/settings/accessibility.ts",
+            "src/ui/settings/index.ts",
+            "src/app/bootstrap/ui.ts",
+            "tests/ui/accessibility-preferences.test.ts"
+          ]
         },
         {
           "id": "q2.accessibility.independent-scales",
@@ -2718,7 +3810,15 @@
           "functionalArea": "localization-accessibility",
           "classification": {
             "area": "localization-accessibility"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Per-seat archived hudScale, textScale and menuScale cvars feed the HUD, the in-game and startup menus, and the console uses its own archived con_scale.",
+          "currentPaths": [
+            "src/ui/settings/accessibility.ts",
+            "src/app/bootstrap/ui.ts",
+            "src/app/bootstrap/startup-menu.ts",
+            "src/app/bootstrap/image-settings.ts"
+          ]
         },
         {
           "id": "q2.media.timed-subtitles",
@@ -2740,7 +3840,15 @@
               "cinematics-media"
             ],
             "note": "Cinematic scheduling is required, but the visible behavior is subtitles/captions."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Offline, remote and startup cinematics pass a SeatMediaCaptions producer into CampaignCinematic, which draws timed subtitle and sound captions over the picture using the seat's caption preference and language.",
+          "currentPaths": [
+            "src/app/bootstrap/campaign-cinematic.ts",
+            "src/app/bootstrap/application.ts",
+            "src/text/media-captions.ts",
+            "src/app/bootstrap/remote-application.ts"
+          ]
         },
         {
           "id": "q3.media.subtitles-captions",
@@ -2760,7 +3868,15 @@
               "cinematics-media"
             ],
             "note": "Timed media dependency retained; assigned to caption behavior."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Screen cinematic captions and sound captions flow from caption data through SeatMediaCaptions to the seat UI captionCommands timeline renderer, gated by the captions preference.",
+          "currentPaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/ui.ts",
+            "src/app/bootstrap/presentation.ts",
+            "tests/text/sound-captions.test.ts"
+          ]
         },
         {
           "id": "q3.presentation.accessibility-scales",
@@ -2777,7 +3893,15 @@
           "functionalArea": "localization-accessibility",
           "classification": {
             "area": "localization-accessibility"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Per-seat HUD, text and menu scales, high contrast, colour modes, reduced flashes, captions toggle and language selection are archived cvar settings with a persistence test, and captions render through the seat UI.",
+          "currentPaths": [
+            "src/ui/settings/index.ts",
+            "src/ui/settings/accessibility.ts",
+            "src/text/q3-font.ts",
+            "tests/ui/accessibility-preferences.test.ts"
+          ]
         },
         {
           "id": "q3.presentation.fonts-and-glyphs",
@@ -2798,7 +3922,14 @@
               "rendering"
             ],
             "note": "Glyph rendering and legibility share this font requirement."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The application constructs RendererFontRegistry with generation services (generated atlas registration, font-data saving, user-directory export), so the FreeType generation path is available alongside bitmap and DAT fonts.",
+          "currentPaths": [
+            "src/app/bootstrap/q3-client/assets.ts",
+            "src/text/q3-font-registry.ts",
+            "src/platform/freetype.ts"
+          ]
         }
       ]
     },
@@ -2824,7 +3955,15 @@
           "functionalArea": "progression-services",
           "classification": {
             "area": "progression-services"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q1 achievement events are recorded in a durable player-progress store and shown through the Achievements and progress library menu.",
+          "currentPaths": [
+            "src/app/bootstrap/player-progress.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/startup-menu.ts",
+            "tests/app/player-progress.test.ts"
+          ]
         },
         {
           "id": "q1.events.level-completed-lobby",
@@ -2844,7 +3983,15 @@
               "maps-campaigns"
             ],
             "note": "Level completion and lobby return share one row; assigned to external/session lifecycle."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Level-completed events are recorded as durable progress and application completion calls returnToLobby on the local lobby service, with host, join, leave and readiness handled by the lobby.",
+          "currentPaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/player-progress.ts",
+            "src/app/bootstrap/remote-application.ts",
+            "tests/app/player-lobby.test.ts"
+          ]
         },
         {
           "id": "q2.service.achievements",
@@ -2860,7 +4007,15 @@
           "functionalArea": "progression-services",
           "classification": {
             "area": "progression-services"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q1 and Q2 rerelease achievement events are recorded per participant in a durable PlayerProgressStore and shown in the player progress library.",
+          "currentPaths": [
+            "src/app/bootstrap/player-progress.ts",
+            "src/app/bootstrap/player-progress-library.ts",
+            "src/app/bootstrap/application.ts",
+            "tests/app/player-progress.test.ts"
+          ]
         },
         {
           "id": "q2.service.match-report-lobby",
@@ -2876,7 +4031,14 @@
           "functionalArea": "progression-services",
           "classification": {
             "area": "progression-services"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q2 match reports are built and recorded durably at match end and the local lobby service handles return-to-lobby and next session.",
+          "currentPaths": [
+            "src/app/bootstrap/q2-match-reports.ts",
+            "src/app/bootstrap/local-lobby.ts",
+            "src/app/bootstrap/application.ts"
+          ]
         },
         {
           "id": "q3.progression.difficulty-records",
@@ -2891,7 +4053,14 @@
           "functionalArea": "progression-services",
           "classification": {
             "area": "progression-services"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "BaseArenaProgression stores best rank per arena in g_spScores1 to g_spScores5 archive cvars and the selection menu shows the best rank and skill per arena.",
+          "currentPaths": [
+            "src/app/bootstrap/base-arena-progression.ts",
+            "src/app/bootstrap/base-arena-selection.ts",
+            "tests/app/base-arena-progression.test.ts"
+          ]
         },
         {
           "id": "q3.progression.medals",
@@ -2907,7 +4076,15 @@
           "functionalArea": "progression-services",
           "classification": {
             "area": "progression-services"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Postgame results accumulate medal counts in the archived g_spAwards cvar with source thresholds, and the progress menu displays them.",
+          "currentPaths": [
+            "src/app/bootstrap/base-arena-progression.ts",
+            "src/app/bootstrap/base-arena-menu.ts",
+            "src/app/bootstrap/application.ts",
+            "tests/app/base-arena-progression.test.ts"
+          ]
         },
         {
           "id": "q3.progression.reset-and-unlock-commands",
@@ -2922,7 +4099,14 @@
           "functionalArea": "progression-services",
           "classification": {
             "area": "progression-services"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "BaseArenaProgression owns the g_spScores/g_spAwards/g_spVideos archive cvars with reset, unlockLevels and unlockMedals; the application routes arena-reset, arena-unlock (iamacheater) and arena-medals to it and saves the source archive.",
+          "currentPaths": [
+            "src/app/bootstrap/base-arena-progression.ts",
+            "src/app/bootstrap/application.ts",
+            "tests/app/base-arena-progression.test.ts"
+          ]
         },
         {
           "id": "q3.progression.team-arena-records",
@@ -2937,7 +4121,14 @@
           "functionalArea": "progression-services",
           "classification": {
             "area": "progression-services"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The Team Arena postgame command computes score, time and bonuses and writes the native games/<map>_<type>.game record on a new high score; ui_score cvars drive the results menu.",
+          "currentPaths": [
+            "src/app/bootstrap/team-arena-scores.ts",
+            "src/app/bootstrap/application.ts",
+            "tests/first-playable/team-arena-scores.test.ts"
+          ]
         },
         {
           "id": "q3.progression.tiers-videos-unlocks",
@@ -2952,7 +4143,14 @@
           "functionalArea": "progression-services",
           "classification": {
             "area": "progression-services"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Tier completion, training and final ordering, and movie unlocks via g_spVideos are implemented in BaseArenaProgression and driven by the application postgame hook.",
+          "currentPaths": [
+            "src/app/bootstrap/base-arena-progression.ts",
+            "src/app/bootstrap/application.ts",
+            "tests/app/base-arena-progression.test.ts"
+          ]
         },
         {
           "id": "q3.services.authorization-endpoints",
@@ -2968,7 +4166,14 @@
           "functionalArea": "progression-services",
           "classification": {
             "area": "progression-services"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q3ServerAuthorization resolves authorize.quake3arena.com, caches the endpoint as authorizeAddress and sends getIpAuthorize with sv_strictAuth; IPX is excluded and a client-side authorization counterpart exists.",
+          "currentPaths": [
+            "src/network/q3/authorization.ts",
+            "src/app/bootstrap/network/q3.ts",
+            "tests/network/q3/authorization.test.ts"
+          ]
         },
         {
           "id": "q3.services.rankings-lifecycle",
@@ -2984,7 +4189,14 @@
           "functionalArea": "progression-services",
           "classification": {
             "area": "progression-services"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Rank wire codecs and an application q3-rankings.ts exist, but no ranking login, match-lifecycle or submission service was verified as joined to a real or configurable endpoint; not fully traced.",
+          "currentPaths": [
+            "src/network/services/rank-codec.ts",
+            "src/app/bootstrap/q3-rankings.ts",
+            "src/network/services/online.ts"
+          ]
         }
       ]
     },
@@ -3009,7 +4221,15 @@
           "functionalArea": "demos-recording",
           "classification": {
             "area": "demos-recording"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "playdemo, timedemo, record, stop and rerecord are registered for .dem recordings, with local NetQuake recording and playback through the demo library.",
+          "currentPaths": [
+            "src/app/bootstrap/demo-commands.ts",
+            "src/app/bootstrap/demo-local-recording.ts",
+            "src/app/bootstrap/demo-playback.ts",
+            "tests/app/demo-local-recording.test.ts"
+          ]
         },
         {
           "id": "q1.demos.qw-record-spectate",
@@ -3025,7 +4245,15 @@
           "functionalArea": "demos-recording",
           "classification": {
             "area": "demos-recording"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "QuakeWorld .qwd record, playback and rerecord are joined through the demo commands, and the remote QW client has a spectator camera with teleport and chase tracking.",
+          "currentPaths": [
+            "src/app/bootstrap/demo-local-recording.ts",
+            "src/app/bootstrap/network/qw-camera.ts",
+            "src/app/bootstrap/network/remote-qw.ts",
+            "tests/network/q1/recording.test.ts"
+          ]
         },
         {
           "id": "q2.demo.client-recording",
@@ -3043,7 +4271,14 @@
           "functionalArea": "demos-recording",
           "classification": {
             "area": "demos-recording"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The record and stop commands record Q2 client demos from a live Q2 source through ClientDemoRecording and the local recording feed.",
+          "currentPaths": [
+            "src/app/bootstrap/demo-recording-commands.ts",
+            "src/app/bootstrap/demo-local-recording.ts",
+            "tests/app/demo-recording-commands.test.ts"
+          ]
         },
         {
           "id": "q2.demo.gtv-streaming",
@@ -3061,7 +4296,15 @@
           "functionalArea": "demos-recording",
           "classification": {
             "area": "demos-recording"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "mvdconnect and mvdisconnect authenticate to a GTV server and GtvRemoteSource streams MVD data into the remote application.",
+          "currentPaths": [
+            "src/app/bootstrap/gtv-commands.ts",
+            "src/app/bootstrap/network/gtv-source.ts",
+            "src/network/q2/gtv-transport.ts",
+            "tests/network/q2/gtv-source.test.ts"
+          ]
         },
         {
           "id": "q2.demo.mvd-recording",
@@ -3079,7 +4322,14 @@
           "functionalArea": "demos-recording",
           "classification": {
             "area": "demos-recording"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "mvdrecord and mvdstop record the hosted Q2 world as a native multiview demo through the MVD recording feed.",
+          "currentPaths": [
+            "src/app/bootstrap/demo-recording-commands.ts",
+            "src/network/q2/mvd-recording.ts",
+            "tests/network/q2/mvd-recording.test.ts"
+          ]
         },
         {
           "id": "q2.demo.protocol-playback",
@@ -3097,7 +4347,15 @@
           "functionalArea": "demos-recording",
           "classification": {
             "area": "demos-recording"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "playdemo plays dm2 demos including KEX 2022 and 2023 headers, and MVD files, through Q2DemoPlayback into the remote application.",
+          "currentPaths": [
+            "src/app/bootstrap/demo-commands.ts",
+            "src/app/bootstrap/network/q2-demo.ts",
+            "src/network/q2/demo.ts",
+            "tests/app/demo-playback.test.ts"
+          ]
         },
         {
           "id": "q2.demo.server-recording",
@@ -3115,7 +4373,14 @@
           "functionalArea": "demos-recording",
           "classification": {
             "area": "demos-recording"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "serverrecord and serverstop record classic Q2 server entity footage from the hosted source.",
+          "currentPaths": [
+            "src/app/bootstrap/demo-recording-commands.ts",
+            "src/network/q2/mvd-recording.ts",
+            "tests/network/q2/server-demo.test.ts"
+          ]
         },
         {
           "id": "q2.demo.view-controls-seats",
@@ -3133,7 +4398,14 @@
           "functionalArea": "demos-recording",
           "classification": {
             "area": "demos-recording"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Demo playback has demopause, follow and chase player selection for MVD and GTV, and recorded KEX viewpoints preserve per-seat identities.",
+          "currentPaths": [
+            "src/app/bootstrap/remote-application.ts",
+            "src/app/bootstrap/network/q2-mvd-presentation.ts",
+            "tests/network/q2/demo-viewpoints.test.ts"
+          ]
         },
         {
           "id": "q3.recording.demo-record-playback",
@@ -3149,7 +4421,15 @@
           "functionalArea": "demos-recording",
           "classification": {
             "area": "demos-recording"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q3 demos are recorded from a live local server (gamestate seed and snapshots) and played back through q3-demo/recorded-source via the demo command with clock handling.",
+          "currentPaths": [
+            "src/app/bootstrap/demo-local-recording.ts",
+            "src/app/bootstrap/network/q3-demo.ts",
+            "src/app/bootstrap/demo-commands.ts",
+            "tests/network/q3/demo-playback.test.ts"
+          ]
         },
         {
           "id": "q3.recording.timedemo",
@@ -3165,7 +4445,15 @@
           "functionalArea": "demos-recording",
           "classification": {
             "area": "demos-recording"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Q3 uses the source timedemo cvar: RecordedRemoteSource honours it, the Q3 demo clock runs unthrottled, and end-of-demo timing is printed via demoTimingText. The timedemo command itself is registered only for Q1/QW, matching source.",
+          "currentPaths": [
+            "src/app/bootstrap/network/recorded-source.ts",
+            "src/network/q3/clock.ts",
+            "src/app/bootstrap/remote-application.ts",
+            "tests/network/q3/demo-playback.test.ts"
+          ]
         }
       ]
     },
@@ -3192,7 +4480,15 @@
           "functionalArea": "cinematics-media",
           "classification": {
             "area": "cinematics-media"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "CampaignCinematic decodes and presents CIN (with OGV fallback), is used by the offline Q2 campaign, remote server requests and the startup frontend; a test plays, skips and completes unit CINs.",
+          "currentPaths": [
+            "src/app/bootstrap/campaign-cinematic.ts",
+            "src/media/cin-playback.ts",
+            "src/app/bootstrap/application.ts",
+            "tests/first-playable/application/q2-campaign-cinematic.test.ts"
+          ]
         },
         {
           "id": "q2.media.pause-skip-transition",
@@ -3210,7 +4506,15 @@
           "functionalArea": "cinematics-media",
           "classification": {
             "area": "cinematics-media"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Cinematics pause (clock and audio), skip on input after one second and complete into the next travel target or quit via the movie completion hook; a test covers pause, skip, completion and failure fallthrough.",
+          "currentPaths": [
+            "src/app/bootstrap/campaign-cinematic.ts",
+            "src/app/bootstrap/application.ts",
+            "src/media/transitions.ts",
+            "tests/first-playable/application/q2-campaign-cinematic.test.ts"
+          ]
         },
         {
           "id": "q2.media.rerelease-formats",
@@ -3228,7 +4532,15 @@
           "functionalArea": "cinematics-media",
           "classification": {
             "area": "cinematics-media"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The shared cinematic path plays CIN, RoQ and OGV (Ogg Vorbis/Theora demux) and falls back from .cin to .ogv for rerelease content; decoder tests cover all three.",
+          "currentPaths": [
+            "src/app/bootstrap/campaign-cinematic.ts",
+            "src/media/ogv-playback.ts",
+            "src/media/playback.ts",
+            "tests/media/cinematic.test.ts"
+          ]
         },
         {
           "id": "q2.media.static-pcx",
@@ -3246,7 +4558,15 @@
           "functionalArea": "cinematics-media",
           "classification": {
             "area": "cinematics-media"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "CampaignCinematic accepts .pcx names via cinematicPcx as held stills with skip, and the Q2 travel grammar routes picture destinations to it.",
+          "currentPaths": [
+            "src/app/bootstrap/campaign-cinematic.ts",
+            "src/media/still.ts",
+            "src/app/bootstrap/q2-travel.ts",
+            "tests/first-playable/application/q2-campaign-cinematic.test.ts"
+          ]
         },
         {
           "id": "q3.media.cinematic-clock-transitions",
@@ -3262,7 +4582,14 @@
           "functionalArea": "cinematics-media",
           "classification": {
             "area": "cinematics-media"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The cinematic command opens a system cinematic with loop/hold/silent modes, skip and stop handles, and on completion queues the nextmap command and clears it.",
+          "currentPaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/q3-client/cinematics.ts",
+            "src/app/bootstrap/campaign-cinematic.ts"
+          ]
         },
         {
           "id": "q3.media.world-and-menu-video",
@@ -3280,7 +4607,15 @@
           "functionalArea": "cinematics-media",
           "classification": {
             "area": "cinematics-media"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "ApplicationAssets passes materialMovie as the SceneShaderRegistry cinematic provider so videoMap stages resolve, and CinematicImage reallocates on frame dimension change.",
+          "currentPaths": [
+            "src/app/bootstrap/assets.ts",
+            "src/render/scene/shaders.ts",
+            "src/media/presentation.ts",
+            "tests/media/cinematic.test.ts"
+          ]
         }
       ]
     },
@@ -3305,7 +4640,14 @@
           "functionalArea": "tools-diagnostics",
           "classification": {
             "area": "tools-diagnostics"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "The presentation view owner applies a traced Q1 chase camera from the viewsize chase settings to the local view, and the chase cvars toggle it.",
+          "currentPaths": [
+            "src/app/bootstrap/presentation.ts",
+            "src/app/bootstrap/q1-client-settings.ts",
+            "tests/console/q1-client-settings.test.ts"
+          ]
         },
         {
           "id": "q3.cameras.spline-runtime",
@@ -3324,7 +4666,15 @@
               "rendering"
             ],
             "note": "Spline evaluation and timed camera tooling depend on rendered camera presentation."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "ApplicationSplineCamera registers load/save/control camera commands and its apply hook is passed into every WorldSeatPresentation view; tests cover spline evaluation and the workflow.",
+          "currentPaths": [
+            "src/camera/application.ts",
+            "src/app/bootstrap/application-tools.ts",
+            "src/app/bootstrap/application.ts",
+            "tests/camera/workflow.test.ts"
+          ]
         },
         {
           "id": "q3.diagnostics.omnitimer",
@@ -3339,7 +4689,14 @@
           "functionalArea": "tools-diagnostics",
           "classification": {
             "area": "tools-diagnostics"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "OmniTimer is a core runtime profiler owned by ApplicationTools, with timers on/off/reset/report/stamps and timerstamp commands and async measurement hooks.",
+          "currentPaths": [
+            "src/core/omnitimer.ts",
+            "src/app/bootstrap/application-tools.ts",
+            "src/app/bootstrap/diagnostic-tools.ts"
+          ]
         },
         {
           "id": "q3.diagnostics.runtime-tools",
@@ -3355,7 +4712,15 @@
           "functionalArea": "tools-diagnostics",
           "classification": {
             "area": "tools-diagnostics"
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "ApplicationTools registers timers, timerstamp, meminfo, path, dir, touchFile, resourceinfo, frameinfo and renderer diagnostics (imagelist, shaderlist, modellist, skinlist, modelist, gfxinfo) against the live owners, alongside cmdlist/cvarlist/soundinfo/midiinfo. Exhaustive comparison with every source developer command was not done.",
+          "currentPaths": [
+            "src/app/bootstrap/application-tools.ts",
+            "src/app/bootstrap/diagnostic-tools.ts",
+            "src/app/bootstrap/renderer-diagnostics.ts",
+            "tests/camera/renderer-diagnostics.test.ts"
+          ]
         },
         {
           "id": "q3.recording.screenshots-levelshots",
@@ -3378,7 +4743,15 @@
               "rendering"
             ],
             "note": "Screenshot and levelshot capture belongs to tools, with rendered output and frame timing dependencies."
-          }
+          },
+          "currentState": "closed",
+          "currentReason": "Screenshot/levelshot commands and formats ship, and capture frames are timed from cl_avidemo, timescale and cl_forceavidemo in both the local and remote applications.",
+          "currentPaths": [
+            "src/app/bootstrap/diagnostic-tools.ts",
+            "src/app/bootstrap/capture.ts",
+            "src/app/bootstrap/application-tools.ts",
+            "tests/camera/application-tools.test.ts"
+          ]
         },
         {
           "id": "q3.source-applications.role-accounting",
@@ -3394,7 +4767,12 @@
           "functionalArea": "tools-diagnostics",
           "classification": {
             "area": "tools-diagnostics"
-          }
+          },
+          "currentState": "open",
+          "currentReason": "Remaining: no Quake III map compiler (q3map), QVM assembler (q3asm/lcc) or SDK/archive packer exists in the repository; the AAS compile role is tools/navigation/aas.ts and the runtime roles are implemented. Not started: a q3asm-compatible assembler would be a new tool.",
+          "currentPaths": [
+            "docs/comparison-q3.md"
+          ]
         }
       ]
     }
@@ -3650,5 +5028,12 @@
       ],
       "note": "Skirmish launch/next-match flow is a UI entry point with mode dependencies."
     }
-  ]
+  ],
+  "currentState": {
+    "derivedOn": "2026-11-02",
+    "closed": 164,
+    "open": 20,
+    "descoped": 0,
+    "ownerQuestions": 2
+  }
 }

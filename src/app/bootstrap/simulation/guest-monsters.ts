@@ -44,7 +44,7 @@ function entitySpans(text: string): readonly (readonly [number, number])[] {
   let depth = 0, start = -1, quoted = false;
   for (let index = 0; index < text.length; index++) {
     const char = text[index];
-    if (quoted) { if (char === '"' && text[index - 1] !== "\\") quoted = false; continue; }
+    if (quoted) { if (char === '"') quoted = false; continue; }
     if (char === '"') quoted = true;
     else if (char === "{") { if (depth === 0) start = index; depth++; }
     else if (char === "}") { depth--; if (depth === 0 && start >= 0) { spans.push([start, index + 1]); start = -1; } }

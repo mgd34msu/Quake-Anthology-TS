@@ -1,4 +1,6 @@
+import { writeCapture } from "../support/capture.ts";
 import { defaultAudioOutputFormat } from "../../src/audio/output.ts";
+import { rendererBackends } from "../support/gl.ts";
 import type { Application as ApplicationInstance } from '../../src/app/bootstrap/application.ts';
 import type { RemoteApplication as RemoteApplicationInstance } from '../../src/app/bootstrap/remote-application.ts';
 import type { SdlAudioDevice as SdlAudioDeviceInstance } from '../../src/platform/audio.ts';
@@ -42,7 +44,7 @@ test('audio disk preferences reject malformed or out-of-range settings at load b
   } finally { await rm(root,{recursive:true,force:true}); }
 });
 
-for (const backend of ['cpu', 'gl']) test(`actual ${backend} audio menu saves device and volumes across application restart`, async () => {
+for (const backend of rendererBackends) test(`actual ${backend} audio menu saves device and volumes across application restart`, async () => {
   const { spyOn } = await import('bun:test');
   const { Application } = await import('../../src/app/bootstrap/application.ts');
   const { ApplicationAudio } = await import('../../src/app/bootstrap/audio.ts');
@@ -77,7 +79,7 @@ for (const backend of ['cpu', 'gl']) test(`actual ${backend} audio menu saves de
     await click(4,400);await click(11);await click(1);await click(0,460);
     const expected={deviceName:audio.selectedOutput,effectsVolume:audio.effectsVolume,musicVolume:audio.musicVolume};
     expect(expected.effectsVolume).not.toBe(1);expect(expected.musicVolume).not.toBe(1);
-    const pending=application.captureNextFrame();await application.step(25);await Bun.write(`/tmp/audio-menu-${backend}.png`,encodePng(640,480,await pending));
+    const pending=application.captureNextFrame();await application.step(25);await writeCapture(`audio-menu-${backend}.png`,encodePng(640,480,await pending));
     await application.close();app=null;
     expect(await loadAudioSettings(new ConfigStore(join(root,'q2/baseq2')))).toEqual({ ...expected, menuTrack: 'auto', musicShuffle: false, outputFormat: audio.outputFormat });
     app=await Application.open({...parsed.options,userContentRoot:root},{print:()=>undefined});

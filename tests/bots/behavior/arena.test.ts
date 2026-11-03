@@ -2,7 +2,7 @@ import { createQ1BotKnowledge } from "../../../src/app/bootstrap/simulation/bot-
 import { testCorpusRoot } from "../../support/corpus.ts";
 
 import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -95,12 +95,24 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("native bots co
     expect(replacement.random.checkpoint()).toEqual(random);
     expect(clients).toHaveLength(2);
     expect(Array.from({ length: 20 }, () => step(replacementSession, replacement, restored))).toEqual(suffix);
+    // A version 1 image recorded the digest that also covered bots/navigation; it must keep loading.
+    await files.prepareLegacyProvenance();
+    const legacyIdentity = createIdentityOwner("bot-save-legacy"), legacySession = new EngineSession(legacyIdentity, { kind: "headless" });
+    const legacyClients = botImage.transport.connections.map(connection => legacySession.createClient(connection.client.slot));
+    const legacy = new SharedSimulation({ ...options, identity: legacyIdentity, restore: saved, restoredClients: legacyClients.map(client => client.id) });
+    legacySession.attachWorld(legacy);
+    const legacyBots = new ApplicationBots({ session: legacySession, simulation: legacy, files, navigation: await createApplicationBotNavigation({ content, simulation: legacy }),
+      leafCount: content.world.leaves.length, print: () => undefined, insertConsoleCommand: () => { throw new Error("Bot restore replayed a console command"); },
+      openLog: () => { throw new Error("Bot restore replayed log initialization"); },
+      restore: { image: { ...decodeApplicationBotsCheckpoint(decodeCheckpointValue(botSection.bytes)), director: Object.assign({}, botImage.director, { version: 1, assets: files.legacyProvenance() }) },
+        resolveClient: saved => legacyClients.find(client => client.id.slot === saved.slot) ?? null } });
+    try { expect(Array.from({ length: 20 }, () => step(legacySession, legacy, legacyBots))).toEqual(suffix); } finally { legacyBots.close(); legacySession.close(); }
   } finally {
     restoredBots?.close(); restoredSession?.close(); bots.close(); session.close(); await content.close(); await rm(directory, { recursive: true, force: true });
   }
 }, 120000);
 
-test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena roster and source bot brain produce shared player movement and combat", async () => {
+async function openArena() {
   const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map", "q3dm1",
     "--movement", "q3", "--character", "q3", "--mode", "singleplayer"]);
   if (launch.kind !== "run") throw new Error("Expected arena launch options");
@@ -113,49 +125,63 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
   const game = simulation.q3Source();
   if (game === null) throw new Error("Real map did not create the Q3 source provider");
   const archive = await openArchive(resolve(corpus, "q3a/baseq3/pak0.pk3"));
-  let bots: ApplicationBots | null = null;
-  try {
-    const files = await loadMountedBotAssetFiles(await content.forContent(content.recipe.map.entities.content), content.catalog);
-    const navEntry = archive.findEntries("maps/q3dm1.aas")[0];
-    if (navEntry === undefined) throw new Error("Retail arena navigation missing");
-    const asset = parseAas(await archive.readEntry(navEntry)), world = navigationWorld(simulation.scene);
-    const graph = navigationFromAsset({ name: "q3dm1", format: "q3-bsp", digest: createContentDigest("0".repeat(64)) }, asset, profile, world);
-    const navigation = new NavigationRuntime(graph, world), consoleCommands: string[] = [], messages: string[] = [];
-    const clientNavigation = new Map<number, NavigationRuntime>();
-    const forClient = (client: number): NavigationRuntime => {
-      let runtime = clientNavigation.get(client);
-      if (runtime !== undefined) return runtime;
-      const passActor = game.pool.at(client).actor.id, scene = simulation.scene;
-      const queries = { trace: (query: Parameters<typeof scene.trace>[0]) => scene.trace({ ...query, passActor }),
-        pointContents: (query: Parameters<typeof scene.pointContents>[0]) => scene.pointContents({ ...query, passActor }),
-        boxLeaves: scene.boxLeaves.bind(scene), areasConnected: scene.areasConnected.bind(scene), clusterVisible: scene.clusterVisible.bind(scene) };
-      runtime = new NavigationRuntime(graph, { ...navigationWorld(queries), passActor });
-      clientNavigation.set(client, runtime);
-      return runtime;
-    };
-    // Ranger must be skilled enough to aim while retreating with his starting machinegun.
-    game.host.cvars.set("g_spSkill", "3", true);
-    game.host.cvars.set("bot_nochat", "1", true);
-    game.host.cvars.set("bot_challenge", "1", true);
-    bots = new ApplicationBots({ session, simulation, files, leafCount: content.world.leaves.length,
-      insertConsoleCommand: text => { consoleCommands.push(text); }, print: text => { messages.push(text); },
-      openLog: () => ({ kind: "failed", error: new Error("Arena check did not enable source logging") }),
-      navigation: { runtime: navigation, forClient,
-        crouchedBounds: { min: { x: -15, y: -15, z: -24 }, max: { x: 15, y: 15, z: 16 } },
-        predictClientMovement: query => arenaPrediction(simulation, query),
-        travelWeapon: (_client, mode) => mode === "rocket-jump" ? 5 : mode === "bfg-jump" ? 9 : 10 } });
-    const roster = bots.director.arenaRoster("q3dm1");
-    expect(roster.map(bot => bot.name)).toEqual(["ranger"]);
-    expect(consoleCommands.some(command => command.startsWith("addbot ranger 3.000000 free 2000"))).toBe(true);
+  const files = await loadMountedBotAssetFiles(await content.forContent(content.recipe.map.entities.content), content.catalog);
+  const navEntry = archive.findEntries("maps/q3dm1.aas")[0];
+  if (navEntry === undefined) throw new Error("Retail arena navigation missing");
+  const asset = parseAas(await archive.readEntry(navEntry)), world = navigationWorld(simulation.scene);
+  const graph = navigationFromAsset({ name: "q3dm1", format: "q3-bsp", digest: createContentDigest("0".repeat(64)) }, asset, profile, world);
+  const navigation = new NavigationRuntime(graph, world), consoleCommands: string[] = [], messages: string[] = [];
+  const clientNavigation = new Map<number, NavigationRuntime>();
+  const forClient = (client: number): NavigationRuntime => {
+    let runtime = clientNavigation.get(client);
+    if (runtime !== undefined) return runtime;
+    const passActor = game.pool.at(client).actor.id, scene = simulation.scene;
+    const queries = { trace: (query: Parameters<typeof scene.trace>[0]) => scene.trace({ ...query, passActor }),
+      pointContents: (query: Parameters<typeof scene.pointContents>[0]) => scene.pointContents({ ...query, passActor }),
+      boxLeaves: scene.boxLeaves.bind(scene), areasConnected: scene.areasConnected.bind(scene), clusterVisible: scene.clusterVisible.bind(scene) };
+    runtime = new NavigationRuntime(graph, { ...navigationWorld(queries), passActor });
+    clientNavigation.set(client, runtime);
+    return runtime;
+  };
+  // Ranger must be skilled enough to aim while retreating with his starting machinegun.
+  game.host.cvars.set("g_spSkill", "3", true);
+  game.host.cvars.set("bot_nochat", "1", true);
+  game.host.cvars.set("bot_challenge", "1", true);
+  const bots = new ApplicationBots({ session, simulation, files, leafCount: content.world.leaves.length,
+    insertConsoleCommand: text => { consoleCommands.push(text); }, print: text => { messages.push(text); },
+    openLog: () => ({ kind: "failed", error: new Error("Arena check did not enable source logging") }),
+    navigation: { runtime: navigation, forClient,
+      crouchedBounds: { min: { x: -15, y: -15, z: -24 }, max: { x: 15, y: 15, z: 16 } },
+      predictClientMovement: query => arenaPrediction(simulation, query),
+      travelWeapon: (_client, mode) => mode === "rocket-jump" ? 5 : mode === "bfg-jump" ? 9 : 10 } });
+  const roster = bots.director.arenaRoster("q3dm1");
+  const addCommands = [...consoleCommands];
     for (const command of consoleCommands.splice(0)) bots.consoleCommand(tokenizeCommand(command, "q3").argv);
-    const botClient = bots.clients()[0];
-    if (botClient === undefined) throw new Error("Authored arena bot did not allocate a real session client");
-    const botActor = bots.actor(botClient.client.id);
-    if (botActor === null) throw new Error("Authored bot has no canonical actor");
-    const entity = game.pool.at(1), player = entity.client;
-    if (player === null) throw new Error("Bot actor source player state missing");
-    const brain = bots.director.roster()[0]?.state;
-    if (brain === undefined) throw new Error("Authored bot has no source brain");
+  const botClient = bots.clients()[0];
+  if (botClient === undefined) throw new Error("Authored arena bot did not allocate a real session client");
+  const botActor = bots.actor(botClient.client.id);
+  if (botActor === null) throw new Error("Authored bot has no canonical actor");
+  const entity = game.pool.at(1), player = entity.client;
+  if (player === null) throw new Error("Bot actor source player state missing");
+  const brain = bots.director.roster()[0]?.state;
+  if (brain === undefined) throw new Error("Authored bot has no source brain");
+  const clock = { ms: 42 * 50 }; // the roster test advances 42 frames before the later sections run
+  return { content, identity, simulation, session, humanClient, human, game, archive, files, graph, bots, forClient, consoleCommands, messages, botClient, botActor, entity, player, brain, roster, addCommands, navigation, clock,
+    close: async () => { bots.close(); session.close(); archive.close(); await content.close(); } };
+}
+type Arena = Awaited<ReturnType<typeof openArena>>;
+
+const arenaFiles = ["q3a/baseq3/pak0.pk3", "q2/baseq2/pak0.pak", "q1/rerelease/id1/pak0.pak"];
+
+// The sections share one world, bot brain, library and director, and run in order like successive frames of one match.
+describe.skipIf(!arenaFiles.every(file => existsSync(resolve(corpus, file))))("retail arena roster and source bot brain", () => {
+  let arena: Arena;
+  beforeAll(async () => { arena = await openArena(); }, 120000);
+  afterAll(async () => { await arena.close(); });
+  test("authored roster admits a source bot that connects through session frames", async () => {
+    const { simulation, session, game, bots, player, brain, roster, addCommands } = arena;
+    expect(roster.map(bot => bot.name)).toEqual(["ranger"]);
+    expect(addCommands.some(command => command.startsWith("addbot ranger 3.000000 free 2000"))).toBe(true);
     expect(bots.director.library.characters.boundedFloat(brain.character, BotCharacteristic.ATTACK_SKILL, 0, 1)).toBeGreaterThan(0.3);
     expect(player.pers.connected).toBe(ConnectionState.CONNECTING);
     expect(game.world.linkState(1)).toBeUndefined();
@@ -164,6 +190,10 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
       bots.receive(simulation.drainPresentationEvents());
     }
     expect(player.pers.connected).toBe(ConnectionState.CONNECTED);
+  }, 60000);
+
+  test("bot transport and director checkpoints round-trip and reject mismatched bindings", async () => {
+    const { simulation, bots, botClient } = arena;
     const originalTransport = bots.checkpointOrchestration(), originalDirector = bots.director.checkpointOrchestration();
     const savedRandom = simulation.random.checkpoint(), savedPlayers = simulation.players();
     for (let index = 0; index < 70; index++) {
@@ -181,24 +211,21 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
     const invalidTransport = { ...transportImage, connections: transportImage.connections.map(connection => ({ ...connection,
       actor: { ...connection.actor, generation: connection.actor.generation + 1 } })) };
     const activeBots = bots;
-    expect(() => activeBots.restoreOrchestration(invalidTransport, resolveClient)).toThrow();
+    expect(() => activeBots.restoreOrchestration(invalidTransport, resolveClient)).toThrow("Invalid saved bot transport binding");
     expect(bots.checkpointOrchestration()).toEqual(transportImage);
     expect(originalDirector.sequences.length).toBeGreaterThan(0);
     const changedDirector = { ...originalDirector, sequences: originalDirector.sequences.map(entry => ({ ...entry, next: entry.next + 7 })) };
     bots.director.restoreOrchestration(changedDirector, saved => simulation.actors.resolveSaved(saved));
     expect(bots.director.checkpointOrchestration()).toEqual(changedDirector);
     expect(() => activeBots.director.restoreOrchestration({ ...changedDirector,
-      sequences: [...changedDirector.sequences, ...changedDirector.sequences] }, saved => simulation.actors.resolveSaved(saved))).toThrow();
+      sequences: [...changedDirector.sequences, ...changedDirector.sequences] }, saved => simulation.actors.resolveSaved(saved))).toThrow("invalid or duplicate actor");
     expect(bots.director.checkpointOrchestration()).toEqual(changedDirector);
     bots.restoreOrchestration(originalTransport, resolveClient);
     bots.director.restoreOrchestration(originalDirector, saved => simulation.actors.resolveSaved(saved));
-    const q2Launch = parseApplicationCommand(["--content-root", corpus, "--game", "q2-classic-baseq2", "--map", "base1", "--dedicated"]);
-    if (q2Launch.kind !== "run") throw new Error("Expected Q2 arsenal fixture");
-    const q2Content = existsSync(resolve(corpus, "q2/baseq2/pak0.pak")) ? await loadApplicationContent(q2Launch.options) : null;
-    let q2Simulation: SharedSimulation | null = null;
-    try {
-      if (q2Content !== null) q2Simulation = new SharedSimulation({ identity: createIdentityOwner("bot-attack-distance"), recipe: q2Content.recipe,
-        world: q2Content.world, mounts: q2Content.mounts, mode: "deathmatch", skill: 3, seed: 7, maxClients: 4 });
+  }, 60000);
+
+  test("Q3 bot item inventory, walking reachability and native weapon activation priority", async () => {
+    const { game, graph, bots, player, brain } = arena;
       const library = bots.director.library, original = bots.director.ai.context;
       const items = new BotState("baseq3"); items.client = brain.client; items.curPs.copyFrom(player.ps);
       items.inventory[65] = 1; items.inventory[97] = 13;
@@ -273,6 +300,18 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
         expect(createBotArsenalKnowledge({ updateInventory: () => undefined, candidates: () => [candidate] }).activationWeapon(library, activation)).toBe(-1);
       }
       expect(createBotArsenalKnowledge({ updateInventory: () => undefined, candidates: () => [] }).activationWeapon(library, activation)).toBe(-1);
+  }, 60000);
+
+  test("Q2 arsenal selection and pickup utility, and attack distance per weapon source", async () => {
+    const { game, bots, brain } = arena;
+    const q2Launch = parseApplicationCommand(["--content-root", corpus, "--game", "q2-classic-baseq2", "--map", "base1", "--dedicated"]);
+    if (q2Launch.kind !== "run") throw new Error("Expected Q2 arsenal fixture");
+    const q2Content = await loadApplicationContent(q2Launch.options);
+    let q2Simulation: SharedSimulation | null = null;
+    try {
+      q2Simulation = new SharedSimulation({ identity: createIdentityOwner("bot-attack-distance"), recipe: q2Content.recipe,
+        world: q2Content.world, mounts: q2Content.mounts, mode: "deathmatch", skill: 3, seed: 7, maxClients: 4 });
+      const library = bots.director.library, original = bots.director.ai.context;
       if (q2Simulation !== null) {
         const actor = q2Simulation.admitPlayer(q2Simulation.options.identity.client(0, 1)).actor;
         const owner = q2Simulation.actors.resolveOwned(actor);
@@ -311,28 +350,8 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
         expect(utility({ accepted: true, weapons: [{ item: "q2:ammo_grenades", before: 0, given: 5 }], ammo: [{ item: "q2:ammo_grenades", before: 0, given: 5 }] })).toBe(0);
 
       }
-      if (existsSync(resolve(corpus, "q1/rerelease/id1/pak0.pak"))) {
-        const q1Launch = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-id1", "--map", "dm4", "--dedicated"]);
-        if (q1Launch.kind !== "run") throw new Error("Expected Q1 source ownership fixture");
-        const q1Content = await loadApplicationContent(q1Launch.options);
-        const q1Simulation = new SharedSimulation({ identity: createIdentityOwner("bot-q1-supply"), recipe: q1Content.recipe,
-          world: q1Content.world, mounts: q1Content.mounts, mode: "deathmatch", skill: 3, seed: 7, maxClients: 4 });
-        try {
-          const actor = q1Simulation.admitPlayer(q1Simulation.options.identity.client(0, 1)).actor;
-          const owner = q1Simulation.actors.resolveOwned(actor);
-          if (owner === null) throw new Error("Q1 source ownership fixture lost actor");
-          q1Simulation.inventory.consume(owner, "q1:ammo/shells", q1Simulation.inventory.count(actor, "q1:ammo/shells"));
-          const knowledge = createQ1BotKnowledge({ simulation: q1Simulation, actorForClient: () => actor });
-          const state = new BotState("baseq3"); state.ws = brain.ws;
-          knowledge.knowledge.updateInventory(state);
-          const selectedBefore = knowledge.knowledge.chooseWeapon(library, state);
-          expect(knowledge.resolveWeapon(0, selectedBefore)).toBe("q1:weapon/axe");
-          expect(knowledge.knowledge.pickupUtility(library, state, { accepted: true, weapons: [],
-            ammo: [{ item: "q1:ammo/shells", before: 0, given: 10 }] })).toBe(10);
-          expect(knowledge.knowledge.chooseWeapon(library, state)).toBe(selectedBefore);
-          expect(q1Simulation.inventory.count(actor, "q1:ammo/shells")).toBe(0);
-        } finally { q1Simulation.close(); await q1Content.close(); }
-      }
+      const gauntlet = library.weapons.getWeaponInfo(brain.ws, 1);
+      if (gauntlet === undefined || !gauntlet.valid) throw new Error("Native gauntlet knowledge missing");
       const cases = [
         ...(q2Simulation === null ? [] : [{ name: "Q2 blaster", active: 1, melee: false, knowledge: createQ2BotKnowledge({ simulation: q2Simulation, actorForClient: () => null }).knowledge }]),
         { name: "Q3 gauntlet", active: 1, melee: true, knowledge: q3BotGame(game, () => undefined).knowledge },
@@ -359,7 +378,38 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
           expect(state.curPs.weapon).toBe(entry.active);
         }
       }
-    } finally { q2Simulation?.close(); await q2Content?.close(); }
+    } finally { q2Simulation?.close(); await q2Content.close(); }
+  }, 120000);
+
+  test("Q1 source ownership drives bot weapon choice and pickup utility", async () => {
+    const { bots, brain } = arena;
+  const library = bots.director.library;
+      {
+        const q1Launch = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-id1", "--map", "dm4", "--dedicated"]);
+        if (q1Launch.kind !== "run") throw new Error("Expected Q1 source ownership fixture");
+        const q1Content = await loadApplicationContent(q1Launch.options);
+        const q1Simulation = new SharedSimulation({ identity: createIdentityOwner("bot-q1-supply"), recipe: q1Content.recipe,
+          world: q1Content.world, mounts: q1Content.mounts, mode: "deathmatch", skill: 3, seed: 7, maxClients: 4 });
+        try {
+          const actor = q1Simulation.admitPlayer(q1Simulation.options.identity.client(0, 1)).actor;
+          const owner = q1Simulation.actors.resolveOwned(actor);
+          if (owner === null) throw new Error("Q1 source ownership fixture lost actor");
+          q1Simulation.inventory.consume(owner, "q1:ammo/shells", q1Simulation.inventory.count(actor, "q1:ammo/shells"));
+          const knowledge = createQ1BotKnowledge({ simulation: q1Simulation, actorForClient: () => actor });
+          const state = new BotState("baseq3"); state.ws = brain.ws;
+          knowledge.knowledge.updateInventory(state);
+          const selectedBefore = knowledge.knowledge.chooseWeapon(library, state);
+          expect(knowledge.resolveWeapon(0, selectedBefore)).toBe("q1:weapon/axe");
+          expect(knowledge.knowledge.pickupUtility(library, state, { accepted: true, weapons: [],
+            ammo: [{ item: "q1:ammo/shells", before: 0, given: 10 }] })).toBe(10);
+          expect(knowledge.knowledge.chooseWeapon(library, state)).toBe(selectedBefore);
+          expect(q1Simulation.inventory.count(actor, "q1:ammo/shells")).toBe(0);
+        } finally { q1Simulation.close(); await q1Content.close(); }
+      }
+  }, 120000);
+
+  test("source bot moves, fires and consumes ammo against a human target", async () => {
+    const { simulation, session, human, game, bots, botActor, entity, player, clock } = arena;
     const initial = { ...player.ps.origin };
     const selected = simulation.movementPlayer(entity.actor.id);
     if (selected === null || selected.state.kind !== "q3") throw new Error("Bot lost its selected movement state");
@@ -378,12 +428,12 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
       targetPlayer.ps.origin = end; game.world.link(target); placed = true; break;
     }
     expect(placed).toBe(true);
-    let frameTime = 42 * 50;
+    
     target.health = 100;
     let moves = 0, shots = 0, ammoConsumed = 0;
     for (let frame = 1; frame <= 80; frame++) {
-      frameTime += 50;
-      const commands = bots.frame(frameTime, 50);
+      clock.ms += 50;
+      const commands = bots.frame(clock.ms, 50);
       for (const input of commands) { expect(input.actor).toBe(botActor); if (input.command.kind !== "q3") throw new Error("Native source bot command changed dialect");
         if (input.command.forwardMove !== 0 || input.command.rightMove !== 0) moves++;
         if ((input.command.buttons & 1) !== 0) shots++;
@@ -399,6 +449,10 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
     expect(ammoConsumed).toBeGreaterThan(0);
     expect(simulation.playerUi(human.actor).health).toBeLessThan(100);
     expect(bots.director.roster()).toHaveLength(1);
+  }, 60000);
+
+  test("scripted move-to-point order reaches its goal and clears", async () => {
+    const { simulation, session, game, bots, forClient, botActor, entity, player, clock } = arena;
     const orderOrigin = { ...player.ps.origin };
     let orderPoint: typeof orderOrigin | null = null;
     for (const displacement of [{ x: 64, y: 0 }, { x: -64, y: 0 }, { x: 0, y: 64 }, { x: 0, y: -64 }]) {
@@ -411,8 +465,8 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
     let orderedMoves = 0;
     for (let frame = 0; frame < 24 && bots.population.goalStatus(botActor) === 2; frame++) {
       expect(bots.population.requestMoveToPoint(botActor, orderPoint)).toBe(2);
-      frameTime += 50;
-      const commands = bots.frame(frameTime, 50);
+      clock.ms += 50;
+      const commands = bots.frame(clock.ms, 50);
       orderedMoves += commands.filter(input => input.command.kind === "q3" && (input.command.forwardMove !== 0 || input.command.rightMove !== 0)).length;
       session.step({ elapsedMilliseconds: 50, commands });
       bots.receive(simulation.drainPresentationEvents());
@@ -423,14 +477,18 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
     expect(bots.population.requestMoveToPoint(botActor, orderPoint)).toBe(1);
     bots.population.clearGoal(botActor);
     expect(bots.population.goalStatus(botActor)).toBe(0);
+  }, 60000);
+
+  test("follow order tracks the human and drops when the followed entity is replaced", async () => {
+    const { simulation, session, humanClient, human, bots, botActor, clock } = arena;
     expect(bots.population.requestFollowEntity(botActor, 0)).toBe(2);
     bots.population.clearGoal(botActor);
     expect(bots.population.goalStatus(botActor)).toBe(0);
     expect(bots.population.requestFollowEntity(botActor, 0)).toBe(2);
     let followMoves = 0;
     for (let frame = 0; frame < 4; frame++) {
-      frameTime += 50;
-      const commands = bots.frame(frameTime, 50);
+      clock.ms += 50;
+      const commands = bots.frame(clock.ms, 50);
       followMoves += commands.filter(input => input.command.kind === "q3" && (input.command.forwardMove !== 0 || input.command.rightMove !== 0)).length;
       session.step({ elapsedMilliseconds: 50, commands });
       bots.receive(simulation.drainPresentationEvents());
@@ -444,6 +502,10 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
     expect(replacement.actor.equals(human.actor)).toBe(false);
     expect(bots.director.options.host.game.entity(0).generation).not.toBe(followedGeneration);
     expect(bots.population.goalStatus(botActor)).toBe(0);
+  }, 60000);
+
+  test("bot goal state survives shutdown and setup for team-goal numbers", async () => {
+    const { bots, brain } = arena;
     const sourceClient = brain.client, settings = { ...brain.settings };
     for (const number of [0x40000000, 37]) {
       const current = bots.director.ai.context.states.get(sourceClient);
@@ -460,5 +522,5 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
       expect(restored.lastGoalDecisionmaker).toBe(number === 37 ? 2 : 0);
       expect(restored.lastGoalTeammate).toBe(number === 37 ? 3 : 0);
     }
-  } finally { bots?.close(); session.close(); archive.close(); await content.close(); }
-}, 30000);
+  }, 60000);
+});

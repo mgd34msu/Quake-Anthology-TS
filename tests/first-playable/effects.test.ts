@@ -1,5 +1,5 @@
 import { finishSceneOperations, createSourceSceneOrder } from "../../src/render/scene/submissions.ts";
-import { testCorpusRoot } from "../support/corpus.ts";
+import { testCorpusRoot, corpusFile } from "../support/corpus.ts";
 
 import type { ApplicationEffectFrame } from "../../src/app/bootstrap/effects.ts";
 import { q2MonsterMuzzle } from "../../src/app/bootstrap/effects/q2-muzzle.ts";
@@ -89,7 +89,7 @@ for (const [map, path, count] of [["e1m2", "progs/flame.mdl", 24], ["e2m1", "*4"
   } finally { assets.close(); simulation.close(); await content.close(); }
 }, 30000);
 
-test.skipIf(!existsSync(`${testCorpusRoot()}/q2/baseq2/pak0.pak`))("retail effects from all three games draw through the shared CPU renderer and expire once for both seats", async () => {
+test.skipIf(!existsSync(corpusFile("q2/baseq2/pak0.pak")))("retail effects from all three games draw through the shared CPU renderer and expire once for both seats", async () => {
   const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--renderer", "cpu"]);
   if (command.kind !== "run") throw new Error("Expected executable fixture");
   const content = await loadApplicationContent(command.options), identity = createIdentityOwner("effect-smoke");
@@ -431,7 +431,7 @@ test("Q1 entity lights retain keyed precedence, rerelease colors and paused-fram
   } finally { assets.close(); await content.close(); }
 }, 30000);
 
-test.skipIf(!existsSync(`${testCorpusRoot()}/q2/baseq2/pak0.pak`))("pitched Q1 lightning beam renders toward its endpoint, not mirrored", async () => {
+test.skipIf(!existsSync(corpusFile("q2/baseq2/pak0.pak")))("pitched Q1 lightning beam renders toward its endpoint, not mirrored", async () => {
   const command = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q2-classic-baseq2", "--map", "base1", "--renderer", "cpu"]);
   if (command.kind !== "run") throw new Error("Expected executable fixture");
   const content = await loadApplicationContent(command.options), identity = createIdentityOwner("beam-pitch");

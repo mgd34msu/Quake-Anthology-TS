@@ -168,10 +168,10 @@ export interface BotFollowInputT {
  * because a bot pinned against a doorframe by another bot still has a
  * non-zero velocity every frame. If the bot has not moved 24 units from
  * where the timer started within `stuckTime` seconds, the timer trips; each
- * trip bumps `stuckCount`, which the brain uses to escalate (re-plan, then
- * pick a different goal).
+ * trip bumps `stuckCount`. clearPath and setPath zero it, so the brain's
+ * give-up tally lives on its own `stuckTrips`.
  */
-export function followPath(state: BotPathStateT, input: BotFollowInputT, movement: BotMovementSettings, _rng: BotRandomT): BotMoveOutputT {
+export function followPath(state: BotPathStateT, input: BotFollowInputT, movement: BotMovementSettings): BotMoveOutputT {
   const idle: BotMoveOutputT = { status: BotPathStatus.NoPath, forwardmove: 0, sidemove: 0, upmove: 0, jump: false, target: null, link: null };
 
   const path = state.path;

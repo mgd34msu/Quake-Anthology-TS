@@ -11,7 +11,7 @@ test("Quaddicted mappings preserve exact files, directory precedence, exclusions
   expect(addonInstallPath(item, "docs/readme.txt")).toBe("id1/maps/readme.txt");
   expect(addonInstallPath(item, "banner.png")).toBe("id1/maps/map_banner.png");
   expect(addonInstallPath(item, "progs.dat")).toBeNull();
-  expect(() => addonInstallPath(item, "../escape")).toThrow();
+  expect(() => addonInstallPath(item, "../escape")).toThrow("File path must be relative and stay inside its storage directory");
   const old = parseAddonCatalog([row("b".repeat(64), ["filename=old.zip"], { extract: "{base}/maps/" })])[0];
   if (old === undefined) throw new Error("Missing legacy package");
   expect(addonInstallPath(old, "test.bsp")).toBe("id1/maps/test.bsp");
@@ -126,4 +126,16 @@ test("classic and rerelease package visibility is independent", async () => {
     expect(await managedAddonHidden(root,"q1/rerelease/"+item.id.slice(6))).toBe(false);
     expect(await readFile(join(root,"q1/rerelease",item.id.slice(6),"maps/example.bsp"),"utf8")).toBe("geometry");
   } finally {await classic.close();await rerelease.close();await rm(root,{recursive:true,force:true});}
+});
+
+test("a malformed row or a dot-directory game option skips that row only", () => {
+  const skipped: string[] = [];
+  const entries = parseAddonCatalog([
+    "not a record",
+    row("a".repeat(64), ["filename=bad.zip", "commandline=-game .."], { extract: "/" }),
+    { ...row("c".repeat(64), ["filename=badurl.zip"], { extract: "/" }), urls: ["not a url"] },
+    row("b".repeat(64), ["filename=good.zip"], { extract: "/" }),
+  ], reason => skipped.push(reason));
+  expect(entries.map(item => item.filename)).toEqual(["good.zip"]);
+  expect(skipped).toHaveLength(3);
 });

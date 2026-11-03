@@ -2,7 +2,7 @@ import type { BotSourceFiles } from "../../../bots/behavior/assets.ts";
 import { WeaponEntry } from "../../../bots/behavior/rerelease/data/botdata.ts";
 import type { BotWeaponT } from "../../../bots/behavior/rerelease/data/knowledge.ts";
 import { BotScriptSources } from "../../../bots/behavior/library/script-sources.ts";
-import { ScriptGlobalDefines } from "../../../ui/common/legacy/script/preprocessor.ts";
+import { ScriptGlobalDefines } from "../../../content/legacy-script/preprocessor.ts";
 import { BotMemory } from "../../../bots/behavior/library/memory.ts";
 import { WeightConfigStore } from "../../../bots/behavior/library/weights.ts";
 import { WeaponAi, WeaponLoadResult } from "../../../bots/behavior/library/weapons.ts";

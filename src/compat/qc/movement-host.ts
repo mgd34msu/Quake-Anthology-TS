@@ -12,6 +12,7 @@ import { qcLinkBounds } from "./world-host.ts";
 import type { QcWorldHost } from "./world-host.ts";
 
 type QcMovementWorld = Pick<QcWorldHost, "actor" | "reference" | "link"> & {
+  readonly isFreeEntity?: QcWorldHost["isFreeEntity"];
   readonly options: Pick<QcWorldHost["options"], "actors" | "bodies" | "entities" | "slots" | "program" | "numeric">;
 };
 
@@ -89,10 +90,10 @@ export function createQcMovementBindings(world: QcMovementWorld, services: {
   const movetogoal: QcBuiltin = vm => {
     if (vm.program !== program || vm.entities !== entities) return vm.fail("movement builtin belongs to another QC machine");
     const self = entities.slot(vm.globals.int(vm.globalOffset("self"))), words = entities.at(self);
-    const actor = world.actor(self), goal = world.actor(entities.slot(words.int(field("goalentity"))));
-    const distance = vm.argFloat(0);
     if ((Math.trunc(words.float(field("flags"))) & (512 | 1 | 2)) === 0) { vm.returnFloat(0); return; }
-    movement.moveToGoal(actor, goal.id, distance);
+    // SV_MoveToGoal dereferences a freed goal as a zeroed edict, which sits at the origin like the world entity.
+    const actor = world.actor(self), goalSlot = entities.slot(words.int(field("goalentity"))), goal = world.actor(world.isFreeEntity?.(goalSlot) === true ? 0 : goalSlot);
+    movement.moveToGoal(actor, goal.id, vm.argFloat(0));
   };
   const changeyaw: QcBuiltin = vm => {
     if (vm.program !== program || vm.entities !== entities) return vm.fail("movement builtin belongs to another QC machine");

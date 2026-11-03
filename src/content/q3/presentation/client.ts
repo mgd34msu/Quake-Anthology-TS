@@ -284,7 +284,7 @@ async function createQ3Presentation(input: Q3ClientPresentationOptions | Q3Scene
         showEvents: () => session.cvars.get("showevents")?.value ?? "", print } } : {}),
       settings: () => ({ gameType: staticState.gameType, dmFlags: staticState.dmFlags, demoPlayback: context.demoPlayback,
         noPredict: enabled("cg_nopredict"), synchronousClients: enabled("cg_synchronousClients"), predictItems: enabled("cg_predictItems"),
-        pmoveFixed: enabled("pmove_fixed"), pmoveMsec: integer("pmove_msec"), errorDecayInteger: integer("cg_errorDecay"),
+        pmoveFixed: enabled("pmove_fixed"), pmoveMsec: integer("pmove_msec"), ladders: enabled("pmove_ladders"), errorDecayInteger: integer("cg_errorDecay"),
         errorDecayValue: numeric("cg_errorDecay"), showMiss: integer("cg_showmiss") }),
       setPmoveMsec: value => setCvar("pmove_msec", String(value)), transitionPlayerState: (current, previous) => playerState.transitionPlayerState(current, previous), warn: print });
     const effects = new ClientEffects(state, pool, media.effects, {
@@ -322,6 +322,7 @@ async function createQ3Presentation(input: Q3ClientPresentationOptions | Q3Scene
         animationSpeed: numeric("cg_animSpeed"), swingSpeed: numeric("cg_swingSpeed"), drawFriend: enabled("cg_drawFriend"), shadows: integer("cg_shadows"),
         enableBreath: missionEnabled("cg_enableBreath"), enableDust: missionEnabled("cg_enableDust"), debugPosition: enabled("cg_debugPosition"), debugAnimation: enabled("cg_debugAnim") }),
     });
+    clients.entityReset = entity => players.resetPlayerEntity(entity);
     const packet = new PacketEntityPresenter(state, media.packet, {
       ...(options.bodyHidden === undefined ? {} : { bodyHidden: options.bodyHidden }),
       ...(primary?.bodyPose === undefined ? {} : { pose: primary.bodyPose }),
@@ -375,7 +376,15 @@ async function createQ3Presentation(input: Q3ClientPresentationOptions | Q3Scene
     });
     session.assertCurrent();
     return { state, staticState, configuration, media, clients, prediction, view, snapshots, packet, events, effects, localEntities, particles, marks, weapons, serverCommands, console, frameAudio, loading, hud, status, tools, menus, frames,
-      close: () => { frames.close(); menus?.dispose(); console.dispose(); serverCommands.dispose(); pool.initialize(); marks.reset(); particles.clear(resources); sound.clearLoopingSounds(true); options.scene.clearScene(); },
+      close: () => {
+        const errors: unknown[] = [];
+        for (const step of [() => frames.close(), () => menus?.dispose(), () => console.dispose(), () => serverCommands.dispose(), () => pool.initialize(), () => marks.reset(),
+          () => particles.resetRound(), () => sound.clearLoopingSounds(true), () => options.scene.clearScene()]) {
+          try { step(); } catch (error) { errors.push(error); }
+        }
+        if (errors.length === 1) throw errors[0];
+        if (errors.length > 1) throw new AggregateError(errors, "Cgame presentation close failed");
+      },
       keyEvent: async (key: number, down: boolean) => { session.assertCurrent(); await menus?.keyEvent(key, down); },
       mouseEvent: async (x: number, y: number) => { session.assertCurrent(); await menus?.mouseEvent(x, y); },
       eventHandling: async (type: number) => { session.assertCurrent(); await menus?.eventHandling(type); },

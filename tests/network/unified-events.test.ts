@@ -63,6 +63,33 @@ test('unified event boundary preserves source payloads and rebuilds only local p
   if (decodedDamage.payload.kind !== 'damage' || decodedDamage.payload.outcome.kind !== 'committed') throw new Error('Lost damage event');
   expect(decodedDamage.payload.outcome.decision.mutations).toEqual([{ kind: 'armor', before, after }]);
   expect(decodedDamage.payload.outcome.decision.request.target).toBe(local);
-  expect(() => decodeUnifiedPresentationEvents(new TextEncoder().encode('[{"kind":"unknown"}]'), identity)).toThrow();
-  expect(() => readUnifiedSimulationEvent({ sequence: 1, time: { kind: 'seconds', value: 0 }, audience: { kind: 'world' }, payload: { kind: 'sound', resource: 'resource:/private/server/pak0' } }, identity)).toThrow();
+  expect(() => decodeUnifiedPresentationEvents(new TextEncoder().encode('[{"kind":"unknown"}]'), identity)).toThrow("unified.presentation-events[0]: unknown event variant");
+  expect(() => readUnifiedSimulationEvent({ sequence: 1, time: { kind: 'seconds', value: 0 }, audience: { kind: 'world' }, payload: { kind: 'sound', resource: 'resource:/private/server/pak0' } }, identity)).toThrow("unified.simulation-event.payload.resource: expected negotiated unified resource identity");
+});
+
+test('unified events carry the Q2 help icon and the attack damage-powerup owner', () => {
+  const server = createIdentityOwner('carry-server'), client = createIdentityOwner('carry-client');
+  const actor = server.actor(3, 7);
+  const identity: UnifiedIdentityDecoder = { session: client.session, actor: (slot, generation) => client.actor(slot, generation),
+    client: (slot, generation) => client.client(slot, generation), seat: index => client.seat(index), resourceId: id => id };
+  const zero = { x: 0, y: 0, z: 0 }, content = createContentId({ family: 'q2', edition: 'classic', package: 'baseq2', revision: 'test' });
+  const view = { angles: zero, offset: zero, kickAngles: zero, gunAngles: zero, gunOffset: zero, blend: { x: 0, y: 0, z: 0, w: 0 }, fov: 90, underwater: false, flashes: 0,
+    health: 100, armor: 0, ammo: 10, score: 0, selectedItem: null, timer: null, spectator: false, layouts: 0 };
+  const common = { sequence: 1, content, seconds: 1 };
+  for (const helpIcon of [true, false]) {
+    const [back] = decodeUnifiedPresentationEvents(encodeUnifiedPresentationEvents([{ ...common, kind: 'q2-player', event: { kind: 'view', actor, view: { ...view, helpIcon } } }]), identity);
+    expect(back?.kind === 'q2-player' && back.event.kind === 'view' ? back.event.view.helpIcon : undefined).toBe(helpIcon);
+  }
+  const [absent] = decodeUnifiedPresentationEvents(encodeUnifiedPresentationEvents([{ ...common, kind: 'q2-player', event: { kind: 'view', actor, view } }]), identity);
+  expect(absent?.kind === 'q2-player' && absent.event.kind === 'view' && 'helpIcon' in absent.event.view).toBe(false);
+  const attack = { sequence: 1, time: { kind: 'seconds' as const, value: 2 }, attacker: actor, inflictor: actor, weapon: 'q3:machinegun' as const, weaponProvider: 'q3:weapons' as const,
+    combatProvider: 'q1:combat' as const, inventoryProvider: 'q2:inventory' as const, movementProvider: 'q1:movement' as const, cause: { kind: 'q3' as const, meansOfDeath: 3, damageFlags: 0 } };
+  const damage = (owner: boolean): SimulationEvent => ({ sequence: 4, time: { kind: 'seconds', value: 2 }, audience: { kind: 'world' }, payload: { kind: 'damage', outcome: {
+    kind: 'committed', survived: true, decision: { reaction: 'none', appliedDamage: 0, mutations: [], request: { target: actor, amount: 5, knockback: 0, direction: zero, point: zero,
+      normal: zero, delivery: 'direct', attack: owner ? { ...attack, damagePowerupOwner: 'q3:quad' } : attack } } } } });
+  for (const owner of [true, false]) {
+    const back = readUnifiedSimulationEvent(writeUnifiedSimulationEvent(damage(owner)), identity);
+    const request = back.payload.kind === 'damage' && back.payload.outcome.kind === 'committed' ? back.payload.outcome.decision.request.attack : undefined;
+    expect(request?.damagePowerupOwner).toBe(owner ? 'q3:quad' : undefined);
+  }
 });

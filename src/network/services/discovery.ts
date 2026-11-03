@@ -138,6 +138,8 @@ export class ServerBrowser {
       : challenge === null ? [...this.broadcasts.values()].at(-1) : this.broadcasts.get(challenge);
     const pending = direct ?? broadcast;
     if (pending === undefined) return false;
+    // Any source may answer a broadcast window, so unsolicited LAN entries are bounded.
+    if (direct === undefined && !this.entries.has(key) && this.entries.size >= 4096) return false;
     const pingMilliseconds = Math.max(0, now - pending.sentAt);
     const old = direct === undefined ? this.add(address, "lan", now) : this.entries.get(key) ?? this.add(address, "direct", now);
     this.entries.set(key, { ...old, status, pingMilliseconds, updatedAt: now });

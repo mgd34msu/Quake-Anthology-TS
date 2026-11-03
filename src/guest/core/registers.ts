@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type {
   GuestArchitecture, GuestFlag, GuestFlags, GuestIntegerRegisters, GuestIntegerWidth,
-  GuestProcessorState, GuestRegister, GuestSegment,
+  GuestProcessorState, GuestSimdScratch, GuestSimdState, GuestRegister, GuestSegment,
 } from "./contracts.ts";
 
 const registerIndex: Readonly<Record<GuestRegister, number>> = {
@@ -138,6 +138,16 @@ export interface GuestProcessorInitialState {
 }
 
 /** The loader/runtime supplies its selected initial environment; this does not execute instructions. */
+function createSimdState(initial: GuestProcessorInitialState): GuestSimdState {
+  const xmm = new Uint8Array(initial.architecture === "i386" ? 128 : 256);
+  const scratch: GuestSimdScratch = { registers: Array.from({ length: xmm.length / 16 }, (_, index) => xmm.subarray(index * 16, index * 16 + 16)),
+    operand: new Uint8Array(16), scalar: { view: new DataView(xmm.buffer, xmm.byteOffset, xmm.byteLength), low: 0, high: 0 } };
+  const simd: GuestSimdState = { xmm, scratch, mxcsr: initial.mxcsr, mxcsrMask: initial.mxcsrMask };
+  // Hidden from enumeration so snapshots and structural comparisons see only architectural state.
+  Object.defineProperty(simd, "scratch", { enumerable: false });
+  return simd;
+}
+
 export function createGuestProcessorState(initial: GuestProcessorInitialState): GuestProcessorState {
   return createState(initial, false);
 }
@@ -174,7 +184,7 @@ function createState(initial: GuestProcessorInitialState, managed: boolean): Gue
     segments: { cs: segment(), ds: segment(), es: segment(), ss: segment(), fs: segment(), gs: segment() },
     x87: { registers: new Uint8Array(80), controlWord: initial.x87ControlWord, statusWord: 0, tagWord: 0xffff,
       lastOpcode: 0, instructionPointer: 0n, dataPointer: 0n, instructionSelector: 0, dataSelector: 0 },
-    simd: { xmm: new Uint8Array(initial.architecture === "i386" ? 128 : 256), mxcsr: initial.mxcsr, mxcsrMask: initial.mxcsrMask },
+    simd: createSimdState(initial),
   };
   if (managed) {
     let instructionPointer = initial.instructionPointer;

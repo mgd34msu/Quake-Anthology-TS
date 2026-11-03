@@ -1,4 +1,4 @@
-import type { ItemId } from "../../contracts/gameplay.ts";
+import { hipnoticOverlay, overlayWeapons } from "./hipnotic-overlay.ts";
 import type { PickupSupplyProfile } from "../../contracts/pickups.ts";
 
 /** Q3 quantities feed Q1 capacities. Rail uses nails; plasma and BFG use lightning. */
@@ -34,10 +34,9 @@ export const Q3_Q1_SUPPLY_PROFILE: PickupSupplyProfile = {
   ],
 };
 
-const hipnoticWeapons = new Map<ItemId, readonly ItemId[]>([["q3:weapon/plasmagun", ["q1:weapon/hipnotic:laser"]], ["q3:weapon/grenadelauncher", ["q1:weapon/hipnotic:proximity"]], ["q3:weapon/bfg", ["q1:weapon/hipnotic:mjolnir"]]]);
+const hipnoticWeapons = hipnoticOverlay([["q3:weapon/plasmagun", ["q1:weapon/hipnotic:laser"]], ["q3:weapon/grenadelauncher", ["q1:weapon/hipnotic:proximity"]], ["q3:weapon/bfg", ["q1:weapon/hipnotic:mjolnir"]]]);
 
 export const Q3_HIPNOTIC_SUPPLY_PROFILE: PickupSupplyProfile = {
   ...Q3_Q1_SUPPLY_PROFILE, id: "composition:q3-hipnotic-supply",
-  weapons: Q3_Q1_SUPPLY_PROFILE.weapons.map(entry => ({ ...entry, destinations: [...entry.destinations,
-    ...(hipnoticWeapons.get(entry.source) ?? [])] })),
+  weapons: overlayWeapons(Q3_Q1_SUPPLY_PROFILE.weapons, hipnoticWeapons),
 };

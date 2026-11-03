@@ -4,16 +4,16 @@ import { BindingStore } from "../../input/binding-store.ts";
 import { q3ProductMapCommands, registerQ3ProductPolicy, type Q3ProductPolicy } from "../../core/q3-product-policy.ts";
 import { registerGtvCvars } from "./gtv-commands.ts";
 import { cdCommandDocumentation, musicCommandDocumentation } from "./audio/commands.ts";
-import { startupCommandPhases } from "./startup-commands.ts";
+import { applySelectedBindingDefaults, applyStartupVariables, inheritedBindingBaseline, noteBindingCommand, startupCommandPhases } from "./startup-commands.ts";
 import { registerQ1ViewCommands } from "./q1-client-settings.ts";
 import { registerRunCvar } from "./shared-setting-cvars.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { InputBinding } from "../../contracts/ui.ts";
-import { CvarFlag, CvarRegistry, type CvarArchiveEntry } from "../../core/cvars/index.ts";
+import { CvarRegistry, type CvarArchiveEntry } from "../../core/cvars/index.ts";
 import { CommandBuffer, asciiFold, type CommandInvocation, type CommandCvarRouting, type CommandBufferOptions } from "../../core/commands/index.ts";
 import { SeatInput, physicalInputKey } from "../../input/seat.ts";
-import { archivedBindings, defaultBindings, namedPhysicalInput, registerBindingCommands, type BindingCommandSeat } from "../../input/bindings.ts";
+import { archivedBindings, defaultBindings, registerBindingCommands, type BindingCommandSeat } from "../../input/bindings.ts";
 import { MouseSettings } from "../../input/mouse-settings.ts";
 import { ConfigStore, type SeatSettings } from "../../settings/config.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
@@ -321,16 +321,8 @@ export class PreparedStartup {
   }): AsyncGenerator<void, void, void> {
     const phases = startupCommandPhases(this.options.startupCommands ?? [], this.options.dialect);
     const commandContext = this.seats[0]?.context ?? this.source.context;
-    const applyStartupVariables = (): void => {
-      for (const variable of phases.variables) {
-        const owner = this.routing.owner(variable.name, commandContext);
-        owner.set(variable.name, variable.value, true);
-        const registered = owner.register(variable.name, "");
-        if (registered === undefined) throw new Error(`Q3 startup variable registration rejected: ${variable.name}`);
-        owner.addFlags(registered.name, CvarFlag.UserCreated);
-      }
-    };
-    applyStartupVariables();
+    const applyVariables = (): void => { applyStartupVariables(phases.variables, (name, context) => this.routing.owner(name, context), commandContext); };
+    applyVariables();
     this.commands.append(phases.early, commandContext);
     await this.commands.executeScriptsAsync(async () => {});
     if (this.options.dialect === "q1-quakeworld" && this.seats.length === 0) this.commands.append(phases.stuffed, commandContext);
@@ -339,9 +331,7 @@ export class PreparedStartup {
       const saved = this.options.seats[index];
       if (seat !== undefined && saved === undefined) throw new Error("Startup seat configuration is missing");
       if (index !== 0 && seat !== undefined) {
-        const defaults = new Map((this.seats[0]?.authoredBindings ?? []).map(binding => [physicalInputKey(binding.input), binding]));
-        for (const binding of seat.selectedBindings ?? defaultBindings(0, this.options.movementDialect)) if (!defaults.has(physicalInputKey(binding.input))) defaults.set(physicalInputKey(binding.input), binding);
-        seat.authoredBindings = [...defaults.values()];
+        seat.authoredBindings = inheritedBindingBaseline(this.seats[0]?.authoredBindings ?? [], seat.selectedBindings ?? defaultBindings(0, this.options.movementDialect));
       }
       const startup = new StartupConfig({ safeMode: phases.safe, dialect: this.options.dialect, context: seat?.context ?? this.source.context, hasMod: options.hasMod,
         scope: index === 0 ? "source" : "seat", read: (name, context, scope) => {
@@ -351,13 +341,7 @@ export class PreparedStartup {
         },
         applySelectedDefaults: () => {
           if (seat === undefined) return;
-          for (const binding of seat.input.bindings) if (binding.target.kind === "command" && /^(?:weapon|impulse|use)\s/i.test(binding.target.text)) seat.input.unbind(binding.input);
-          const authored = new Map(seat.input.bindings.map(binding => [physicalInputKey(binding.input), binding]));
-          for (const binding of seat.selectedBindings ?? defaultBindings(0, this.options.movementDialect)) {
-            seat.input.bind(binding);
-            if (!authored.has(physicalInputKey(binding.input))) authored.set(physicalInputKey(binding.input), binding);
-          }
-          seat.authoredBindings = [...authored.values()];
+          seat.authoredBindings = applySelectedBindingDefaults(seat.input, seat.selectedBindings ?? defaultBindings(0, this.options.movementDialect));
           seat.collectingBindings = true;
         },
         applyArchive: () => {
@@ -374,17 +358,15 @@ export class PreparedStartup {
           }
           seat.collectingBindings = true;
         }, applyLaunchOptions: () => {},
-        replayStartupVariables: () => { if (index === 0) { applyStartupVariables(); this.commands.insert(phases.early, commandContext); } },
+        replayStartupVariables: () => { if (index === 0) { applyVariables(); this.commands.insert(phases.early, commandContext); } },
       });
       this.active = startup;
       if (seat !== undefined) seat.collectingBindings = index !== 0;
       while (!await startup.executeFrame(this.commands, async () => {
         if (seat === undefined || !seat.collectingBindings) return;
-        const [name, key] = this.commands.tokenizedArguments;
-        if (name === "unbindall") seat.allBindingsChosen = true;
-        if ((name === "bind" || name === "unbind") && key !== undefined) {
-          const input = namedPhysicalInput(key); if (input !== null) seat.overriddenKeys.add(physicalInputKey(input));
-        }
+        const choices = { all: seat.allBindingsChosen, overridden: seat.overriddenKeys };
+        noteBindingCommand(this.commands.tokenizedArguments, choices);
+        seat.allBindingsChosen = choices.all;
       }, () => !this.worldAction)) yield;
       this.active = undefined;
     }

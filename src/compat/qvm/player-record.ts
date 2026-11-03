@@ -97,7 +97,8 @@ export function readSourceQvmPlayerState(view: DataView, profile: QvmAbiProfile)
 
 /** Writes playerState_t; borrowed records retain source-only persistent slots. */
 export function writeQvmPlayerState(view: DataView, state: Q3PlayerState, profile: QvmAbiProfile = "q3-modern",
-  persistentWrite: "initialize" | "preserve-private" = "initialize"): void {
+  persistentWrite: "initialize" | "preserve-private" = "initialize", unmapped: "throw" | "ignore" = "throw"): void {
+  const lenient = unmapped === "ignore";
   checkRecord(view, profile);
   for (const slots of [state.stats, state.persistent, state.powerups, state.ammo]) {
     if (slots.length !== 16) throw new RangeError("QVM player-state arrays require 16 slots");
@@ -109,8 +110,8 @@ export function writeQvmPlayerState(view: DataView, state: Q3PlayerState, profil
     persistent[7] = state.persistent[6] ?? 0; persistent[11] = state.persistent[13] ?? 0;
   }
   writeSourceQvmPlayerState(view, { ...state, persistent,
-    events: [qvmEvent(state.events[0], profile, true), qvmEvent(state.events[1], profile, true)],
-    externalEvent: qvmEvent(state.externalEvent, profile, true), powerups: qvmPowerups(state.powerups, profile) }, profile);
+    events: [qvmEvent(state.events[0], profile, true, lenient), qvmEvent(state.events[1], profile, true, lenient)],
+    externalEvent: qvmEvent(state.externalEvent, profile, true, lenient), powerups: qvmPowerups(state.powerups, profile, lenient) }, profile);
 }
 
 /** Writes original enum values and private slots directly, without stock presentation translation. */

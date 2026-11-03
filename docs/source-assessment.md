@@ -1,5 +1,7 @@
 # Source assessment
 
+> **Dated record, not current status.** Written before implementation started; the source assessment is a historical input. The maintained status is [status.md](status.md). Where this page disagrees with it or with the code, trust those. Paths such as `verification/`, `work-packages.json`, `completion-status.json` and `../the Q1 reference port/...` name files deleted or scrubbed in commit `949c337c`; bare `src/...` paths may name donor-project files.
+
 This assessment grounds the unified-engine plan in the adjacent TypeScript ports and the installed reference corpus. It records the state inspected on 2026-09-10. Implementation has not started. Source inspection establishes available mechanisms and concrete gaps; inherited release labels and historical test reports do not establish a passing baseline for the combined engine.
 
 Detailed evidence is preserved in the [Q1 interoperability assessment](research/q1-interoperability.md), [Q2 interoperability assessment](research/q2-interoperability.md), and [mod execution contracts](research/mod-execution.md). These reports retain exact source comparisons, bounded observations, and commands for reproducing the inspections. Their historical test and runtime claims retain the qualifications recorded by each investigator.

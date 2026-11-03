@@ -286,6 +286,11 @@ export class SdlAudioDevice {
     const now = audio().counter(); device.resume(); this.playingSince = now;
   }
   start(): void { this.resume(); }
+  /** True when a named output is no longer enumerated (unplugged); the system default follows SDL's own rerouting. */
+  get removed(): boolean {
+    this.opened();
+    return this.deviceName !== null && !audio().names().includes(this.deviceName);
+  }
   get state(): "paused" | "playing" | "closed" { return this.device === null ? "closed" : this.playingSince === null ? "paused" : "playing"; }
   [Symbol.dispose](): void { this.close(); }
   close(): void { const device = this.device; if (device === null) return; this.device = null; try { device.close(); } finally { audio().quit(); } }

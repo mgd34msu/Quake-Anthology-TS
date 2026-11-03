@@ -136,6 +136,11 @@ export function createSharedBotWorld(options: Options) {
         state.inventory[BotInventory.ENVIRONMENTSUIT] = Number(actor !== null && source.game.powerupExpires(actor, "suit") > source.game.time);
       }
     } },
+    observable: number => {
+      const actor = actorForId(number);
+      return actor !== null && simulation.actors.isLive(actor) && simulation.bodies.read(actor) !== null
+        && simulation.bodies.linked(actor) !== null && metadata(actor)?.hidden !== true;
+    },
     entity: number => {
       const actor = actorForId(number), entity = metadata(actor), state = new EntityState(); state.number = number;
       const body = actor === null ? null : simulation.bodies.read(actor), movement = actor === null ? null : simulation.movementPlayer(actor);

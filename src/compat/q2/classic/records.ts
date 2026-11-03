@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+import { Buffer } from "node:buffer";
+import { SparseGuestMemory } from "../../../guest/core/memory.ts";
 import { allocateNativeMemory, nativeAllocationBytes } from "../../../guest/runtime/common/memory.ts";
 import type { GuestAddress, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
@@ -9,6 +11,11 @@ import { CLASSIC_Q2_CLIENT_PREFIX_BYTES, CLASSIC_Q2_EDICT_BYTES, CLASSIC_Q2_EDIC
 
 export function readClassicString(memory: MappedGuestMemory, address: GuestAddress | null, maximum = 65536): string {
   if (address === null) return "";
+  if (SparseGuestMemory.managed(memory)) {
+    const length = memory.findZero(address, maximum);
+    if (length < 0) throw new RangeError(`Unterminated API 3 string at 0x${address.byteOffset.toString(16)}`);
+    return Buffer.from(memory.copy(address, length)).toString("latin1");
+  }
   let text = "";
   for (let index = 0; index < maximum; index++) {
     const byte = memory.readUint8(memory.offset(address, BigInt(index)));
@@ -16,6 +23,11 @@ export function readClassicString(memory: MappedGuestMemory, address: GuestAddre
     text += String.fromCharCode(byte);
   }
   throw new RangeError(`Unterminated API 3 string at 0x${address.byteOffset.toString(16)}`);
+}
+/** SV_ConnectionlessPacket strncpy: peers supply userinfo, so oversized text is cut to the guest buffer rather than refused. */
+export function fitClassicUserinfo(text: string, capacity = 512): string {
+  const end = text.indexOf("\0"), terminated = end < 0 ? text : text.slice(0, end);
+  return terminated.slice(0, capacity - 1).replace(/[^\u0000-\u00ff]/g, "?");
 }
 export function writeClassicString(memory: MappedGuestMemory, address: GuestAddress, text: string, capacity: number): undefined {
   if (text.length + 1 > capacity || text.includes("\0")) throw new RangeError("API 3 string exceeds its guest allocation");
@@ -55,6 +67,9 @@ export class ClassicQ2Edicts {
   readonly #retiredInputClients = new Set<number>();
   readonly #fields: { readonly base: GuestAddress; readonly stride: GuestAddress; readonly count: GuestAddress; readonly capacity: GuestAddress };
   #descriptor: ClassicQ2EdictDescriptor | null = null;
+  /** Records stay valid while the descriptor object is unchanged: it is replaced whenever the base, stride or counts move. */
+  #records: RawEntityView[] = [];
+  #recordsFor: ClassicQ2EdictDescriptor | null = null;
   retireInputClient(slot: number): void { this.#retiredInputClients.add(slot); }
   finishInputRetirement(slot: number): void { this.#retiredInputClients.delete(slot); }
   constructor(readonly memory: MappedGuestMemory, readonly exports: GuestAddress, readonly actors: SessionActorRegistry,
@@ -81,12 +96,17 @@ export class ClassicQ2Edicts {
   at(slot: number): RawEntityView {
     return this.#at(slot, this.descriptor());
   }
-  #at(slot: number, { base, stride, count }: ClassicQ2EdictDescriptor): RawEntityView {
+  #at(slot: number, descriptor: ClassicQ2EdictDescriptor): RawEntityView {
+    const { base, stride, count } = descriptor;
     if (!Number.isInteger(slot) || slot < 0 || slot >= count) throw new RangeError("API 3 edict slot exceeds num_edicts");
+    if (this.#recordsFor !== descriptor) { this.#records = []; this.#recordsFor = descriptor; }
+    const retained = this.#records[slot];
+    if (retained !== undefined) return retained;
     const address = this.memory.offset(base, BigInt(slot * stride));
     const record: RawEntityView = { module: this.memory.module, slot, address, strideBytes: stride, publicLayout: CLASSIC_Q2_EDICT_LAYOUT,
       bytes: this.memory.borrow(address, stride), currentActor: () => this.projection === undefined
         ? this.actors.atSource(this.provider, slot)?.id ?? null : this.projection.project(record)?.id ?? null };
+    this.#records[slot] = record;
     return record;
   }
   fromPointer(address: GuestAddress): RawEntityView {
@@ -154,7 +174,7 @@ export class ClassicQ2Edicts {
       const source = this.actors.sourceOf(actor.id);
       if (source !== null && source.slot >= descriptor.count) this.actors.release(actor);
     }
-    for (let slot = 0; slot < descriptor.count; slot++) this.#observe(this.at(slot));
+    for (let slot = 0; slot < descriptor.count; slot++) this.#observe(this.#at(slot, descriptor));
     return undefined;
   }
   clientPrefix(slot: number): DataView | null {

@@ -1,3 +1,4 @@
+import { writeCapture } from "../support/capture.ts";
 import { expect, test } from "bun:test";
 import { WorldTextStore } from "../../src/text/world.ts";
 import type { WorldText } from "../../src/text/world.ts";
@@ -87,7 +88,7 @@ async function renderText(kind: "cpu" | "gl"): Promise<void> {
     expect(prepareWorldText(snapshot, distantSeat, () => font, 100)).toHaveLength(3);
     begin(1); for (const batch of batches) draw(batch);
     const visible = read(); expect(count(visible)).toBeGreaterThan(30);
-    await Bun.write(`/tmp/world-text-${kind}.png`, encodePng(96, 96, visible));
+    await writeCapture(`world-text-${kind}.png`, encodePng(96, 96, visible));
     begin(0); for (const batch of batches) draw(batch); expect(count(read())).toBe(0);
     const through = prepareWorldText([{ ...source, depthTest: false }], camera, () => font);
     for (const batch of through) draw(batch); expect(count(read())).toBeGreaterThan(30);

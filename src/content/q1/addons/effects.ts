@@ -51,7 +51,7 @@ export function registerAddonEffects(context: Q1AddonContext): undefined {
       const target = trace.actor;
       if (target === null || hits.some(hit => sameActor(hit, target))) continue;
       hits.push(target); if (!game.host.combat.read(target)?.canTakeDamage) continue;
-      game.host.emit({ kind: "particles", origin: trace.end, direction: { x: 0, y: 0, z: 100 }, color: 225, count: entity.damage * 4 });
+      game.host.emit({ kind: "particles", origin: trace.end, direction: { x: 0, y: 0, z: 100 }, color: context.program === "mg3" ? 246 : 225, count: entity.damage * 4 });
       game.damage(target, entity.actor.id, entity.actor.id, entity.damage);
     }
     return undefined;
@@ -161,14 +161,19 @@ export function registerAddonFog(context: Q1AddonContext): undefined {
     context.setPlayerNumber(player, "fog_color_x", color.x); context.setPlayerNumber(player, "fog_color_y", color.y); context.setPlayerNumber(player, "fog_color_z", color.z);
     return context.services.emit({ kind: "fog", player, density, color, duration, skyFactor: 0 });
   };
+  const push = (entity: Q1Actor, player: ActorId, duration: number): boolean => {
+    const source = info(entity); if (source === null) return false;
+    const density = source.number("fog_density"), color = source.vector("fog_color");
+    if (density !== 0 || length(color) !== 0 || (source.spawnflags & 1) !== 0) setFog(player, density, color, duration);
+    return true;
+  };
+  if (context.program === "mg1" || context.program === "mg3") game.sourceFogPush = (player, entity) => push(entity, player, 0);
   const activate = (entity: Q1Actor, player: ActorId | null): undefined => {
     if (player === null || !game.isPlayer(player)) return undefined;
     const previous = context.playerReference(player, "fog.active");
     if (previous !== null && sameActor(previous, entity.actor.id)) return undefined;
     context.setPlayerReference(player, "fog.active", entity.actor.id);
-    const source = info(entity); if (source === null) return undefined;
-    const density = source.number("fog_density"), color = source.vector("fog_color");
-    return density !== 0 || length(color) !== 0 || (source.spawnflags & 1) !== 0 ? setFog(player, density, color, entity.delay) : undefined;
+    push(entity, player, entity.delay); return undefined;
   };
   game.named.register(prefix + "activate", { touch: (_game, entity, other) => activate(entity, other), use: (_game, entity, other) => activate(entity, other) });
   game.registerSpawn("info_fog", (_game, entity) => {

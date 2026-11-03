@@ -138,7 +138,7 @@ export class Q3ClientNetwork implements ApplicationNetwork {
         }
         catch (error) { this.state = 'rejected'; this.options.host.disconnected(error instanceof Error ? error.message : String(error)); throw error; }
       } else if (result.kind === 'connectionless') {
-        if (result.packet.command === 'print') {
+        if (result.packet.command === 'print' && sameAddress(packet.from, this.peer, false)) {
           const text = new Uint8Array(result.packet.payload.length + 1);
           text.set(result.packet.payload);
           this.options.host.print(new MessageReader(text, 'oob').readString());

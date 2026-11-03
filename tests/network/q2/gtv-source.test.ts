@@ -18,7 +18,7 @@ test('authenticated GTV prepares its real header, then the existing receiver adm
     broadcast.observe(capture());
     const port = await broadcast.listen('127.0.0.1', 0);
     await expect(GtvRemoteSource.prepare({ host: '127.0.0.1', port,
-      identity: { username: 'viewer', password: 'bad', version: 'test' } })).rejects.toThrow();
+      identity: { username: 'viewer', password: 'bad', version: 'test' } })).rejects.toThrow("GTS_NOACCESS");
     source = await GtvRemoteSource.prepare({ host: '127.0.0.1', port,
       identity: { username: 'viewer', password: 'secret', version: 'test' } });
     expect(source.header.revision).toBe(2010); expect(source.phase).toBe('loading'); expect(source.time).toBeNull();

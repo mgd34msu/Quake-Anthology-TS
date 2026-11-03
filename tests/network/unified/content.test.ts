@@ -1,25 +1,14 @@
+import { recipeFixture } from "../../support/save-fixtures.ts";
 import { expect, test } from 'bun:test';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import type { ExecutableRecipe, ProviderReference, ResolvedResourceReference, LooseMount } from '../../../src/contracts/content.ts';
+import type { ExecutableRecipe, ResolvedResourceReference, LooseMount } from '../../../src/contracts/content.ts';
 import { createContentDigest, createResourceId } from '../../../src/contracts/content.ts';
 import { InstalledCatalog, expectedProducts } from '../../../src/content/catalog/index.ts';
 import { createUnifiedComposition, readUnifiedComposition, encodeUnifiedComposition, decodeUnifiedComposition, resolveUnifiedComposition, unifiedResourceId } from '../../../src/app/bootstrap/network/unified-content.ts';
-function recipe(): ExecutableRecipe {
-  const content = "q1:classic:id1:fixture";
-  const provider = (role: string): ProviderReference => ({ provider: `q1:${role}`, content });
-  const raw: Omit<ResolvedResourceReference, "id"> = { requestedPath: "maps/start.bsp", provenance: { kind: "loose", memberPath: "maps/start.bsp", mount: { kind: "loose", identity: { id: "mount:q1:fixture", content, generation: 2 }, rootPath: "/fixture" } },
-    digest: createContentDigest("0".repeat(64)), byteLength: 123, resolution: { kind: "default-order", plan: "mount-plan:fixture:1", rank: 0 } };
-  const geometry = { ...raw, id: createResourceId(raw) };
-  return { schemaVersion: 3, id: "recipe:fixture:1", preset: "recipe:fixture:1", map: { geometryContent: content, geometry, entities: provider("game") }, campaign: { kind: "campaign", mission: provider("mission"), gamecode: provider("game") },
-    movement: provider("movement"), character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
-    presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: content, hud: provider("hud"), effects: provider("effects"), audio: provider("audio") }, engineBehavior: provider("engine"), combat: provider("combat"), inventory: provider("inventory"), match: provider("match"), transition: provider("transition"),
-    execution: [{ kind: "typescript", owner: provider("game"), implementation: "q1:official", role: "server-game", api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } }],
-    mounts: { id: "mount-plan:fixture:1", mounts: [raw.provenance.mount], defaultOrder: [raw.provenance.mount.identity.id], prefixOrders: [] }, resources: [geometry], timing: [],
-    ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } } };
-}
+const recipe = (): ExecutableRecipe => recipeFixture();
 
 test('composition omits machine paths and generations while preserving selected semantics', () => {
   const original = recipe(), source = original.map.geometry, mount: LooseMount = { kind: 'loose', identity: { ...source.provenance.mount.identity, id: 'mount:other:machine', generation: 94 }, rootPath: '/different/client/root' };
@@ -39,11 +28,11 @@ test('composition omits machine paths and generations while preserving selected 
 
 test('malformed identities and noncanonical server mount paths reject before local resolution', () => {
   const identity = createUnifiedComposition(recipe());
-  expect(() => readUnifiedComposition({ ...identity, digest: createContentDigest('f'.repeat(64)) })).toThrow();
+  expect(() => readUnifiedComposition({ ...identity, digest: createContentDigest('f'.repeat(64)) })).toThrow("unified.composition: noncanonical or mismatched unified composition");
   expect(() => readUnifiedComposition({ ...identity, composition: { ...identity.composition, recipe: recipe() } })).toThrow('noncanonical');
-  expect(() => readUnifiedComposition({ ...identity, composition: { ...identity.composition, snapshotSchema: 'other:snapshot' } })).toThrow();
-  expect(() => readUnifiedComposition({ ...identity, composition: { ...identity.composition, snapshotSchema: 'qts:snapshot-v6' } })).toThrow();
-  expect(() => unifiedResourceId({ content: recipe().map.geometryContent, path: '../escape', digest: createContentDigest('0'.repeat(64)), byteLength: 1 })).toThrow();
+  expect(() => readUnifiedComposition({ ...identity, composition: { ...identity.composition, snapshotSchema: 'other:snapshot' } })).toThrow("unified.composition.composition.snapshotSchema: expected qts:snapshot-v10");
+  expect(() => readUnifiedComposition({ ...identity, composition: { ...identity.composition, snapshotSchema: 'qts:snapshot-v6' } })).toThrow("unified.composition.composition.snapshotSchema: expected qts:snapshot-v10");
+  expect(() => unifiedResourceId({ content: recipe().map.geometryContent, path: '../escape', digest: createContentDigest('0'.repeat(64)), byteLength: 1 })).toThrow("Invalid relative resource path: ../escape");
 });
 
 test('local catalog reconstruction verifies actual bytes without using remote paths', async () => {

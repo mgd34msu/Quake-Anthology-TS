@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../support/corpus.ts";
+import { corpusFile } from "../support/corpus.ts";
 
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
@@ -13,7 +13,7 @@ import { createSceneQueries } from "../../src/world/collision/index.ts";
 import { anglesToAxis } from "../../src/core/math.ts";
 import { perspectiveProjection } from "../../src/render/scene/view.ts";
 
-test.skipIf(!existsSync(`${testCorpusRoot()}/q2/rerelease/Q2Game.kpf`))("retail Q2 shadow lights preserve source toggle, cone, fade and atlas metadata", async () => {
+test.skipIf(!existsSync(corpusFile("q2/rerelease/Q2Game.kpf")))("retail Q2 shadow lights preserve source toggle, cone, fade and atlas metadata", async () => {
   const command = parseApplicationCommand(["--game", "q2-rerelease-baseq2", "--map", "base1", "--renderer", "cpu"]);
   if (command.kind !== "run") throw new Error("Expected application launch");
   const content = await loadApplicationContent(command.options), identity = createIdentityOwner("shadow-light-source");
@@ -49,7 +49,7 @@ test.skipIf(!existsSync(`${testCorpusRoot()}/q2/rerelease/Q2Game.kpf`))("retail 
     expect(effects.shadowSceneLights(camera, () => 1)[0]?.profile).toMatchObject({ cone: { direction: { x: 1, y: 0, z: 0 } } });
     for (let i = 0; i < 10; i++) await advance();
     expect(effects.shadowSceneLights(camera, () => 1)).toEqual([]);
-  } finally { effects.close(); simulation.close(); assets.close(); }
+  } finally { effects.close(); simulation.close(); assets.close(); await content.close(); }
 });
 
 test("flashlight uses seat eye/hand, follows foreign actor pose and retires on toggle/reset/generation", async () => {

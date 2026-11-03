@@ -113,19 +113,6 @@ export function drawTextLayout(draw: Draw2D, layout: TextLayout, origin: Vec2, s
   pass(false); draw.setColor(null);
 }
 
-export interface SeatTextScale { readonly console: number; readonly consoleWidth: number; readonly consoleHeight: number; readonly statusBar: number; readonly crosshair: number; }
-/** Source scaling formulas applied to a seat viewport, without process-global video state. */
-export function seatTextScale(viewport: Rect, consoleScale = 0, statusBarScale = 1, crosshairScale = 1): SeatTextScale {
-  const automatic = Math.max(1, Math.floor(viewport.height / 300));
-  const requested = consoleScale > 0 ? consoleScale : automatic;
-  const consoleWidth = Math.max(8, Math.floor(Math.max(320, Math.min(viewport.width / requested, Math.max(320, viewport.width)))) & ~7);
-  const fit = Math.max(1, Math.min(Math.floor(viewport.width / 320), Math.floor(viewport.height / 144)));
-  return { console: viewport.width / consoleWidth, consoleWidth,
-    consoleHeight: viewport.width <= 0 ? viewport.height : Math.round(consoleWidth * viewport.height / viewport.width),
-    statusBar: statusBarScale > 0 ? Math.max(1, Math.min(statusBarScale, fit)) : fit,
-    crosshair: Math.max(1, Math.min(crosshairScale, 10)) };
-}
-
 export class SeatTextPresentation {
   constructor(readonly seat: SeatId, public font: TextFontSelection) {}
   layout(options: Omit<TextLayoutOptions, "font">): TextLayout { return layoutText({ ...options, font: this.font }); }

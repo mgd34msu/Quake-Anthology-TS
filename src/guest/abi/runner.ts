@@ -67,6 +67,7 @@ interface InlineRegion {
 /** Synchronous nested entries preserve processor context and retain guest memory mutations. */
 export class GuestCallRunner {
   readonly #active: ActiveCall[] = [];
+  #entryState: AbiProcessorSnapshot | null = null;
   readonly #regions = new Map<bigint, InlineRegion>();
   #callbackContext: GuestCallContext | null = null;
   #instructionsExecuted = 0n;
@@ -112,6 +113,7 @@ export class GuestCallRunner {
     const callerInstruction = cpu.state.instructionPointer;
     const saved = enclosing === undefined ? null : captureAbiProcessorState(cpu.state), adapter = new X86AbiAdapter(request.signature.abi);
     const callerStack = cpu.state.registers.read("rsp", cpu.memory.pointerBytes === 4 ? 32 : 64);
+    if (enclosing === undefined) this.#entryState = captureAbiProcessorState(cpu.state);
     adapter.enter(cpu, request.target, request.signature, request.arguments, returnAddress);
     const width = cpu.memory.pointerBytes === 4 ? 32 : 64;
     const entryStack = cpu.state.registers.read("rsp", width);
@@ -126,6 +128,7 @@ export class GuestCallRunner {
       else {
         cpu.state.registers.write("rsp", width, callerStack);
         cpu.state.instructionPointer = callerInstruction;
+        this.#entryState = null;
       }
       return result;
     } finally {
@@ -175,6 +178,19 @@ export class GuestCallRunner {
       finally { this.#callbackContext = previousContext; }
       callbackAdapter.leave(cpu, callback.signature, result);
     }
+  }
+  /** After a stopped outermost call, returns the processor to its state at entry so shutdown does not run on the faulted stack. */
+  recover(): undefined {
+    if (this.#active.length !== 0 || this.#entryState === null) return undefined;
+    restoreAbiProcessorState(this.options.cpu.state, this.#entryState);
+    this.#entryState = null;
+    return undefined;
+  }
+  /** Host services that touch many bytes pay one budget unit per 64 of them, so a loop of bulk calls cannot outlast its budget. */
+  chargeBytes(byteLength: number): undefined {
+    const units = Math.floor(byteLength / 64);
+    if (units > 0) for (const frame of this.#active) frame.remaining = Math.max(0, frame.remaining - units);
+    return undefined;
   }
   /** The source adapter qualifies a fixed entry and join against its original artifact. */
   bindInlineRegion(entry: GuestAddress, join: GuestAddress, abi: GuestCallSignature["abi"], intercept: (continuation: GuestInlineContinuation) => undefined, accepts: () => boolean = () => true): () => void {

@@ -4,7 +4,7 @@ import type { CommandContext } from "../../src/contracts/common.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
 import { CvarRegistry } from "../../src/core/cvars/index.ts";
 import { SeatConsole } from "../../src/console/session.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 
 test("session completion keeps paging output-only, reverses with Shift, and resets on history", () => {
   const identity = createIdentityOwner("session-completion"), seat = identity.seat(0);

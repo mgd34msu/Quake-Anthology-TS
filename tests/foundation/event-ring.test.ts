@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  EventRing, SysEventQueue, SYS_KEY, SYS_PACKET, SYS_QUIT, SYS_TIME,
+  EventRing,
 } from "../../src/foundation/index.ts";
 
 describe("foundation event ring", () => {
@@ -115,50 +115,5 @@ describe("foundation event ring", () => {
     ring.append(1);
     ring.retireBefore(2);
     expect(() => ring.read(cursor)).toThrow(RangeError);
-  });
-});
-
-describe("foundation system queue", () => {
-  test("admission, payload custody and per-cursor retirement follow intake order", () => {
-    const queue = new SysEventQueue(4, 64);
-    const keys = queue.openCursor();
-    const packets = queue.openCursor();
-    expect(queue.admit(SYS_PACKET, 65)).toBe("oversize");
-    expect(queue.oversize(SYS_PACKET)).toBe(1);
-    expect(queue.frame(1_000_000)).toBe("accepted");
-    expect(queue.push(SYS_PACKET, 2_000_000, 1, 2, 3, 4, new Uint8Array([9, 8, 7]))).toBe("accepted");
-    expect(queue.push(SYS_KEY, 3_000_000, 32, 0, 1, 0)).toBe("accepted");
-    const time = queue.read(keys);
-    expect(time?.kind).toBe(SYS_TIME);
-    queue.consume(keys);
-    const packetForKeys = queue.read(keys);
-    expect(packetForKeys?.kind).toBe(SYS_PACKET);
-    queue.consume(keys);
-    const key = queue.read(keys);
-    expect(key?.kind).toBe(SYS_KEY);
-    expect(key?.a).toBe(32);
-    queue.consume(keys);
-    const timeForPackets = queue.read(packets);
-    expect(timeForPackets?.kind).toBe(SYS_TIME);
-    queue.consume(packets);
-    const packet = queue.read(packets);
-    expect(packet === null ? [] : Array.from(queue.payloadOf(packet))).toEqual([9, 8, 7]);
-    queue.consume(packets);
-    queue.consume(packets);
-    expect(queue.stats()).toMatchObject({ accepted: 3, consumed: 6, records: 0, bytes: 0 });
-  });
-
-  test("quit latches while records remain and full preserves accepted events", () => {
-    const queue = new SysEventQueue(2, 16);
-    const cursor = queue.openCursor();
-    expect(queue.push(SYS_QUIT, 0, 0, 0, 0, 0)).toBe("accepted");
-    expect(queue.quitRequested()).toBe(true);
-    expect(queue.push(SYS_KEY, 0, 1, 0, 0, 0)).toBe("accepted");
-    expect(queue.push(SYS_KEY, 0, 2, 0, 0, 0)).toBe("full");
-    expect(queue.stats().fullRecords).toBe(1);
-    expect(queue.read(cursor)?.kind).toBe(SYS_QUIT);
-    queue.reset();
-    expect(queue.quitRequested()).toBe(false);
-    expect(queue.live).toBe(0);
   });
 });

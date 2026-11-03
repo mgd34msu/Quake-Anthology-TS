@@ -20,6 +20,14 @@ export function isWithin(parent: string, child: string): boolean {
   return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
 }
 
+/** Mirrors the credential entries in .gitignore (environment files, LLM keys and settings) plus the Quake III CD key. */
+const credentialName = /^(?:(?:q3key|quake3cdkey|chatgpt\.key|other\.key|other\.service|llm\.json)(?:\..*)?|\.env(?:\..*)?)$/i;
+const documentedExample = /^\.env\.(?:example|sample)$/i;
+
+export function isCredentialFileName(name: string): boolean {
+  return credentialName.test(name) && !documentedExample.test(name);
+}
+
 export class WorkspaceSnapshot {
   readonly #entries: readonly SnapshotEntry[];
   readonly manifest: SnapshotManifest;
@@ -42,7 +50,7 @@ export class WorkspaceSnapshot {
         const path = prefix === "" ? child.name : `${prefix}/${child.name}`;
         const absolutePath = join(directoryPath, child.name);
         if (exclusions.some(exclusion => isWithin(exclusion, absolutePath))) continue;
-        if (/^(?:q3key|quake3cdkey)(?:\..*)?$/i.test(child.name)) throw new Error(`Snapshot refuses a credential filename: ${path}`);
+        if (isCredentialFileName(child.name)) throw new Error(`Snapshot refuses a credential filename: ${path}`);
         if (child.isDirectory()) await visit(absolutePath, path);
         else if (child.isSymbolicLink()) {
           const target = await readlink(absolutePath);

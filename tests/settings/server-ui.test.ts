@@ -1,14 +1,16 @@
+import { writeCapture } from "../support/capture.ts";
 import { expect, test } from "bun:test";
+import { rendererBackends } from "../support/gl.ts";
 import { Application } from "../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { WorldSeatPresentation } from "../../src/app/bootstrap/presentation.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 import { encodePng } from "../../src/formats/images/png.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { mkdir, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 
-for (const renderer of ["cpu", "gl"]) test(`${renderer} host settings mouse edits reach the current source and show pending changes`, async () => {
+for (const renderer of rendererBackends) test(`${renderer} host settings mouse edits reach the current source and show pending changes`, async () => {
   const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--mode", "deathmatch", "--renderer", renderer,
     "--width", "640", "--height", "480", "--hidden"]);
   if (parsed.kind !== "run") throw new Error("Missing launch");
@@ -20,8 +22,7 @@ for (const renderer of ["cpu", "gl"]) test(`${renderer} host settings mouse edit
     const controller = presentation.ui.controller;
     const screenshot = async (name: string): Promise<void> => {
       const capture = application.captureNextFrame(); await application.step(25);
-      await mkdir(".artifacts", { recursive: true });
-      await Bun.write(`.artifacts/server-settings-${renderer}-${name}.png`, encodePng(640, 480, await capture));
+      await writeCapture(`server-settings-${renderer}-${name}.png`, encodePng(640, 480, await capture));
     };
     const key = (code: number): void => { application.input({ seat: player.seat.id, timeMilliseconds: performance.now(), kind: "key", code, down: true, repeat: false }); };
     const click = (row: number, x = 180): void => {

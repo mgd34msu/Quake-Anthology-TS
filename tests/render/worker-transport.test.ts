@@ -39,22 +39,36 @@ test("nested host failures retain exact thrown identity and remain sticky", asyn
   });
   try { worker.call("outer"); throw new Error("Expected failure"); } catch (error) { expect(error).toBe(original); }
   try { worker.call("leaf"); throw new Error("Expected sticky failure"); } catch (error) { expect(error).toBe(original); }
-  try { worker.close(); } catch (error) { expect(error).toBe(original); }
+  let closeFailure: unknown = null;
+  try { worker.close(); } catch (error) { closeFailure = error; }
+  expect(closeFailure).toBe(original);
   expect(worker.retired).toBe(true);
 });
+
+// The late completion arrives on the worker's own schedule: retry close until it lands, failing only on a different error or after a generous deadline.
+async function closeAfterLateCompletion(worker: { close(): void }): Promise<void> {
+  const deadline = performance.now() + 10000;
+  for (;;) {
+    try { worker.close(); return; } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect(String(error)).toContain("did not complete its issued buffer");
+      if (performance.now() > deadline) throw error;
+      await Bun.sleep(10);
+    }
+  }
+}
 
 test("failed close acknowledgment never retires the worker", async () => {
   const worker = await RenderWorkerTransport.open(workerUrl, "close-fails-once", { request() {}, completed() {} });
   expect(() => worker.close()).toThrow("release failed"); expect(worker.retired).toBe(false);
-  try { worker.close(); } catch (error) { expect(error).toBeInstanceOf(Error); }
+  expect(() => worker.close()).toThrow("release failed");
   expect(worker.retired).toBe(true);
 });
 
 test("timeout does not retire pending ownership; late completion permits acknowledged close", async () => {
   const worker = await RenderWorkerTransport.open(workerUrl, null, { request() {}, completed() {} }, 60);
   expect(() => worker.call("slow")).toThrow("did not complete"); expect(worker.retired).toBe(false);
-  await Bun.sleep(150);
-  try { worker.close(); } catch (error) { expect(error).toBeInstanceOf(Error); }
+  await closeAfterLateCompletion(worker);
   expect(worker.retired).toBe(true);
 });
 
@@ -64,8 +78,7 @@ test("timed out nested subcall retains ownership of its late completion", async 
   }, 60);
   expect(() => worker.call("outer")).toThrow("did not complete");
   expect(worker.retired).toBe(false);
-  await Bun.sleep(150);
-  try { worker.close(); } catch (error) { expect(error).toBeInstanceOf(Error); }
+  await closeAfterLateCompletion(worker);
   expect(worker.retired).toBe(true);
 });
 
@@ -90,9 +103,11 @@ test("issued failure notifies asynchronous waiters exactly once without a render
     const error = await notification;
     if (command === "outer") expect(error).toBe(original);
     else if (command === "failure") { expect(error).toBeInstanceOf(RangeError); expect(String(error)).toContain("worker failure"); }
-    else { expect(String(error)).toContain("did not complete"); await Bun.sleep(150); }
+    else expect(String(error)).toContain("did not complete");
     expect(notifications).toHaveLength(1);
-    try { worker.close(); } catch (closeError) { expect(closeError).toBe(error); }
+    let closeFailure: unknown = null;
+    try { worker.close(); } catch (closeError) { closeFailure = closeError; }
+    expect(closeFailure).toBe(error);
     expect(worker.retired).toBe(true);
     await Bun.sleep(1); expect(notifications).toHaveLength(1);
   }

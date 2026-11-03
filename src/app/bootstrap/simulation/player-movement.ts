@@ -32,7 +32,8 @@ export function playerLocomotionMatches(player: LocomotionPlayer, previous: Loco
   return player.flight === previous.flight && player.profile === previous.profile && player.character === previous.character && player.standingBounds === previous.standingBounds
     && player.worldGravity === previous.worldGravity && player.q2MovementConfig?.airAccelerate === previous.q2MovementConfig?.airAccelerate
     && player.q2MovementConfig?.n64Physics === previous.q2MovementConfig?.n64Physics && player.sourceMovement?.traceMask === previous.sourceMovement?.traceMask
-    && player.sourceMovement?.fixedMsec === previous.sourceMovement?.fixedMsec && player.sourceMovement?.noFootsteps === previous.sourceMovement?.noFootsteps;
+    && player.sourceMovement?.fixedMsec === previous.sourceMovement?.fixedMsec && player.sourceMovement?.noFootsteps === previous.sourceMovement?.noFootsteps
+    && player.sourceMovement?.ladders === previous.sourceMovement?.ladders;
 }
 export function playerTracePolicy(player: LocomotionPlayer): TracePolicy {
   switch (player.profile.kind) {
@@ -64,7 +65,7 @@ export function selectedMovementProfile(player: Pick<MovementPlayer, "profile" |
   profile: MovementProfile = player.profile): MovementProfile {
   if (profile.kind === "q1-netquake" || profile.kind === "q1-quakeworld") return { ...profile, parameters: { ...profile.parameters, gravity: player.worldGravity } };
   if (profile.kind === "q3" && player.sourceMovement !== null) return { ...profile,
-    fixedMilliseconds: player.sourceMovement.fixedMsec, noFootsteps: player.sourceMovement.noFootsteps };
+    fixedMilliseconds: player.sourceMovement.fixedMsec, noFootsteps: player.sourceMovement.noFootsteps, ladders: player.sourceMovement.ladders === true };
   const q2 = player.q2MovementConfig;
   if (q2 !== null && profile.kind === "q2-classic") return { ...profile, airAccelerate: q2.airAccelerate };
   if (q2 !== null && profile.kind === "q2-rerelease") return { ...profile, ...q2 };

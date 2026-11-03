@@ -8,6 +8,7 @@ export interface ClientMovementOptions {
   readonly traceMask: number;
   readonly fixedMsec: number | null;
   readonly noFootsteps: boolean;
+  readonly ladders?: boolean;
   readonly gauntletHit: boolean;
   readonly debugLevel: number;
 }

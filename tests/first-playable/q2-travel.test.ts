@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { parseQ2Travel, q2NextServerCommand } from "../../src/app/bootstrap/q2-travel.ts";
+import { literal } from "../support/literal.ts";
 
 test("Q2 unit movie retains the authored next-unit destination", () => {
   expect(parseQ2Travel("eou1_.cin+*bunk1")).toEqual({ kind: "cinematic", name: "eou1_.cin", spawnPoint: "", newUnit: false,
@@ -13,7 +14,9 @@ test("Q2 parses continuation before spawn point and unit marker", () => {
   expect(parseQ2Travel("demo1.dm2").kind).toBe("demo");
 });
 test("Q2 rejects malformed travel before changing the published world", () => {
-  for (const value of ["", "a+", "+b", "../a", "a;quit", "a$start$other", "a++b"]) expect(() => parseQ2Travel(value)).toThrow();
+  for (const [value, message] of literal([["", "empty destination"], ["a+", "empty destination"], ["+b", "empty destination"], ["../a", "Invalid Q2 travel destination"],
+    ["a;quit", "Invalid Q2 travel destination"], ["a$start$other", "Invalid Q2 spawn point"], ["a++b", "empty destination"]]))
+    expect(() => parseQ2Travel(value)).toThrow(message);
 });
 
 test("Q2 nextserver preserves the complete authored chain and clears absent continuation", () => {

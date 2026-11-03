@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import { testCorpusRoot } from "../support/corpus.ts";
+import { corpusFile } from "../support/corpus.ts";
 
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -52,8 +52,8 @@ function closePoint(actual: Vec3, expected: Vec3): void {
 }
 
 test("held-weapon grip metadata is reproducible from retail reference hand geometry", async () => {
-  const q2 = await openArchive(`${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`);
-  const q3 = await openArchive(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`);
+  const q2 = await openArchive(corpusFile("q2/rerelease/baseq2/pak0.pak"));
+  const q3 = await openArchive(corpusFile("q3a/baseq3/pak0.pk3"));
   try {
     const decoder = new TextDecoder();
     const gun = parseQ12Model(await bytes(q2, "players/male/w_blaster.md2"));
@@ -132,12 +132,12 @@ for (const backend of ["cpu", "gl"]) test.skipIf(process.env["QUAKE_HELD_WEAPON_
 const unitTransform = { origin: { x: 0, y: 0, z: 0 }, axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }], scale: { x: 1, y: 1, z: 1 } } satisfies SceneEntity["transform"];
 
 test("native held attachment follows original Classic and rerelease carriers, source interpolation, hiding and renderer LOD", async () => {
-  const archive = await openArchive(`${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`);
+  const archive = await openArchive(corpusFile("q2/rerelease/baseq2/pak0.pak"));
   const content = "q2:classic:baseq2:held-test", identity = createMountIdentity("mount:held:source", content, 0);
-  const mount = { kind: "loose", identity, rootPath: `${testCorpusRoot()}/q2/baseq2` } satisfies Extract<ResolvedResourceReference["provenance"], { kind: "loose" }>["mount"];
+  const mount = { kind: "loose", identity, rootPath: corpusFile("q2/baseq2") } satisfies Extract<ResolvedResourceReference["provenance"], { kind: "loose" }>["mount"];
   const classic = new MountedContent({ id: "mount-plan:held:classic", mounts: [mount], defaultOrder: [identity.id], prefixOrders: [] }, [{ kind: "loose", mount }]);
-  const retailMount: ArchiveMount = { kind: "archive", format: "pak", archivePath: `${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`,
-    archiveDigest: await digestFile(`${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`), identity: createMountIdentity("mount:held:retail", "q2:rerelease:baseq2:held-test", 0) };
+  const retailMount: ArchiveMount = { kind: "archive", format: "pak", archivePath: corpusFile("q2/rerelease/baseq2/pak0.pak"),
+    archiveDigest: await digestFile(corpusFile("q2/rerelease/baseq2/pak0.pak")), identity: createMountIdentity("mount:held:retail", "q2:rerelease:baseq2:held-test", 0) };
   const retail = new MountedContent({ id: "mount-plan:held:retail", mounts: [retailMount], defaultOrder: [retailMount.identity.id], prefixOrders: [] }, [{ kind: "archive", mount: retailMount, archive }]);
   const entity = async (mounts: Pick<MountedContent, "open">, path: string): Promise<SceneEntity> => {
     const opened = await mounts.open(path); if (opened === null) throw new Error(`Missing original carrier ${path}`);
@@ -158,6 +158,7 @@ test("native held attachment follows original Classic and rerelease carriers, so
       const noTranslation = sample({ ...posed, previousOrigin: unitTransform.origin }); if (noTranslation === null) throw new Error("Missing running pose");
       closePoint(sub3(grip.origin, noTranslation.origin), { x: -4, y: 1, z: 0 });
       const attach = await new NativeHeldWeapons({ modelPolicy: DEFAULT_MODEL_REPLACEMENT_POLICY, provider: async () => ({ mounts }) }).attachment(reference.resource.provenance.mount.identity.content, posed);
+      if (attach === null) throw new Error("Native carrier has no attachment definition");
       // The selected model stays in source-owned Q3 hand coordinates until the native attachment consumes it.
       const child: SceneEntity = { ...reference, transform: alignModelAttachment(definition.grip, Q3_WEAPON_HAND_GRIP), pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 } };
       const resolve = attach(child), far = resolve({ x: 3000, y: 0, z: 0 }, "view"); if (far === null) throw new Error("Running held weapon hidden");
@@ -190,7 +191,7 @@ test("authored mod held declarations resolve source assets and survive invisible
   const mounts = new MountedContent({ id: "mount-plan:held:mod", mounts: [mount], defaultOrder: [mount.identity.id], prefixOrders: [] }, [{ kind: "loose", mount }]);
   try {
     await mkdir(join(root, "models"));
-    const bytes = new Uint8Array(await readFile(`${testCorpusRoot()}/q2/baseq2/players/male/weapon.md2`));
+    const bytes = new Uint8Array(await readFile(corpusFile("q2/baseq2/players/male/weapon.md2")));
     await writeFile(join(root, "models/authored.md2"), bytes);
     const attachment = q2WeaponAttachment(digestBytes(bytes)); if (attachment === null) throw new Error("Missing actual reference grip");
     const declaration: HeldWeaponDeclaration = { kind: "model", model: { path: "models/authored.md2", digest: digestBytes(bytes), referenceFrame: 0, grip: attachment.grip } };

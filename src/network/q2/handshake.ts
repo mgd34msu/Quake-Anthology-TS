@@ -1,7 +1,7 @@
 // Quake II sv_main.c, cl_main.c and q2proto connect dialects. GPL-2.0-or-later.
 import type { Q2ProtocolIdentity } from '../../contracts/protocol.ts';
 import { parseQ2Token } from '../../core/common-parse.ts';
-import { addressKey, sameAddress } from '../common/endpoint.ts';
+import { addressKey, isPrivateHost, isPrivateNetworkAddress, sameAddress } from '../common/endpoint.ts';
 import type { NetworkAddress } from '../common/endpoint.ts';
 import { q2CodecSupport } from './codec.ts';
 import { stringToBytes } from './message.ts';
@@ -150,13 +150,17 @@ export function readQ2Challenge(message: Q2ConnectionlessMessage): Q2Challenge {
     const challenge = decimal(message.arguments[0]), offer = message.arguments.find(value => value.startsWith('p='));
     return { challenge, versions: offer === undefined ? [34] : offer.slice(2).split(',').map(value => decimal(value)) };
 }
-/** Q2PRO client_connect extension; it does not select a different packet protocol. */
-export function readQ2DownloadServer(arguments_: readonly string[]): URL | null {
+/**
+ * Q2PRO client_connect extension; it does not select a different packet protocol. A download server on a private
+ * or loopback host is accepted only when the game server itself is on such a network.
+ */
+export function readQ2DownloadServer(arguments_: readonly string[], server?: NetworkAddress): URL | null {
     const advertised = arguments_.find(value => value.startsWith('dlserver='))?.slice(9);
     if (!advertised || advertised.length >= 512 || !/^https?:\/\//i.test(advertised)) return null;
     try {
         const url = new URL(advertised);
         if (url.username !== '' || url.password !== '' || url.hash !== '' || url.search !== '') return null;
+        if (server !== undefined && isPrivateHost(url.hostname) && !isPrivateNetworkAddress(server)) return null;
         if (!url.pathname.endsWith('/')) url.pathname += '/';
         return url;
     } catch { return null; }
@@ -220,12 +224,14 @@ export class Q2ClientHandshake {
             return true;
         }
         if (message.command === 'client_connect' && this.state.kind === 'connecting' && (this.state.request.protocol.kind !== 'q2-kex' || message.arguments[0] === '2023')) {
-            this.state = { kind: 'connected', request: this.state.request, downloadServer: readQ2DownloadServer(message.arguments) };
+            this.state = { kind: 'connected', request: this.state.request, downloadServer: readQ2DownloadServer(message.arguments, this.remote) };
             return true;
         }
         return false;
     }
 }
+/** Challenges expire so a guessed or leaked value is useful only briefly. */
+const CHALLENGE_LIFETIME_MILLISECONDS = 30000;
 export class Q2ChallengeTable {
     private readonly entries = new Map<string, {
         readonly value: number;
@@ -234,8 +240,10 @@ export class Q2ChallengeTable {
     constructor(readonly random: () => number, readonly capacity = 1024) { }
     issue(from: NetworkAddress, now: number): number {
         const key = addressKey(from, false), found = this.entries.get(key);
-        if (found !== undefined)
+        if (found !== undefined && now - found.time <= CHALLENGE_LIFETIME_MILLISECONDS)
             return found.value;
+        if (found !== undefined)
+            this.entries.delete(key);
         if (this.entries.size >= this.capacity) {
             let oldest: string | null = null, time = Infinity;
             for (const [name, entry] of this.entries)
@@ -246,11 +254,16 @@ export class Q2ChallengeTable {
             if (oldest !== null)
                 this.entries.delete(oldest);
         }
-        const value = this.random() & 0x7fff;
+        const value = this.random() & 0x7fffffff;
         this.entries.set(key, { value, time: now });
         return value;
     }
-    validate(from: NetworkAddress, challenge: number): boolean { return from.kind === 'loopback' || this.entries.get(addressKey(from, false))?.value === challenge; }
+    validate(from: NetworkAddress, challenge: number, now = 0): boolean {
+        if (from.kind === 'loopback')
+            return true;
+        const entry = this.entries.get(addressKey(from, false));
+        return entry !== undefined && entry.value === challenge && (now === 0 || now - entry.time <= CHALLENGE_LIFETIME_MILLISECONDS);
+    }
     reply(from: NetworkAddress, now: number, protocols: readonly Q2ProtocolIdentity[]): Uint8Array { return q2OutOfBand(`challenge ${this.issue(from, now)} p=${[...new Set(protocols.map(p => p.version))].join(',')}`); }
 }
 

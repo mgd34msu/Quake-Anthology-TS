@@ -522,11 +522,11 @@ export function createKexContext(net_message: SizeBuf) {
         }
         return { flags, index, volume, attenuation, timeofs, entity, channel, pos };
     }
-    function inflateInternal(compressedLen: number): Uint8Array {
+    function inflateInternal(compressedLen: number, uncompressedLen: number): Uint8Array {
         const compressed = new Uint8Array(compressedLen);
         MSG_ReadData(net_message, compressed, compressedLen);
         try {
-            return new Uint8Array(inflateSync(compressed));
+            return new Uint8Array(inflateSync(compressed, { maxOutputLength: Math.max(1, uncompressedLen) }));
         }
         catch (e) {
             throw new ComError(ERR_DROP, `kexdemo: zlib inflate failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -541,8 +541,8 @@ export function createKexContext(net_message: SizeBuf) {
     }
     function readConfigblastKex(): KexConfigstringRecordT[] {
         const compressedLen = MSG_ReadWord(net_message);
-        MSG_ReadWord(net_message);
-        const inflated = inflateInternal(compressedLen);
+        const uncompressedLen = MSG_ReadWord(net_message);
+        const inflated = inflateInternal(compressedLen, uncompressedLen);
         const buf = makeReadBuf(inflated);
         const records: KexConfigstringRecordT[] = [];
         while (buf.readcount < buf.cursize) {
@@ -557,8 +557,8 @@ export function createKexContext(net_message: SizeBuf) {
         state: EntityStateT;
     }> {
         const compressedLen = MSG_ReadWord(net_message);
-        MSG_ReadWord(net_message);
-        const inflated = inflateInternal(compressedLen);
+        const uncompressedLen = MSG_ReadWord(net_message);
+        const inflated = inflateInternal(compressedLen, uncompressedLen);
         const saved = { data: net_message.data, view: net_message.view, cursize: net_message.cursize, readcount: net_message.readcount, maxsize: net_message.maxsize };
         net_message.data = inflated;
         net_message.view = new DataView(inflated.buffer, inflated.byteOffset, inflated.byteLength);

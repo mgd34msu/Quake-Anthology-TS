@@ -77,7 +77,7 @@ export function heightFogAmount(density: number, depth: number, extinction: numb
 /** CPU fragment and GL shader implementations can consume the same source terms. */
 export function q2FogColor(color: Vec3, fog: Extract<SceneFog, { readonly kind: "q2" }>, point: Vec3, view: Vec3, depth: number, sky: boolean): Vec3 {
   let result = mix(color, fog.color, globalFogAmount(fog.density / 64, depth));
-  if (fog.height.density > 0) {
+  if (fog.height.density > 0 && fog.height.falloff > 0) {
     const distance = Math.hypot(point.x - view.x, point.y - view.y, point.z - view.z);
     const directionZ = heightFogDirZ(distance === 0 ? 0 : (point.z - view.z) / distance);
     const extinction = heightFogExtinction(view.z, point.z, fog.height.start.distance, fog.height.falloff, directionZ);

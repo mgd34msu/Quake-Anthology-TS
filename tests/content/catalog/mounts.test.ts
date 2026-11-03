@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile, corpusHasFile, testCorpusRoot } from "../../support/corpus.ts";
 
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from "node:fs/promises";
@@ -41,8 +41,8 @@ test("music traversal accepts source archive directory records and nested loose 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test.skipIf(!existsSync(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`))("installed Q3 archive retains the explicit music directory that playlist traversal must skip", async () => {
-  const archive = await openArchive(`${testCorpusRoot()}/q3a/baseq3/pak0.pk3`);
+test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3"))("installed Q3 archive retains the explicit music directory that playlist traversal must skip", async () => {
+  const archive = await openArchive(corpusFile("q3a/baseq3/pak0.pk3"));
   try {
     expect(archive.entries.some(entry => entry.path === "music/")).toBe(true);
     expect(archive.entries.some(entry => entry.path.startsWith("music/") && entry.path.endsWith(".wav"))).toBe(true);
@@ -82,8 +82,8 @@ test("Q3 product restrictions distinguish forced, missing and corrupted product 
   await expect(resolveQ3MountRestriction({ kind: "retail" }, false, async () => new Uint8Array([1]))).rejects.toThrow("Invalid product identification");
 });
 
-const retailPak = `${testCorpusRoot()}/q3a/baseq3/pak0.pk3`;
-test.skipIf(!existsSync(retailPak))("Q3 retail product identification preserves unrestricted mounts", async () => {
+const retailPak = corpusFile("q3a/baseq3/pak0.pk3");
+test.skipIf(!corpusHasFile("q3a/baseq3/pak0.pk3"))("Q3 retail product identification preserves unrestricted mounts", async () => {
   const archive = await openArchive(retailPak, "pk3");
   try {
     const entry = archive.findEntries("productid.txt")[0];
@@ -130,8 +130,8 @@ test("reads selected archive, preserves pure order, and detects replacement loos
     const before = await mounted.resolve("maps/loose.bsp");
     if (before === null) throw new Error("Missing loose resource");
     await writeFile(resolve(root, "maps/loose.bsp"), "changed");
-    expect(mounted.read(before)).rejects.toThrow("bytes changed");
-    expect(mounted.read("../outside")).rejects.toThrow("Invalid relative");
+    await expect(mounted.read(before)).rejects.toThrow("bytes changed");
+    await expect(mounted.read("../outside")).rejects.toThrow("Resource not found");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -636,9 +636,9 @@ test("explicit QW mod context uses common archives and user overlays above qw an
       }
     }
     const absent = await discoverInstalledContent({ corpusRoot, userContentRoot, products, discoverMods: false });
-    expect(() => absent.require("q1-quakeworld-mod-beta")).toThrow();
+    expect(() => absent.require("q1-quakeworld-mod-beta")).toThrow("Unknown requested content or mod: q1-quakeworld-mod-beta");
     for (const directory of ["", "..", "../alpha", "a/b", "a\\b", "a:b", ".", "a..b", "a;quit"])
-      expect(() => remoteContentSelection("q1-quakeworld", directory)).toThrow();
+      expect(() => remoteContentSelection("q1-quakeworld", directory)).toThrow("Remote game directory must be a single safe directory name");
     expect(remoteContentSelection("q1-quakeworld", "ID1")).toEqual({ base: "q1-quakeworld", directory: "qw" });
     for (const directory of ["_ctf", "-arena", ".hidden", "+foo"])
       expect(remoteContentSelection("q1-quakeworld", directory)).toEqual({ base: "q1-quakeworld", directory });

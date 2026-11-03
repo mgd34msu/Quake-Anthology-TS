@@ -4,6 +4,7 @@ import type { Vec3 } from "../../../contracts/math.ts";
 import { add, integerField, normalize, numberField, scale, subtract, zero } from "./fields.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think, Q2Use, Q2Touch, Q2Die } from "./host.ts";
 import { freeQ2Entity } from "./callbacks.ts";
+import { checkEntityBottom, monsterSolidMask } from "./monsters/ai.ts";
 import { throwGib, throwHead } from "./monsters/gibs.ts";
 
 export function throwQ2Debris(self: Q2Entity, game: Q2GameServices, model: string, speed: number, origin: Vec3): Q2Entity {
@@ -114,7 +115,7 @@ export function createQ2SceneryModule(): Q2SpawnModule {
         if (game.options.mode === "deathmatch") { game.remove(entity); return true; }
         entity.model = "models/deadbods/dude/tris.md2";
         entity.frame = (entity.spawnflags & 2) !== 0 ? 1 : (entity.spawnflags & 4) !== 0 ? 2 : (entity.spawnflags & 8) !== 0 ? 3 : (entity.spawnflags & 16) !== 0 ? 4 : (entity.spawnflags & 32) !== 0 ? 5 : 0;
-        entity.serverFlags |= 12;
+        entity.serverFlags |= 6;
         game.host.combat.create(entity.actor, { health: integerField(entity.spawn, "health"), armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
         game.move(entity, { bounds: { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 16 } } }, false);
         entity.die = misc_deadsoldier_die;
@@ -175,7 +176,7 @@ const blast: Q2Think = (self, services) => {
     for (const point of [low, add(low, { x: size.x, y: 0, z: 0 }), add(low, { x: 0, y: size.y, z: 0 }), add(low, { x: size.x, y: size.y, z: 0 })]) {
       throwQ2Debris(self, services, "models/objects/debris3/tris.md2", 1.75 * self.damage / 200, point);
     }
-    for (let count = 0; count < 8; count++) throwQ2Debris(self, services, "models/objects/debris2/tris.md2", 2 * self.damage / 200, randomPoint());
+    for (let count = 0; count < 8; count++) throwQ2Debris(self, services, "models/objects/debris2/tris.md2", Math.trunc(2 * self.damage / 200), randomPoint());
     return explode(self, services, body.ground === null ? 1 : 2);
   };
 
@@ -189,15 +190,25 @@ const barrel_touch: Q2Touch = (self, services, contact) => {
     if (other === null || state === null || other.ground === null || other.ground.equals(self.actor.id)) return undefined;
     const body = services.body(self), delta = subtract(body.origin, other.origin);
     const direction = normalize({ x: delta.x, y: delta.y, z: 0 });
-    const end = add(body.origin, scale(direction, 20 * state.mass / (services.host.combat.read(self.actor.id)?.mass ?? 400) * services.host.frameSeconds()));
-    const trace = services.host.trace({ start: body.origin, end, bounds: body.bounds, ignore: self.actor.id, mask: 0x2010003 });
-    if (trace.fraction === 1) services.move(self, { origin: trace.end });
+    const destination = add(body.origin, scale(direction, 20 * state.mass / (services.host.combat.read(self.actor.id)?.mass ?? 400) * services.host.frameSeconds()));
+    // M_walkmove: step up as much as 18 units, refuse to leave a ledge.
+    const mask = monsterSolidMask(services), start = add(destination, { x: 0, y: 0, z: 18 }), end = add(start, { x: 0, y: 0, z: -36 });
+    let trace = services.host.trace({ start, end, bounds: body.bounds, ignore: self.actor.id, mask });
+    if (trace.allSolid) return undefined;
+    if (trace.startSolid) {
+      trace = services.host.trace({ start: { ...start, z: start.z - 18 }, end, bounds: body.bounds, ignore: self.actor.id, mask });
+      if (trace.startSolid || trace.allSolid) return undefined;
+    }
+    if (trace.fraction === 1 || !checkEntityBottom(services, self, trace.end)) return undefined;
+    services.move(self, { origin: trace.end });
     return undefined;
   };
 
 const barrelDropToFloor: Q2Think = (self, services) => {
+    // M_droptofloor lifts the origin by one unit before it traces, even when the trace then fails.
     const body = services.body(self), start = add(body.origin, { x: 0, y: 0, z: 1 });
-    const trace = services.host.trace({ start, end: add(start, { x: 0, y: 0, z: -256 }), bounds: body.bounds, ignore: self.actor.id, mask: 0x2010003 });
+    services.move(self, { origin: start });
+    const trace = services.host.trace({ start, end: add(start, { x: 0, y: 0, z: -256 }), bounds: body.bounds, ignore: self.actor.id, mask: 0x2020003 });
     if (!trace.allSolid && trace.fraction < 1) services.move(self, { origin: trace.end, ground: trace.hit.kind === "actor" ? trace.hit.actor : trace.hit.kind === "world" ? services.host.worldActor() : null });
     return undefined;
   };

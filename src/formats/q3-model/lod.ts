@@ -4,7 +4,7 @@ import { parseMd3 } from "./md3.ts";
 import type { Md3Model } from "./md3.ts";
 
 export type Md3LodSlot = { readonly kind: "missing"; readonly path: string }
-  | { readonly kind: "loaded"; readonly path: string; readonly model: Md3Model; readonly bytes: Uint8Array }
+  | { readonly kind: "loaded"; readonly path: string; readonly model: Md3Model }
   | { readonly kind: "invalid"; readonly path: string; readonly error: string }
   | { readonly kind: "alias"; readonly path: string; readonly sourceSlot: number };
 
@@ -43,7 +43,7 @@ export async function loadMd3Lods(path: string, reader: Md3ModelReader): Promise
       // Unknown dispatch IDs abort registration before the nonzero-LOD fallback.
       if (new BinaryReader(bytes, filename).u32() !== 0x33504449) return null;
       const model = parseMd3(bytes, filename);
-      slots[lod] = { kind: "loaded", path: filename, model, bytes: model.bytes };
+      slots[lod] = { kind: "loaded", path: filename, model };
       byteLength += model.byteLength;
       numLods++;
     } catch (error) {

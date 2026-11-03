@@ -1,12 +1,12 @@
-import { describe, expect, test } from "bun:test";
-import { testCorpusRoot } from "../../../../support/corpus.ts";
+import { expect } from "bun:test";
+import { testCorpusRoot, corpusTest, corpusDescribe } from "../../../../support/corpus.ts";
 
 import { createIdentityOwner } from "../../../../../src/contracts/identity.ts";
 import type { OwnedActor } from "../../../../../src/contracts/identity.ts";
 import type { Vec3 } from "../../../../../src/contracts/math.ts";
 import type { TraceResult } from "../../../../../src/contracts/scene.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../../../../src/world/gameplay/index.ts";
 import type { Q2Edition, Q2Entity, Q2FoundationHost, Q2GameServices, Q2PresentationEvent, Q2TraceRequest } from "../../../../../src/content/q2/foundation/host.ts";
 import { Q2Foundation } from "../../../../../src/content/q2/foundation/runtime.ts";
 import { Q2Weapons } from "../../../../../src/content/q2/foundation/weapons/index.ts";
@@ -15,6 +15,9 @@ import { classic_infantryFrames, rerelease_infantryFrames, rerelease_soldierFram
 import { openArchive } from "../../../../../src/content/archive/index.ts";
 import { readQ2Bsp } from "../../../../../src/formats/q2-map/index.ts";
 import { parseQ2Entities, inhibitQ2Spawn } from "../../../../../src/content/q2/foundation/fields.ts";
+import { inertAuthority } from "../../../../support/authority.ts";
+const test = corpusTest("q2/baseq2/pak0.pak");
+const describe = corpusDescribe("q2/baseq2/pak0.pak");
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 interface Shot { readonly type: "bullet" | "shotgun"; readonly damage: number; readonly count: number; readonly hspread: number; readonly vspread: number; }
@@ -32,7 +35,7 @@ function fixture(edition: Q2Edition, step = 0.1) {
   const actors = new SessionActorRegistry(createIdentityOwner(`q2-monsters-${edition}`));
   const callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors), scheduled = new Map<OwnedActor, number>(), events: Q2PresentationEvent[] = [];
   const world = actors.allocateAtSource("q2:game", 0, "q2:worldspawn"), player = actors.allocate("q3:character", "q3:sarge");
   bodies.create(world, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
@@ -90,7 +93,7 @@ describe("source soldier and infantry behavior", () => {
         const entry = archive.findEntries("maps/base1.bsp")[0];
         if (entry === undefined) throw new Error("Missing supplied base1 BSP");
         const rows = parseQ2Entities(readQ2Bsp(await archive.readEntry(entry)).entities, edition).filter(row => row.classname.startsWith("monster_"));
-        if (edition === "classic") expect(rows).toHaveLength(19);
+        expect(rows).toHaveLength(19);
         for (const row of rows) {
           if (inhibitQ2Spawn(row, scene.game.options)) continue;
           const entity = scene.game.spawn(row);
@@ -99,6 +102,19 @@ describe("source soldier and infantry behavior", () => {
         }
       } finally { archive.close(); scene.actors.close(); }
     }
+  });
+
+  test("rerelease Xatrix soldiers spawn as soldier-family variants with their own skin, count and health", () => {
+    const scene = fixture("rerelease");
+    try {
+      const expected = [["monster_soldier_ripper", 50, 6, 0, "blaster"], ["monster_soldier_hypergun", 60, 8, 2, "shotgun"], ["monster_soldier_lasergun", 70, 10, 4, "machinegun"]] as const;
+      for (const [classname, health, skin, count, weapon] of expected) {
+        const context = scene.spawn(classname);
+        expect([classname, scene.combat.read(context.entity.actor.id)?.health, context.entity.skin, context.entity.count, context.state.weapon, context.state.kind])
+          .toEqual([classname, health, skin, count, weapon, "soldier"]);
+        expect(context.entity.model).toBe("models/monsters/soldier/tris.md2");
+      }
+    } finally { scene.actors.close(); }
   });
 
   test("rerelease shotgun fire marks the uncocked gun and skips into its cock sequence", () => {
@@ -198,7 +214,7 @@ describe("source soldier and infantry behavior", () => {
     const random = [...scene.random], counters = { ...scene.game.counters };
     const actors = SessionActorRegistry.restore(createIdentityOwner("q2-monsters-restored"), scene.actors.checkpoint(), scene.actors.sourceCheckpoint());
     const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-    const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+    const combat = inertAuthority(actors, callbacks);
     for (const entry of scene.actors.observations()) {
       const actor = actors.resolveSaved(entry.id), body = scene.bodies.read(entry.id), health = scene.combat.read(entry.id);
       if (actor === null) throw new Error("Missing restored actor");

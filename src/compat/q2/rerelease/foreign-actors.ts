@@ -194,6 +194,8 @@ export class RereleaseForeignActors {
     }));
   }
   released(actor: OwnedActor): void { this.deferred.release(actor); const entry = this.#actors.get(actor.id); if (entry !== undefined) this.#release(entry); }
+  /** True when the slot's actor is owned by a projection or a restore is rebinding slots, so views must go through lookup. */
+  engaged(slot: number): boolean { return this.#restoring !== null || this.#slots.has(slot); }
   lookup(view: RawEntityView): OwnedActor | null | undefined {
     let entry = this.#slots.get(view.slot);
     const saved = this.#restoring?.actors.get(view.slot);

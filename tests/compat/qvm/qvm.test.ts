@@ -1,15 +1,24 @@
-import { describe, expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect } from "bun:test";
+import { testCorpusRoot, corpusTest, corpusDescribe } from "../../support/corpus.ts";
 
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
-import { QvmOpcode, parseQvm, parseQvmRestart, QvmInterpreter, QvmMemory, QvmGameData, QvmModule,
-  qvmArguments, resolveQvmArtifact, createQvmSystemCall, rejectQvmSyscall, QvmUnboundSyscallError, QvmUi, QvmCgame,
-} from "../../../src/compat/qvm/index.ts";
-import type { QvmArguments, QvmRole, QvmHost, QvmSyscall } from "../../../src/compat/qvm/index.ts";
+import { QvmOpcode, parseQvm, parseQvmRestart } from "../../../src/compat/qvm/image.ts";
+import { QvmInterpreter } from "../../../src/compat/qvm/interpreter.ts";
+import { QvmMemory } from "../../../src/compat/qvm/memory.ts";
+import { QvmGameData } from "../../../src/compat/qvm/game-data.ts";
+import { QvmModule, qvmArguments } from "../../../src/compat/qvm/module.ts";
+import { resolveQvmArtifact } from "../../../src/compat/qvm/artifacts.ts";
+import { createQvmSystemCall, rejectQvmSyscall, QvmUnboundSyscallError } from "../../../src/compat/qvm/syscalls.ts";
+import { QvmUi } from "../../../src/compat/qvm/ui.ts";
+import { QvmCgame } from "../../../src/compat/qvm/cgame.ts";
+import type { QvmArguments, QvmSyscall } from "../../../src/compat/qvm/interpreter.ts";
+import type { QvmRole, QvmHost } from "../../../src/compat/qvm/syscalls.ts";
 import type { ModuleIdentity } from "../../../src/contracts/execution.ts";
+const test = corpusTest("q3a/baseq3/pak0.pk3");
+const describe = corpusDescribe("q3a/baseq3/pak0.pk3");
 
 type Operation = readonly [QvmOpcode, number?];
 function bytes(operations: readonly Operation[], words: readonly number[] = []): Uint8Array {
@@ -45,6 +54,23 @@ describe("QVM execution", () => {
       [QvmOpcode.OP_BLOCK_COPY, 4], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 0]]);
     const vm = new QvmInterpreter(parseQvm(source), () => { throw new Error("Unexpected syscall"); });
     expect(() => vm.invoke(qvmArguments([]))).toThrow("OP_BLOCK_COPY not dword aligned");
+  });
+
+  test("compiled block copies move whole words forward and refuse out-of-range blocks", () => {
+    const copy = (destination: number, source: number, count: number, words: readonly number[]): Uint32Array => {
+      const source_ = bytes([[QvmOpcode.OP_ENTER, 0], [QvmOpcode.OP_CONST, destination], [QvmOpcode.OP_CONST, source],
+        [QvmOpcode.OP_BLOCK_COPY, count], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 0]], words);
+      const artifact = resolveQvmArtifact({ module: identity(source_, "qagame"), role: "qagame", bytes: source_ });
+      if (artifact.kind !== "bytecode") throw new Error("Expected original bytecode");
+      const module = new QvmModule({ artifact, host: rejectQvmSyscall });
+      try {
+        module.call([]);
+        return new Uint32Array(module.interpreter.memory.buffer.slice(module.interpreter.memory.byteOffset, module.interpreter.memory.byteOffset + words.length * 4));
+      } finally { module.retire(); }
+    };
+    expect([...copy(16, 0, 14, [1, 2, 3, 4, 9, 9, 9, 9])]).toEqual([1, 2, 3, 4, 1, 2, 3, 9]);
+    expect([...copy(4, 0, 12, [1, 2, 3, 4])]).toEqual([1, 1, 1, 1]);
+    expect(() => copy(1 << 30, 0, 4, [1])).toThrow("OP_BLOCK_COPY out of range");
   });
 
   test("production modules retain compiled return control when guest buffers overwrite frame padding", () => {
@@ -322,7 +348,7 @@ test("awaited host keeps only its syscall capability open and drains a suspended
   let completed = false;
   const pending = vm.invokeAsync(qvmArguments([0])).then(value => { completed = true; return value; });
   enter.resolve(0);
-  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  await Bun.sleep(0); // a macrotask: enough for a parent that did not drain its child to have settled
   expect(vm.isActive).toBe(true);
   expect(completed).toBe(false);
   childTrap.resolve(77);

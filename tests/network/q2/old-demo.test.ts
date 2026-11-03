@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import { existsSync } from 'node:fs';
 import { openArchive } from '../../../src/content/archive/index.ts';
@@ -51,13 +51,13 @@ test('legacy full/delta frames omit suppress byte and preserve trailing message 
 });
 test('failed serverdata does not switch read layout and malformed legacy frames still fail', () => {
   const r = reader();
-  expect(() => r.read(serverdata(26).slice(0,7))).toThrow();
+  expect(() => r.read(serverdata(26).slice(0,7))).toThrow("Truncated Quake II message");
   const event = r.read(packet(frame(1),null,false))[0]?.event;
   expect(event?.kind === 'frame' ? event.frame.suppressedCount : -1).toBe(5);
-  r.read(serverdata(26)); expect(() => r.read(packet(frame(1),null,true).slice(0,10))).toThrow();
+  r.read(serverdata(26)); expect(() => r.read(packet(frame(1),null,true).slice(0,10))).toThrow("CL_ParseFrame: not playerinfo");
 });
-test.skipIf(!existsSync(`${testCorpusRoot()}/q2/baseq2/pak0.pak`))('installed retail demo1 protocol26 decodes through actual dm2 EOF', async () => {
-  const archive = await openArchive(`${testCorpusRoot()}/q2/baseq2/pak0.pak`);
+test.skipIf(!existsSync(corpusFile("q2/baseq2/pak0.pak")))('installed retail demo1 protocol26 decodes through actual dm2 EOF', async () => {
+  const archive = await openArchive(corpusFile("q2/baseq2/pak0.pak"));
   try {
     const entry = archive.findEntries('demos/demo1.dm2')[0]; if (entry === undefined) throw new Error('Retail demo1 missing');
     const bytes = await archive.readEntry(entry), r = reader(); let frames = 0, configs = 0, packets = 0, first = -1, last = -1;

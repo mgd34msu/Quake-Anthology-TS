@@ -39,8 +39,16 @@ export function registerAddonBaseTriggers(context: Q1AddonContext): undefined {
   });
   for (const classname of ["trigger_teleport", "trigger_relay"]) game.registerSpawn(classname, (_game, entity) => {
     if (context.removedOutsideCoop(entity, classname === "trigger_relay") || context.removedForRunes(entity)) return undefined;
-    return spawnMapActor(game, entity);
+    spawnMapActor(game, entity);
+    if (classname !== "trigger_teleport" || !game.live(entity)) return undefined;
+    // IGNORE_TARGETNAME (4) keeps the teleporter live without a firing; flag 8 (MG3) starts it dormant until first used.
+    if ((entity.spawnflags & 4) !== 0) entity.fields.set("teleport.ignoreTargetname", "1");
+    if (context.program === "mg3" && (entity.spawnflags & 8) !== 0 && entity.targetname !== "") {
+      entity.use = game.named.use(entity, "mg3:teleport_activate"); entity.touch = null;
+    }
+    return undefined;
   });
+  game.named.register("mg3:teleport_activate", { use: (_game, entity) => { entity.use = game.named.use(entity, "teleport_use"); entity.touch = game.named.touch(entity, "teleport_touch"); return undefined; } });
   for (const classname of ["trigger_onlyregistered", "trigger_monsterjump", "trigger_setskill"]) {
     game.replaceSpawn(classname, (_game, entity) => {
       if (context.removedOutsideCoop(entity, false) || context.removedForRunes(entity)) return undefined;

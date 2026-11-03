@@ -283,6 +283,6 @@ test("output gamma preserves raw rendering and repeated completion", () => {
   renderer.setOutputGamma(1);
   expect(renderer.pixels).toBe(neutral);
   expect([...renderer.pixels.slice(0, 4)]).toEqual([16, 16, 16, 64]);
-  expect(() => renderer.setOutputGamma(Number.NaN)).toThrow();
+  expect(() => renderer.setOutputGamma(Number.NaN)).toThrow("Output gamma must be between 0.5 and 3");
   renderer.close();
 });

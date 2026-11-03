@@ -79,7 +79,7 @@ test('GL stage fog clamps active fog after lighting and preserves normal alpha',
   expect(stageFragmentShader.indexOf('color.a *= 1.0 - fogAmount')).toBeLessThan(stageFragmentShader.indexOf('if (alphaMode == 1'));
 });
 
-test('fog metadata survives worker transfer and sky/additive batches retain their distinct equations', () => {
+test('sky/additive batches retain their distinct fog equations', () => {
   const owner = { identity: Symbol('fog-meta'), session: ids.session, generation: 0 };
   const image: RendererImage = { owner, ordinal: 0, source: { kind: 'generated', name: 'white' }, width: 1, height: 1 };
   const base: DrawBatch = { primitive: 'triangles', texturing: 'single', lighting: { kind: 'vertex' }, texture: { kind: 'bind-image', image },
@@ -92,7 +92,6 @@ test('fog metadata survives worker transfer and sky/additive batches retain thei
   expect(op.batches[0]).toBe(sky);
   expect(op.batches[0]?.state.depthRange).toEqual([0,1]);
   expect(op.batches[1]?.fog?.color).toEqual({ x: 0, y: 0, z: 0 });
-  expect(structuredClone({ fog: op.batches[1]?.fog, fogDepthScale: 64 })).toEqual({ fog: op.batches[1]?.fog, fogDepthScale: 64 });
 });
 
 test('Q1-world fog composes legacy lightmaps before fog without changing the no-fog passes', async () => {

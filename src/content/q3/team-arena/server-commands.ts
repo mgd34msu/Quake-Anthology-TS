@@ -164,9 +164,8 @@ export class GameServerCommandRuntime {
     const initializedMask = initialized === 4 ? 0xffffffff : (2 ** (initialized * 8) - 1) >>> 0;
     for (const filter of this.filters) {
       if (((incoming & filter.mask & initializedMask) >>> 0) !== ((filter.compare & initializedMask) >>> 0)) continue;
-      // Bots have no IP epair. Missing octets matter only to a matching filter
-      // that actually consumes them, never to the empty filter list.
-      if ((filter.mask & ~initializedMask) !== 0) throw new RangeError("IP filter reads uninitialized source octets");
+      // Bots have no IP epair, and C compares uninitialized octets here. A filter needing octets the address lacks doesn't match it.
+      if ((filter.mask & ~initializedMask) !== 0) continue;
       if (((incoming & filter.mask) >>> 0) === filter.compare) return denyMatches;
     }
     return !denyMatches;

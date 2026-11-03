@@ -1,12 +1,21 @@
 import { test, expect } from 'bun:test';
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import { existsSync } from 'node:fs';
 import { openArchive } from '../../../src/content/archive/index.ts';
-import { LoopbackHub } from '../../../src/network/common/loopback.ts';
+import { LoopbackHub } from '../../support/loopback.ts';
 import { UdpTransport } from '../../../src/network/common/transport.ts';
 import type { Q1ExtendedEntityState, Q1ProtocolIdentity, QwUserCommand } from '../../../src/contracts/protocol.ts';
-import { SizeBuf, MessageReader, createNetQuakeCodec, NetQuakeDecoder, NetQuakeChannel, QuakeWorldChannel, QuakePeer, NetQuakeDemoReader, QuakeWorldDecoder, QwEntityStateT, EntityStateT, writeQuakeWorldEntities, writeQuakeWorldMove, decodeQuakeWorldClient, QuakeWorldCommandReplay, encodeNetQuakeControl, decodeNetQuakeControl, QuakeWorldChallenges, QuakeWorldConnectionlessServer, QuakeWorldConnectClient, writeNetQuakeEntity, QuakeWorldDemoReader, writeQuakeWorldDemoRecord } from '../../../src/network/q1/index.ts';
+import { SizeBuf, MessageReader } from '../../../src/network/q1/message.ts';
+import { createNetQuakeCodec } from '../../../src/network/q1/profile.ts';
+import { NetQuakeDecoder, writeNetQuakeEntity } from '../../../src/network/q1/netquake.ts';
+import { NetQuakeChannel, QuakeWorldChannel } from '../../../src/network/q1/channels.ts';
+import { NetQuakeDemoReader, QuakeWorldDemoReader, writeQuakeWorldDemoRecord } from '../../../src/network/q1/demos.ts';
+import { QuakeWorldDecoder, writeQuakeWorldEntities } from '../../../src/network/q1/quakeworld.ts';
+import { QwEntityStateT } from '../../../src/network/q1/qw-constants.ts';
+import { EntityStateT } from '../../../src/network/q1/wire-types.ts';
+import { writeQuakeWorldMove, decodeQuakeWorldClient, QuakeWorldCommandReplay } from '../../../src/network/q1/commands.ts';
+import { encodeNetQuakeControl, decodeNetQuakeControl, QuakeWorldChallenges, QuakeWorldConnectionlessServer, QuakeWorldConnectClient } from '../../../src/network/q1/handshake.ts';
 const q1: Q1ProtocolIdentity = { kind: 'q1-netquake', version: 15 };
 const zero = { x: 0, y: 0, z: 0 };
 const baseline: Q1ExtendedEntityState = { number: 300, origin: zero, angles: zero, modelIndex: 1, frame: 0, colorMap: 0, skin: 0, effects: 0, alpha: 0, scale: 16, lerpFinishSeconds: 0, step: false };
@@ -30,25 +39,28 @@ test('NQ angle/coord bytes and RMQ extended entity payload retain source formats
     expect(decoded.state.frame).toBe(513);
 });
 test('NetQuake fragments and duplicate acknowledgements cross shared transport', () => {
-    const hub = new LoopbackHub(), a = hub.bind('a'), b = hub.bind('b'), sendChannel = new NetQuakeChannel(32, 3), receiveChannel = new NetQuakeChannel(32, 3), sender = new QuakePeer(a, b.address, sendChannel), receiver = new QuakePeer(b, a.address, receiveChannel);
+    const hub = new LoopbackHub(), a = hub.bind('a'), b = hub.bind('b'), sendChannel = new NetQuakeChannel(32, 3), receiveChannel = new NetQuakeChannel(32, 3);
     try {
         const payload = Uint8Array.from([1, 2, 3, 4, 5, 6, 7]);
         sendChannel.queueReliable(payload);
         const first = sendChannel.next(0);
         if (first === null)
             throw new Error('No first fragment');
-        sender.send(first);
+        a.send(b.address, first);
         let delivered: Uint8Array | null = null;
         for (let i = 0; i < 10; i++) {
             const next = b.poll();
             if (next?.kind === 'packet') {
-                const result = receiver.receive(next.from, next.payload, 0);
-                if (result !== null)
-                    delivered = result.payload;
+                const result = receiveChannel.receive(next.payload, 0);
+                for (const reply of result.replies)
+                    b.send(next.from, reply);
+                if (result.delivery !== null)
+                    delivered = result.delivery.payload;
             }
             const ack = a.poll();
             if (ack?.kind === 'packet')
-                sender.receive(ack.from, ack.payload, 0);
+                for (const reply of sendChannel.receive(ack.payload, 0).replies)
+                    a.send(ack.from, reply);
         }
         expect(delivered).toEqual(payload);
         expect(sendChannel.canSendReliable).toBe(true);
@@ -145,7 +157,7 @@ test('QuakeWorld channel and x86 QWD command record', () => {
         throw new Error('Missing demo command');
     expect(parsed.command).toEqual(command);
 });
-const pak = `${testCorpusRoot()}/q1/id1/PAK0.PAK`;
+const pak = corpusFile("q1/id1/PAK0.PAK");
 (existsSync(pak) ? test : test.skip)('retail PAK demo1 decodes through the complete NetQuake stream', async () => {
     const archive = await openArchive(pak);
     try {

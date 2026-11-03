@@ -14,14 +14,15 @@ import { defaultMouseTuning } from "../../input/mouse.ts";
 import type { MouseTuning } from "../../input/mouse.ts";
 import type { SeatInput } from "../../input/seat.ts";
 import type { InputCommandBuilder } from "../../input/user-command.ts";
-import type { RestartControls, RestartKind } from "../../settings/restart.ts";
+import type { RestartControls } from "../../settings/restart.ts";
 import type { NativeUiController } from "../common/controller.ts";
 import { menuRow } from "../common/layout.ts";
 export * from "./bindings.ts";
 export * from "./services.ts";
 export * from "./input-routing.ts";
 
-export type SettingCategory = "display" | "video" | "audio" | "input" | "network" | "accessibility" | "language";
+import type { SettingCategory, CvarSettingSpec } from "../../settings/setting-spec.ts";
+export type { SettingCategory, CvarSettingSpec };
 interface SettingBase { readonly id: UiControlId; readonly label: string; readonly category: SettingCategory; readonly enabled: () => boolean; /** Optional submenu title inside the category page. */ readonly group?: string; }
 export type SettingBinding = SettingBase & (
   | { readonly kind: "toggle"; readonly read: () => boolean; readonly write: (value: boolean) => void }
@@ -47,13 +48,6 @@ export function settingControl(binding: SettingBinding, rect: Rect, seat: SeatId
   }
 }
 
-interface CvarSettingBase { readonly name: string; readonly label: string; readonly category: SettingCategory; readonly restart: RestartKind | null; readonly group?: string; }
-export type CvarSettingSpec = CvarSettingBase & (
-  | { readonly kind: "toggle" }
-  | { readonly kind: "slider"; readonly minimum: number; readonly maximum: number; readonly step: number }
-  | { readonly kind: "choice"; readonly choices: readonly UiChoice[] }
-  | { readonly kind: "text-entry"; readonly maximumLength: number; readonly submitOnly?: boolean }
-);
 /** The subsystem registers its cvar and supplies the spec; menus never create unused cvars. */
 export type SettingCvars = Pick<CvarRegistry, "dialect" | "find" | "set" | "variableValue">;
 export function bindCvarSetting(registry: SettingCvars, spec: CvarSettingSpec, restarts: RestartControls | null): SettingBinding {

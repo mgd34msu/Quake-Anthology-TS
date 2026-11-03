@@ -3,10 +3,13 @@ import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import type { CommandBuffer } from "../core/commands/index.ts";
 
+const MAXIMUM_PENDING = 65536;
+
 /** Dedicated stdin is independent of SDL and retains partial UTF-8/lines between polls. */
 export class DedicatedConsole {
   private readonly decoder = new StringDecoder("utf8");
   private pending = "";
+  private dropped = 0;
   private readonly lines = new EventRing<string>(16384);
   private ended = false;
   private closed = false;
@@ -17,24 +20,30 @@ export class DedicatedConsole {
   };
   private readonly onEnd = (): void => {
     this.pending += this.decoder.end(); this.split();
-    if (this.pending !== "") this.lines.admit(this.pending);
+    if (this.pending !== "") this.enqueue(this.pending);
     this.pending = ""; this.ended = true;
   };
   private readonly onError = (error: Error): void => { this.error = error; };
   constructor(private readonly input: Readable = process.stdin) {
     input.on("data", this.onData); input.on("end", this.onEnd); input.on("error", this.onError);
   }
+  /** A full ring or an over-long unterminated line drops input instead of throwing from the stream handler. */
+  private enqueue(line: string): void {
+    if (this.lines.append(line) === 0) this.dropped++;
+  }
   private split(): void {
     let index = this.pending.indexOf("\n");
     while (index >= 0) {
-      this.lines.admit(this.pending.slice(0, index).replace(/\r$/, "")); this.pending = this.pending.slice(index + 1);
+      this.enqueue(this.pending.slice(0, index).replace(/\r$/, "")); this.pending = this.pending.slice(index + 1);
       index = this.pending.indexOf("\n");
     }
+    if (this.pending.length > MAXIMUM_PENDING) { this.pending = ""; this.dropped++; }
   }
   get eof(): boolean { return this.ended && this.lines.live === 0; }
   drain(commands: CommandBuffer): number {
     if (this.closed) throw new Error("Dedicated console is closed");
     if (this.error !== null) throw this.error;
+    if (this.dropped !== 0) { commands.append(`echo "Dedicated console dropped ${this.dropped} input line(s)"\n`); this.dropped = 0; }
     const lines = this.lines.drainAll();
     for (const line of lines) commands.append(`${line}\n`);
     return lines.length;

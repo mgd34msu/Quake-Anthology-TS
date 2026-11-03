@@ -9,11 +9,10 @@ import { createIdentityOwner } from '../../../src/contracts/identity.ts';
 import { EngineSession } from '../../../src/world/session/session.ts';
 import type { Q2ServerRecord } from '../../../src/network/q2/index.ts';
 
-test('Q2 connecting records retain server metadata and prints before any world is admitted', () => {
+test('Q2 connecting records are retained, without admitting a world', () => {
     const identity = createIdentityOwner('Q2 preworld records'), session = new EngineSession(identity, { kind: 'headless' });
-    const prints: string[] = [];
     const remote = new Q2RemotePresentation({ identity, session, seat: identity.seat(0), publish: output => session.publish(output), disconnected: () => { session.clientAt(0)?.disconnect(); }, client: session.createClient(0), nextGeneration: slot => nextActorGeneration(session.session, slot), content: null, protocol: { kind: 'q2-classic', version: 34 },
-        userinfo: () => '', print: text => { prints.push(text); }, sendCommand() {},
+        userinfo: () => '', print() {}, sendCommand() {},
         prepareServerData: async () => { throw new Error('This record projection must not prepare content'); },
         loadContent: async () => { throw new Error('This record projection must not load a map'); } });
     const events: readonly Q2ServerRecord["event"][] = [
@@ -27,11 +26,8 @@ test('Q2 connecting records retain server metadata and prints before any world i
     ];
     const records: readonly Q2ServerRecord[] = events.map(event => ({ seat: 0, opcode: 0, raw: new Uint8Array(), event }));
     try {
-        // The network prints messages before forwarding its record batch.
-        for (const { event } of records) if (event.kind === 'print') remote.print(event.text);
         remote.records(records);
         expect(remote.sourceRecords).toBe(records);
-        expect(prints).toEqual(['Connecting\n', 'Welcome from chat\n']);
         expect(remote.player).toBeNull();
         expect(remote.output).toBeNull();
         expect(remote.drainPresentationEvents()).toEqual([]);

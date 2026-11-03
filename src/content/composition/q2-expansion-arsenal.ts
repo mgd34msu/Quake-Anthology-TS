@@ -30,6 +30,6 @@ export function registerSelectedQ2MissionWeapons(game: Q2GameServices, weapons: 
   game.sourceCallbacks.register(projectiles.callbacks);
   if (game.options.edition === "rerelease") weapons.setFallbackOrder(["disintegrator", "railgun", "heatbeam", "ionripper", "hyperblaster", "etf_rifle", "chaingun", "machinegun", "supershotgun", "shotgun", "phalanx", "rocketlauncher", "grenadelauncher", "proxlauncher", "chainfist", "blaster"]);
   const definitions = weapons.registeredDefinitions();
-  return { inventoryDefinitions: [...q2BaseWeaponInventory(), ...packs.flatMap(q2MissionWeaponInventory)],
+  return { inventoryDefinitions: [...q2BaseWeaponInventory(), ...packs.flatMap(pack => q2MissionWeaponInventory(pack, game.options.edition))],
     pickupOrder: pickupOrder.filter(item => definitions.some(definition => definition.item === item)) };
 }

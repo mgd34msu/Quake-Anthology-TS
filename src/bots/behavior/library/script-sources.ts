@@ -1,16 +1,16 @@
 import { SaveReader } from "../../../persistence/value.ts";
-import type { ScriptMemoryCapture, ScriptMemoryRestore } from "../../../ui/common/legacy/script/memory.ts";
+import type { ScriptMemoryCapture, ScriptMemoryRestore } from "../../../content/legacy-script/memory.ts";
 /*
  * Bot source loading from id Software's botlib/l_script.c and l_precomp.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
  */
 import type { BotSourceFiles } from "../assets.ts";
-import { allocateScriptSource } from "../../../ui/common/legacy/script/lexer.ts";
-import type { ScriptMemory } from "../../../ui/common/legacy/script/memory.ts";
-import type { SourceTokenMemory } from "../../../ui/common/legacy/script/token-memory.ts";
-import { ScriptSourceReader } from "../../../ui/common/legacy/script/preprocessor.ts";
+import { allocateScriptSource } from "../../../content/legacy-script/lexer.ts";
+import type { ScriptMemory } from "../../../content/legacy-script/memory.ts";
+import type { SourceTokenMemory } from "../../../content/legacy-script/token-memory.ts";
+import { ScriptSourceReader } from "../../../content/legacy-script/preprocessor.ts";
 import type { IncludeRequest, IncludeResolver, ScriptGlobalDefines, ScriptSource,
-  ScriptSourcePosition, ScriptTokenRecord } from "../../../ui/common/legacy/script/preprocessor.ts";
+  ScriptSourcePosition, ScriptTokenRecord } from "../../../content/legacy-script/preprocessor.ts";
 import { BotMemory } from "./memory.ts";
 
 const MAX_SOURCE_FILES = 64;

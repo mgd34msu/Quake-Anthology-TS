@@ -10,7 +10,7 @@ import type { GoalEntityInfo, GoalNavigation, GoalWorldHost, SourcePickupGoals }
 import { BotMemory } from "../../../../src/bots/behavior/library/memory.ts";
 import { BotScriptSources } from "../../../../src/bots/behavior/library/script-sources.ts";
 import { WeightConfigStore } from "../../../../src/bots/behavior/library/weights.ts";
-import { ScriptGlobalDefines } from "../../../../src/ui/common/legacy/script/preprocessor.ts";
+import { ScriptGlobalDefines } from "../../../../src/content/legacy-script/preprocessor.ts";
 
 function sources(files: Readonly<Record<string, string>>, memory: BotMemory): BotScriptSources {
   const assets = new BotAssetFiles();

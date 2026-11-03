@@ -251,7 +251,7 @@ export class ApplicationBots {
           const connection = this.connection(client), argv = tokenizeCommand(text, "q3").argv;
           options.simulation.playerCommand(connection.actor.id, argv[0] ?? "", argv.slice(1)); return undefined;
         } },
-      navigation: library => q3BotNavigation(game, library, options.navigation) });
+      navigation: (library, bspEntities) => q3BotNavigation(game, library, options.navigation, bspEntities) });
     this.population = new SharedBotPopulation(actor => options.simulation.actors.isLive(actor), this.director);
     let attached = false;
     try {
@@ -311,7 +311,7 @@ export class ApplicationBots {
     }
     if (observations.size !== (nativeOwnership?.filter(record => record.actor !== null).length ?? simulation.players().length)) throw new Error("Saved bot observation authority is incomplete");
     this.director.restoreSaveState(image.director, actor, saved => simulation.actors.resolveSaved(saved),
-      (client, edge) => navigation.forClient(client).graph.edges.find(value => value.id === edge) ?? null,
+      (client, edge) => navigation.forClient(client).edge(edge),
       (number, generation) => {
         const saved = observations.get(number);
         return { number, generation: saved === undefined || generation === 0 ? generation : actor({ slot: saved.slot, generation }).generation };
@@ -351,7 +351,7 @@ export class ApplicationBots {
     this.arsenal = createBotArsenalBinding(this.options.simulation, client => this.connections.get(client)?.actor.id ?? null);
     const game = q3BotGame(source, this.options.insertConsoleCommand, this.arsenal ?? undefined);
     this.gameValue = game;
-    this.director.bindRestartedRound(this.directorHost(game), library => q3BotNavigation(game, library, navigation));
+    this.director.bindRestartedRound(this.directorHost(game), (library, bspEntities) => q3BotNavigation(game, library, navigation, bspEntities));
     this.options.simulation.botServices.attach(this.director, this);
     this.restartPhase = { kind: "bound", clients: phase.clients, pending: new Set(phase.clients.filter(client => !client.client.isClosed).map(client => client.client.id.slot)) };
   }

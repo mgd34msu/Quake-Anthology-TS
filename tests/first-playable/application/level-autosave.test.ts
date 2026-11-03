@@ -9,6 +9,8 @@ import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { readSaveImage } from "../../../src/persistence/save-image.ts";
 import { ConfigStore } from "../../../src/settings/config.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 for (const [product, map, family, ammo] of [
   ["q1-classic-id1", "e1m1", "q1", "q1:ammo/nails"],
@@ -85,7 +87,7 @@ for (const [product, map, family, ammo] of [
 }
 
 test("level autosave captures initial and next playable worlds and preserves saves on failed travel and restore", async () => {
-  const root = await mkdtemp(join(tmpdir(), "quake-level-autosave-"));
+  const root = await tempDirectory("quake-level-autosave-");
   const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Missing options");
   const app = await Application.open(parsed.options, { print: () => undefined, saveDirectory: join(root, "saves") });
@@ -116,7 +118,7 @@ test("level autosave captures initial and next playable worlds and preserves sav
 }, 60000);
 
 test("autosave write failure does not abort a playable level", async () => {
-  const root = await mkdtemp(join(tmpdir(), "quake-autosave-failure-"));
+  const root = await tempDirectory("quake-autosave-failure-");
   const saveDirectory = join(root, "not-a-directory"); await Bun.write(saveDirectory, "file");
   const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Missing options");
@@ -132,7 +134,7 @@ test("autosave write failure does not abort a playable level", async () => {
 
 
 test("graphical saves retain key releases and failed preparation retains the live input owner", async () => {
-  const root = await mkdtemp(join(tmpdir(), "quake-graphical-restore-"));
+  const root = await tempDirectory("quake-graphical-restore-");
   const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", root]);
   if (parsed.kind !== "run") throw new Error("Missing options");
   const app = await Application.open(parsed.options, { print: () => undefined, saveDirectory: join(root, "saves") });

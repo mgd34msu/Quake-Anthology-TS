@@ -1,4 +1,6 @@
+import { writeCapture } from "../../support/capture.ts";
 import { encodePng } from "../../../src/formats/images/png.ts";
+import { rendererBackends } from "../../support/gl.ts";
 import { expect, test } from 'bun:test';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -20,7 +22,7 @@ import type { QwServerData } from '../../../src/app/bootstrap/network/qw-types.t
 import type { QwPlayerState } from '../../../src/contracts/protocol.ts';
 const profile = { kind: 'q1-quakeworld', version: 28 } satisfies QwServerData['protocol'];
 const pcx = (index: number): Uint8Array => encodePcx({ width: 320, height: 200, indices: Uint8Array.from({ length: 320 * 200 }, (_, offset) => offset === 0 ? 0 : index) }, new Uint8Array(768));
-for (const renderer of ['cpu', 'gl']) test(`hidden ${renderer} QW player skins follow live userinfo, controls and contained downloads`, async () => {
+for (const renderer of rendererBackends) test(`hidden ${renderer} QW player skins follow live userinfo, controls and contained downloads`, async () => {
     const root = await mkdtemp(join(tmpdir(), 'qw-skin-application-')), server = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
     let app: RemoteApplication | null = null;
     const commands: string[] = [], prints: string[] = [];
@@ -84,9 +86,9 @@ for (const renderer of ['cpu', 'gl']) test(`hidden ${renderer} QW player skins f
         expect(commands.some(command => command.startsWith('download skins/'))).toBe(false);
         const capture = async (): Promise<Uint8Array> => { const pending = remote.captureNextFrame(); await remote.step(50); return pending; };
         const beforeColors = await capture();
-        await Bun.write(`/tmp/qw-skin-application-${renderer}-before.png`, encodePng(160, 120, beforeColors));
+        await writeCapture(`qw-skin-application-${renderer}-before.png`, encodePng(160, 120, beforeColors));
         send([{ kind: 'set-info', slot: 7, key: 'topcolor', value: '99' }, { kind: 'set-info', slot: 7, key: 'bottomcolor', value: '-1' }]); await Bun.sleep(1); await remote.step(50);
-        expect(model()?.playerColors).toEqual({ top: 13, bottom: 13 }); const afterColors = await capture(); await Bun.write(`/tmp/qw-skin-application-${renderer}-after.png`, encodePng(160, 120, afterColors)); expect(afterColors.some((value, index) => value !== beforeColors[index])).toBe(true);
+        expect(model()?.playerColors).toEqual({ top: 13, bottom: 13 }); const afterColors = await capture(); await writeCapture(`qw-skin-application-${renderer}-after.png`, encodePng(160, 120, afterColors)); expect(afterColors.some((value, index) => value !== beforeColors[index])).toBe(true);
         send([{ kind: 'set-info', slot: 7, key: 'skin', value: 'paint.pcx' }]); await Bun.sleep(1); await remote.step(50);
         expect(model()?.indexedSkin?.pixels[1]).toBe(100); expect(commands.some(command => command.startsWith('download skins/'))).toBe(false);
         cvars.set('noskins', '1'); await remote.step(50); expect(model()?.indexedSkin).toBeUndefined();

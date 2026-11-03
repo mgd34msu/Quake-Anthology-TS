@@ -1,8 +1,7 @@
 import { parseSaveRequest, parseLoadRequest, saveCommandDocumentation } from "../../src/app/bootstrap/save-requests.ts";
-import { testCorpusRoot } from "../support/corpus.ts";
+import { corpusFile, corpusHasFile, testCorpusRoot } from "../support/corpus.ts";
 
 import { expect, test } from "bun:test";
-import { join } from "node:path";
 import { decodeSavedGame } from "../../src/persistence/saved-game.ts";
 import { encodeQ1Save, type Q1SaveData } from "../../src/persistence/q1.ts";
 
@@ -24,8 +23,8 @@ test("malformed shared headers do not fall back to native formats", () => {
 
 // The fixture is a save written by id's engine into the installed
 // rerelease id1/autosave directory; it only exists after playing there.
-const installedSavePath = join(testCorpusRoot(), "q1/id1/autosave/start.sav");
-const hasInstalledSave = await Bun.file(installedSavePath).exists();
+const installedSavePath = corpusFile("q1/id1/autosave/start.sav");
+const hasInstalledSave = corpusHasFile("q1/id1/autosave/start.sav");
 test.skipIf(!hasInstalledSave)("actual installed Quake source saves identify format and preserve extensions", async () => {
   const path = installedSavePath;
   const first = decodeSavedGame(await Bun.file(path).bytes());

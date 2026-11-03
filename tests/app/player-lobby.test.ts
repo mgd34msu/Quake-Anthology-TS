@@ -28,7 +28,7 @@ test("completion retains members, clears readiness, and stale completion cannot 
   const first = service.start(lobby.id, owner.id);
   expect(first.endpoint).toBeNull();
   service.publish(lobby.id, owner.id, first.matchGeneration, ipAddress("127.0.0.1", 27960), {kind:"unified",version:1,composition:identity.digest,snapshotSchema:"unified:snapshot-v1"});
-  expect(() => service.complete(lobby.id, guest.id, first.matchGeneration)).toThrow();
+  expect(() => service.complete(lobby.id, guest.id, first.matchGeneration)).toThrow("Only the lobby owner can complete its match");
   const completed = service.complete(lobby.id, owner.id, first.matchGeneration);
   expect(completed.phase).toBe("open"); expect(completed.members.map(member => member.ready)).toEqual([false, false]);
   expect(completed.members.map(member => member.account.id)).toEqual([owner.id, guest.id]);
@@ -87,7 +87,7 @@ test("native rerelease match reports require explicit public intermission and ex
 import { registerLocalLobbyMenu } from "../../src/ui/settings/local-lobby.ts";
 import { NativeUiController, defaultUiSkin } from "../../src/ui/common/index.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
-import { KeyCode } from "../../src/input/key-codes.ts";
+import { KeyCode } from "../../src/core/key-codes.ts";
 test("local lobby menu creates a prepared room with actual local seat capacity before any host launch", async () => {
   const service = new LocalLobbyService(), seat = createIdentityOwner("lobby-menu").seat(0); let launches = 0;
   const owner = new ApplicationLocalLobby(service, {id:"account:menu",name:"Local player"}, {

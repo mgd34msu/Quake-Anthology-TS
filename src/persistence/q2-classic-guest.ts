@@ -81,6 +81,8 @@ function validate(save: Q2ClassicOriginalSave, expected: Q2ClassicOriginalIdenti
 }
 
 type OpenFile = NonNullable<WindowsCapabilities["openFile"]>;
+/** Generous against retail Q2 savegames, which stay under a few MB. */
+const MAX_NATIVE_SAVE_BYTES = 256 * 1024 * 1024;
 interface Entry { bytes: Uint8Array; read: boolean; readonly handles: Set<WindowsFile>; }
 interface Operation { readonly kind: "capture" | "restore" | "capture-level" | "restore-level"; readonly game: string; readonly level: string; readonly entries: Map<string, Entry>; }
 const ROOT = "__qts_original_save/";
@@ -120,7 +122,16 @@ export class ClassicOriginalSaveFiles {
       write: (offset, bytes) => {
         live(); if (!mode.write) throw new Error("Native save file is not writable");
         const end = range(offset, bytes.length);
-        if (end > owned.bytes.length) { const grown = new Uint8Array(end); grown.set(owned.bytes); owned.bytes = grown; }
+        if (end > MAX_NATIVE_SAVE_BYTES) throw new RangeError("Native save file exceeds its size limit");
+        if (end > owned.bytes.length) {
+          // Spare capacity past the current length is untouched (zero), so a write can extend in place.
+          const capacity = owned.bytes.buffer.byteLength - owned.bytes.byteOffset;
+          if (end <= capacity) owned.bytes = new Uint8Array(owned.bytes.buffer, owned.bytes.byteOffset, end);
+          else {
+            const backing = new Uint8Array(Math.max(end, owned.bytes.length * 2, 4096));
+            backing.set(owned.bytes); owned.bytes = backing.subarray(0, end);
+          }
+        }
         owned.bytes.set(bytes, offset); return bytes.length;
       },
       size: () => { live(); return owned.bytes.length; },

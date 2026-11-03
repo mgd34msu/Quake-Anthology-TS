@@ -19,6 +19,9 @@ export class Q3ClientAuthorization {
   constructor(private readonly options: Q3ClientAuthorizationOptions) {}
   async request(assertCurrent: () => void, send: (address: Ipv4Address, packet: Uint8Array) => void): Promise<void> {
     assertCurrent();
+    // The key is sent in cleartext to a legacy authority, so it leaves the machine only when the player opts in.
+    this.options.cvars.register('cl_authorizeKey', '0', CvarFlag.Archive);
+    if ((this.options.cvars.get('cl_authorizeKey')?.integerValue ?? 0) === 0) return;
     if (this.address === null) {
       let address: Ipv4Address | null;
       try {

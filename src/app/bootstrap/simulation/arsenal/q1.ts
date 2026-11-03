@@ -132,9 +132,8 @@ export class Q1SelectedArsenal implements SelectedArsenal {
 
   step(input: WeaponStepInput, intent: ArsenalIntent | undefined): WeaponStepResult {
     if (intent !== undefined && intent.provider !== this.provider) throw new Error("Arsenal intent belongs to a different provider");
-    if (intent?.weapon != null && !this.weapons.some(weapon => this.options.game.weaponItem(weapon) === intent.weapon))
-      throw new Error("Weapon does not belong to the selected Q1 product");
-    if (intent?.weapon != null && this.options.game.weaponItem(this.require(input.actor.id).weapon) !== intent.weapon)
+    // Peers choose this string; a weapon outside the product is no request.
+    if (intent?.weapon != null && this.weapons.some(weapon => this.options.game.weaponItem(weapon) === intent.weapon) && this.options.game.weaponItem(this.require(input.actor.id).weapon) !== intent.weapon)
       this.select(input.actor.id, intent.weapon);
     const before = this.read(input.actor.id), observation = this.options.observe(input.actor.id);
     const seconds = input.frame.time.kind === "seconds" ? input.frame.time.value : input.frame.time.value / 1000;

@@ -44,7 +44,7 @@ import type { ApplicationOptions } from "./options.ts";
 import type { SimulationPresentationAccess } from "./simulation/types.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
 import { registerDiscoveryCommands } from "../../console/discovery.ts";
-import { primeLlmConsoleSession, registerLlmCommands, type LlmCommandRequester } from "../../console/llm.ts";
+import { registerLlmCommands, type LlmCommandRequester } from "../../console/llm.ts";
 import { registerQ2ClientCommands } from "./q2-client-commands.ts";
 import { applicationAudioCommands } from "./audio/commands.ts";
 import type { ApplicationConsoleServer } from "./console.ts";
@@ -422,23 +422,35 @@ export class ApplicationInput {
     if (prepared === undefined) for (const binding of saved?.bindings ?? defaults) input.bind(binding);
     if (saved !== null && prepared === undefined) { input.gamepad.tuning = structuredClone(saved.gamepad); builder.mouse.tuning = {...saved.mouse};
       if (saved.alwaysRun !== undefined) builder.tuning = {...builder.tuning, alwaysRun:saved.alwaysRun}; }
-    const haptics = new SeatHaptics({seat, controllers:{rumble:(instance,low,high,duration)=>this.controllers.rumble(instance,low,high,duration)},
-      controller:id=>this.router.controllerFor(id),load:request=>this.hapticLoad(request),now:this.now});
+    const haptics = this.createSeatHaptics(player);
     if (saved !== null) {haptics.setEnabled(saved.rumble);haptics.setStrength(saved.rumbleStrength ?? 1);}
-    const console = new SeatConsole({staged:true,seat,dialect:sourceDialect,context,commands:this.commands,cvars:this.consoleCvars,now:this.now,
-      connected:()=>true,clipboard:()=>{const bytes=readSdlClipboard();return bytes===null?null:new TextDecoder().decode(bytes);},
-      focus:focus=>{input.setFocus(focus,this.now());haptics.setActive(input.focused && focus.kind==="game");},
-      chat:(text,team,target)=>this.actions.execute(team?"say_team":"say",target===null?[text]:[text,String(target)],seat)});
+    const console = this.createSeatConsole(player, input, context, sourceDialect, haptics);
     if(saved!==null) console.history.replace(saved.history);
     this.mouseSettings.set(seat,mouse);
-    this.uiCallbacks.set(input,(event,focus)=>{
-      const ui=this.seatUi.get(seat);
-      if(event.kind==="key" && (event.code===96 || event.code===126)) {
-        if(event.down){if(!event.repeat)ui?.closeMenus();console.toggleFromKey(event.repeat);} return true;
-      }
-      return console.input(event,focus) || (this.actions.clientInput?.(event) ?? false) || (ui?.input(event,focus) ?? false);
-    });
+    this.bindSeatUiInput(input, seat, () => console);
     return {player,input,console,builder,haptics};
+  }
+
+  /** Seat construction shared by the constructor (initial seats) and createJoinedLocal (seats that join later). */
+  private createSeatHaptics(player: LocalPlayer): SeatHaptics {
+    return new SeatHaptics({ seat: player.seat.id, controllers: { rumble: (instance, low, high, duration) => this.controllers.rumble(instance, low, high, duration) },
+      controller: seat => this.router.controllerFor(seat), load: request => this.hapticLoad(request), now: this.now });
+  }
+  private createSeatConsole(player: LocalPlayer, input: SeatInput, context: CommandContext, sourceDialect: CommandDialect, haptics: SeatHaptics): SeatConsole {
+    return new SeatConsole({ staged: true, seat: player.seat.id, dialect: sourceDialect, context, commands: this.commands, cvars: this.consoleCvars,
+      now: this.now, connected: () => true, clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); },
+      focus: focus => { input.setFocus(focus, this.now()); haptics.setActive(input.focused && focus.kind === "game"); },
+      chat: (text, team, target) => this.actions.execute(team ? "say_team" : "say", target === null ? [text] : [text, String(target)], player.seat.id) });
+  }
+  private bindSeatUiInput(input: SeatInput, seat: SeatId, console: () => SeatConsole | undefined): void {
+    this.uiCallbacks.set(input, (event, focus) => {
+      const ui = this.seatUi.get(seat);
+      if (event.kind === "key" && (event.code === 96 || event.code === 126)) {
+        if (event.down) { if (!event.repeat) ui?.closeMenus(); console()?.toggleFromKey(event.repeat); }
+        return true;
+      }
+      return (console()?.input(event, focus) ?? false) || (this.actions.clientInput?.(event) ?? false) || (ui?.input(event, focus) ?? false);
+    });
   }
 
   private constructor(staging: ReadonlySet<CvarRegistry> | null, private currentWindow: SdlWindow, players: readonly LocalPlayer[], readonly options: ApplicationOptions, readonly dialect: CommandDialect,
@@ -506,18 +518,9 @@ export class ApplicationInput {
       const input = retainedInput ?? new SeatInput({ seat: player.seat.id, dialect, context: seatContext, commands: this.commands,
         uiEvent: () => false });
       if (retainedInput === undefined || configuredSeat !== undefined && preparedSeat === undefined) freshInputs.add(input);
-      this.uiCallbacks.set(input, (event, focus) => {
-          const ui = this.seatUi.get(player.seat.id);
-          if (event.kind === "key" && (event.code === 96 || event.code === 126)) {
-            if (event.down) { if (!event.repeat) ui?.closeMenus(); localConsole?.console.toggleFromKey(event.repeat); }
-            return true;
-          }
-          return (localConsole?.console.input(event, focus) ?? false) || (actions.clientInput?.(event) ?? false) || (ui?.input(event, focus) ?? false);
-        });
-      const console = new SeatConsole({ staged: true, seat: player.seat.id, dialect: sourceDialect, context: seatContext, commands: this.commands, cvars: consoleCvars,
-        now, connected: () => true, clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, focus: focus => { input.setFocus(focus, now());
-          locals.find(local => local.player.seat.id.equals(player.seat.id))?.haptics.setActive(input.focused && focus.kind === "game"); },
-        chat: (text, team, target) => actions.execute(team ? "say_team" : "say", target === null ? [text] : [text, String(target)], player.seat.id) });
+      this.bindSeatUiInput(input, player.seat.id, () => localConsole?.console);
+      const haptics = this.createSeatHaptics(player);
+      const console = this.createSeatConsole(player, input, seatContext, sourceDialect, haptics);
       const preparedMouse = configuredSeat?.mouse ?? (staging === null && previous === undefined && preparedSeat?.mouse.cvars.dialect === sourceDialect ? preparedSeat.mouse : undefined);
       const mouseSettings = preparedMouse ?? owner?.inputSettings ?? new MouseSettings(new CvarRegistry({ dialect: sourceDialect, context: seatContext, print }));
       const mouseOrigin = mouseSettings.cvars.context.origin;
@@ -541,9 +544,7 @@ export class ApplicationInput {
         else if (staging !== null && preparedSeat !== undefined) this.candidateDefaults.set(player.seat.id, defaults);
         else for (const binding of this.startup?.bindings(player.seat.id, defaults) ?? defaults) input.bind(binding);
       }
-      localConsole = { player, input, console, builder, haptics: new SeatHaptics({ seat: player.seat.id,
-        controllers: { rumble: (instance, low, high, duration) => this.controllers.rumble(instance, low, high, duration) },
-        controller: seat => this.router.controllerFor(seat), load: request => this.hapticLoad(request), now }) };
+      localConsole = { player, input, console, builder, haptics };
       locals.push(localConsole);
     }
     for (const [index, local] of locals.entries()) {
@@ -694,8 +695,6 @@ export class ApplicationInput {
       if (command.kind === "console") this.commands.append(command.text, command.source);
       else command.dispatch(command.text, command.source);
     }
-    // All world commands are registered now; refresh the same process session's primer if this game's catalog differs.
-    if (actions.llm !== undefined) void primeLlmConsoleSession(this.commands, actions.llm).catch(() => undefined);
   }
 
   private retireCommands(): void {

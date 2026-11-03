@@ -8,6 +8,7 @@ import { launchSpike } from "../../../base/projectiles.ts";
 import { velocityAngles } from "../../../missionpacks/types.ts";
 import type { Q1AddonContext } from "../../context.ts";
 import { bossEnemy, bossLater, bossTarget, bossWorld, cross, oldnewPrefix, spawnBossTeledeath } from "./oldnew-projectiles.ts";
+import { qcCos } from "../../qc-math.ts";
 
 const largeHull = { min: { x: -32, y: -32, z: -24 }, max: { x: 32, y: 32, z: 64 } };
 function child(context: Q1AddonContext, owner: Q1Actor): Q1Actor { const entity = context.game.create("oldnew_child"); entity.owner = owner.actor.id; context.game.setOrigin(entity, context.game.body(owner).origin); return entity; }
@@ -16,7 +17,7 @@ export function spawnSpammer(context: Q1AddonContext, owner: Q1Actor): Q1Actor {
 }
 export function spawnSwiper(context: Q1AddonContext, owner: Q1Actor): Q1Actor {
   const { game } = context, entity = child(context, owner); entity.count = 0; game.setBody(entity, { angles: game.body(owner).angles });
-  game.sound(entity, "weapons/lstart.wav", "weapon"); context.setNumber(entity, "aflag", owner.number("aflag")); context.setNumber(owner, "aflag", 1 - owner.number("aflag")); bossLater(context, entity, "oldnew_swipe", 0.025); return entity;
+  game.sound(owner, "weapons/lstart.wav", "auto"); context.setNumber(entity, "aflag", owner.number("aflag")); context.setNumber(owner, "aflag", 1 - owner.number("aflag")); bossLater(context, entity, "oldnew_swipe", 0.025); return entity;
 }
 export function spawnEye(context: Q1AddonContext, owner: Q1Actor): Q1Actor {
   const { game } = context, entity = game.create("oldnew_eye"), origin = vadd(game.body(owner).origin, { x: 0, y: 0, z: 300 }); spawnTeleportFog(game, origin);
@@ -29,15 +30,15 @@ function armedEye(context: Q1AddonContext, owner: Q1Actor, offset: number): Q1Ac
   const { game } = context, entity = child(context, owner), basis = game.makeVectors(game.body(owner).angles);
   const origin = vadd(vadd(vadd(game.body(owner).origin, vscale(basis.right, offset * 300)), vscale(basis.up, 80)), vscale(basis.forward, 200));
   game.setBody(entity, { origin, bounds: largeHull }); entity.model = "progs/teleporter_eye.mdl"; entity.solid = "slidebox"; entity.movement = "step"; entity.movementFlags = 33;
-  entity.die = game.named.die(entity, oldnewPrefix + "eye_die"); spawnBossTeledeath(context, origin, entity); game.host.combat.setHealth(entity.actor, 120); entity.maxHealth = 120; entity.damageable = true; entity.aimedDamage = true;
+  entity.die = game.named.die(entity, oldnewPrefix + "eye_die"); entity.pain = game.named.pain(entity, oldnewPrefix + "armed_eye_pain"); spawnBossTeledeath(context, origin, entity); game.host.combat.setHealth(entity.actor, 120); entity.maxHealth = 120; entity.damageable = true; entity.aimedDamage = true;
   game.totalMonsters++; game.host.emit({ kind: "monster-total", total: game.totalMonsters }); game.setBody(entity, { angles: game.body(owner).angles }); spawnTeleportFog(game, origin); entity.effects = 64; game.link(entity); return entity;
 }
 export function spawnBlaster(context: Q1AddonContext, owner: Q1Actor): undefined {
-  for (const offset of [1, -1]) { const entity = armedEye(context, owner, offset); context.setNumber(entity, "aflag", offset); entity.count = 0; entity.damage = -offset; bossLater(context, entity, "blast", 2); } return undefined;
+  for (const offset of [1, -1]) { const entity = armedEye(context, owner, offset); context.setNumber(entity, "aflag", offset); entity.count = 0; entity.damage = -offset; entity.fields.set("oldnew.armedThink", "blast"); bossLater(context, entity, "blast", 2); } return undefined;
 }
 export function spawnVortex(context: Q1AddonContext, owner: Q1Actor): Q1Actor {
   const entity = armedEye(context, owner, owner.number("ammo_cells") !== 0 ? 1 : -1); context.setNumber(entity, "aflag", owner.number("ammo_cells") !== 0 ? 1 : -1);
-  context.setNumber(owner, "ammo_cells", 1 - owner.number("ammo_cells")); entity.count = 0; entity.references.set("enemy", bossEnemy(context, owner)); bossLater(context, entity, "vortex_think_alt", 2); return entity;
+  context.setNumber(owner, "ammo_cells", 1 - owner.number("ammo_cells")); entity.count = 0; entity.references.set("enemy", bossEnemy(context, owner)); entity.fields.set("oldnew.armedThink", "vortex_think_alt"); bossLater(context, entity, "vortex_think_alt", 2); return entity;
 }
 export function cleanupOldnew(context: Q1AddonContext): undefined {
   const { game } = context; for (const entity of game.entities.values()) if (entity.classname === "oldnew_child" || entity.classname === "oldnew_eye") bossLater(context, entity, "oldnew_cleanup_think", 0.1);
@@ -53,6 +54,11 @@ export function registerOldnewChildren(context: Q1AddonContext): undefined {
     context.services.emit({ kind: "colored-explosion", origin: game.body(entity).origin, colorStart: 244, colorLength: 3 }); return game.remove(entity);
   };
   game.named.register(oldnewPrefix + "eye_die", { die: (_game, entity, attacker) => eyeDie(entity, attacker) });
+  // T_Damage reacts through FoundTarget: a hit armed eye starts shooting 0.1 s later instead of finishing its warm-up.
+  game.named.register(oldnewPrefix + "armed_eye_pain", { pain: (_game, entity) => {
+    const think = entity.text("oldnew.armedThink");
+    return think !== "" && entity.nextThink - game.time > 0.1 ? bossLater(context, entity, think, 0.1) : undefined;
+  } });
   game.named.register(oldnewPrefix + "eye_pain", { pain: (_game, entity, attacker, take) => {
     const origin = game.body(entity).origin, delta = vsub(origin, attacker === null ? ZERO : game.host.bodies.read(attacker)?.origin ?? ZERO);
     const impulse = vscale(vadd(vscale(normalize({ ...delta, z: 0 }), 0.8), { x: 0, y: 0, z: 0.2 }), take * 10); return game.setBody(entity, { velocity: vadd(game.body(entity).velocity, impulse) });
@@ -71,7 +77,7 @@ export function registerOldnewChildren(context: Q1AddonContext): undefined {
   const blast = (entity: Q1Actor, name: string): undefined => {
     const enemy = bossEnemy(context, entity); if (enemy === null || !game.isPlayer(enemy)) entity.references.set("enemy", game.host.players()[0] ?? null);
     const body = game.body(entity), target = bossTarget(context, entity); let direction = normalize(vsub(target, body.origin));
-    direction = normalize(vadd(direction, vscale(cross(direction, { x: 0, y: 0, z: 1 }), Math.cos(entity.count * 15) * 0.5 * entity.number("aflag")))); game.setBody(entity, { angles: velocityAngles(direction) });
+    direction = normalize(vadd(direction, vscale(cross(direction, { x: 0, y: 0, z: 1 }), qcCos(entity.count * 15) * 0.5 * entity.number("aflag")))); game.setBody(entity, { angles: velocityAngles(direction) });
     const shot = launchSpike(game, entity.actor.id, vadd(body.origin, vscale(direction, 8)), direction); shot.touch = game.named.touch(shot, oldnewPrefix + "blast_touch"); shot.model = "progs/rogue/sphere.mdl"; shot.effects = 64;
     game.sound(entity, "weapons/spike2.wav", "weapon"); game.setBody(shot, { velocity: vscale(direction, 500), bounds: POINT }); shot.angularVelocity = vscale({ x: 300, y: 300, z: 300 }, game.host.random() * 2 - 1);
     bossLater(context, entity, name, 0.2); entity.count++; if (entity.count > 72) game.damage(entity.actor.id, bossWorld(context), bossWorld(context), 500); return undefined;
@@ -97,7 +103,8 @@ export function registerOldnewChildren(context: Q1AddonContext): undefined {
     if (game.entity(other) === game.world) {
       game.setBody(entity, { velocity: ZERO, angles: { x: 0, y: game.host.random() * 360, z: 0 } }); entity.movement = "none"; entity.solid = "none"; entity.model = "maps/bmodel/b_splash.bsp"; entity.touch = null; game.link(entity); return bossLater(context, entity, "spam1", 2);
     }
-    if (game.health(other) !== 0) game.damage(other, entity.owner ?? bossWorld(context), entity.actor.id, 10); return game.remove(entity);
+    if (game.health(other) !== 0) { game.damage(other, entity.owner ?? bossWorld(context), entity.actor.id, 10); return game.remove(entity); }
+    return undefined;
   } });
   game.named.register(oldnewPrefix + "spam1", { action: (_game, entity) => { const origin = game.body(entity).origin; context.services.emit({ kind: "lightning", actor: entity.actor.id, style: 1, start: origin, end: vadd(origin, { x: 0, y: 0, z: 500 }) }); return bossLater(context, entity, "spam2", 0.1); } });
   game.named.register(oldnewPrefix + "spam2", { action: (_game, entity) => { context.services.emit({ kind: "colored-explosion", origin: game.body(entity).origin, colorStart: 244, colorLength: 3 }); game.radiusDamage(entity.actor.id, entity.actor.id, 100, game.world?.actor.id ?? null, null); return game.remove(entity); } });

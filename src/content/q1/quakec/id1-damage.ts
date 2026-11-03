@@ -1,4 +1,4 @@
-import { id1ProgramBinding, type Id1ProgramBinding } from "./id1-program.ts";
+import { id1ProgramBinding, id1DamageMultiplier, type Id1ProgramBinding } from "./id1-program.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { ModQcArmorStage, ModQcDamageScale, ModSourceCall } from "../../../contracts/mod-callbacks.ts";
@@ -104,10 +104,19 @@ export class Id1DamageBinding {
       const sameReference = (actor: ActorId | null, captured: ActorId, reference: number): boolean => actor === null ? reference === 0 : actor.equals(captured);
       if (!request.target.equals(captured.target) || Math.fround(request.amount) !== captured.amount || !sameReference(request.attack.attacker, captured.attacker, sourceCall.attacker)
         || !sameReference(request.attack.inflictor, captured.inflictor, sourceCall.inflictor)) throw new QcProgramError("id1 damage provenance changed source arguments");
+      const owned = source.actors.sourceOf(captured.target);
+      if (projection !== undefined && (owned === null || owned.provider !== source.slots.options.provider)) {
+        // A foreign actor keeps its own health: its provider applies the damage, and the source function never runs on its borrowed row.
+        const multiplier = this.binding.attribution === "native" ? 1 : id1DamageMultiplier(vm, sourceCall.attacker, sourceCall.inflictor);
+        const foreign = authority.apply(multiplier === 1 ? request : { ...request, amount: Math.fround(request.amount * multiplier) });
+        projection.completed?.(request, foreign);
+        execute.skip([0, 0, 0]);
+        return undefined;
+      }
       let executed = false;
       const outcome = authority.apply(request, composed => authority.runSourceDamage(composed, (observer, effective) => {
         if (projection?.admit?.(effective) === false || !source.actors.isLive(effective.target)) return { appliedDamage: 0, reaction: "none" };
-        if (authority.damageOperation.active && (!isDeepStrictEqual(
+        if (layout.kind === "sites" && authority.damageOperation.active && (!isDeepStrictEqual(
           { knockback: request.knockback, direction: request.direction, point: request.point, normal: request.normal, delivery: request.delivery,
             attack: { ...request.attack, attacker: null, inflictor: null } },
           { knockback: effective.knockback, direction: effective.direction, point: effective.point, normal: effective.normal, delivery: effective.delivery,
@@ -212,8 +221,8 @@ export class Id1DamageBinding {
     if (reaction === undefined) return execute();
     if (vm.globals.int(vm.globalOffset("self")) !== frame.targetReference
       || call.functionIndex !== target.int(reaction === "death" ? this.die : this.pain)) return execute();
-    if ((target.float(this.health) <= 0) !== (reaction === "death")) throw new QcProgramError("Native damage reaction disagrees with target health");
-    if (!frame.healthWritten) throw new QcProgramError("Native damage reaction precedes target health mutation");
+    // A program whose reaction call does not follow a health write (zero-damage pain, custom state) is run without reporting it.
+    if ((target.float(this.health) <= 0) !== (reaction === "death") || !frame.healthWritten) return execute();
     frame.result = { ...frame.result, reaction };
     frame.observer.beforeReaction(frame.result);
     frame.reactionDepth++;
@@ -256,11 +265,9 @@ export class Id1DamageBinding {
     const native = layout.kind === "calls";
     const combatStore = [this.health, this.velocity, this.armorValue, this.armorType, this.items].includes(store.word);
     if (native && frame.reactionDepth > 0) return undefined;
-    if (native && combatStore && store.reference !== frame.targetReference)
-      throw new QcProgramError("Unsupported native damage redirects a combat store to another actor");
     if (store.reference !== frame.targetReference) return undefined;
-    if (native && combatStore && frame.result.reaction !== "none")
-      throw new QcProgramError("Native damage combat store follows its reaction continuation");
+    // Stores after the reaction continuation are observation-only: they already ran in the VM and are not reported to the authority.
+    if (native && combatStore && frame.result.reaction !== "none") return undefined;
     if (!native && store.functionIndex !== this.binding.damage.index) return undefined;
     const vm = this.vm(), before = new DataView(store.before.buffer, store.before.byteOffset, store.before.byteLength), after = new DataView(store.after.buffer, store.after.byteOffset, store.after.byteLength);
     if (store.word === this.health) {

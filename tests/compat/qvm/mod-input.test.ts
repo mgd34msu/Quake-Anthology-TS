@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
 import { digestBytes } from "../../../src/content/mounts/index.ts";
-import { QvmModule, QvmOpcode, rejectQvmSyscall, resolveQvmArtifact } from "../../../src/compat/qvm/index.ts";
+import { QvmModule } from "../../../src/compat/qvm/module.ts";
+import { QvmOpcode } from "../../../src/compat/qvm/image.ts";
+import { rejectQvmSyscall } from "../../../src/compat/qvm/syscalls.ts";
+import { resolveQvmArtifact } from "../../../src/compat/qvm/artifacts.ts";
 import { QvmModInput } from "../../../src/compat/qvm/mod-input.ts";
 import { readQvmPlayerState } from "../../../src/compat/qvm/player-record.ts";
 import { writeQvmUserCommand } from "../../../src/compat/qvm/client-state-record.ts";

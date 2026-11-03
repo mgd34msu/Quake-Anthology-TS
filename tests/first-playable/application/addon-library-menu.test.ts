@@ -1,15 +1,16 @@
 import { expect, spyOn, test } from "bun:test";
 import { testCorpusRoot } from "../../support/corpus.ts";
 
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { copyFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { StartupApplication } from "../../../src/app/bootstrap/startup.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.ts";
 import { NativeUiController } from "../../../src/ui/common/controller.ts";
-import { KeyCode } from "../../../src/input/key-codes.ts";
+import { KeyCode } from "../../../src/core/key-codes.ts";
 import { encodePng } from "../../../src/formats/images/png-encoder.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 async function until(read:()=>boolean,label:string,step:()=>Promise<void>,milliseconds=45000):Promise<void>{
   const deadline=performance.now()+milliseconds;
@@ -18,7 +19,7 @@ async function until(read:()=>boolean,label:string,step:()=>Promise<void>,millis
 test.skipIf(process.env["QUAKE_ADDON_ASSETS"] === undefined || process.env["QUAKE_ADDON_OUTPUT"] === undefined)("public add-on library installs cached authored package, launches GL world, returns Main and shows Q3 tiers",async()=>{
   const assets=process.env["QUAKE_ADDON_ASSETS"],output=process.env["QUAKE_ADDON_OUTPUT"];
   if(assets===undefined||output===undefined)throw new Error("Use the isolated T02 runner");
-  const directory=await mkdtemp(join(tmpdir(),"addon-public-"));
+  const directory=await tempDirectory("addon-public-");
   const user=join(directory,"content");await mkdir(join(user,".addons"),{recursive:true});
   const digest="4108605842870e051b71be0721da4be004b22765dd4ba2bb0fc2e6769a55a17f";
   await copyFile(join(assets,digest+".zip"),join(user,".addons",digest+".zip"));

@@ -1,7 +1,7 @@
 import { blockChecksum } from '../../../src/core/md4.ts';
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
-import { test, expect } from 'bun:test';
+import { expect } from "bun:test";
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +10,7 @@ import { remoteContentSelection } from '../../../src/content/catalog/index.ts';
 import { Q2DownloadReceiver } from '../../../src/app/bootstrap/network/q2-downloads.ts';
 import { EntityStateT } from '../../../src/network/q2/state.ts';
 import type { Q2ApplicationGameState } from '../../../src/app/bootstrap/network/types.ts';
+const test = corpusTest("q2/baseq2/pak0.pak");
 
 test('Q2 cancellation drains the outstanding native block before retry and reports staged bytes', async () => {
   const root=await mkdtemp(join(tmpdir(),'q2-controls-'));

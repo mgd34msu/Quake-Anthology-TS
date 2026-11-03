@@ -60,6 +60,11 @@ export class MvdBroadcast {
         if (this.closed || this.viewers.size >= (this.options.maxViewers ?? 16)) { socket.destroy(); return; }
         const viewer: Viewer = { socket, stream: new GtvServerStream(), frames: new MvdMessageFramer(true, 256), queue: Promise.resolve(), queuedBytes: 0, identified: false, authorized: false, active: false, needsGamestate: true, flags: 0, closed: false, sequence: 0 };
         this.viewers.add(viewer); socket.setTimeout(90000); socket.setNoDelay(true);
+        // An unauthenticated connection holds a viewer slot, so it gets a short deadline and a per-address cap.
+        const sameHost = [...this.viewers].filter(other => other.socket.remoteAddress === socket.remoteAddress).length;
+        if (sameHost > 4) { this.retire(viewer); return; }
+        const deadline = setTimeout(() => { if (!viewer.authorized) this.retire(viewer); }, 10000);
+        deadline.unref(); socket.once('close', () => { clearTimeout(deadline); });
         socket.on('error', () => { this.retire(viewer); }); socket.on('timeout', () => { this.retire(viewer); }); socket.on('close', () => { this.retire(viewer); });
         socket.on('data', (bytes: Uint8Array) => {
             try {

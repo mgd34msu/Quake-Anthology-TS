@@ -1,5 +1,5 @@
-import { expect, spyOn, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect, spyOn } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../../support/corpus.ts";
 
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -7,6 +7,7 @@ import { createQ3ApplicationServerHost } from "../../../src/app/bootstrap/simula
 import { SharedSimulation } from "../../../src/app/bootstrap/simulation/runtime.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { EngineSession } from "../../../src/world/session/session.ts";
+const test = corpusTest("q3a/baseq3/pak0.pk3");
 
 test("native round admission returns source denial but preserves connect, begin and cleanup failures", async () => {
   const launch = parseApplicationCommand(["--content-root", `${testCorpusRoot()}`, "--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3", "--dedicated", "--mode", "deathmatch"]);

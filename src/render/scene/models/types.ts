@@ -1,4 +1,4 @@
-import type { SceneModelGroup, SourceEntityOrder, SourceSceneOrder } from "../submissions.ts";
+import type { SceneModelGroup, SceneShadowGroup, SourceEntityOrder, SourceSceneOrder } from "../submissions.ts";
 /* Model submission adapted from Q1 r_alias/r_sprite, Q2 gl_mesh and Q3 tr_mesh.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds, Plane, Vec2, Vec3, Vec4 } from "../../../contracts/math.ts";
@@ -110,7 +110,7 @@ export interface PreparedModelEntity {
 }
 
 export interface ModelGroupContext {
-  draw(surface: PreparedModelSurface): readonly SceneModelGroup[];
+  draw(surface: PreparedModelSurface, personalModel: boolean): readonly (SceneModelGroup | SceneShadowGroup)[];
 }
 
 export function modelImage(selection: Extract<ModelImageSelection, { readonly kind: "indexed" }>,

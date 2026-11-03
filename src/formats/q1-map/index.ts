@@ -85,11 +85,14 @@ export function readQ1Bsp(data: Uint8Array, options: Q1MapOptions = {}): Q1Map {
   const layout = format === "quake64" ? "bsp29" : format;
   const directory = reader.section(4, 120);
   const lumps: Q1Lump[] = [];
+  // One owned copy backs every lump, lighting and visibility as views instead of a copy per consumer.
+  const owned = new Uint8Array(data);
   for (const name of lumpNames) {
     const offset = directory.i32();
     const length = directory.i32();
     if (length > 0 && offset < 124) throw new BinaryError(source, offset, `${name} overlaps BSP header`);
-    lumps.push({ name, offset, length, data: reader.section(offset, length).bytes(length) });
+    reader.section(offset, length);
+    lumps.push({ name, offset, length, data: owned.subarray(offset, offset + length) });
   }
   const lump = (name: Q1LumpName): BinaryReader => {
     const entry = lumps.find((item) => item.name === name);
@@ -110,10 +113,13 @@ export function readQ1Bsp(data: Uint8Array, options: Q1MapOptions = {}): Q1Map {
   const embeddedEntities = lump("entities");
   const entityReader = options.entities === undefined ? embeddedEntities : new BinaryReader(options.entities, `${source}:.ent`);
   const entities = entityReader.fixedByteString(entityReader.length);
-  const lightReader = lump("lighting");
-  const storedLighting = lightReader.bytes(lightReader.remaining);
+  const lumpData = (name: Q1LumpName): Uint8Array => {
+    const entry = lumps.find((item) => item.name === name);
+    if (entry === undefined) throw new Error(`Missing required BSP directory entry ${name}`);
+    return entry.data;
+  };
+  const storedLighting = lumpData("lighting");
   const monochromeLighting = format === "quake64" ? new Uint8Array() : storedLighting;
-  const visibilityReader = lump("visibility");
   const map: Q1Map = {
     kind: "q1-bsp", format, source, version, lumps, bspx, bspxMetadata,
     extensions: bspx.map((entry) => ({ name: entry.name, bytes: entry.data })),
@@ -124,7 +130,7 @@ export function readQ1Bsp(data: Uint8Array, options: Q1MapOptions = {}): Q1Map {
     edges: readEdges(lump("edges"), layout), clipnodes: readClipnodes(lump("clipnodes"), layout),
     surfaceEdges: records(lump("surfaceEdges"), 4, (r) => r.i32()),
     leafFaces: records(lump("leafFaces"), layout === "bsp29" ? 2 : 4, (r) => layout === "bsp29" ? r.u16() : r.u32()),
-    visibility: visibilityReader.bytes(visibilityReader.remaining), monochromeLighting,
+    visibility: lumpData("visibility"), monochromeLighting,
     lighting: selectLighting(monochromeLighting, bspxMetadata.rgbLighting, options.lit, format === "quake64" ? storedLighting : undefined),
     decoupledLightmaps: readDecoupledLightmaps(bspxData(bspx, "DECOUPLED_LM"), faces.length),
     brushList: readBrushList(bspxData(bspx, "BRUSHLIST"), models.length),
@@ -173,6 +179,31 @@ function validateReferences(map: Q1Map): void {
       } else if (hull < 3 && headnode >= 0 && (map.clipnodes.length > 0 || map.brushList === null)) {
         index(headnode, map.clipnodes.length, `${source}:model clip headnode`);
       }
+    }
+  }
+  const drawingRoots: number[] = [], clipRoots: number[] = [];
+  for (const model of map.models) for (const [hull, headnode] of model.headnodes.entries()) {
+    if (headnode < 0 || hull > 2) continue;
+    if (hull === 0) drawingRoots.push(headnode); else if (map.clipnodes.length > 0) clipRoots.push(headnode);
+  }
+  requireAcyclic(drawingRoots, number => map.nodes[number]?.children.flatMap(child => child.kind === "node" ? [child.index] : []) ?? [], `${source}:drawing nodes`);
+  requireAcyclic(clipRoots, number => map.clipnodes[number]?.children.flatMap(child => child.kind === "clipnode" ? [child.index] : []) ?? [], `${source}:clipnodes`);
+}
+
+/** Hull walks recurse to the node count at most, so a cycle must fail at load rather than in a trace. */
+function requireAcyclic(roots: readonly number[], successors: (node: number) => readonly number[], source: string): void {
+  const complete = new Set<number>(), active = new Set<number>();
+  for (const root of roots) {
+    const pending: { node: number; leaving: boolean }[] = [{ node: root, leaving: false }];
+    while (pending.length > 0) {
+      const item = pending.pop();
+      if (item === undefined) continue;
+      if (item.leaving) { active.delete(item.node); complete.add(item.node); continue; }
+      if (active.has(item.node)) throw new BinaryError(source, 0, "cycle in BSP nodes");
+      if (complete.has(item.node)) continue;
+      active.add(item.node);
+      pending.push({ node: item.node, leaving: true });
+      for (const next of successors(item.node)) pending.push({ node: next, leaving: false });
     }
   }
 }

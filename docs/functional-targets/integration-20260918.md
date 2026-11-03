@@ -1,5 +1,7 @@
 # September 18 integration evidence
 
+> **Dated record, not current status.** Integration evidence from 2026-09-18. T12 is no longer reopened, and the claim that VCR/journal ownership is joined was wrong (audit DOCS2-001). The maintained status is [status.md](../status.md). Where this page disagrees with it or with the code, trust those. 
+
 Later scope clarification, September 22: the project owner accepted the replaceable ranking backend as the sole permitted placeholder. T19 is now accepted under that requirement; references below to its original external blocker are historical. [Current contract](../ranking-services.md).
 
 This record reconciles the original functional targets with actual production callers. It records source implementation and bounded execution separately from executable delivery, full playthroughs, physical audio, native peers, and overall frame rate.
@@ -15,21 +17,21 @@ This record reconciles the original functional targets with actual production ca
 | T17 | Source pickup preferences, authored default-binding reset, mounted libraries, progression, HUD, and postgame controls have public consumers. Reset uses the selected product and preserves per-seat ownership. Opaque source modules retain control of their own pickup policy. |
 | T18 | Per-seat language is archived and reaches live localized text, prompts, sound captions, and media captions. Existing glyph fallback, accessibility, and independent scale controls retain their consumers. |
 | T19 | Durable progress browsing, Q2 match records, authored arena progress, Team Arena demo lookup/play, and Q3 ranking reports/account controls are implemented. The retained client now owns prepared lobby rooms, readiness, actual launch, return, and next-session state. Native classic reports follow authenticated module command provenance; rerelease reports use explicit public intermission fields. Original GRank SDK transport and service compatibility remain unavailable in this client. |
-| T20 | Public recording/replay, source libraries, MVD/GTV, KEX recorded views, server recording, VCR/journal ownership, and ordered shutdown have consumers. Actual public record/stop/replay preserved seat/client/session identity and returned to the frontend at EOF. |
+| T20 | Public recording/replay, source libraries, MVD/GTV, KEX recorded views, server recording, and ordered shutdown have consumers. (VCR/journal ownership was listed here and is not implemented; audit DOCS2-001.) Actual public record/stop/replay preserved seat/client/session identity and returned to the frontend at EOF. |
 | T21 | Fullscreen stills, cinematic decoding/audio/captions, Q2 campaign transitions, Q3 system cinematics, and shader video maps have consumers. Actual OGV decoding and public campaign skip/EOF checks remain the bounded evidence. |
 | T22 | Source capture clocks, screenshots/readback, camera/view handling, and diagnostics reach their public owners. Remote capture now shares the source capture clock. Public replay produced an inspected complete rendered frame. |
 | T23 | Provider selection, model/effort choices, callback flow, cancellation, command documentation, and validated execution have consumers. Existing-account public ask/exec passed. A fresh real-provider sign-in remains manual validation. |
 
 ## Actual mod and save workflows
 
-- [Public QVM homing](../../.artifacts/resume-20260918/public-qvm-homing/receipt.json): original authored Q3 homing code attached to a Q2 rocket, public save/load, and matching resumed trajectory through retirement. The package retains author sources and build provenance.
-- [Public native rocket component](../../.artifacts/resume-20260918/public-native-rocket2/RESULT.md): actual native Q2Eaks Faster rockets attached to a Q3 rocket, private source state, and saved continuation.
-- [Public external native declaration](../../.artifacts/resume-20260918/public-native-declaration/receipt.json): public `declare-native` installation of a distinct authored profile, actual Q2Eaks trajectory on a Q3 launcher, exact declaration retention, and matching public save/load continuation. The 58.236-second source workflow retained 2,582 unchanged inputs.
-- [Native rerelease restore](../../.artifacts/resume-20260918/t13-rr-continuation/receipt.json): exact saved source position and resumed movement/fire. Opening took 155.206 seconds; this remains slow.
-- [Original Q1 saves](../../.artifacts/resume-20260918/public-original-save/receipt.json): v5 and v6 public export/import, exact restored position, and 500 ms of fresh movement per format. This was same-process restoration.
-- [Native bot saves](../../.artifacts/resume-20260918/public-original-save/native-bot-receipt.json): Q1 rerelease, Q2 rerelease, and Q1 with Q2 movement/Q3 character, with exact saved decision/state continuation in fresh simulations.
-- [Public demo ownership](../../.artifacts/resume-20260918/public-demo-owner/receipt.md): recorded 11,041 bytes, replayed 19 advancing source frames, matched final camera/position, inspected CPU-rendered output, and preserved the retained client through EOF.
-- [Public lobby ownership](../../.artifacts/resume-20260918/public-lobby-owner/receipt.md): keyboard room creation and readiness, actual listening host, retained membership/client/seat on return, a second match generation, and explicit leave/teardown. This uses the local service, not a retail platform lobby.
+- Public QVM homing (evidence file not retained): original authored Q3 homing code attached to a Q2 rocket, public save/load, and matching resumed trajectory through retirement. The package retains author sources and build provenance.
+- Public native rocket component (evidence file not retained): actual native Q2Eaks Faster rockets attached to a Q3 rocket, private source state, and saved continuation.
+- Public external native declaration (evidence file not retained): public `declare-native` installation of a distinct authored profile, actual Q2Eaks trajectory on a Q3 launcher, exact declaration retention, and matching public save/load continuation. The 58.236-second source workflow retained 2,582 unchanged inputs.
+- Native rerelease restore (evidence file not retained): exact saved source position and resumed movement/fire. Opening took 155.206 seconds; this remains slow.
+- Original Q1 saves (evidence file not retained): v5 and v6 public export/import, exact restored position, and 500 ms of fresh movement per format. This was same-process restoration.
+- Native bot saves (evidence file not retained): Q1 rerelease, Q2 rerelease, and Q1 with Q2 movement/Q3 character, with exact saved decision/state continuation in fresh simulations.
+- Public demo ownership (evidence file not retained): recorded 11,041 bytes, replayed 19 advancing source frames, matched final camera/position, inspected CPU-rendered output, and preserved the retained client through EOF.
+- Public lobby ownership (evidence file not retained): keyboard room creation and readiness, actual listening host, retained membership/client/seat on return, a second match generation, and explicit leave/teardown. This uses the local service, not a retail platform lobby.
 
 These cases do not establish automatic extraction of arbitrary mod semantics. Exact source artifacts and declared private layouts remain necessary where the original module has no standard component interface. Community maps use their original BSP or full PK3 and companion files; loading checks are not full-map playthroughs.
 
@@ -41,7 +43,7 @@ Shadow-only preparation skips unused color computation while retaining geometry,
 
 The native interpreter classifies canonical addresses with exact range comparisons rather than a BigInt shift on every check. Complete CPU-state/fault parity passed. The later paired interpreter samples improved by 9.1% and 9.3%. None of these component results establishes a whole-game FPS or native-load-time improvement.
 
-Evidence: [MD5 cache](../../.artifacts/resume-20260918/md5-frame-pose-indexed), [shadow preparation](../../.artifacts/resume-20260918/shadow-color-skip2/RESULT.md), [address classification](../../.artifacts/resume-20260918/canonical-address-range/RESULT.md).
+Evidence: MD5 cache (evidence file not retained), shadow preparation (evidence file not retained), address classification (evidence file not retained).
 
 ## Remaining T19 service boundary
 
@@ -49,12 +51,12 @@ The original Quake III server calls external GRank SDK functions for login, matc
 
 ## Latest executable delivery
 
-The current executable includes the accepted native declarations, movement normalization, qualified model/GL/native-memory optimizations, exact-envelope collision reuse, and the projectile picker across all supported providers. Build/source guards and `--help` passed; no gameplay run of this exact delivery is claimed. See [execution status](../execution-status.md#installed-executable-and-recent-fixes) for its identity and the preceding executable's direct QuakeWorld-movement workflow. The [GL pixel/depth check](../../.artifacts/resume-20260918/gl-layout-native/RESULT.md) and [native scalar-store workflow](../../.artifacts/resume-20260918/scalar-store-native/receipt.json) remain separate source qualifications.
+The current executable includes the accepted native declarations, movement normalization, qualified model/GL/native-memory optimizations, exact-envelope collision reuse, and the projectile picker across all supported providers. Build/source guards and `--help` passed; no gameplay run of this exact delivery is claimed. See [execution status](../execution-status.md#installed-executable-and-recent-fixes) for its identity and the preceding executable's direct QuakeWorld-movement workflow. The GL pixel/depth check (evidence file not retained) and native scalar-store workflow (evidence file not retained) remain separate source qualifications.
 
-The earlier `065259c` executable passed the [bounded mixed-game GL follow-up](../../.artifacts/resume-20260918/compiled-mixed-065259c/RESULT.md): complete Custom summary, two five-second control segments, an inspected visible scene, menu return and normal Quit. Source/assets/binary guards passed and processes were reaped. This is separate from the source native component save/load proof; it does not claim every model replacement, physical audio, whole campaigns, or improved desktop FPS.
+The earlier `065259c` executable passed the bounded mixed-game GL follow-up (evidence file not retained): complete Custom summary, two five-second control segments, an inspected visible scene, menu return and normal Quit. Source/assets/binary guards passed and processes were reaped. This is separate from the source native component save/load proof; it does not claim every model replacement, physical audio, whole campaigns, or improved desktop FPS.
 
 ## Projectile behavior picker correction
 
 The Custom game projectile picker previously filtered discovery to Q1 products, despite the shared discovery service supporting declared QVM and native rerelease components. It now enumerates every installed provider. Existing declaration validation, disabled-choice reasons, and selection rejection remain in use. A focused installed-content check selected QC, QVM, and rerelease-native entries, rejected an unavailable choice, and preserved selection through a second `prepareMaps()` call (1 test, 13 assertions). The check is explicitly opt-in because it requires the installed example mod declarations.
 
-The final two menu paths passed strict TypeScript and scoped policy checks with 1,951 loaded files and 2,578 unchanged input guards. [Source and retained check](../../.artifacts/resume-20260918/behavior-menu-all-providers/README.md). This correction and exact-envelope collision reuse are included in the current executable; exact identity and delivery limits are recorded in [execution status](../execution-status.md#installed-executable-and-recent-fixes).
+The final two menu paths passed strict TypeScript and scoped policy checks with 1,951 loaded files and 2,578 unchanged input guards. Source and retained check (evidence file not retained). This correction and exact-envelope collision reuse are included in the current executable; exact identity and delivery limits are recorded in [execution status](../execution-status.md#installed-executable-and-recent-fixes).

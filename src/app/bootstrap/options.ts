@@ -11,6 +11,7 @@ import { normalizeResourcePath } from "../../content/mounts/paths.ts";
 import type { ApplicationNetworkTransport } from "./network/transport.ts";
 
 export interface ApplicationOptions {
+  readonly trustedNetworksOnly?: boolean;
   readonly networkTransport?: ApplicationNetworkTransport;
   readonly q3MapLaunch?: import("./q3-map-command.ts").Q3MapLaunch;
   readonly q3Product?: import("../../core/q3-product-policy.ts").Q3ApplicationProduct;
@@ -56,6 +57,8 @@ export interface ApplicationOptions {
   readonly seed: number;
   readonly frameLimit: number | null;
   readonly hidden: boolean;
+  /** `load` of a path outside the save directory is otherwise accepted only from the local console. */
+  readonly allowLoadPaths?: boolean;
   readonly network: { readonly kind: "offline" } | { readonly kind: "native-server" | "q2-server" | "unified-server"; readonly host: string; readonly port: number }
     | { readonly kind: "q1-client" | "qw-client" | "q2-client" | "q3-client" | "unified-client"; readonly remote: string };
 }
@@ -107,6 +110,7 @@ Usage: bun run src/main.ts [options]
   --q1-protocol 15|666|999    NetQuake host protocol (default 15; RMQ flags 130)
   --listen-q2 PORT           Host the native Quake II source protocol
   --bind ADDRESS             Server IP (default 0.0.0.0)
+  --lan-only                 NetQuake and Quake II KEX LAN hosts ignore non-private peers
   --connect-q1 ADDRESS       Join a native Quake server (id1, protocols 15/666/999)
   --connect-qw ADDRESS       Join a base QuakeWorld protocol 28 server
   --connect-q3 ADDRESS       Join a baseq3 protocol 68 server (sv_pure 0)
@@ -117,10 +121,11 @@ Usage: bun run src/main.ts [options]
   --seed N                   Gameplay random seed
   --frames N                 Close after N simulation steps
   --hidden                   Start a hidden native window
+  --allow-load-paths         Let scripts, game modules and remote clients load a save from outside the save directory
   --list-content             Show installed games and expansions
   --version                  Show the application version
   weapon-behavior --help     Inspect and author mounted source behavior declarations
-  --help                     Show these options
+  -h, --help                 Show these options
 `;
 
 function integer(value: string, label: string, minimum: number, maximum: number): number {
@@ -166,15 +171,18 @@ export function parseApplicationCommand(argv: readonly string[], search: Content
     if (flag !== undefined && !["--content-root", "--steam", "--user-content-root", "--renderer", "--render-worker", "--gamma", "--width", "--height", "--hidden", "--list-content"].includes(flag)) explicitLaunch = true;
     if (flag === "--help" || flag === "-h") return { kind: "help" };
     if (flag === "--version") return { kind: "version" };
+    if (flag === "--lan-only") { options = { ...options, trustedNetworksOnly: true }; continue; }
     if (flag === "--dedicated") { options = { ...options, dedicated: true }; continue; }
     if (flag === "--hidden") { options = { ...options, hidden: true }; continue; }
+    if (flag === "--allow-load-paths") { options = { ...options, allowLoadPaths: true }; continue; }
     if (flag === "--list-content") { list = true; continue; }
     if (flag === "--ipx-native") {
       if (options.networkTransport !== undefined) throw new Error("Choose one IPX transport");
       options = { ...options, networkTransport: { kind: "ipx-native" } }; continue;
     }
     const value = argv[++index];
-    if (value === undefined) throw new Error(`Missing value for ${flag}`);
+    // A flag swallowing the next flag as its value would silently disable what the user asked for.
+    if (value === undefined || value.startsWith("--")) throw new Error(`Missing value for ${flag}`);
     switch (flag) {
       case "--ipx-dosbox":
         if (options.networkTransport !== undefined) throw new Error("Choose one IPX transport");
@@ -261,7 +269,9 @@ export function parseApplicationCommand(argv: readonly string[], search: Content
       case "--connect-qw": case "--connect-q1": case "--connect-q2": case "--connect-q3": case "--connect-unified":
         if (remote !== null) throw new Error("Choose one remote connection");
         remoteKind = flag === "--connect-unified" ? "unified-client" : flag === "--connect-qw" ? "qw-client" : flag === "--connect-q1" ? "q1-client" : flag === "--connect-q3" ? "q3-client" : "q2-client"; remote = value; break;
-      case "--bind": bind = value; break;
+      case "--bind":
+        if (!/^[A-Za-z0-9._:[\]-]+$/.test(value)) throw new Error(`Invalid bind address: ${value}`);
+        bind = value; break;
       case "--skill": {
         const skill = integer(value, flag, 0, 3);
         if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new RangeError("Invalid skill");
@@ -291,7 +301,8 @@ export function parseApplicationCommand(argv: readonly string[], search: Content
   if (listen !== null) options = { ...options, network: { kind: listenKind, host: bind, port: listen } };
   else if (bind !== "0.0.0.0") throw new Error("--bind requires --listen, --listen-q2 or --listen-unified");
   if (remote !== null) {
-    if (options.botSkill !== undefined) throw new Error("--bot-skill is not a native Quake II client setting");
+    if (options.dedicated) throw new Error("A dedicated server cannot connect to a remote server");
+    if (options.botSkill !== undefined) throw new Error("--bot-skill sets bot difficulty on the host and cannot be used when joining a server");
     options = { ...options, network: { kind: remoteKind, remote } };
   }
   if (options.networkTransport !== undefined && (options.network.kind === "unified-server" || options.network.kind === "unified-client")) throw new Error("Unified networking uses UDP; IPX applies to native game protocols");
@@ -301,6 +312,8 @@ export function parseApplicationCommand(argv: readonly string[], search: Content
   if (options.q2Protocol !== undefined && options.network.kind !== "q2-client" && options.network.kind !== "q2-server" && options.network.kind !== "native-server") throw new Error("--q2-protocol requires --connect-q2, --listen-q2 or --listen");
   if (options.q1Protocol !== undefined && options.network.kind !== "native-server") throw new Error("--q1-protocol requires --listen for a Quake I host");
   if (options.q1Protocol !== undefined && options.product === "q1-quakeworld") throw new Error("--q1-protocol selects NetQuake; QuakeWorld uses native protocol 28");
+  if (options.explicitRules?.mode === true && options.mode === "singleplayer" && (options.seats > 1 || options.network.kind !== "offline"))
+    throw new Error("--mode singleplayer conflicts with --seats above 1 and with network options");
   if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: (options.network.kind === "native-server" || options.network.kind === "unified-server") && (options.product.startsWith("q3-") || options.product === "q1-quakeworld") ? "deathmatch" : "coop" };
   if (options.seats > 1 && options.mode === "singleplayer") options = { ...options, mode: "coop" };
   // CTF, LMCTF, Tag and DeathBall are PvP modes of their own, not deathmatch

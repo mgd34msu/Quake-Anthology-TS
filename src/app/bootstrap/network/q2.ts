@@ -14,12 +14,17 @@ import type { ActorCommand, SimulationOutput } from '../../../contracts/session.
 import type { WireSelection } from '../../../network/common/session.ts';
 import type { NetworkAddress } from '../../../network/common/endpoint.ts';
 import { addressKey, sameAddress } from '../../../network/common/endpoint.ts';
+import { ConnectionlessGate } from '../../../network/services/admin.ts';
+import { printablePeerText } from '../../../network/common/diagnostics.ts';
+import { MovementBudget } from '../../../network/common/movement-budget.ts';
 import { tokenizeCommand } from '../../../core/commands/text.ts';
+import { quakeWorldInfo } from '../../../network/q1/handshake.ts';
+import { nativeAtoi } from '../../../core/numeric.ts';
 import { Q2Channel, Q2ChallengeTable, Q2ClientHandshake, Q2CommandReplay, Q2WireCodec, UsercmdT, encodeQ2ClientControl, encodeQ2Frame, encodeQ2Move, encodeQ2ServerEvent, q2OutOfBand, readQ2ClientMessages, readQ2Connect, readQ2OutOfBand } from '../../../network/q2/index.ts';
 import type { Q2ChannelReceive, Q2ServerWriteEvent, Q2WireFrame } from '../../../network/q2/index.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase, Q2ApplicationGameState, Q2ApplicationPlayer, Q2ApplicationServerHost, Q2ClientNetworkOptions, Q2ServerNetworkOptions } from './types.ts';
-import { Q2PeerDownload } from './q2-downloads.ts';
+import { Q2PeerDownload, Q2ServerDropError } from './q2-downloads.ts';
 import { MasterHeartbeat } from '../../../network/services/discovery.ts';
 import { q2InfoText, q2StatusText, q2DiscoveryWire, handleQ2Rcon } from '../../../network/q2/connectionless.ts';
 function integer(text: string | undefined): number {
@@ -39,6 +44,9 @@ function joinPackets(packets: readonly Uint8Array[]): Uint8Array {
     }
     return bytes;
 }
+const MAX_PEERS_PER_ADDRESS = 8;
+const RATE_MESSAGES = 10;
+const MAX_MSGLEN = 1400;
 interface ServerSplit { player: Q2ApplicationPlayer; replay: Q2CommandReplay; sequence: number; }
 interface ServerPeer<TAddress extends NetworkAddress> {
     readonly download: Q2PeerDownload;
@@ -49,6 +57,7 @@ interface ServerPeer<TAddress extends NetworkAddress> {
     readonly channel: Q2Channel;
     readonly wire: Q2WireCodec;
     replay: Q2CommandReplay;
+    readonly budget: MovementBudget;
     readonly frames: Map<number, Q2WireFrame>;
     gameState: Q2ApplicationGameState | null;
     active: boolean;
@@ -56,6 +65,9 @@ interface ServerPeer<TAddress extends NetworkAddress> {
     lastReceived: number;
     datagram: Uint8Array[];
     userinfo: string;
+    /** sv_send.c message_size[RATE_MESSAGES] and surpressCount. */
+    readonly rateSizes: number[];
+    suppressed: number;
 }
 /** Native packet work surrounds the application's simulation step; it owns no game clock. */
 export class Q2ServerNetwork<TAddress extends NetworkAddress> implements ApplicationNetwork {
@@ -132,13 +144,14 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
     private readonly lan: KexLanTransport<TAddress> | null;
     private readonly masterHeartbeat: MasterHeartbeat;
     private ended = false;
+    private readonly gate = new ConnectionlessGate();
     private readonly peers = new Map<string, ServerPeer<TAddress>>();
     private readonly challenges: Q2ChallengeTable;
     private pending: ActorCommand[] = [];
     private host: Q2ApplicationServerHost;
     private serverGeneration = 1;
     constructor(readonly options: Q2ServerNetworkOptions<TAddress>) {
-        this.lan = options.host.protocol.kind === 'q2-kex' ? new KexLanTransport(options.transport, { role: 'host', localPlayers: 0, maxPlayers: options.host.maxClients, name: 'Quake II' }) : null;
+        this.lan = options.host.protocol.kind === 'q2-kex' ? new KexLanTransport(options.transport, { role: 'host', localPlayers: 0, maxPlayers: options.host.maxClients, name: 'Quake II', ...(options.trustedNetworksOnly === true ? { trustedNetworksOnly: true } : {}) }) : null;
         this.transport = this.lan ?? options.transport;
         this.masterHeartbeat = new MasterHeartbeat(q2DiscoveryWire(options.host.protocol, () => { const discovery = this.host.discovery; if (discovery === undefined) throw new Error('Q2 master publication requires source status'); return discovery.status(); }), this.transport);
         this.host = options.host;
@@ -202,6 +215,8 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         const message = readQ2OutOfBand(bytes, this.host.protocol.kind === 'q2-kex');
         if (message === null)
             return false;
+        if (!this.gate.allow(remote, now))
+            return true;
         switch (message.command) {
             case 'rcon': {
                 const administration = this.host.administration;
@@ -231,13 +246,17 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                     this.reply(remote, 'print\nUnsupported protocol.\n');
                     break;
                 }
-                if (!(request.protocol.kind === 'q2-kex' ? this.lan?.admitted(remote) === true : this.challenges.validate(remote, request.challenge))) {
+                if (!(request.protocol.kind === 'q2-kex' ? this.lan?.admitted(remote) === true : this.challenges.validate(remote, request.challenge, now))) {
                     this.reply(remote, 'print\nBad challenge.\n');
                     break;
                 }
                 const existing = this.peers.get(addressKey(remote));
                 if (existing !== undefined) {
                     this.acceptConnection(remote);
+                    break;
+                }
+                if ([...this.peers.values()].filter(peer => sameAddress(peer.remote, remote, false)).length >= MAX_PEERS_PER_ADDRESS) {
+                    this.reply(remote, 'print\nToo many connections from this address.\n');
                     break;
                 }
                 if (this.clients.length + (request.socialIds?.length ?? 1) > this.host.maxClients) {
@@ -262,7 +281,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                     : configured.kind === 'q2-q2pro' && offered.kind === 'q2-q2pro' && configured.revision < offered.revision ? configured : offered;
                 const peer: ServerPeer<TAddress> = { remote, player: admitted.player, splits, download: new Q2PeerDownload(), downloadFailure: null,
                     channel: new Q2Channel({ maxDatagramBytes: this.transport.maxDatagramBytes ?? 65507, side: 'server', protocol, channel: request.channel, qport: request.qport, payloadBytes: request.payloadBytes, compress: request.compression }),
-                    wire: new Q2WireCodec(protocol), replay: new Q2CommandReplay(), frames: new Map<number, Q2WireFrame>(), gameState: null, active: false, sequence: 0, lastReceived: now, datagram: [], userinfo: request.userinfo };
+                    wire: new Q2WireCodec(protocol), replay: new Q2CommandReplay(), budget: new MovementBudget(), frames: new Map<number, Q2WireFrame>(), gameState: null, active: false, sequence: 0, lastReceived: now, datagram: [], userinfo: request.userinfo, rateSizes: new Array<number>(RATE_MESSAGES).fill(0), suppressed: 0 };
                 this.peers.set(addressKey(remote), peer);
                 this.acceptConnection(remote);
                 break;
@@ -304,17 +323,19 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
             throw new Error('Q2 signon has no game state');
         if (start < 0)
             throw new Error('Q2 signon index is negative');
+        // Records are encoded as the page fills, not for the whole table on every request.
         const entries = kind === 'configstrings'
-            ? [...state.configStrings].filter(([index]) => index >= start).sort(([a], [b]) => a - b).map(([index, value]) => ({ index, bytes: encodeQ2ServerEvent(peer.wire, { kind: 'config-string', index, value }) }))
-            : [...state.baselines].filter(([index]) => index >= start).sort(([a], [b]) => a - b).map(([index, entity]) => ({ index, bytes: encodeQ2ServerEvent(peer.wire, { kind: 'baseline', entity }) }));
+            ? [...state.configStrings].filter(([index]) => index >= start).sort(([a], [b]) => a - b).map(([index, value]) => ({ index, encode: () => encodeQ2ServerEvent(peer.wire, { kind: 'config-string', index, value }) }))
+            : [...state.baselines].filter(([index]) => index >= start).sort(([a], [b]) => a - b).map(([index, entity]) => ({ index, encode: () => encodeQ2ServerEvent(peer.wire, { kind: 'baseline', entity }) }));
         let length = 0, next: number | null = null;
         for (const entry of entries) {
-            if (length + entry.bytes.length > peer.channel.capacity - 96) {
+            const bytes = entry.encode();
+            if (length + bytes.length > peer.channel.capacity - 96) {
                 next = entry.index;
                 break;
             }
-            peer.channel.queueReliable(entry.bytes);
-            length += entry.bytes.length;
+            peer.channel.queueReliable(bytes);
+            length += bytes.length;
         }
         if (next !== null && length === 0)
             throw new Error('Q2 signon record exceeds negotiated reliable message capacity');
@@ -336,6 +357,9 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
             this.drop(peer, 'Client disconnected');
             return;
         }
+        // sv_user.c accepts the signon commands only while the client is cs_connected.
+        if (peer.active && (name === 'new' || name === 'configstrings' || name === 'baselines'))
+            return;
         if (name === 'new') {
             this.newClient(peer);
             return;
@@ -379,7 +403,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                 case 'move':
                 case 'batch-move':
                     if (peer.active)
-                        owner.replay.execute(event, result.dropped, command => { const input = this.host.input(owner.player, command, owner.sequence++); if (input !== null) this.pending.push(input); });
+                        owner.replay.execute(event, result.dropped, command => { if (!peer.budget.admit(command.msec, peer.lastReceived)) return; const input = this.host.input(owner.player, command, owner.sequence++); if (input !== null) this.pending.push(input); });
                     break;
                 case 'command':
                     this.clientCommand(peer, event.text, owner.player);
@@ -442,12 +466,15 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                 }
             }
             catch (error) {
-                if (error instanceof Q2GameCallbackError) throw error;
+                // A fault raised while handling one peer's packet costs that peer its connection. If the game itself is
+                // broken, the disconnect callback fails too and the application's frame boundary takes over.
+                const callback = error instanceof Q2GameCallbackError;
                 const reason = error instanceof Error ? error.message : String(error);
+                if (callback) this.host.print(`${printablePeerText(reason)}\n`);
                 if (peer !== undefined)
                     this.drop(peer, reason);
                 else
-                    this.reply(packet.from, `print\n${reason}\n`);
+                    this.reply(packet.from, 'print\nConnection refused\n');
             }
         }
         for (const peer of this.peers.values()) {
@@ -502,61 +529,89 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         } else { this.mvdTick = null; this.mvdMessages = []; }
 
         for (const peer of this.peers.values()) {
-            for (const message of this.host.rawMessages?.(peer.player) ?? []) {
-                if (message.reliable) peer.channel.queueReliable(message.bytes);
-                else if (peer.active) peer.datagram.push(message.bytes);
+            try { this.publishPeer(peer, output, events, nowMilliseconds); }
+            catch (error) {
+                // Overflow or a stuck channel belongs to this peer. As in native Q2, only that client is dropped.
+                if (error instanceof Q2GameCallbackError) throw error;
+                this.drop(peer, error instanceof Error ? error.message : String(error));
             }
-            for (let index = 0; index < peer.splits.length; index++) {
-                const split = peer.splits[index]; if (split === undefined) continue;
-                const prefix = new Uint8Array([21, index + 2]);
-                for (const message of this.host.rawMessages?.(split.player) ?? []) {
-                    const bytes = joinPackets([prefix, message.bytes, new Uint8Array([21, 1])]);
-                    if (message.reliable) peer.channel.queueReliable(bytes); else if (peer.active) peer.datagram.push(bytes);
-                }
-                if (peer.active) for (const event of this.host.events(split.player, output, events)) {
-                    const bytes = joinPackets([prefix, encodeQ2ServerEvent(peer.wire, event), new Uint8Array([21, 1])]);
-                    if (event.reliable ?? (event.kind !== 'sound' && event.kind !== 'muzzle-flash' && event.kind !== 'temporary-entity')) peer.channel.queueReliable(bytes); else peer.datagram.push(bytes);
-                }
+        }
+    }
+    /** The client's `msg` userinfo key: prints below it are not sent (sv_send.c SV_ClientPrintf). */
+    private messageLevel(peer: ServerPeer<TAddress>): number {
+        const value = quakeWorldInfo(peer.userinfo).get('msg');
+        if (value === undefined || value === '') return 0;
+        try { return nativeAtoi(value); } catch { return 0; }
+    }
+    private publishPeer(peer: ServerPeer<TAddress>, output: SimulationOutput, events: readonly SimulationPresentationEvent[], nowMilliseconds: number): void {
+        for (const message of this.host.rawMessages?.(peer.player) ?? []) {
+            if (message.reliable) peer.channel.queueReliable(message.bytes);
+            else if (peer.active) peer.datagram.push(message.bytes);
+        }
+        for (let index = 0; index < peer.splits.length; index++) {
+            const split = peer.splits[index]; if (split === undefined) return;
+            const prefix = new Uint8Array([21, index + 2]);
+            for (const message of this.host.rawMessages?.(split.player) ?? []) {
+                const bytes = joinPackets([prefix, message.bytes, new Uint8Array([21, 1])]);
+                if (message.reliable) peer.channel.queueReliable(bytes); else if (peer.active) peer.datagram.push(bytes);
             }
-            if (!peer.active)
-                continue;
-            const primary = this.host.frame(peer.player, output, peer.wire.protocol);
-            const splitFrames = peer.splits.map(split => this.host.frame(split.player, output, peer.wire.protocol));
-            const entities = new Map(primary.entities.map(entity => [entity.number, entity]));
-            for (const additional of splitFrames) for (const entity of additional.entities) entities.set(entity.number, entity);
-            const frame = splitFrames.length === 0 ? primary : { ...primary, splitPlayers: splitFrames.map(additional => ({ areaBits: additional.areaBits, player: additional.player })), entities: [...entities.values()].sort((a, b) => a.number - b.number) };
-            for (const event of this.host.events(peer.player, output, events)) {
-                const reliable = event.reliable ?? (event.kind !== 'sound' && event.kind !== 'muzzle-flash' && event.kind !== 'temporary-entity');
-                const bytes = encodeQ2ServerEvent(peer.wire, event);
-                if (reliable)
-                    peer.channel.queueReliable(bytes);
-                else
-                    peer.datagram.push(bytes);
+            if (peer.active) for (const event of this.host.events(split.player, output, events)) {
+                const bytes = joinPackets([prefix, encodeQ2ServerEvent(peer.wire, event), new Uint8Array([21, 1])]);
+                if (event.reliable ?? (event.kind !== 'sound' && event.kind !== 'muzzle-flash' && event.kind !== 'temporary-entity')) peer.channel.queueReliable(bytes); else peer.datagram.push(bytes);
             }
-            if (peer.channel.fragmentPending) {
+        }
+        if (!peer.active)
+            return;
+        const primary = this.host.frame(peer.player, output, peer.wire.protocol);
+        const splitFrames = peer.splits.map(split => this.host.frame(split.player, output, peer.wire.protocol));
+        const entities = new Map(primary.entities.map(entity => [entity.number, entity]));
+        for (const additional of splitFrames) for (const entity of additional.entities) entities.set(entity.number, entity);
+        const frame = splitFrames.length === 0 ? primary : { ...primary, splitPlayers: splitFrames.map(additional => ({ areaBits: additional.areaBits, player: additional.player })), entities: [...entities.values()].sort((a, b) => a.number - b.number) };
+        const messageLevel = this.messageLevel(peer);
+        for (const event of this.host.events(peer.player, output, events)) {
+            if (event.kind === 'print' && event.level < messageLevel) continue;
+            const reliable = event.reliable ?? (event.kind !== 'sound' && event.kind !== 'muzzle-flash' && event.kind !== 'temporary-entity');
+            const bytes = encodeQ2ServerEvent(peer.wire, event);
+            if (reliable)
+                peer.channel.queueReliable(bytes);
+            else
+                peer.datagram.push(bytes);
+        }
+        if (peer.channel.fragmentPending) {
+            peer.channel.send(this.transport, peer.remote, new Uint8Array(0), nowMilliseconds);
+            return;
+        }
+        if (peer.frames.has(frame.serverFrame)) {
+            if (peer.channel.shouldUpdate(nowMilliseconds))
                 peer.channel.send(this.transport, peer.remote, new Uint8Array(0), nowMilliseconds);
-                continue;
+            return;
+        }
+        const old = peer.replay.lastFrame < 0 ? null : peer.frames.get(peer.replay.lastFrame) ?? null;
+        const baseline = peer.gameState?.baselines;
+        if (baseline === undefined)
+            throw new Error('Active Q2 client has no baselines');
+        // SV_RateDrop: skip the frame while the last RATE_MESSAGES sends exceed the client's rate; loopback is exempt.
+        const slot = frame.serverFrame % RATE_MESSAGES;
+        if (peer.remote.kind !== 'loopback') {
+            let requested = 5000;
+            try { requested = nativeAtoi(quakeWorldInfo(peer.userinfo).get('rate') || '5000'); } catch { /* an unparsable rate keeps the 5000 default */ }
+            const rate = Math.max(100, Math.min(15000, requested));
+            if (peer.rateSizes.reduce((total, size) => total + size, 0) > rate) {
+                peer.suppressed++; peer.rateSizes[slot] = 0;
+                if (peer.datagram.reduce((total, part) => total + part.length, 0) > MAX_MSGLEN) peer.datagram = [];
+                return;
             }
-            if (peer.frames.has(frame.serverFrame)) {
-                if (peer.channel.shouldUpdate(nowMilliseconds))
-                    peer.channel.send(this.transport, peer.remote, new Uint8Array(0), nowMilliseconds);
-                continue;
-            }
-            const old = peer.replay.lastFrame < 0 ? null : peer.frames.get(peer.replay.lastFrame) ?? null;
-            const baseline = peer.gameState?.baselines;
-            if (baseline === undefined)
-                throw new Error('Active Q2 client has no baselines');
-            const frameBytes = encodeQ2Frame(peer.wire, frame, old, baseline, this.host.maxClients);
-            const datagram = joinPackets([frameBytes, ...peer.datagram]);
-            peer.datagram = [];
-            peer.channel.send(this.transport, peer.remote, datagram, nowMilliseconds);
-            peer.frames.set(frame.serverFrame, structuredClone(frame));
-            while (peer.frames.size > 16) {
-                const oldest = peer.frames.keys().next();
-                if (oldest.done)
-                    break;
-                peer.frames.delete(oldest.value);
-            }
+        }
+        const frameBytes = encodeQ2Frame(peer.wire, { ...frame, suppressedCount: peer.suppressed }, old, baseline, this.host.maxClients);
+        const datagram = joinPackets([frameBytes, ...peer.datagram]);
+        peer.datagram = []; peer.suppressed = 0; peer.rateSizes[slot] = datagram.length;
+        peer.channel.send(this.transport, peer.remote, datagram, nowMilliseconds);
+        peer.frames.set(frame.serverFrame, frame);
+        while (peer.frames.size > 16) {
+            const oldest = peer.frames.keys().next();
+            if (oldest.done)
+                break;
+            peer.frames.delete(oldest.value);
         }
     }
     async close(): Promise<void> {
@@ -671,7 +726,8 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
                 const result = this.channel.receive(packet.payload, nowMilliseconds);
                 if (result.kind === 'message') {
                     this.options.host.prediction?.acknowledged(result.acknowledged, nowMilliseconds);
-                    const records = await this.receiver.receive(result.bytes, nowMilliseconds);
+                    const records = await this.dropOnServerError(() => this.receiver.receive(result.bytes, nowMilliseconds));
+                    if (records === null) return [];
                     const owner = this.recordingOwner;
                     if (owner !== null) {
                         const messages: Uint8Array[] = [];
@@ -695,9 +751,25 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
             this.state = 'rejected';
             this.options.host.disconnected('Connection timed out');
         }
-        await this.receiver.prepareGameState();
+        await this.dropOnServerError(() => this.receiver.prepareGameState());
         this.sendPending(nowMilliseconds);
         return [];
+    }
+    /** Com_Error(ERR_DROP) from the server's map or content: tell the server, leave it, and report the reason. */
+    private async dropOnServerError<T>(action: () => Promise<T>): Promise<T | null> {
+        try { return await action(); } catch (error) {
+            if (!(error instanceof Q2ServerDropError)) throw error;
+            const channel = this.channel;
+            if (channel !== null && this.phase !== 'closed' && this.phase !== 'rejected') {
+                this.command('disconnect');
+                channel.send(this.transport, this.options.remote, new Uint8Array(0), performance.now());
+            }
+            this.receiver.close();
+            this.state = 'rejected';
+            this.pendingCommands = [];
+            this.options.host.disconnected(error.message);
+            return null;
+        }
     }
     private sendPending(nowMilliseconds: number): void {
         const channel = this.channel;

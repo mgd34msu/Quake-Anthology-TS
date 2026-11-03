@@ -19,9 +19,9 @@ import { prepareSceneEntity } from "../../../../src/render/scene/models/index.ts
 import { SessionActorRegistry } from "../../../../src/world/actors/registry.ts";
 import { SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/body.ts";
 import { ActorCallbackTable } from "../../../../src/world/actors/callbacks.ts";
-import { GameplayAuthority } from "../../../../src/world/gameplay/authority.ts";
 import { SharedInventoryTable } from "../../../../src/world/gameplay/inventory.ts";
 import { createQ3CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/policies.ts";
+import { inertAuthority } from "../../../support/authority.ts";
 
 const zero = { x: 0, y: 0, z: 0 };
 const archivePath = corpusFile("q3a/baseq3/pak0.pk3");
@@ -83,7 +83,7 @@ describe("permanent Q3 character foundation", () => {
     const actors = new SessionActorRegistry(createIdentityOwner("q3-life"));
     const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
     const callbacks = new ActorCallbackTable(actors);
-    const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+    const combat = inertAuthority(actors, callbacks);
     const inventory = new SharedInventoryTable(actors);
     const actor = actors.allocate("q3:character", "q3:character/sarge");
     const events: Q3CharacterEvent[] = [];

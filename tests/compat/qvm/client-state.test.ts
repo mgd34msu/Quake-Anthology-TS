@@ -1,4 +1,5 @@
 import { readQvmUserCommand, writeQvmUserCommand } from "../../../src/compat/qvm/client-state-record.ts";
+import { qvmEntityStateBytes, writeQvmEntityState } from "../../../src/compat/qvm/entity-record.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { HistorySnapshotSource } from "../../../src/content/q3/presentation/snapshots.ts";
@@ -86,6 +87,24 @@ test("QVM snapshot uses retained parse entities, preserves untouched ABI slots, 
   expect(() => qvmClientStateSyscall(f.call(QvmCgameImport.CG_GETSNAPSHOT, [1, 100000]), f.services)).toThrow("allocation");
   for (let index = 1; index < 2048; index++) f.connection.parseEntities.advance();
   expect(qvmClientStateSyscall(f.call(QvmCgameImport.CG_GETSNAPSHOT, [1, 8]), f.services)).toBe(0);
+});
+
+test("QVM snapshot truncates to MAX_ENTITIES_IN_SNAPSHOT like CL_GetSnapshot", () => {
+  const f = fixture(), ps = new PlayerStateRecord("baseq3", 0, 2, 0);
+  const entities = Array.from({ length: 257 }, (_, index) => { const entity = new EntityStateRecord(0); entity.number = index + 1; entity.modelindex = 3; return entity; });
+  const snapshot: Snapshot = { messageNumber: 1, serverTime: 200, deltaNumber: -1, flags: 0, serverCommandNumber: 3,
+    parseEntitiesNumber: 0, areaMask: new Uint8Array(32), playerState: ps, entities };
+  f.connection.history.publish({ kind: "snapshot", validity: { kind: "valid" }, snapshot });
+  expect(qvmClientStateSyscall(f.call(QvmCgameImport.CG_GETSNAPSHOT, [1, 8]), f.services)).toBe(1);
+  expect(f.guest.view(8, 53772).getInt32(44 + 468, true)).toBe(256);
+});
+
+test("legacy entity writes from a remote snapshot map unrepresentable values to none instead of throwing", () => {
+  const entity = new EntityStateRecord(0), view = new DataView(new ArrayBuffer(qvmEntityStateBytes("q3-1.16n-base")));
+  entity.number = 4; entity.event = 47; entity.eType = 12; entity.powerups = 1 << 9; entity.generic1 = 1;
+  expect(() => writeQvmEntityState(view, entity, "q3-1.16n-base")).toThrow("Legacy QVM has no team entity type");
+  writeQvmEntityState(view, entity, "q3-1.16n-base", "ignore");
+  expect(view.getInt32(4, true)).toBe(0); expect(view.getInt32(180, true)).toBe(0); expect(view.getInt32(188, true)).toBe(0);
 });
 
 test("QVM server command trap awaits its owner before reporting argv availability", async () => {

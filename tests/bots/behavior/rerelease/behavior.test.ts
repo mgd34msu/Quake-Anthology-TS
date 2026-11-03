@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../../support/corpus.ts";
+import { corpusFile } from "../../../support/corpus.ts";
 
 import { existsSync } from "node:fs";
 import { openArchive } from "../../../../src/content/archive/index.ts";
@@ -9,8 +9,6 @@ import { Bot_LoadKnowledge } from "../../../../src/bots/behavior/rerelease/data/
 import { RereleaseBotBehavior } from "../../../../src/bots/behavior/rerelease/profile.ts";
 import type { BotEntityT, BotSelfT, BotUsercmdT, BotWorldT } from "../../../../src/bots/behavior/rerelease/world.ts";
 import { BotEntityKind, BOT_BUTTON_ATTACK } from "../../../../src/bots/behavior/rerelease/world.ts";
-import { Bot_SetWeapon, Bot_UseItem, Bot_TriggerEdict, Bot_GetItemID, Bot_PickedUpItem } from "../../../../src/bots/behavior/rerelease/q2-exports.ts";
-import type { Q2BotExportsHost, Q2BotItemView } from "../../../../src/bots/behavior/rerelease/q2-exports.ts";
 import { SourceRereleaseNavigation } from "../../../../src/bots/behavior/rerelease/nav.ts";
 import { navigationFromAsset, NavigationRuntime, parseKexNavigation } from "../../../../src/bots/navigation/index.ts";
 import { createContentDigest } from "../../../../src/contracts/content.ts";
@@ -18,8 +16,8 @@ import { readQ1Bsp } from "../../../../src/formats/q1-map/index.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
 import { navigationWorld, profile } from "../../navigation/prediction.ts";
 
-const q1 = `${testCorpusRoot()}/q1/rerelease/id1/pak0.pak`;
-const q2 = `${testCorpusRoot()}/q2/rerelease/baseq2/pak0.pak`;
+const q1 = corpusFile("q1/rerelease/id1/pak0.pak");
+const q2 = corpusFile("q2/rerelease/baseq2/pak0.pak");
 const zero = { x: 0, y: 0, z: 0 };
 
 async function retailFiles(path: string): Promise<BotAssetFiles> {
@@ -122,39 +120,6 @@ test.skipIf(!existsSync(q1) || !existsSync(q2))("retail Q1/Q2 profiles use sourc
     expect(reached).toBe(true);
   } finally { archive.close(); }
 }, 30000);
-
-test("Q2 source bot exports preserve existing inventory authority and named use/touch/pickup ordering", () => {
-  const calls: string[] = [], items: readonly Q2BotItemView[] = [
-    { id: 0, classname: null, weapon: false, useCallback: null },
-    { id: 1, classname: "weapon_blaster", weapon: true, useCallback: "Use_Weapon" },
-    { id: 2, classname: "weapon_rocketlauncher", weapon: true, useCallback: "Use_Weapon" },
-  ];
-  let selected = 0, pending = 0;
-  const inventory = [0, 1, 1];
-  const host: Q2BotExportsHost = { itemCount: items.length,
-    bot: () => ({ inuse: true, bot: true, client: { currentWeapon: 1, pendingWeapon: pending, selectedItem: selected,
-      origin: zero, viewOffset: zero, commandAngles: zero } }),
-    entity: () => ({ inuse: true, useCallback: "door_use", touchCallback: "door_touch" }),
-    item: id => items[id] ?? null, inventory: (_entity, item) => inventory[item] ?? 0,
-    setSelectedItem: (_entity, item) => { selected = item; calls.push(`select:${item}`); },
-    validateSelectedItem: () => { calls.push("validate"); }, disableWeaponChains: () => { calls.push("disable_chains"); },
-    useItem: (callback, _entity, item) => { calls.push(`${callback}:${item}`); pending = item; },
-    changeWeaponInstantly: () => { calls.push("ChangeWeapon:instant"); },
-    triggerUse: name => { calls.push(name); }, triggerTouch: (name, _target, _other, touching) => { calls.push(`${name}:${touching}`); },
-    forceLook() {}, pickedUpBy: (item, client) => item === 9 && client === 0 };
-  Bot_SetWeapon(host, 1, 2, true);
-  expect(calls.splice(0)).toEqual(["disable_chains", "Use_Weapon:2", "ChangeWeapon:instant"]);
-  Bot_SetWeapon(host, 1, 2, true);
-  expect(calls).toEqual([]);
-  Bot_UseItem(host, 1, 2);
-  expect(calls.splice(0)).toEqual(["select:2", "validate", "select:0", "disable_chains", "Use_Weapon:2"]);
-  Bot_TriggerEdict(host, 1, 9);
-  expect(calls).toEqual(["door_use", "door_touch:true"]);
-  expect(Bot_GetItemID(host, "WEAPON_ROCKETLAUNCHER")).toBe(2);
-  expect(Bot_GetItemID(host, "none")).toBe(0);
-  expect(Bot_PickedUpItem(host, 1, 9)).toBe(true);
-  expect(inventory).toEqual([0, 1, 1]);
-});
 
 test.skipIf(!existsSync(q2))("a sight trace stopping on the target's own box still counts as seeing it", async () => {
   const knowledge = Bot_LoadKnowledge(await retailFiles(q2));

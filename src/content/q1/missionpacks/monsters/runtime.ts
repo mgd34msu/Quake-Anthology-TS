@@ -4,10 +4,11 @@ import type { Q1Actor } from "../../foundation/entity.ts";
 import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { callbackName } from "../../foundation/callbacks.ts";
 import { baseSpecies } from "../../base/species.ts";
+import { hipnoticSpeciesVariants, rogueSpeciesVariants, speciesDefinition } from "./species-variants.ts";
 import { charmer, findCharmedTarget, findHipnoticTarget, huntCharmer, walkWithCharmer } from "./charm.ts";
 import { BaseMonster, registerMonsterCallbacks } from "../../base/monsters.ts";
 import { vsub, yawFor } from "../../foundation/types.ts";
-import type { MonsterAi, MonsterFrame } from "../../base/animation.ts";
+import type { MonsterAi } from "../../base/animation.ts";
 import type { Q1Base } from "../../base/provider.ts";
 import { SaveReader, decodeCheckpointValue, encodeCheckpointValue } from "../../../../persistence/value.ts";
 import type { Q1MissionPack } from "../types.ts";
@@ -25,14 +26,24 @@ export class MissionMonster extends BaseMonster {
     const path = this.game.find(this.state.path)[0]; this.entity.references.set("goalentity", path?.actor.id ?? null); this.entity.references.set("movetarget", path?.actor.id ?? null);
     return super.start();
   }
-  override play(name: string): undefined {
+  useDefault(activator: ActorId | null): undefined { return super.use(activator); }
+  gibDeathDefault(): boolean { return super.gibDeath(); }
+  protected override sfx(path: string): string { return this.definition.sfx?.(this, path) ?? path; }
+  protected override gibDeath(): boolean { return this.definition.gibDeath === undefined ? super.gibDeath() : this.definition.gibDeath(this); }
+  override play(requested: string): undefined {
+    const name = this.definition.redirect?.(this, requested) ?? requested;
     if (!this.definition.frames.has(name)) {
       const action = this.definition.actions[name];
       if (action !== undefined) return action(this);
     }
     return super.play(name);
   }
-  override pain(attacker: ActorId | null, damage: number): undefined { if (this.definition.baseBehavior === true) return super.pain(attacker, damage); this.retaliate(attacker); return this.definition.pain(this, attacker, damage); }
+  override pain(attacker: ActorId | null, damage: number): undefined {
+    if (this.definition.prePain !== undefined) {
+      if ((this.entity.movementFlags & 32) !== 0) this.retaliate(attacker);
+      if (this.definition.prePain(this, attacker, damage)) return undefined;
+    }
+    if (this.definition.baseBehavior === true) return super.pain(attacker, damage); this.retaliate(attacker); return this.definition.pain(this, attacker, damage); }
   painDefault(attacker: ActorId | null, damage: number): undefined { return super.pain(attacker, damage); }
   dieDefault(attacker: ActorId | null): undefined { return super.die(attacker); }
   override die(attacker: ActorId | null): undefined {
@@ -70,10 +81,12 @@ export class MissionMonster extends BaseMonster {
     if (mode === "walk" && walkWithCharmer(this, distance)) return undefined;
     return this.definition.ai === undefined ? super.ai(mode, distance) : this.definition.ai(this, mode, distance); }
   aiDefault(mode: MonsterAi, distance: number): undefined { return super.ai(mode, distance); }
+  protected override firesThroughBlockers(): boolean { return charmer(this) !== null; }
   override run(distance: number): undefined {
     const { game, entity } = this;
     const owner = charmer(this);
     if (owner !== null && (this.enemy === null || this.enemy === owner || game.health(this.enemy) <= 0)) { this.enemy = null; return huntCharmer(this); }
+    if (this.runtime.pack === "hipnotic") entity.fields.set("show_hostile", String(Math.fround(game.time + 1)));
     if (entity.attackState !== "dodging") return super.run(distance);
     if (this.enemy === null || game.health(this.enemy) <= 0) { entity.attackState = "straight"; return super.run(distance); }
     const target = this.target;
@@ -113,9 +126,17 @@ export class Q1MissionPackMonsters {
   private readonly definitions = new Map<string, PackMonsterDefinition>();
   constructor(readonly game: Q1EntityServices, readonly base: Q1Base, readonly pack: Q1MissionPack, readonly hooks: MissionMonsterHooks = {}) {
     registerMonsterCallbacks(game, pack, entity => this.require(entity));
-    if (pack === "hipnotic") for (const spec of baseSpecies) for (const classname of spec.classnames) {
-      this.definitions.set(classname, { spec, baseBehavior: true, frames: new Map<string, MonsterFrame>(), actions: {}, pain: (monster, attacker, damage) => monster.painDefault(attacker, damage), die: (monster, attacker) => monster.dieDefault(attacker) });
-      if (spec.movement !== "boss") game.replaceSpawn(classname, (_game, entity) => this.spawn(entity));
+    if (pack === "hipnotic") {
+      const variants = hipnoticSpeciesVariants();
+      // The charmed grunt and dog register their own definitions below.
+      for (const spec of baseSpecies) if (spec.species !== "army" && spec.species !== "dog") for (const classname of spec.classnames) {
+        this.definitions.set(classname, speciesDefinition(spec, variants[classname]));
+        if (spec.movement !== "boss") game.replaceSpawn(classname, (_game, entity) => this.spawn(entity));
+      }
+    }
+    if (pack === "rogue") for (const definition of rogueSpeciesVariants(this)) for (const classname of definition.spec.classnames) {
+      this.definitions.set(classname, definition);
+      game.replaceSpawn(classname, (_game, entity) => this.spawn(entity));
     }
     game.host.actors.onRelease(actor => { this.monsters.delete(actor); return undefined; });
     game.registerStateExtension({ id: `q1:${pack}:monsters`, capture: () => this.capture(), restore: bytes => this.restore(bytes), clone: (source, target) => this.clone(source, target) });
@@ -134,7 +155,8 @@ export class Q1MissionPackMonsters {
     for (const classname of definition.spec.classnames) {
       if (this.definitions.has(classname)) throw new Error(`Duplicate ${this.pack} monster ${classname}`);
       this.definitions.set(classname, definition);
-      this.game.registerSpawn(classname, (_game, entity) => this.spawn(entity));
+      const spawn = (_game: Q1EntityServices, entity: Q1Actor): undefined => this.spawn(entity);
+      if (this.game.hasSpawn(classname)) this.game.replaceSpawn(classname, spawn); else this.game.registerSpawn(classname, spawn);
     }
     return undefined;
   }

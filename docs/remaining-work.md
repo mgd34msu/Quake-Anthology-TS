@@ -1,5 +1,7 @@
 # Remaining project work
 
+> **Dated record, not current status.** The patch list agreed for 1.0.0. Its performance measurement and its statement that no other item is open are from that date; later releases and the audit changed both. The maintained status is [status.md](status.md). Where this page disagrees with it or with the code, trust those. 
+
 Current source summary: 22 of the T01–T23 targets are accepted. T10 remains open. This is an implementation status, not a claim that every original game, mod, device and campaign works correctly. The list below separates known work from unverified workflows. Fix confirmed defects through shared behavior; keep verification proportionate.
 
 ## Patch release work

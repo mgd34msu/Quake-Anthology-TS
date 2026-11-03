@@ -1,7 +1,5 @@
 import { nextActorGeneration } from '../../../src/world/actors/registry.ts';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rm } from 'node:fs/promises';
 import { openRemoteContent } from "../../../src/app/bootstrap/content.ts";
 import type { RemoteContentMounts } from "../../../src/app/bootstrap/content.ts";
 import { remoteContentSelection } from "../../../src/content/catalog/index.ts";
@@ -9,13 +7,16 @@ import { expect, test } from "bun:test";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
-import { Q2ClientNetwork, Q2RemotePresentation } from "../../../src/app/bootstrap/network/index.ts";
+import { Q2ClientNetwork } from "../../../src/app/bootstrap/network/q2.ts";
+import { Q2RemotePresentation } from "../../../src/app/bootstrap/network/remote.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { UdpTransport } from "../../../src/network/common/transport.ts";
 import { EngineSession } from "../../../src/world/session/session.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 test("native Q2 predicts sent moves before server execution and reconciles using channel acknowledgements", async () => {
-  const userRoot = await mkdtemp(join(tmpdir(), "q2-prediction-content-"));
+  const userRoot = await tempDirectory("q2-prediction-content-");
   const launch = parseApplicationCommand(["--user-content-root", userRoot, "--game", "q2-classic-baseq2", "--movement", "q2", "--character", "q2",
     "--dedicated", "--mode", "coop", "--listen-q2", "0", "--bind", "127.0.0.1"]);
   if (launch.kind !== "run") throw new Error("Expected launch");

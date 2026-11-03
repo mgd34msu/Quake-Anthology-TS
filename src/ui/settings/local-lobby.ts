@@ -2,6 +2,7 @@ import type { UiControl, UiControlId, UiMenuId } from "../../contracts/ui.ts";
 import type { ApplicationLocalLobby, LocalLobbySelection } from "../../app/bootstrap/local-lobby.ts";
 import type { NativeUiController } from "../common/controller.ts";
 import { menuRow } from "../common/layout.ts";
+import { buttonControl } from "../common/controls.ts";
 
 export function registerLocalLobbyMenu(controller: NativeUiController, current: () => ApplicationLocalLobby | null,
   hostSelection: () => Promise<LocalLobbySelection>, readSeats: () => number): { readonly root: UiMenuId; dispose(): void } {
@@ -18,10 +19,7 @@ export function registerLocalLobbyMenu(controller: NativeUiController, current: 
   };
   const unregister = controller.register(root, () => {
     const owner = current(), lobby = owner?.current() ?? null;
-    const button = (id: UiControlId, label: string, row: number, action: () => void, enabled = !busy): UiControl => ({
-      id, kind: "button", label, rect: menuRow(row), visible: true, enabled,
-      activate: () => { action(); return undefined; },
-    });
+    const button = (id: UiControlId, label: string, row: number, action: () => void, enabled = !busy): UiControl => buttonControl(id, label, menuRow(row), action, enabled);
     const controls: UiControl[] = [];
     if (owner === null) controls.push(button("ui:lobby:unavailable", "No local lobby service is configured.", 0, () => undefined, false));
     else if (lobby === null) {

@@ -5,6 +5,9 @@ import type { Bounds, Vec2, Vec3, Vec4 } from "../../contracts/math.ts";
 import { parseEntities } from "./entities.ts";
 import { normalizeQ3Bsp } from "./ibsp44.ts";
 
+/** Original MAX_MAP_AREAS is 256; collision allocates areas squared. */
+const MAX_MAP_AREAS = 1024;
+
 export interface BspShader { readonly name: string; readonly surfaceFlags: number; readonly contentFlags: number }
 export interface BspPlane { readonly normal: Vec3; readonly distance: number }
 export interface BspNode { readonly plane: number; readonly children: readonly [number, number]; readonly bounds: Bounds }
@@ -217,7 +220,7 @@ export function parseQ3Bsp(data: Uint8Array, source = "<bsp>"): BspMap {
   for (const [index, leaf] of leaves.entries()) {
     const offset = lump(4).offset + index * 48;
     if (leaf.cluster < -1 || (visibility !== null && leaf.cluster >= visibility.clusterCount)) fail(offset, "invalid leaf cluster");
-    if (leaf.area < -1) fail(offset + 4, "invalid leaf area");
+    if (leaf.area < -1 || leaf.area >= MAX_MAP_AREAS) fail(offset + 4, "invalid leaf area");
     range(leaf.firstSurface, leaf.surfaceCount, leafSurfaces.length, offset + 32, "leaf surfaces");
     range(leaf.firstBrush, leaf.brushCount, leafBrushes.length, offset + 40, "leaf brushes");
   }
@@ -245,6 +248,7 @@ export function parseQ3Bsp(data: Uint8Array, source = "<bsp>"): BspMap {
     if (fog.visibleSide !== -1) reference(fog.visibleSide, brush.sideCount, offset + 68, "fog visible side");
   }
   const lightmapUse = new Uint8Array(vertices.length);
+  let surfaceWork = 0;
   for (const [index, item] of surfaces.entries()) {
     const offset = lump(13).offset + index * 104;
     reference(item.shader, shaders.length, offset, "surface shader");
@@ -253,6 +257,9 @@ export function parseQ3Bsp(data: Uint8Array, source = "<bsp>"): BspMap {
     if (item.fog !== -1 && !retailFlareFog) reference(item.fog, fogs.length, offset + 4, "surface fog");
     range(item.firstVertex, item.vertexCount, vertices.length, offset + 12, "surface vertices");
     range(item.firstIndex, item.indexCount, indices.length, offset + 20, "surface indices");
+    // Surfaces own disjoint vertex and index ranges in compiled maps; overlapping ranges would multiply this validation work.
+    surfaceWork += item.vertexCount + item.indexCount;
+    if (surfaceWork > 4 * (vertices.length + indices.length) + 65536) fail(offset + 12, "surface ranges overlap excessively");
     // R_FindShader falls back to vertex lighting for missing lightmaps, including retail texturegrab.
     const usesLightmap = (item.type === "planar" || item.type === "patch")
       && item.lightmap >= 0 && item.lightmap < lightmaps.length;

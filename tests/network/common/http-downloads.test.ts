@@ -284,11 +284,12 @@ test('whole-file range retry cannot publish a truncated protocol-completion file
 });
 
 test('HTTP redirect stays within advertised origin and settled fallback can be retried', async () => {
-  const root = mkdtempSync(join(tmpdir(),'http-redirect-')); let ready = false;
+  const root = mkdtempSync(join(tmpdir(),'http-redirect-')); let ready = false; const foreignRequests: string[] = [];
+  const foreign = Bun.serve({hostname:'127.0.0.1',port:0,fetch(req) { foreignRequests.push(new URL(req.url).pathname); return new Response('foreign'); }});
   const server = Bun.serve({hostname:'127.0.0.1',port:0,fetch(req) {
     const path = new URL(req.url).pathname;
     if (path === '/redirect') return new Response(null,{status:302,headers:{location:'/asset'}});
-    if (path === '/escape') return new Response(null,{status:302,headers:{location:'http://localhost:1/asset'}});
+    if (path === '/escape') return new Response(null,{status:302,headers:{location:`http://127.0.0.1:${foreign.port}/asset`}});
     return ready ? new Response('complete') : new Response('',{status:503});
   }});
   const queue=new HttpDownloadQueue({root,assertCurrent(){},resolved:()=>false,async refreshPackage(){},progress(){}});
@@ -297,8 +298,9 @@ test('HTTP redirect stays within advertised origin and settled fallback can be r
     ready=true; expect((await queue.retry('redirect')).kind).toBe('downloaded');
     expect(readFileSync(join(root,'redirect'),'utf8')).toBe('complete');
     expect((await queue.enqueue(request(server.port ?? 0,'escape'))).kind).toBe('fallback');
+    expect(foreignRequests).toEqual([]);
     expect(queue.progress.find(item=>item.path==='redirect')).toMatchObject({phase:'done',received:8,result:'downloaded'});
-  } finally {queue.cancel();await server.stop(true);rmSync(root,{recursive:true,force:true});}
+  } finally {queue.cancel();await server.stop(true);await foreign.stop(true);rmSync(root,{recursive:true,force:true});}
 });
 
 test('per-file cancellation preserves unrelated queue work and permits explicit retry', async () => {

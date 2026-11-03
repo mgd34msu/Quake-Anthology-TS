@@ -30,7 +30,8 @@ test("explicit Hipnotic executes native weapons and authored travel through the 
     expect(source.prepared.program.digest).toBe("sha256:35a2fdc3acb04bdafe8d0269f5327cd1d5b47971f1ef024429f1572d3201dc82");
     expect(source.kind).toBe("netquake"); expect(simulation.q1Source()).toBeNull();
     // Offline local worlds run the same explicit program; only wire clients are refused (above).
-    expect((await loadApplicationContent({ ...explicit.options, dedicated: false }, simulation.recipe)).preparedQuakeC).not.toBeNull();
+    const explicitContent = await loadApplicationContent({ ...explicit.options, dedicated: false }, simulation.recipe);
+    try { expect(explicitContent.preparedQuakeC).not.toBeNull(); } finally { await explicitContent.close(); }
     const vm = source.machine, field = (name: string) => vm.fieldOffset(name);
     expect(vm.profiling[vm.program.functionNamed("func_rotate_door").index]).toBeGreaterThan(0);
     expect(source.precacheNames("model")).not.toContain("");
@@ -66,9 +67,10 @@ test("explicit Hipnotic executes native weapons and authored travel through the 
     simulation.inventory.give(owner, "q1:weapon/grenadelauncher", 1);
     words.setFloat(field("health"), 10000);
     let sequence = 20;
+    let yaw = 0;
     const advance = (buttons: number, impulse = 0) => app.session.step({ elapsedMilliseconds: 100, commands: [{ actor: player.actor,
       source: { kind: "remote-client", client: client.id }, sequence: sequence++,
-      command: { kind: "q1-netquake", acknowledgedServerTimeSeconds: source.timeSeconds, viewAngles: { x: 0, y: 0, z: 0 },
+      command: { kind: "q1-netquake", acknowledgedServerTimeSeconds: source.timeSeconds, viewAngles: { x: 0, y: yaw, z: 0 },
         forwardMove: 0, sideMove: 0, upMove: 0, buttons, impulse } }] });
     const cases: readonly { readonly item: ItemId; readonly bit: number; readonly ammo: "ammo_cells" | "ammo_rockets"; readonly attack: string }[] = [
       { item: "q1:weapon/hipnotic:laser", bit: 8388608, ammo: "ammo_cells", attack: "HIP_FireLaser" },
@@ -84,7 +86,14 @@ test("explicit Hipnotic executes native weapons and authored travel through the 
       const beforeAmmo = words.float(field(weapon.ammo)), attack = vm.program.functionNamed(weapon.attack).index, beforeCalls = vm.profiling[attack] ?? 0;
       const actorsBefore = simulation.actors.observations().length;
       let spawned = false;
-      for (let tick = 0; tick < 12; tick++) { advance(1); spawned ||= simulation.actors.observations().length > actorsBefore; }
+      // Mjolnir only discharges when the way ahead is open above a surface, so sweep the compass until a direction allows it.
+      const discharged = (): boolean => (vm.profiling[vm.program.functionNamed("HIP_FireMjolnirLightning").index] ?? 0) > 0;
+      for (const heading of weapon.bit === 128 ? [0, 90, 180, 270] : [0]) {
+        yaw = heading;
+        for (let tick = 0; tick < 12; tick++) { advance(1); spawned ||= simulation.actors.observations().length > actorsBefore; }
+        if (weapon.bit !== 128 || discharged()) break;
+      }
+      yaw = 0;
       expect(vm.profiling[attack]).toBeGreaterThan(beforeCalls);
       if (weapon.bit !== 128) expect(spawned).toBe(true);
       else expect(vm.profiling[vm.program.functionNamed("HIP_FireMjolnirLightning").index]).toBeGreaterThan(0);

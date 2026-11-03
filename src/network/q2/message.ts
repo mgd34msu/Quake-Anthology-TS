@@ -230,10 +230,11 @@ export function MSG_WriteDeltaEntity(from: EntityStateT, to: EntityStateT, msg: 
         else
             bits |= U_FRAME16;
     }
-    if (to.effects !== from.effects) {
-        if (to.effects < 256)
+    // effects is unsigned in the original, so bit 31 (EF_TRACKERTRAIL) selects the long form.
+    if (to.effects >>> 0 !== from.effects >>> 0) {
+        if (to.effects >>> 0 < 256)
             bits |= U_EFFECTS8;
-        else if (to.effects < 0x8000)
+        else if (to.effects >>> 0 < 0x8000)
             bits |= U_EFFECTS16;
         else
             bits |= U_EFFECTS8 | U_EFFECTS16;

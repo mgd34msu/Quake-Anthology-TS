@@ -61,6 +61,7 @@ export interface PredictionSettings {
   readonly predictItems: boolean;
   readonly pmoveFixed: boolean;
   readonly pmoveMsec: number;
+  readonly ladders?: boolean;
   readonly errorDecayInteger: number;
   readonly errorDecayValue: number;
   readonly showMiss: number;
@@ -95,6 +96,18 @@ export class PredictionRuntime {
   private command = emptyCommand();
   constructor(readonly state: ClientGameState, readonly collision: CollisionWorld, readonly host: PredictionHost) {}
 
+  private readonly boxModels = new Map<number, ReturnType<typeof createBoxModel>>();
+  /** The packed solid value fixes the box, so models are shared instead of rebuilt per trace as CM_TempBoxModel reuses its static box. */
+  private boxModel(solid: number, x: number, zd: number, zu: number): ReturnType<typeof createBoxModel> {
+    let model = this.boxModels.get(solid);
+    if (model === undefined) {
+      if (this.boxModels.size >= 256) this.boxModels.clear();
+      model = createBoxModel({ min: vec3(-x, -x, -zd), max: vec3(x, x, zu) }, this.collision.counters);
+      this.boxModels.set(solid, model);
+    }
+    return model;
+  }
+
   trace(start: Vec3, end: Vec3, bounds: Bounds, skipNumber: number, mask: number): MovementTrace {
     const query: TraceQuery = { start, end, shape: { kind: "box", mins: bounds.min, maxs: bounds.max }, mask };
     const worldTrace = this.collision.trace(query);
@@ -105,7 +118,7 @@ export class PredictionRuntime {
       const x = entity.solid & 255, zd = (entity.solid >> 8) & 255, zu = ((entity.solid >> 16) & 255) - 32;
       const trace = entity.solid === SOLID_BMODEL
         ? this.collision.transformedTrace({ ...query, modelIndex: entity.modelindex }, evaluateTrajectory(entity.pos, this.state.physicsTime), cent.lerpAngles)
-        : createBoxModel({ min: vec3(-x, -x, -zd), max: vec3(x, x, zu) }, this.collision.counters).transformedTrace(query, cent.lerpOrigin, vec3(0, 0, 0));
+        : this.boxModel(entity.solid, x, zd, zu).transformedTrace(query, cent.lerpOrigin, vec3(0, 0, 0));
       if (trace.solidity === "all-solid" || trace.fraction < result.fraction) result = { ...trace, entityNum: entity.number };
       else if (trace.solidity !== "clear" && result.solidity !== "all-solid") result = { ...result, solidity: "start-solid" };
       if (result.solidity === "all-solid") return result;
@@ -243,7 +256,7 @@ export class PredictionRuntime {
       if (settings.pmoveFixed && this.host.commandTiming === "q3") this.command.serverTime = Math.imul(Math.trunc(((this.command.serverTime + settings.pmoveMsec - 1) | 0) / settings.pmoveMsec), settings.pmoveMsec);
       const result = this.host.movePlayer(ps, this.command, { trace: (start, end, bounds, skip, contents) => this.trace(start, end, bounds, skip, contents),
         pointContents: (point, pass) => this.pointContents(point, pass), originalServerTime, traceMask: mask, fixedMsec: settings.pmoveFixed ? settings.pmoveMsec : null,
-        noFootsteps: (settings.dmFlags & 32) !== 0, gauntletHit: false });
+        noFootsteps: (settings.dmFlags & 32) !== 0, ...(settings.ladders === true ? { ladders: true } : {}), gauntletHit: false });
       moved = true;
       this.touchTriggerPrediction(result.bounds, settings);
     }

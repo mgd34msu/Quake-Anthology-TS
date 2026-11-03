@@ -24,7 +24,8 @@ export function isMissingFile(error: unknown): boolean {
 }
 
 /** Resolve spelling on case-sensitive hosts, rejecting ambiguous case collisions. */
-export async function findContentPath(root: string, path: string, comparison: "exact" | "case-insensitive" = "case-insensitive"): Promise<string | null> {
+export async function findContentPath(root: string, path: string, comparison: "exact" | "case-insensitive" = "case-insensitive",
+  list: (directory: string) => Promise<readonly string[]> = directory => readdir(directory)): Promise<string | null> {
   const parts = normalizeResourcePath(path).split("/");
   let current = resolve(root);
   try {
@@ -32,7 +33,7 @@ export async function findContentPath(root: string, path: string, comparison: "e
     for (const part of parts) {
       if (comparison === "exact") current = resolve(current, part);
       else {
-        const entries = await readdir(current);
+        const entries = await list(current);
         const exact = entries.find(entry => entry === part);
         const matches = entries.filter(entry => entry.toLowerCase() === part.toLowerCase());
         if (exact !== undefined) current = resolve(current, exact);

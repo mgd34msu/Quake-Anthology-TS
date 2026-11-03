@@ -14,11 +14,16 @@ export class SeatSoundCaptions {
   private readonly catalogs = new Map<string, SeatMediaCaptions>();
   private closed = false;
   private readonly dispose: () => void;
-  constructor(private readonly seat: SeatId, private readonly audio: Pick<UnifiedAudio, "observeVoices" | "voiceClock">, private readonly language: () => string) {
+  constructor(private readonly seat: SeatId, private readonly audio: Pick<UnifiedAudio, "observeVoices" | "voiceClock">, private readonly language: () => string, private readonly warn: (text: string) => void = () => {}) {
     this.dispose = audio.observeVoices(event => {
       if (!event.seat.equals(this.seat)) return;
       if (event.kind === "start") this.voices.set(event.voiceId, { event, captions: null, language: "", stopSample: null });
-      else { const voice = this.voices.get(event.voiceId); if (voice !== undefined) voice.stopSample = event.outputSample; }
+      else {
+        const voice = this.voices.get(event.voiceId); if (voice !== undefined) voice.stopSample = event.outputSample;
+        // prepare() is not called under a QVM cgame, so finished voices are retired here too.
+        const sample = this.audio.voiceClock.outputSample;
+        for (const [id, other] of this.voices) if (other.stopSample !== null && sample >= other.stopSample) this.voices.delete(id);
+      }
     });
   }
   async prepare(content: Pick<LoadedApplicationContent, "forContent">): Promise<void> {
@@ -34,9 +39,11 @@ export class SeatSoundCaptions {
       if (captions === undefined) {
         const mounts = await content.forContent(reference.provenance.mount.identity.content);
         if (this.closed || this.voices.get(id) !== voice) continue;
-        captions = new SeatMediaCaptions(this.seat, async path => (await mounts.open(path))?.bytes ?? null, null, "caption");
+        captions = new SeatMediaCaptions(this.seat, async path => (await mounts.open(path))?.bytes ?? null, null, "caption", undefined, this.warn);
         this.catalogs.set(key, captions);
-        await captions.prepare(reference.requestedPath, language);
+        // The sidecar is optional: an unreadable or malformed one leaves this sound without captions.
+        try { await captions.prepare(reference.requestedPath, language); }
+        catch (error) { this.warn(`Sound captions for ${reference.requestedPath} unavailable: ${error instanceof Error ? error.message : String(error)}\n`); }
       }
       if (this.closed || this.voices.get(id) !== voice) continue;
       voice.captions = captions; voice.language = language;

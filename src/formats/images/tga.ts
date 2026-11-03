@@ -2,6 +2,7 @@
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import { BinaryError, BinaryReader, BinaryWriter } from "../../core/binary/index.ts";
 import type { ImageLevel } from "../../contracts/render.ts";
+import { imageSizeAllowed } from "./limits.ts";
 
 export interface TgaImage extends ImageLevel {
   readonly descriptor: number;
@@ -15,7 +16,7 @@ export function decodeTga(bytes: Uint8Array, source = "<tga>"): TgaImage {
   reader.skip(4);
   const width = reader.u16(), height = reader.u16(), depth = reader.u8(), descriptor = reader.u8();
   const indexed = type === 1 || type === 9, gray = type === 3 || type === 11, rle = type >= 9;
-  if (![1, 2, 3, 9, 10, 11].includes(type) || width === 0 || height === 0 || width * height * 4 > 0x7fffffff
+  if (![1, 2, 3, 9, 10, 11].includes(type) || !imageSizeAllowed(width, height)
     || (descriptor & 192) !== 0 || mapType !== (indexed ? 1 : 0)
     || (indexed ? depth !== 8 && depth !== 16 : gray ? depth !== 8 && depth !== 16 : ![16, 24, 32].includes(depth)))
     throw new BinaryError(source, 0, "Unsupported TGA header");

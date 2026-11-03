@@ -1,7 +1,8 @@
 import { closeSync, constants, openSync, writeSync, fsyncSync } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
-import { containedFileParts, openContainedParent } from "../platform/files/contained.ts";
+import type { CommandContext } from "../contracts/common.ts";
+import { containedFileParts, openContainedParent } from "../core/files/contained.ts";
 
 export type SavePurpose = "manual" | "autosave" | "transition";
 export interface SaveEligibility {
@@ -31,6 +32,24 @@ export function saveUnavailable(state: SaveEligibility, purpose: SavePurpose): s
 export function saveCommandPath(directory: string, name: string): string {
   if (name.length === 0) throw new RangeError("Enter a save name or file path");
   return resolve(directory, extname(name) === "" ? `${name}.sav` : name);
+}
+
+/**
+ * `load` of a file outside the save directory imports original saves, which id's engines refuse; the port keeps
+ * it for the person at the local console. A script, a game or client module, or a remote client must not be able
+ * to point the loader at an arbitrary file, so those sources are refused unless the operator turned the option on.
+ */
+export function assertLoadPathAllowed(directory: string, path: string, source: CommandContext | undefined,
+  options: { readonly allowAnyPath: boolean; readonly trustedDirectories: readonly string[] }): void {
+  if (options.allowAnyPath) return;
+  const inside = (root: string): boolean => {
+    const name = relative(resolve(root), resolve(path));
+    return !isAbsolute(name) && name !== ".." && !name.startsWith(`..${sep}`);
+  };
+  if (inside(directory) || options.trustedDirectories.some(inside)) return;
+  const origin = source?.origin;
+  if (origin === undefined || source?.producer === undefined && (origin.kind === "local-console" || origin.kind === "server-console" || origin.kind === "local-seat")) return;
+  throw new RangeError(`load of a path outside the save directory is only accepted from the local console; start with --allow-load-paths to allow it from scripts, game modules and remote clients: ${resolve(path)}`);
 }
 
 export function containedSaveName(directory: string, path: string): string {

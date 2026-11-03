@@ -1,10 +1,10 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../../../support/corpus.ts";
+import { expect } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../../../../support/corpus.ts";
 
 import type { ActorId, OwnedActor } from "../../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../../src/contracts/identity.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../../src/world/gameplay/index.ts";
 import { createSceneQueries } from "../../../../../src/world/collision/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../../../src/core/numeric.ts";
 import { Q1MonsterMovement } from "../../../../../src/movement/q1/monsters.ts";
@@ -15,12 +15,14 @@ import type { Q1Actor } from "../../../../../src/content/q1/foundation/entity.ts
 import type { Q1Event, Q1FoundationHost } from "../../../../../src/content/q1/foundation/types.ts";
 import { PLAYER_BOUNDS, ZERO, vadd, vscale, length } from "../../../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base } from "../../../../../src/content/q1/base/index.ts";
-import { registerMissionPackArsenal } from "../../../../../src/content/q1/missionpacks/index.ts";
+import { registerMissionPackArsenal } from "../../../../../src/content/q1/missionpacks/arsenal.ts";
 import { registerMissionPackMonsters } from "../../../../../src/content/q1/missionpacks/monsters/index.ts";
 import { registerHipnoticMisc } from "../../../../../src/content/q1/missionpacks/world/hipnotic-misc.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../../../src/persistence/q1-foundation.ts";
 import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../../src/persistence/world-state.ts";
 import type { BodyCheckpoint, CombatCheckpoint, InventoryCheckpoint } from "../../../../../src/contracts/session.ts";
+import { impulseAuthority } from "../../../../support/authority.ts";
+const test = corpusTest("q1/id1/pak0.pak");
 
 interface SavedBoss {
   readonly source: ReturnType<Q1Foundation["capture"]>;
@@ -54,7 +56,7 @@ async function session(pack: "hipnotic" | "rogue", edition: "classic" | "rerelea
     bodies.write(actor, { ...body, origin: state.origin, angles: state.angles, ground: state.ground.kind === "none" ? null : state.ground.kind === "actor" ? state.ground.actor : active?.world?.actor.id ?? null });
     entity.movementFlags = state.flags; entity.idealYaw = state.idealYaw; entity.yawSpeed = state.yawSpeed; return undefined;
   }, link: actor => bodies.link(actor) });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: (actor, impulse) => { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, velocity: vadd(body.velocity, impulse) }); return undefined; }, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = impulseAuthority(actors, callbacks, bodies);
   const inventory = new SharedInventoryTable(actors);
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => randomValue, trace: request => {
     const trace = scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" }, policy: { kind: "q1", move: request.monsters ? "normal" : "no-monsters", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: request.ignore });

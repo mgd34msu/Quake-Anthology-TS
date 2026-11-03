@@ -262,13 +262,6 @@ export const boss31Moves: readonly MonsterMove[] = [
     { ai: "run", distance: Math.fround(9), actions: [], lerpFrame: -1 },
     { ai: "run", distance: Math.fround(9), actions: [], lerpFrame: -1 },
   ] },
-  { name: "jorg_move_start_walk", firstFrame: 163, lastFrame: 167, end: null, sidestepScale: 0, frames: [
-    { ai: "walk", distance: Math.fround(5), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(6), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(7), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(9), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(15), actions: [], lerpFrame: -1 },
-  ] },
   { name: "jorg_move_walk", firstFrame: 168, lastFrame: 181, end: null, sidestepScale: 0, frames: [
     { ai: "walk", distance: Math.fround(17), actions: [], lerpFrame: -1 },
     { ai: "walk", distance: Math.fround(0), actions: [], lerpFrame: -1 },
@@ -284,14 +277,6 @@ export const boss31Moves: readonly MonsterMove[] = [
     { ai: "walk", distance: Math.fround(9), actions: [], lerpFrame: -1 },
     { ai: "walk", distance: Math.fround(9), actions: [], lerpFrame: -1 },
     { ai: "walk", distance: Math.fround(9), actions: [], lerpFrame: -1 },
-  ] },
-  { name: "jorg_move_end_walk", firstFrame: 182, lastFrame: 187, end: null, sidestepScale: 0, frames: [
-    { ai: "walk", distance: Math.fround(11), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(0), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(8), actions: [], lerpFrame: -1 },
-    { ai: "walk", distance: Math.fround(-8), actions: [], lerpFrame: -1 },
   ] },
   { name: "jorg_move_pain3", firstFrame: 87, lastFrame: 111, end: "jorg_run", sidestepScale: 0, frames: [
     { ai: "move", distance: Math.fround(-28), actions: [], lerpFrame: -1 },

@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import { expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { corpusFile } from "../../../support/corpus.ts";
 
-import { nativeFixture } from "./native.test.ts";
-import { guestPointer, RereleaseSourceClient, retailRereleaseClientProfile } from "../../../../src/compat/q2/rerelease/index.ts";
+import { closeNativeSources, nativeFixture } from "./native-fixture.ts";
+import { guestPointer } from "../../../../src/compat/q2/rerelease/module.ts";
+import { RereleaseSourceClient } from "../../../../src/compat/q2/rerelease/source-state.ts";
+import { retailRereleaseClientProfile } from "../../../../src/compat/q2/rerelease/client-profile.ts";
+
+afterEach(closeNativeSources);
 
 const available = await Bun.file(new URL(corpusFile("q2/rerelease/baseq2/game_x64.dll"), "file:///")).exists();
 
@@ -42,7 +46,9 @@ test.skipIf(!available)("retail protection deadline follows native give/use and 
     command(["give", "Invulnerability"]); command(["use", "Invulnerability"]);
     expect(memory.readInt64(deadline)).toBe(60000n);
     expect(sounds.length).toBeGreaterThan(0);
+    const calls = spyOn(guest, "callGame");
     host.runFrame(true);
+    expect(calls.mock.calls.some(([name]) => name === "RunFrame")).toBe(true);
     expect(memory.readInt64(deadline)).toBe(60000n);
   } finally { source.close(); }
 });

@@ -43,7 +43,7 @@ export class NativeModCombat {
   private readonly process: NativeModEntryBinding | null;
   private readonly armor: NativeModArmorState;
   private readonly frames: DamageFrame[] = [];
-  private watched: { readonly base: GuestAddress; readonly bytes: number; readonly close: () => void } | null = null;
+  private readonly watched = new Map<number, (() => void)[]>();
   private suspended = false;
   constructor(readonly definition: NativeModSourceActors, readonly declaration: NativeModDeclaration, readonly host: NativeModHost,
     readonly services: ModHostServices, readonly instance: ProviderId, readonly calls: NativeModCombatCalls) {
@@ -101,7 +101,8 @@ export class NativeModCombat {
     const offset = this.offset(kind); if (offset === null) return null;
     const address = this.host.memory.readPointer(this.at(slot, offset)); if (address === null) return null;
     const prior = this.entries.get(address.byteOffset);
-    if (prior !== undefined) { if (prior.kind !== kind) throw new Error("One native callback entry has incompatible declared ABIs"); return prior.binding; }
+    // One function address shared by two callback kinds (a no-op assigned to pain and die) keeps the binding of its first kind.
+    if (prior !== undefined) return prior.binding;
     const binding = bindNativeModEntry(this.host, address, `${this.instance}:actor-${kind}-${address.byteOffset}`, this.signature(this.parameters(kind)), (args, original) => {
       const self = this.calls.owner(this.slot(requiredPointer(args, 0)));
       if (self === null) return original(args);
@@ -111,27 +112,30 @@ export class NativeModCombat {
     }, () => !this.suspended);
     this.entries.set(address.byteOffset, { kind, binding }); return binding;
   }
-  private watch(): void {
-    const table = this.host.entities(), bytes = table.stride * table.capacity;
-    if (this.watched?.base.byteOffset === table.base.byteOffset && this.watched.bytes === bytes) return;
-    this.watched?.close();
-    this.watched = { base: table.base, bytes, close: this.host.memory.observeWrites(table.base, bytes, ranges => this.changed(ranges)) };
+  /** Only the callback and deferred-damage fields of a bound slot are observed, so other edict stores never enter JS. */
+  private watch(slot: number): void {
+    if (this.watched.has(slot)) return;
+    const fields: { readonly offset: number; readonly bytes: number }[] = [];
+    for (const kind of ["use", "touch", "pain", "die"] satisfies readonly Kind[]) { const offset = this.offset(kind); if (offset !== null) fields.push({ offset, bytes: this.host.memory.pointerBytes }); }
+    if (this.deferred !== null) fields.push(...this.deferred.watchedFields());
+    const entity = this.host.entity(slot).address;
+    this.watched.set(slot, fields.map(field => this.host.memory.observeWrites(this.host.memory.offset(entity, BigInt(field.offset)), field.bytes,
+      ranges => this.changed(slot, field.offset, ranges))));
   }
-  private changed(ranges: readonly GuestWrittenRange[]): void {
-    if (this.suspended) return;
-    const table = this.host.entities();
-    for (const range of ranges) for (let slot = Math.floor(range.byteOffset / table.stride); slot <= Math.floor((range.byteOffset + range.byteLength - 1) / table.stride); slot++) {
-      if (this.calls.owner(slot) === null) continue;
-      this.deferred?.changed(slot, { byteOffset: range.byteOffset - slot * table.stride, byteLength: range.byteLength });
+  private unwatch(): void { for (const closers of this.watched.values()) for (const close of closers) close(); this.watched.clear(); }
+  private changed(slot: number, base: number, ranges: readonly GuestWrittenRange[]): void {
+    if (this.suspended || this.calls.owner(slot) === null) return;
+    for (const written of ranges) {
+      const range = { byteOffset: base + written.byteOffset, byteLength: written.byteLength };
+      this.deferred?.changed(slot, range);
       for (const kind of ["use", "touch", "pain", "die"] satisfies readonly Kind[]) {
         const offset = this.offset(kind); if (offset === null) continue;
-        const start = slot * table.stride + offset;
-        if (range.byteOffset < start + this.host.memory.pointerBytes && start < range.byteOffset + range.byteLength) this.ensure(kind, slot);
+        if (range.byteOffset < offset + this.host.memory.pointerBytes && offset < range.byteOffset + range.byteLength) this.ensure(kind, slot);
       }
     }
   }
   bind(slot: number, actor: OwnedActor): ActorCallbacks {
-    this.validate(); this.watch(); for (const kind of ["use", "touch", "pain", "die"] satisfies readonly Kind[]) this.ensure(kind, slot);
+    this.validate(); this.watch(slot); for (const kind of ["use", "touch", "pain", "die"] satisfies readonly Kind[]) this.ensure(kind, slot);
     const combat = this.definition.combat;
     if (combat !== undefined) {
       const scalar = (field: NativeModScalarField, value?: number) => this.calls.scalar(this.host.entity(slot).address, field, value);
@@ -269,8 +273,8 @@ export class NativeModCombat {
   checkpoint(): readonly SavedNativeDeferredDamage[] { return this.deferred?.checkpoint() ?? []; }
   validateSaved(records: readonly SavedNativeDeferredDamage[]): void { this.deferred?.validateSaved(records); }
   restore(records: readonly SavedNativeDeferredDamage[]): void { this.deferred?.restore(records); }
-  suspend(value: boolean): void { this.suspended = value; if (value) { this.watched?.close(); this.watched = null; } }
-  close(): void { this.watched?.close(); this.watched = null; for (const entry of this.entries.values()) entry.binding.close(); this.entries.clear(); this.damage?.close(); this.process?.close(); this.deferred?.clear(); }
+  suspend(value: boolean): void { this.suspended = value; if (value) this.unwatch(); }
+  close(): void { this.unwatch(); for (const entry of this.entries.values()) entry.binding.close(); this.entries.clear(); this.damage?.close(); this.process?.close(); this.deferred?.clear(); }
 
   private withBytes<Result>(bytes: Uint8Array, run: (address: GuestAddress) => Result): Result {
     const memory = this.host.memory, address = memory.allocate({ byteLength: bytes.length, alignment: 8n, label: "Native mod callback value" });

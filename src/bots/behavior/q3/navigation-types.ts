@@ -112,6 +112,8 @@ export interface BotMovementPrediction {
   readonly frameTime: number;
   readonly stopEvents: number;
   readonly stopArea: number;
+  /** Box for SE_HITBOUNDINGBOX (AAS_ClientMovementHitBBox); the botlib export has no way to pass one. */
+  readonly hitBox?: Bounds;
   readonly visualize: boolean;
 }
 

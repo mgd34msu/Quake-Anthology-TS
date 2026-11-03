@@ -1,10 +1,12 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 test("the application run loop services timers when every frame exceeds its minimum duration", async () => {
-  const directory = await mkdtemp("/tmp/quake-run-yield-");
+  const directory = await tempDirectory("quake-run-yield-");
   const parsed = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m1", "--movement", "q1", "--character", "q1",
     "--dedicated", "--frames", "12", "--user-content-root", directory]);
   if (parsed.kind !== "run") throw new Error("Expected dedicated run options");

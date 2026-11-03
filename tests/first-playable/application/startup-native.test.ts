@@ -1,29 +1,14 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Application } from "../../../src/app/bootstrap/application.ts";
-import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
-import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.ts";
-import { userProductDirectory } from "../../../src/content/user-data.ts";
+import { startupNativeFixture } from "../../support/startup-fixture.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 const enabled = process.env["QUAKE_STARTUP_NATIVE_TEST"] === "1";
-async function fixture(game = "q2-classic-baseq2", map = "base1", extra: readonly string[] = []) {
-  const root = await mkdtemp(join(tmpdir(), "quake-startup-native-"));
-  const command = parseApplicationCommand(["--game", game, "--map", map, "--renderer", "cpu", "--hidden", ...extra,
-    "--width", "320", "--height", "240", "--user-content-root", root]);
-  if (command.kind !== "run") throw new Error("Expected native launch");
-  const content = await loadApplicationContent(command.options);
-  try {
-    const product = content.catalog.product(content.recipe.engineBehavior.content);
-    const productRoot = userProductDirectory(root, product.expectation.contentDirectory);
-    const sourcePath = join(productRoot, "cvars", "source", encodeURIComponent(content.recipe.map.entities.content), `${encodeURIComponent(content.recipe.map.entities.provider)}.json`);
-    const clientPath = join(productRoot, "cvars", "client", encodeURIComponent(content.recipe.engineBehavior.content), encodeURIComponent(content.recipe.engineBehavior.provider), "0.json");
-    await mkdir(productRoot, { recursive: true });
-    return { root, productRoot, sourcePath, clientPath, options: command.options };
-  } finally { await content.close(); }
-}
+const fixture = (game?: string, map?: string, extra?: readonly string[]) => startupNativeFixture(tempDirectory, game, map, extra);
 
 test.skipIf(!enabled)("actual first world consumes wait-completed difficulty and capacity", async () => {
   const data = await fixture(); let app: Application | null = null;

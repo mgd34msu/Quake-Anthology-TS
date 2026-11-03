@@ -1,3 +1,4 @@
+import { fixturePk3 } from "../../support/pk3.ts";
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,19 +12,6 @@ import { MessageWriter } from '../../../src/network/q3/message.ts';
 import { decodeServerMessage, ServerOpcode } from '../../../src/network/q3/server-message.ts';
 import { DownloadSink } from '../../../src/network/services/downloads.ts';
 
-function fixturePk3(): Uint8Array<ArrayBuffer> {
-  const name = new TextEncoder().encode('wire-probe.cfg'), data = new TextEncoder().encode('set wire_probe 1\n'.repeat(400));
-  const localLength = 30 + name.length + data.length, centralLength = 46 + name.length;
-  const bytes = new Uint8Array(localLength + centralLength + 22), view = new DataView(bytes.buffer), crc = Bun.hash.crc32(data);
-  view.setUint32(0, 0x04034b50, true); view.setUint16(4, 20, true); view.setUint32(14, crc, true);
-  view.setUint32(18, data.length, true); view.setUint32(22, data.length, true); view.setUint16(26, name.length, true);
-  bytes.set(name, 30); bytes.set(data, 30 + name.length);
-  view.setUint32(localLength, 0x02014b50, true); view.setUint16(localLength + 4, 20, true); view.setUint16(localLength + 6, 20, true);
-  view.setUint32(localLength + 16, crc, true); view.setUint32(localLength + 20, data.length, true); view.setUint32(localLength + 24, data.length, true);
-  view.setUint16(localLength + 28, name.length, true); bytes.set(name, localLength + 46);
-  const end = localLength + centralLength; view.setUint32(end, 0x06054b50, true); view.setUint16(end + 8, 1, true); view.setUint16(end + 10, 1, true);
-  view.setUint32(end + 12, centralLength, true); view.setUint32(end + 16, localLength, true); return bytes;
-}
 
 function fixture(checksumDelta = 0, earlierLoaded = false, reload: () => Promise<void> = async () => {}, physicalDirectory?: string) {
   const root = mkdtempSync(join(tmpdir(), 'q3-download-sink-')), bytes = fixturePk3(), archive = decodeArchive(bytes, 'pk3');
@@ -60,7 +48,7 @@ test('Q3 selected and base directory mapping preserves wire names and physical c
     expect(q3DownloadPath('MYMOD/custom.123.pk3', owner)).toBe('MyMod/custom.123.pk3');
     expect(q3DownloadPath('BASEQ3/custom.pk3', owner)).toBe('BaseQ3/custom.pk3');
     expect(q3DownloadPath('other/custom.pk3', owner)).toBe('other/custom.pk3');
-    expect(() => q3DownloadPath('../custom.pk3', owner)).toThrow();
+    expect(() => q3DownloadPath('../custom.pk3', owner)).toThrow("Unsafe package download name: \"../custom.pk3\"");
   } finally { f.client.close(); f.server.close(); rmSync(f.root, { recursive: true, force: true }); }
 });
 
@@ -120,7 +108,7 @@ test('a destination installed during transfer is never replaced', async () => {
     if (first?.kind !== 'start') throw new Error('Missing start');
     f.client.publishSize(first.fileSize); await f.client.receive(first);
     const path = join(f.root, 'baseq3/custom.pk3'); writeFileSync(path, 'installed');
-    await expect((async () => { for (const block of blocks.slice(1)) await f.client.receive(block); })()).rejects.toThrow();
+    await expect((async () => { for (const block of blocks.slice(1)) await f.client.receive(block); })()).rejects.toThrow("EEXIST: file already exists, link");
     expect(readFileSync(path, 'utf8')).toBe('installed'); expect(readdirSync(join(f.root, 'baseq3'))).toEqual(['custom.pk3']);
     expect(f.commands).not.toContain('donedl');
   } finally { f.client.close(); f.server.close(); rmSync(f.root, { recursive: true, force: true }); }

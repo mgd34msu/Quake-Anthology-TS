@@ -20,6 +20,8 @@ export interface Q1StateExtension {
   capture(): Uint8Array;
   /** Runs after all source entity/player references exist, before thinks are scheduled. */
   restore(bytes: Uint8Array): undefined;
+  /** Runs when a save written before this extension existed has no entry for it; without it a missing entry is an error. */
+  restoreAbsent?(): undefined;
   /** SUB_CopyEntity duplicates initialized source state without running a spawn function. */
   clone?(source: Q1Actor, target: Q1Actor): undefined;
 }

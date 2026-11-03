@@ -270,7 +270,7 @@ export function botMatchHelpAccompany(context: GameAiContext, state: BotState, m
     else other = true;
   }
   if (client < 0) {
-    if (netname === null) throw new Error("BotMatch_HelpAccompany reads an uninitialized source netname");
+    netname ??= variable(context, match, BotMatchVariable.NETNAME);
     botInitialChat(context, state, "whois", other ? teammate : netname);
     context.library.chat.enterChat(state.cs, clientFromName(context, netname), ChatDestination.Tell);
     return;
@@ -282,10 +282,10 @@ export function botMatchHelpAccompany(context: GameAiContext, state: BotState, m
   if (state.teamGoal.entity < 0) {
     if (other) botInitialChat(context, state, "whereis", teammate);
     else {
-      if (netname === null) throw new Error("BotMatch_HelpAccompany reads an uninitialized source netname");
+      netname ??= variable(context, match, BotMatchVariable.NETNAME);
       botInitialChat(context, state, "whereareyou", netname);
     }
-    if (netname === null) throw new Error("BotMatch_HelpAccompany reads an uninitialized source reply recipient");
+    netname ??= variable(context, match, BotMatchVariable.NETNAME);
     context.library.chat.enterChat(state.cs, clientFromName(context, netname), ChatDestination.Team);
     return;
   }
@@ -517,9 +517,13 @@ export function botMatchCheckPoint(context: GameAiContext, state: BotState, matc
     if (old.prev !== null) old.prev.next = old.next;
     else state.checkpoints = old.next;
     old.inuse = false;
+    // C leaks the replaced waypoint, so repeated chats from any player would exhaust the shared heap.
+    old.prev = null;
+    old.next = context.deathmatch.freeWaypoints;
+    context.deathmatch.freeWaypoints = old;
   }
   const checkpoint = botCreateWayPoint(context, name, position, area);
-  if (checkpoint === null) throw new Error("BotMatch_CheckPoint exhausted the source waypoint heap");
+  if (checkpoint === null) return; // BotCreateWayPoint already warned.
   checkpoint.next = state.checkpoints;
   if (state.checkpoints !== null) state.checkpoints.prev = checkpoint;
   state.checkpoints = checkpoint;
@@ -675,7 +679,7 @@ export function botMatchLeadTheWay(context: GameAiContext, state: BotState, matc
     other = false;
   }
   if (client < 0) {
-    if (netname === null) throw new Error("BotMatch_LeadTheWay reads an uninitialized source netname");
+    netname ??= variable(context, match, BotMatchVariable.NETNAME);
     botInitialChat(context, state, "whois", netname);
     context.library.chat.enterChat(state.cs, state.client, ChatDestination.Team);
     return;

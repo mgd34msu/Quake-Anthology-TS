@@ -1,5 +1,7 @@
 # Q2 donor and unified-engine comparison
 
+> **Dated record, not current status.** A donor-versus-port comparison from September 2026; many rows describe features since joined. The maintained status is [status.md](status.md). Where this page disagrees with it or with the code, trust those. Paths such as `verification/`, `work-packages.json`, `completion-status.json` and `../the Q1 reference port/...` name files deleted or scrubbed in commit `949c337c`; bare `src/...` paths may name donor-project files.
+
 This audit covers all **193 Q2 feature IDs** in verification/features/q2.json, plus core scheduling, collision and native execution that cross family boundaries. It is a source-grounded checklist as of 2026-09-12, not a claim of exhaustive function-level equivalence or completed product acceptance. Every inventoried Q2 feature appears once in the final table. A feature not yet in that inventory is not thereby excluded from the target.
 
 The brain source/fixture changes cited below were pushed in commit `8f5e9a3e70cd66ca86ce1f9718e2a6cd61827bbb` after isolated strict TypeScript and policy checks passed and root reported 8 focused tests/260 assertions passing. The installed executable remains at `e20b6d6`; source verification does not claim that newer code is installed.
@@ -215,7 +217,7 @@ Unified paths: [src/content/q2/multiplayer/lmctf/index.ts](../src/content/q2/mul
 
 ### G16 Local seats and remote seat ownership
 
-Unified paths: [src/world/session/session.ts](../src/world/session/session.ts), [src/input/seat.ts](../src/input/seat.ts), [src/network/common/loopback.ts](../src/network/common/loopback.ts), [src/app/bootstrap/network/q2.ts](../src/app/bootstrap/network/q2.ts).
+Unified paths: [src/world/session/session.ts](../src/world/session/session.ts), [src/input/seat.ts](../src/input/seat.ts), [tests/support/loopback.ts](../tests/support/loopback.ts), [src/app/bootstrap/network/q2.ts](../src/app/bootstrap/network/q2.ts).
 
 | Decision and comparison | Universal feature union | Retained policies | Evidence and remaining gap |
 | --- | --- | --- | --- |
@@ -285,7 +287,7 @@ Unified paths: [src/input/router.ts](../src/input/router.ts), [src/input/gamepad
 
 ### G23 Sound channels and multiple listeners
 
-Unified paths: [src/audio/engine.ts](../src/audio/engine.ts), [src/audio/quake-mixer.ts](../src/audio/quake-mixer.ts), [src/audio/streams.ts](../src/audio/streams.ts), [src/app/bootstrap/audio.ts](../src/app/bootstrap/audio.ts).
+Unified paths: [src/audio/engine.ts](../src/audio/engine.ts), [src/audio/streams.ts](../src/audio/streams.ts), [src/app/bootstrap/audio.ts](../src/app/bootstrap/audio.ts).
 
 | Decision and comparison | Universal feature union | Retained policies | Evidence and remaining gap |
 | --- | --- | --- | --- |
@@ -315,7 +317,7 @@ Unified paths: [src/audio/music.ts](../src/audio/music.ts), [src/platform/vorbis
 
 ### G26 Cinematics and media
 
-Unified paths: [src/media/cin.ts](../src/media/cin.ts), [src/media/cin-playback.ts](../src/media/cin-playback.ts), [src/media/roq.ts](../src/media/roq.ts), [src/media/transitions.ts](../src/media/transitions.ts), [src/app/bootstrap/finale.ts](../src/app/bootstrap/finale.ts).
+Unified paths: [src/media/cin.ts](../src/media/cin.ts), [src/media/cin-playback.ts](../src/media/cin-playback.ts), [src/media/roq.ts](../src/media/roq.ts), [src/app/bootstrap/finale.ts](../src/app/bootstrap/finale.ts).
 
 | Decision and comparison | Universal feature union | Retained policies | Evidence and remaining gap |
 | --- | --- | --- | --- |

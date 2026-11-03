@@ -9,31 +9,69 @@ export interface BotSourceFiles {
   read(path: string): Uint8Array | null;
   list(directory: string, extension: string): readonly string[];
   provenance?(): string;
+  /** Digest recorded by version 1 bot saves; present once prepared for a restore. */
+  legacyProvenance?(): string;
 }
 
 function key(path: string): string { return path.replaceAll("\\", "/").replace(/^\.\//, "").toLowerCase(); }
+
+/** Navigation graphs are read through the mounted resources by the navigation loader, never through these files. */
+const NAVIGATION_PATH = /^bots\/navigation\//i;
+
+function hashEntry(hash: ReturnType<typeof createHash>, path: string, bytes: Uint8Array): void {
+  const name = new TextEncoder().encode(path), size = new Uint8Array(8), view = new DataView(size.buffer);
+  view.setUint32(0, name.length, true); view.setUint32(4, bytes.length, true);
+  hash.update(size); hash.update(name); hash.update(bytes);
+}
 
 /** Text is prepared from selected mounted resources before synchronous source AI setup. */
 export class BotAssetFiles implements BotSourceFiles {
   private readonly files = new Map<string, Uint8Array>();
   private readonly paths: string[] = [];
+  /** Listed but unread files, kept only so a version 1 save, whose digest covered them, can still be verified. */
+  private readonly unread = new Map<string, () => Promise<Uint8Array | null>>();
+  private readonly legacyOverrides = new Map<string, Uint8Array>();
+  private legacyDigest: string | null = null;
 
-  add(path: string, bytes: Uint8Array): void {
+  add(path: string, bytes: Uint8Array, legacyBytes?: Uint8Array): void {
     const normalized = key(path);
-    if (!this.files.has(normalized)) this.paths.push(path.replaceAll("\\", "/"));
+    if (!this.files.has(normalized) && !this.unread.has(normalized)) this.paths.push(path.replaceAll("\\", "/"));
     this.files.set(normalized, bytes.slice());
+    if (legacyBytes !== undefined) this.legacyOverrides.set(normalized, legacyBytes.slice());
+  }
+  /** Records a path whose bytes are not loaded unless a legacy digest is requested. */
+  addUnread(path: string, open: () => Promise<Uint8Array | null>): void {
+    const normalized = key(path);
+    if (this.files.has(normalized) || this.unread.has(normalized)) return;
+    this.paths.push(path.replaceAll("\\", "/")); this.unread.set(normalized, open);
   }
   read(path: string): Uint8Array | null { return this.files.get(key(path))?.slice() ?? null; }
   provenance(): string {
     const hash = createHash("sha256");
     for (const path of this.paths) {
+      if (this.unread.has(key(path))) continue;
       const bytes = this.files.get(key(path));
       if (bytes === undefined) throw new Error("Bot asset provenance lost its mounted payload");
-      const name = new TextEncoder().encode(path), size = new Uint8Array(8), view = new DataView(size.buffer);
-      view.setUint32(0, name.length, true); view.setUint32(4, bytes.length, true);
-      hash.update(size); hash.update(name); hash.update(bytes);
+      hashEntry(hash, path, bytes);
     }
     return hash.digest("hex");
+  }
+  /** Computes the digest that version 1 bot saves recorded, which included every navigation file. */
+  async prepareLegacyProvenance(): Promise<void> {
+    const hash = createHash("sha256");
+    for (const path of this.paths) {
+      const normalized = key(path), open = this.unread.get(normalized);
+      const bytes = open === undefined ? this.legacyOverrides.get(normalized) ?? this.files.get(normalized) : await open();
+      // A navigation file that does not exist was never part of the version 1 digest either.
+      if (bytes === null) continue;
+      if (bytes === undefined) throw new Error("Bot asset provenance lost its mounted payload");
+      hashEntry(hash, path, bytes);
+    }
+    this.legacyDigest = hash.digest("hex");
+  }
+  legacyProvenance(): string {
+    if (this.legacyDigest === null) throw new Error("Version 1 bot saves require prepared legacy asset provenance");
+    return this.legacyDigest;
   }
   list(directory: string, extension: string): readonly string[] {
     const prefix = key(directory).replace(/\/$/, "") + "/", suffix = extension.toLowerCase();
@@ -41,7 +79,7 @@ export class BotAssetFiles implements BotSourceFiles {
     let bytes = 0;
     for (const path of this.paths) {
       const normalized = key(path);
-      if (!normalized.startsWith(prefix) || !normalized.endsWith(suffix)) continue;
+      if (this.unread.has(normalized) || !normalized.startsWith(prefix) || !normalized.endsWith(suffix)) continue;
       const name = path.slice(prefix.length);
       if (name.includes("/")) continue;
       if (bytes + name.length + 1 >= 1024) break;
@@ -61,6 +99,10 @@ export async function loadBotAssetFiles(resources: BotAssetResources, orderedPat
     const normalized = key(path);
     if (loaded.has(normalized) || normalized.endsWith("/")) continue;
     loaded.add(normalized);
+    if (NAVIGATION_PATH.test(path.replaceAll("\\", "/"))) {
+      files.addUnread(path, async () => (await resources.open(path))?.bytes ?? null);
+      continue;
+    }
     const resource = await resources.open(path);
     if (resource !== null) files.add(path, resource.bytes);
   }

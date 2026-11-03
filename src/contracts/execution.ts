@@ -17,14 +17,6 @@ export type Q3ApiIdentity =
   | { readonly kind: "q3-ui"; readonly version: 4 | 6 };
 export type GameApiIdentity = QuakeCApiIdentity | Q2GameApiIdentity | Q2CgameApiIdentity | Q3ApiIdentity;
 
-/** Source callback entry points dispatched by the shared scheduler. */
-export type SourceGameLifecycle = { readonly module: ModuleIdentity } & (
-  | { readonly kind: "quakec"; readonly api: QuakeCApiIdentity; readonly startFrame: () => undefined }
-  | { readonly kind: "q2-classic"; readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-classic-game" }>; readonly runFrame: () => undefined }
-  | { readonly kind: "q2-rerelease"; readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-rerelease-game" }>; readonly runFrame: (mainLoop: boolean) => undefined; readonly prepFrame: () => undefined }
-  | { readonly kind: "q3"; readonly api: Extract<Q3ApiIdentity, { readonly kind: "q3-qagame" }>; readonly runFrame: (levelTimeMilliseconds: number) => undefined }
-);
-
 /** A replacement must identify the artifact it replaces, not just a module name. */
 export interface ModuleIdentity {
   readonly id: ProviderId;

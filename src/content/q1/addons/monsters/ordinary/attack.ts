@@ -3,20 +3,22 @@ import { sameActor } from "../../../../../contracts/identity.ts";
 import { POINT, length, vsub } from "../../../foundation/types.ts";
 import type { Mg3Monster } from "../ai/index.ts";
 import { armyAttack } from "./army.ts";
+import { dogAttack } from "./classic.ts";
 
 export function mg3OrdinaryAttack(monster: Mg3Monster): boolean {
   const { game, entity } = monster, enemy = monster.enemy;
   if ((game.world?.number("enemy_visible") ?? 0) === 0 || enemy === null) return false;
   const range = game.world?.number("enemy_range") ?? 0;
   if (entity.classname === "monster_army") return armyAttack(monster);
-  if (entity.classname === "monster_demon1" || entity.classname === "monster_dog") {
+  if (entity.classname === "monster_dog") return dogAttack(monster, range);
+  if (entity.classname === "monster_demon1") {
     if (range === 0) { entity.attackState = "melee"; return true; }
     const body = game.body(entity), target = game.host.bodies.read(enemy); if (target === null) return false;
     const height = target.bounds.max.z - target.bounds.min.z;
     if (body.origin.z + body.bounds.min.z > target.origin.z + target.bounds.min.z + height * 0.75 || body.origin.z + body.bounds.max.z < target.origin.z + target.bounds.min.z + height * 0.25) return false;
-    const delta = vsub(target.origin, body.origin), distance = Math.hypot(delta.x, delta.y), demon = entity.classname === "monster_demon1";
-    if (demon ? distance < 100 || distance > 200 && game.host.random() < 0.9 : distance < 80 || distance > 150) return false;
-    entity.attackState = "missile"; if (demon) game.sound(entity, "demon/djump.wav", "voice"); return true;
+    const delta = vsub(target.origin, body.origin), distance = Math.hypot(delta.x, delta.y);
+    if (distance < 100 || distance > 200 && game.host.random() < 0.9) return false;
+    entity.attackState = "missile"; game.sound(entity, "demon/djump.wav", "voice"); return true;
   }
   const shambler = entity.classname === "monster_shambler", ogre = entity.classname === "monster_ogre", wizard = entity.classname === "monster_wizard";
   if (!shambler && !ogre && !wizard) return monster.checkAttack();

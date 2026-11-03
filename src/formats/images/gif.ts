@@ -2,6 +2,7 @@
  * The rerelease port composites disposal 2 to transparency. Timing stays with callers. */
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 import type { ImageLevel } from "../../contracts/render.ts";
+import { imageSizeAllowed, MAX_ANIMATION_BYTES, MAX_ANIMATION_FRAMES } from "./limits.ts";
 
 export interface GifFrame {
   readonly image: ImageLevel;
@@ -66,9 +67,10 @@ export function decodeGif(bytes: Uint8Array, source = "<gif>"): GifImage {
   const reader = new BinaryReader(bytes, source), signature = reader.fixedByteString(6);
   if (signature !== "GIF87a" && signature !== "GIF89a") throw new BinaryError(source, 0, "Invalid GIF signature");
   const width = reader.u16(), height = reader.u16(), packed = reader.u8(), backgroundIndex = reader.u8(); reader.skip(1);
-  if (width === 0 || height === 0 || width * height * 4 > 0x7fffffff) throw new BinaryError(source, 6, "Invalid GIF dimensions");
+  if (!imageSizeAllowed(width, height)) throw new BinaryError(source, 6, "Invalid GIF dimensions");
   const globalPalette = (packed & 128) === 0 ? null : reader.bytes((2 << (packed & 7)) * 3);
   const canvas = new Uint8Array(width * height * 4), frames: GifFrame[] = [];
+  let retainedBytes = 0;
   let transparentIndex: number | null = null, delayCentiseconds = 0, disposal = 0, loopCount: number | null = null;
   for (let block = reader.u8(); block !== 59; block = reader.u8()) {
     if (block === 33) {
@@ -110,6 +112,8 @@ export function decodeGif(bytes: Uint8Array, source = "<gif>"): GifImage {
         if (index !== transparentIndex) canvas.set([colors.getUint8(index * 3), colors.getUint8(index * 3 + 1), colors.getUint8(index * 3 + 2), 255], ((y + destinationY) * width + x + column) * 4);
       }
     }
+    retainedBytes += canvas.length;
+    if (frames.length >= MAX_ANIMATION_FRAMES || retainedBytes > MAX_ANIMATION_BYTES) throw new BinaryError(source, reader.offset, "GIF exceeds the frame or decoded size limit");
     frames.push({ image: { width, height, pixels: canvas.slice() }, rect: { x, y, width: frameWidth, height: frameHeight },
       indices, palette: palette.slice(), transparentIndex, delayCentiseconds, disposal });
     if (disposal === 2) for (let row = y; row < y + frameHeight; row++) canvas.fill(0, (row * width + x) * 4, (row * width + x + frameWidth) * 4);

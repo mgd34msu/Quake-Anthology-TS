@@ -5,7 +5,7 @@ import type { Q2WireCodec } from './codec.ts';
 import type { Q2ServerEvent } from './server-messages.ts';
 import type { SvcFogDataT } from './fog.ts';
 import { SvcFogDataBitsT } from './fog.ts';
-import { createMessage, messageBytes, MSG_WriteByte, MSG_WriteDir, MSG_WriteFloat, MSG_WriteLong, MSG_WritePos, MSG_WriteShort, MSG_WriteString, SZ_Write } from './message.ts';
+import { createMessage, messageBytes, MSG_WriteByte, MSG_WriteDir, MSG_WriteFloat, MSG_WriteLong, MSG_WritePos, MSG_WriteShort, MSG_WriteString, SZ_Clear, SZ_Write } from './message.ts';
 import type { SizeBuf } from './message.ts';
 import { readElement } from './state.ts';
 import type { DownloadSource } from '../services/downloads.ts';
@@ -50,8 +50,12 @@ export function writeQ2Fog(m: SizeBuf, fog: SvcFogDataT): void {
 export type Q2ServerWriteEvent = Exclude<Q2ServerEvent, {
     kind: 'frame' | 'private';
 }>;
+// Each event is copied out by messageBytes, so one 32 KiB buffer serves every encode.
+let scratchMessage: SizeBuf | null = null;
 export function encodeQ2ServerEvent(wire: Q2WireCodec, event: Q2ServerWriteEvent): Uint8Array {
-    const m = createMessage(), kex = wire.protocol.kind === 'q2-kex' || wire.protocol.kind === 'q2-kex-demo';
+    const m = scratchMessage ??= createMessage();
+    SZ_Clear(m); m.readcount = 0;
+    const kex = wire.protocol.kind === 'q2-kex' || wire.protocol.kind === 'q2-kex-demo';
     const rerelease = wire.protocol.kind === 'q2-rerelease' || wire.protocol.kind === 'q2-private-classic';
     if (['achievement', 'fog', 'damage', 'poi', 'help-path', 'localized-print'].includes(event.kind) && !kex && !rerelease)
         throw new Error('Q2 rerelease service message cannot fit selected protocol');

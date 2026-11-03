@@ -35,6 +35,10 @@ test('contained TCP GTV handshake authenticates, streams compressed payload and 
         const address = server.address(); if (address === null || typeof address === 'string') throw new Error('Missing loopback address');
         connection = await GtvConnection.connect({ host: '127.0.0.1', port: address.port, identity: { username: 'viewer', password: 'test-local', version: 'fixture' }, timeoutMilliseconds: 1000, event: event => { if (event.kind === 'data') resolveData?.(event.bytes); else if (event.kind === 'closed') rejectData?.(new Error(event.reason)); } });
         connection.start(); expect(await data).toEqual(Uint8Array.of(6, 0, 255, 0, 0)); expect(authenticated).toBe(true);
+        connection.close();
+        const deadline = performance.now() + 1500;
+        while (peers.size > 0 && performance.now() < deadline) await new Promise<void>(resolve => { setTimeout(resolve, 5); });
+        expect(peers.size).toBe(0);
     } finally {
         connection?.close();
         await Promise.all([...peers].map(peer => new Promise<void>(resolve => { peer.once('close', () => resolve()); peer.destroy(); })));

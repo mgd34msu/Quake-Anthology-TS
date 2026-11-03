@@ -20,6 +20,7 @@ test('Q3 key owner preserves base/unique selection, validates checksum and write
     const base = new ConfigStore(join(root, 'base')), mod = new ConfigStore(join(root, 'mod'));
     await base.dump('q3key', fixtureBase + '\n'); await mod.dump('q3key', fixtureUnique + '\n');
     const registry = cvars(), keys = new Q3CdKeyState(registry);
+  registry.register('cl_authorizeKey', '1', CvarFlag.None);
     await keys.readFile(base); await keys.appendFile(mod);
     const destination = new Uint8Array(33), ui = new Uint8Array(17);
     keys.readAuthorization(destination);
@@ -43,6 +44,7 @@ test('Q3 key owner preserves base/unique selection, validates checksum and write
 
 test('Q3 client authorization uses native packet, cached endpoint, anonymous cvar and demo key', async () => {
   const registry = cvars(), keys = new Q3CdKeyState(registry);
+  registry.register('cl_authorizeKey', '1', CvarFlag.None);
   keys.writeUi(0, '', new TextEncoder().encode(fixtureBase));
   registry.register('cl_anonymous', '1', CvarFlag.None);
   let demo = false, lookups = 0;
@@ -62,6 +64,7 @@ test('Q3 client authorization uses native packet, cached endpoint, anonymous cva
 
 test('Q3 client authorization suppresses a pending request after owner retirement and retries failed lookup', async () => {
   const registry = cvars(), keys = new Q3CdKeyState(registry), gate = Promise.withResolvers<Ipv4Address | null>();
+  registry.register('cl_authorizeKey', '1', CvarFlag.None);
   let current = true, sent = 0, attempts = 0;
   const owner = new Q3ClientAuthorization({ cvars: registry, keys, demoRestricted: () => false,
     resolve: () => gate.promise, print() {} });
@@ -78,6 +81,7 @@ test('Q3 admission authorizes before WAN challenge, retains resend interval and 
   const { Q3ClientNetwork } = await import('../../../src/app/bootstrap/network/q3-client.ts');
   const { PacketQueue } = await import('../../../src/network/common/transport.ts');
   const registry = cvars(), keys = new Q3CdKeyState(registry);
+  registry.register('cl_authorizeKey', '1', CvarFlag.None);
   keys.writeUi(0, '', new TextEncoder().encode(fixtureBase));
   const packets: { readonly to: import('../../../src/network/common/endpoint.ts').IpAddress | IpxAddress; readonly bytes: Uint8Array }[] = [];
   let lookups = 0;
@@ -113,4 +117,12 @@ test('Q3 admission authorizes before WAN challenge, retains resend interval and 
   const ipx = connection({ kind: 'ipx', network: 0x12345678, node: [1, 2, 3, 4, 5, 6], port: 27960 });
   try { await ipx.poll(0); expect(packets.map(packet => decodeConnectionless(packet.bytes, 'server').command)).toEqual(['getchallenge']); expect(packets[0]?.to.kind).toBe('ipx'); expect(lookups).toBe(1); }
   finally { ipx.close(); }
+});
+
+test('Q3 client authorization sends nothing until the player opts in', async () => {
+  const registry = cvars(), keys = new Q3CdKeyState(registry);
+  let sent = 0, lookups = 0;
+  const owner = new Q3ClientAuthorization({ cvars: registry, keys, demoRestricted: () => false, async resolve() { lookups++; return authority; }, print() {} });
+  await owner.request(() => undefined, () => { sent++; });
+  expect(sent).toBe(0); expect(lookups).toBe(0);
 });

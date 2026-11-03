@@ -10,9 +10,9 @@ import type { QvmModCallbackDeclaration } from "../../../src/contracts/qvm-mod-c
 import type { ModCallbackInput, ModRuntimeValue } from "../../../src/contracts/mod-callbacks.ts";
 import { ActorCallbackTable, SessionActorRegistry } from "../../../src/world/actors/index.ts";
 import { SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/body.ts";
-import { GameplayAuthority } from "../../../src/world/gameplay/authority.ts";
 import { SharedInventoryTable } from "../../../src/world/gameplay/inventory.ts";
 import { SharedOriginalPickupAdmission } from "../../../src/world/gameplay/original-pickups.ts";
+import { inertAuthority } from "../../support/authority.ts";
 
 async function fixture(ownedItem = false) {
   const first = ownedItem ? 596 : 64, second = ownedItem ? 600 : 68;
@@ -32,7 +32,7 @@ async function fixture(ownedItem = false) {
   const artifact = resolveQvmArtifact({ module, role: "qagame", bytes: program, abiProfile: "q3-modern" });
   if (artifact.kind !== "bytecode") throw new Error("Missing source program");
   const identity = createIdentityOwner("compound-qvm"), actors = new SessionActorRegistry(identity), target = actors.allocate("q1:world", "q1:player"), pickup = actors.allocate("q1:world", "q1:pickup"), client = identity.client(0, 0);
-  const callbacks = new ActorCallbackTable(actors), combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const callbacks = new ActorCallbackTable(actors), combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors); inventory.create(target, [{ item: "test:first", count: 0, capacity: 100 }, { item: "test:second", count: 0, capacity: 100 }, { item: "test:third", count: 0, capacity: 100 }]);
   const services: ModHostServices = { actors, callbacks, combat, inventory, seed: 1, time: () => ({ kind: "seconds", value: 1 }),
     bodies: new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined }), clients: {

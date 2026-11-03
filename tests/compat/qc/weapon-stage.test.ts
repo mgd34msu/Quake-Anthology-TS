@@ -1,7 +1,6 @@
 import type { QcPrimaryWeaponStageDeclaration } from "../../../src/contracts/qc-weapon-stage.ts";
-import { homedir } from "node:os";
 
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { copperAvailable, copperProgramPath, corpusFile } from "../../support/corpus.ts";
 
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { readQuakeCCompatibility } from "../../../src/compat/qc/compatibility.ts";
@@ -15,10 +14,10 @@ import { id1DamageMultiplier } from "../../../src/content/q1/quakec/id1-program.
 import { SourceRandom } from "../../../src/app/bootstrap/simulation/random.ts";
 
 for (const kind of ["netquake", "quakeworld"] satisfies readonly ("netquake" | "quakeworld")[]) test(`original ${kind} selected weapon boundary preserves committed axe, retires repeat shots, and continues post-think`, async () => {
-  const archive = await openArchive(`${testCorpusRoot()}/q1/id1/PAK0.PAK`);
+  const archive = await openArchive(corpusFile("q1/id1/PAK0.PAK"));
   try {
     const entry = archive.findEntries("progs.dat").at(-1); if (entry === undefined) throw new Error("Missing original id1 program");
-    const program = loadQcProgram(kind === "quakeworld" ? await Bun.file(`${testCorpusRoot()}/q1/qw/qwprogs.dat`).bytes() : await archive.readEntry(entry)), originalStage = qcWeaponStage(program);
+    const program = loadQcProgram(kind === "quakeworld" ? await Bun.file(corpusFile("q1/qw/qwprogs.dat")).bytes() : await archive.readEntry(entry)), originalStage = qcWeaponStage(program);
     if (originalStage === null || originalStage.client === undefined) throw new Error("Missing qualified original weapon stage");
     const declaration = readQuakeCCompatibility(new TextEncoder().encode(JSON.stringify({ version: 1, artifactDigest: program.digest, weaponStage: {
       dispatcher: program.functionAt(originalStage.dispatcher).name,
@@ -88,8 +87,8 @@ for (const kind of ["netquake", "quakeworld"] satisfies readonly ("netquake" | "
 });
 
 
-test("declared client calls execute original Copper parameters, globals and entity results with nested staging restored", async () => {
-  const program = loadQcProgram(await Bun.file(`${homedir()}/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat`).bytes());
+test.skipIf(!copperAvailable())("declared client calls execute original Copper parameters, globals and entity results with nested staging restored", async () => {
+  const program = loadQcProgram(await Bun.file(copperProgramPath()).bytes());
   const declaration: QcPrimaryWeaponStageDeclaration = { dispatcher: "W_WeaponFrame", continuations: ["player_axe1"], repeats: [], client: {
     spawn: { function: "autosave", arguments: [{ kind: "input", name: "self" }, { kind: "string", value: "stage-check" }],
       globals: [{ name: "isKex", value: { kind: "float", value: 0 } }, { name: "v_forward", value: { kind: "vector", value: { x: 1, y: 2, z: 3 } } }] },
@@ -143,13 +142,13 @@ test("declared client calls execute original Copper parameters, globals and enti
 // skeleton; the derivation must reproduce the pinned retail stages exactly and
 // fully qualify undeclared mod programs such as qdoom.
 test("derived weapon stage reproduces pinned stages and qualifies qdoom", async () => {
-  const archive = await openArchive(`${testCorpusRoot()}/q1/id1/PAK0.PAK`);
-  const qdoom = await openArchive(`${testCorpusRoot()}/q1/qdoom/pak0.pak`);
+  const archive = await openArchive(corpusFile("q1/id1/PAK0.PAK"));
+  const qdoom = await openArchive(corpusFile("q1/qdoom/pak0.pak"));
   try {
     const entry = archive.findEntries("progs.dat").at(-1), doomEntry = qdoom.findEntries("progs.dat").at(-1);
     if (entry === undefined || doomEntry === undefined) throw new Error("Missing QC programs");
     const programs = [loadQcProgram(await archive.readEntry(entry)),
-      loadQcProgram(await Bun.file(`${testCorpusRoot()}/q1/qw/qwprogs.dat`).bytes()),
+      loadQcProgram(await Bun.file(corpusFile("q1/qw/qwprogs.dat")).bytes()),
       loadQcProgram(await qdoom.readEntry(doomEntry))];
     for (const program of programs) {
       const derived = qcDerivedWeaponStage(program), selected = qcWeaponStage(program);

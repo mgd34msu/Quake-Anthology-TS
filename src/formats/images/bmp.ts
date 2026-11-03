@@ -1,6 +1,7 @@
 /* Adapted from the reference port GPL-2.0-or-later. */
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 import type { ImageLevel } from "../../contracts/render.ts";
+import { imageSizeAllowed } from "./limits.ts";
 
 export interface BmpImage extends ImageLevel {
   readonly indexed: { readonly indices: Uint8Array; readonly palette: Uint8Array } | null;
@@ -14,7 +15,7 @@ export function decodeBmp(bytes: Uint8Array, source = "<bmp>"): BmpImage {
   const height = Math.abs(signedHeight);
   if (header !== 40 || planes !== 1 || compression !== 0 || ![8, 24, 32].includes(depth))
     throw new BinaryError(source, 14, "BMP requires BITMAPINFOHEADER, BI_RGB and 8/24/32-bit pixels");
-  if (width <= 0 || height <= 0 || width * height * 4 > 0x7fffffff) throw new BinaryError(source, 18, "Invalid BMP dimensions");
+  if (!imageSizeAllowed(width, height)) throw new BinaryError(source, 18, "Invalid BMP dimensions");
   let palette: Uint8Array | null = null;
   if (depth === 8) {
     if (colorCount === 0) colorCount = 256;

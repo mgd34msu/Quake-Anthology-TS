@@ -231,7 +231,7 @@ export function createR1Context(net_message: SizeBuf) {
             else if (bits & U_SKIN16)
                 to.skinnum = MSG_ReadWord(net_message);
             if ((bits & (U_EFFECTS8 | U_EFFECTS16)) === (U_EFFECTS8 | U_EFFECTS16))
-                to.effects = MSG_ReadLong(net_message);
+                to.effects = MSG_ReadLong(net_message) >>> 0;
             else if (bits & U_EFFECTS8)
                 to.effects = MSG_ReadByte(net_message);
             else if (bits & U_EFFECTS16)
@@ -580,11 +580,11 @@ export function createR1Context(net_message: SizeBuf) {
             MSG_WriteByte(msg, bits);
             let buttons = bits & (1 << 6) ? cmd.buttons : 0;
             if (compressedMovements && bits & (1 << 6)) {
-                if (bits & (1 << 3) && cmd.forwardmove % 5 === 0)
+                if (bits & (1 << 3) && cmd.forwardmove % 5 === 0 && Math.abs(cmd.forwardmove) < 640)
                     buttons |= BUTTON_UCMD_DBLFORWARD;
-                if (bits & (1 << 4) && cmd.sidemove % 5 === 0)
+                if (bits & (1 << 4) && cmd.sidemove % 5 === 0 && Math.abs(cmd.sidemove) < 640)
                     buttons |= BUTTON_UCMD_DBLSIDE;
-                if (bits & (1 << 5) && cmd.upmove % 5 === 0)
+                if (bits & (1 << 5) && cmd.upmove % 5 === 0 && Math.abs(cmd.upmove) < 640)
                     buttons |= BUTTON_UCMD_DBLUP;
                 if (bits & (1 << 0) && readElement(cmd.angles, 0) % 64 === 0 && Math.abs(Math.trunc(readElement(cmd.angles, 0) / 64)) < 128)
                     buttons |= BUTTON_UCMD_DBL_ANGLE1;

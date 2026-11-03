@@ -35,5 +35,5 @@ test("an unknown native artifact requires its retained explicit declaration", ()
   if (selected === null) throw new Error("Explicit declaration was not resolved");
   expect(() => readSavedNativeWeaponDeclaration(new SaveReader(undefined, "legacy"), selected)).toThrow("no retained declaration");
   expect(readSavedNativeWeaponDeclaration(reader(declared), selected)).toEqual(declared);
-  expect(() => readSavedNativeWeaponDeclaration(reader(declaration), selected)).toThrow();
+  expect(() => readSavedNativeWeaponDeclaration(reader(declaration), selected)).toThrow("native-weapon-profile: native profile artifact identity differs");
 });

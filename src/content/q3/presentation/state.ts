@@ -91,7 +91,6 @@ export function createClientPlayerEntity() {
     barrelAngle: 0, barrelTime: 0, barrelSpinning: false,
   };
 }
-export type ClientPlayerEntity = ReturnType<typeof createClientPlayerEntity>;
 
 export interface SkullTrail {
   readonly positions: [Vec3, Vec3, Vec3, Vec3, Vec3, Vec3, Vec3, Vec3, Vec3, Vec3];
@@ -156,7 +155,7 @@ export class ClientGameState {
   readonly scores: readonly ClientScore[] = Array.from({ length: 64 }, createClientScore);
   readonly teamScores: [number, number] = [0, 0];
   numSortedTeamPlayers = 0;
-  readonly sortedTeamPlayers: [number, number, number, number, number, number, number, number] = [0, 0, 0, 0, 0, 0, 0, 0];
+  readonly sortedTeamPlayers: number[] = Array.from({ length: 32 }, () => 0);
   warmupCount = 0;
   levelShot = false;
   infoScreenText = "";

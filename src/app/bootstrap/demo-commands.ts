@@ -37,6 +37,7 @@ export function localWorldDemoCommands(host: {
       return { kind: "local", family: dialect === "q1-netquake" ? "q1" : dialect === "q1-quakeworld" ? "qw" : dialect === "q3" ? "q3" : "q2" };
     },
     stage: intent => {
+      if (host.dedicated) { host.print("Demo playback is not available on a dedicated server.\n"); return; }
       throw new Error(intent.kind === "start"
         ? `Demo playback (${intent.request.name}) requires the graphical launcher; this application owns a local game.`
         : "Stopping demo playback requires its retained client owner.");

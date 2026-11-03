@@ -1,6 +1,6 @@
+import { writeCapture } from "../../support/capture.ts";
 import { expect, spyOn, test } from "bun:test";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { RemoteApplication } from "../../../src/app/bootstrap/remote-application.ts";
@@ -10,6 +10,8 @@ import { QvmCgame } from "../../../src/compat/qvm/cgame.ts";
 import { Q3ServerConnection } from "../../../src/network/q3/server.ts";
 import { encodePng } from "../../../src/formats/images/png.ts";
 import { SeatConsole } from "../../../src/console/session.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 function pinkPixels(bytes: Uint8Array): number {
   let count = 0;
@@ -19,7 +21,7 @@ function pinkPixels(bytes: Uint8Array): number {
 }
 
 test("remote image console refresh preserves the active Q3 cgame and connection", async () => {
-  const users = await mkdtemp(join(tmpdir(), "quake-remote-images-"));
+  const users = await tempDirectory("quake-remote-images-");
   const imagePath = join(users, "q3a/baseq3/gfx/2d/bigchars.png");
   await mkdir(join(users, "q3a/baseq3/gfx/2d"), { recursive: true });
   const pixels = new Uint8Array(256 * 256 * 4);
@@ -55,7 +57,7 @@ test("remote image console refresh preserves the active Q3 cgame and connection"
     remote.input({ seat: seat.id, kind: "text", text: '/r_override_textures 2;r_texture_formats "png tga jpg"', timeMilliseconds: performance.now() });
     key(13);
     for (let index = 0; index < 4; index++) await exchange();
-    await Bun.write("/tmp/remote-image-settings.png", encodePng(320, 240, remote.readPixels()));
+    await writeCapture("remote-image-settings.png", encodePng(320, 240, remote.readPixels()));
     expect(pinkPixels(remote.readPixels())).toBeGreaterThan(before + 100);
     expect(await Bun.file(join(users, "settings/images.cfg")).text()).toContain('"png tga jpg"');
     remote.input({ seat: seat.id, kind: "text", text: "/r_override_textures 0;r_texture_formats source", timeMilliseconds: performance.now() });

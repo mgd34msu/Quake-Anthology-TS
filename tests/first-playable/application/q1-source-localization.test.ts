@@ -20,6 +20,8 @@ import { InstalledCatalog, expectedProducts } from '../../../src/content/catalog
 import type { CatalogProduct } from '../../../src/content/catalog/index.ts';
 import { digestFile, openMountPlan } from '../../../src/content/mounts/index.ts';
 import { Q1MessageLocalization } from '../../../src/app/bootstrap/q1-localization.ts';
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const tempDirectory = trackedTempDirectories();
 
 const source: ContentId = 'q1:rerelease:id1:retail';
 const classic: ContentId = 'q1:classic:id1:retail';
@@ -32,7 +34,7 @@ function product(id: ContentId, expected: string): CatalogProduct {
 
 test('Q1 source catalog uses selected language, source mod tiers and format arguments independently of Q2 map content', async () => {
   const identity = createIdentityOwner('source-localization');
-  const root = await mkdtemp(join(tmpdir(), 'q1-source-localization-'));
+  const root = await tempDirectory('q1-source-localization-');
   const catalog = new InstalledCatalog('', [product(source, 'q1-rerelease-id1'), product(classic, 'q1-classic-id1'), product(world, 'q2-classic-baseq2')], [], 0);
   const archive: ContentMount = { kind: 'archive', identity: createMountIdentity('mount:test:q1-loc', source, 0), format: 'pak',
     archivePath: corpusFile("q1/rerelease/id1/pak0.pak"), archiveDigest: await digestFile(corpusFile("q1/rerelease/id1/pak0.pak")) };

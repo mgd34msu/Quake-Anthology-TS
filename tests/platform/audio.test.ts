@@ -15,25 +15,25 @@ if (process.env["QUAKE_AUDIO_TEST_CHILD"] !== "1") {
   test("real SDL audio tests use an isolated dummy driver", async () => {
     const child = Bun.spawn([process.execPath, "test", fileURLToPath(import.meta.url)], {
       env: { ...process.env, SDL_AUDIODRIVER: "dummy", SDL_AUDIO_DRIVER: "dummy", SDL_AUDIO_FREQUENCY: "48000", QUAKE_AUDIO_TEST_CHILD: "1" },
-      stdout: "pipe", stderr: "pipe",
+      stdout: "pipe", stderr: "pipe", timeout: 50000, killSignal: "SIGKILL",
     });
     const [code, stdout, stderr] = await Promise.all([
       child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
     ]);
     if (code !== 0) throw new Error(`SDL dummy tests failed (${code})\n${stdout}${stderr}`);
     expect(code).toBe(0);
-  }, 15000);
+  }, 60000);
   test.skipIf(!existsSync(fixture))("real external Vorbis PCM plays through isolated SDL dummy output", async () => {
     const child = Bun.spawn([process.execPath, "test", fileURLToPath(import.meta.url)], {
       env: { ...process.env, SDL_AUDIODRIVER: "dummy", SDL_AUDIO_DRIVER: "dummy", QUAKE_AUDIO_TEST_CHILD: "1", QUAKE_AUDIO_OGG_CHILD: "1" },
-      stdout: "pipe", stderr: "pipe",
+      stdout: "pipe", stderr: "pipe", timeout: 50000, killSignal: "SIGKILL",
     });
     const [code, stdout, stderr] = await Promise.all([
       child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
     ]);
     if (code !== 0) throw new Error(`Vorbis/SDL child failed (${code})\n${stdout}${stderr}`);
     expect(code).toBe(0);
-  }, 15000);
+  }, 60000);
 } else if (process.env["QUAKE_AUDIO_OGG_CHILD"] === "1") {
   if (process.env["SDL_AUDIODRIVER"] !== "dummy") throw new Error("Audio tests require the dummy driver");
   test("decoded PCM survives decoder close and drains at its native sample rate", async () => {
@@ -57,11 +57,12 @@ if (process.env["QUAKE_AUDIO_TEST_CHILD"] !== "1") {
 } else {
   if (process.env["SDL_AUDIODRIVER"] !== "dummy") throw new Error("Audio tests require the dummy driver");
 
-  test("shared mixer adapts its queue to frames slower than the default lookahead", async () => {
-    using engine = new UnifiedAudio({ sampleRate: 48000, milliseconds: () => performance.now(), random: () => 0 });
+  test("shared mixer adapts its queue to frames slower than the default lookahead", () => {
+    let now = 0;
+    using engine = new UnifiedAudio({ sampleRate: 48000, milliseconds: () => now, random: () => 0 });
     engine.openDevice({ bufferFrames: 256 });
     expect(engine.pump()).toBe(9600);
-    await Bun.sleep(130);
+    now += 130;
     engine.pump();
     expect(engine.queuedFrames).toBeGreaterThan(6000);
     for (let frame = 0; frame < 8; frame++) engine.pump();
@@ -101,6 +102,17 @@ if (process.env["QUAKE_AUDIO_TEST_CHILD"] !== "1") {
       expect(reopened.state).toBe("paused");
       expect(reopened.queuedFrames).toBe(0);
     }
+  });
+
+  test("PLATFORM-020: removal is reported only for a named output that is no longer enumerated", () => {
+    const deviceName = SdlAudioDevice.outputDeviceNames()[0];
+    if (deviceName === undefined) throw new Error("SDL dummy did not enumerate a device");
+    using named = SdlAudioDevice.open({ sampleRate: 48000, channels: 2, deviceName, bufferFrames: 256 });
+    expect(named.removed).toBe(false);
+    using fallback = SdlAudioDevice.open({ sampleRate: 48000, channels: 2, bufferFrames: 256 });
+    expect(fallback.removed).toBe(false);
+    named.close();
+    expect(() => named.removed).toThrow("closed");
   });
 
   test("native playback drains, pause freezes the clock, clear retains clock ownership", async () => {

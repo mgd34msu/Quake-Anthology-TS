@@ -15,7 +15,7 @@ import type { ServerSettingCollection } from "./types.ts";
 
 const rereleaseCombatDefaults = [
   ["g_instant_weapon_switch", "0", Q2CvarFlag.Latch], ["g_weapon_respawn_time", "30", 0],
-  ["g_dm_weapons_stay", "0", 0], ["g_dm_instant_items", "1", 0], ["g_dm_same_level", "0", 0],
+  ["g_dm_weapons_stay", "0", 0], ["g_infinite_ammo", "0", 0], ["g_instagib", "0", Q2CvarFlag.Latch], ["g_no_health", "0", 0], ["g_no_armor", "0", 0], ["g_no_items", "0", 0], ["g_dm_instant_items", "1", 0], ["g_dm_same_level", "0", 0],
   ["g_no_mines", "0", 0], ["g_no_nukes", "0", 0], ["g_no_spheres", "0", 0],
   ["g_dm_random_items", "0", 0], ["g_dm_no_quadfire_drop", "0", 0],
   ["g_dm_no_quad_drop", "0", 0], ["g_dm_no_stack_double", "0", 0], ["g_dm_strong_mines", "0", 0],
@@ -38,7 +38,8 @@ export function q2SourceDeathmatchFlags(cvars: CvarRegistry): number {
   if (cvars.dialect !== "q2-rerelease") return flags;
   for (const [name, mask, inverted] of [
     ["g_dm_weapons_stay", 4, false], ["g_dm_instant_items", 16, false],
-    ["g_dm_same_level", 32, false], ["g_dm_no_quad_drop", 16384, true],
+    ["g_dm_same_level", 32, false], ["g_dm_no_quad_drop", 16384, true], ["g_infinite_ammo", 8192, false],
+    ["g_no_health", 1, false], ["g_no_items", 2, false], ["g_no_armor", 2048, false],
   ] satisfies readonly (readonly [string, number, boolean])[]) {
     const enabled = (cvars.variableValue(name) !== 0) !== inverted;
     flags = enabled ? flags | mask : flags & ~mask;
@@ -99,6 +100,7 @@ export function registerQ2ServerCvars(cvars: CvarRegistry, match: string): void 
   if (cvars.dialect === "q2-rerelease") for (const [name, value, flags] of rereleaseCombatDefaults) cvars.register(name, value, flags);
   const defaults = createQ2PlayerRules();
   cvars.register("sv_gravity", "800", 0);
+  cvars.register("g_select_empty", "0", Q2CvarFlag.Archive);
   cvars.register("sv_airaccelerate", "0", 0);
   cvars.register("dmflags", "0", Q2CvarFlag.ServerInfo);
   cvars.register("timelimit", String(defaults.timeLimitMinutes), Q2CvarFlag.ServerInfo);

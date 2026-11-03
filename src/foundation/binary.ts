@@ -34,6 +34,20 @@ export function float64Bits(value: number): bigint {
   return scratchView.getBigUint64(0, false);
 }
 
+/** Reads a little-endian binary64 from bytes without allocating. */
+export function loadF64LE(data: Uint8Array, offset: number): number {
+  scratchView.setUint32(0, loadU32LE(data, offset), true);
+  scratchView.setUint32(4, loadU32LE(data, offset + 4), true);
+  return scratchView.getFloat64(0, true);
+}
+
+/** Writes a binary64 as little-endian bytes without allocating. */
+export function storeF64LE(data: Uint8Array, offset: number, value: number): void {
+  scratchView.setFloat64(0, value, true);
+  storeU32LE(data, offset, scratchView.getUint32(0, true));
+  storeU32LE(data, offset + 4, scratchView.getUint32(4, true));
+}
+
 function byteAt(data: Uint8Array, offset: number): number {
   const value = data[offset];
   if (value === undefined) throw new RangeError("Binary load offset is outside its checked span");

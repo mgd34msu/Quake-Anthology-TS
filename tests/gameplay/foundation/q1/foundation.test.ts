@@ -1,4 +1,4 @@
-import { encodeCheckpointValue } from "../../../../src/persistence/value.ts";
+import { SaveReader, decodeCheckpointValue, encodeCheckpointValue } from "../../../../src/persistence/value.ts";
 import { corpusFile } from "../../../support/corpus.ts";
 
 import { SharedPhysics } from "../../../../src/app/bootstrap/simulation/physics.ts";
@@ -13,17 +13,23 @@ import { readQ1Bsp } from "../../../../src/formats/q1-map/index.ts";
 import type { Q1Map } from "../../../../src/formats/q1-map/index.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
 import { SessionActorRegistry, ActorCallbackTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../../src/core/numeric.ts";
 import { createQ1MonsterMovement } from "../../../../src/movement/q1/index.ts";
-import { Q1Foundation, Q1_PROVIDER, PLAYER_BOUNDS, weaponItem, observeQ1Supply } from "../../../../src/content/q1/foundation/index.ts";
-import type { Q1Event, Q1FoundationHost, Q1FoundationCheckpoint } from "../../../../src/content/q1/foundation/index.ts";
+import { Q1Foundation } from "../../../../src/content/q1/foundation/runtime.ts";
+import { Q1Creatures } from "../../../../src/content/q1/base/creatures.ts";
+import { baseSpecies } from "../../../../src/content/q1/base/species.ts";
+import { Q1_PROVIDER, PLAYER_BOUNDS, weaponItem } from "../../../../src/content/q1/foundation/types.ts";
+import { observeQ1Supply } from "../../../../src/content/q1/foundation/pickups.ts";
+import type { Q1Event, Q1FoundationHost } from "../../../../src/content/q1/foundation/types.ts";
+import type { Q1FoundationCheckpoint } from "../../../../src/content/q1/foundation/checkpoint.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../../src/persistence/q1-foundation.ts";
 import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../src/persistence/world-state.ts";
 import { SharedPickupAdmission } from "../../../../src/world/gameplay/pickups.ts";
 import { Q1_Q2_SUPPLY_PROFILE } from "../../../../src/content/composition/q1-q2-supply.ts";
 import { previewQ1Supply } from "../../../../src/content/q1/foundation/pickups.ts";
 import { ZERO, vadd } from "../../../../src/content/q1/foundation/types.ts";
+import { impulseAuthority } from "../../../support/authority.ts";
 
 const path = corpusFile("q1/rerelease/id1/pak0.pak");
 test.skipIf(!existsSync(path))("authored soldier gib death launches a persistent head before its gib pieces", async () => {
@@ -88,7 +94,7 @@ function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerel
     getFlags: actor => { const entry = execution(actor); return entry === null ? { player: true } : actorFlags(entry); } });
   const bodies = physics.bodies;
 
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: (actor, impulse) => { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, velocity: vadd(body.velocity, impulse) }); return undefined; }, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = impulseAuthority(actors, callbacks, bodies);
   const inventory = new SharedInventoryTable(actors);
   const monsterMovement = createQ1MonsterMovement({ scene, numeric: createNumericOperations(Q1_DONOR_PROFILE), random: { nextInteger: () => 1 },
     readTarget: actor => {
@@ -123,8 +129,13 @@ function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerel
   const runtime = new Q1Foundation(host, { edition: saved?.source.edition ?? edition, skill: 1, deathmatch, coop: false, gravity: 800, maxClients: 4,
     campaign: "q1:id1", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q1:movement" });
   game = runtime;
+  // The grunt and the dog are base species; the foundation fixture hosts them the way the selected-monster source does.
+  const creatures = new Q1Creatures(runtime, { countMonsterKill: () => true, finale: () => undefined, finishFinale: () => undefined });
+  creatures.registerSpecies(baseSpecies.filter(species => species.species === "army" || species.species === "dog"));
+  runtime.registerStateExtension({ id: "q1:test-creatures", capture: () => encodeCheckpointValue(creatures.captureFields()),
+    restore: bytes => creatures.restoreFields(new SaveReader(decodeCheckpointValue(bytes), "q1:test-creatures")), clone: (original, target) => creatures.clone(original, target) });
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => runtime.combatContext(request), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
-  let report: import("../../../../src/content/q1/foundation/index.ts").Q1SpawnReport | null = null;
+  let report: import("../../../../src/content/q1/foundation/runtime.ts").Q1SpawnReport | null = null;
   let player: OwnedActor;
   if (saved === undefined) {
     report = runtime.spawnMap(map);
@@ -151,7 +162,7 @@ function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerel
     }
     runtime.time = until;
   };
-  return { runtime, report, player, actors, callbacks, bodies, combat, inventory, events, due };
+  return { runtime, creatures, report, player, actors, callbacks, bodies, combat, inventory, events, due };
 }
 
 test.skipIf(!existsSync(path))("Q1 monster startup preserves failed drop state and reports placement after native walkmove", async () => {
@@ -169,7 +180,7 @@ test.skipIf(!existsSync(path))("Q1 monster startup preserves failed drop state a
       runtime.host.walkMove = (actor, yaw, distance) => { expect(actor).toBe(entity.actor); expect([yaw, distance]).toEqual([0, 0]); order.push("walk"); return true; };
       runtime.monsterMissions.set(entity.actor.id, { ambush: false, spawned: () => undefined, started: () => { order.push("started"); return undefined; },
         killed: () => undefined, route: () => null, use: () => false, combatRoute: () => ({ goal: null, standGround: false }), foundTarget: () => undefined });
-      runtime.named.action(entity, "walkmonster_start_go")();
+      runtime.named.action(entity, "base:monster_start")();
       const success = result.fraction < 1 && !result.allSolid;
       expect(runtime.body(entity).origin).toEqual(success ? landed : raised);
       expect(runtime.body(entity).ground).toBe(success ? entity.actor.id : player.id);
@@ -180,20 +191,21 @@ test.skipIf(!existsSync(path))("Q1 monster startup preserves failed drop state a
 });
 
 test.skipIf(!existsSync(path))("Q1 terminal corners give native and selected followers the source pause deadline", async () => {
-  const { runtime, actors } = gameFor(await loadMap(), undefined, "classic");
+  const { runtime, actors, player } = gameFor(await loadMap(), undefined, "classic");
   try {
     const corner = runtime.create("path_corner"); corner.targetname = "terminal"; runtime.spawnEntity(corner);
     const native = runtime.create("monster_army"); runtime.spawnEntity(native);
     if (native.monster === null) throw new Error("Missing native monster");
     native.monster.path = corner.targetname; runtime.time = 1.1;
     corner.touch?.(native.actor.id, null);
-    expect(native.monster.path).toBe(""); expect(native.monster.mode).toBe("stand"); expect(native.monster.pauseUntil).toBe(1000000.125);
+    // find(world, targetname, "") matches the first client, so a monster at a terminal corner heads for the player instead of standing.
+    expect(native.monster.path).toBe(""); expect(native.monster.pauseUntil).toBe(0);
     const selected = actors.allocate("q2:monsters", "q2:monster_infantry");
     const advances: { readonly name: string; readonly goal: ActorId | null; readonly pauseUntil: number }[] = [];
     runtime.authoredPathFollower = actor => actor.equals(selected.id) ? { targetname: corner.targetname, enemy: null,
       advance: (name, goal, pauseUntil) => { advances.push({ name, goal, pauseUntil }); return undefined; } } : null;
     corner.touch?.(selected.id, null);
-    expect(advances).toEqual([{ name: "", goal: null, pauseUntil: native.monster.pauseUntil }]);
+    expect(advances).toEqual([{ name: "", goal: player.id, pauseUntil: 0 }]);
   } finally { actors.close(); }
 });
 
@@ -269,7 +281,7 @@ test.skipIf(!existsSync(path))("Q2 character receives Q1 arsenal, armor and sing
 
 test.skipIf(!existsSync(path))("actual e1m1 source save resumes mover, delay, megahealth, axe and AI without map respawn", async () => {
   const map = await loadMap(), original = gameFor(map, undefined, "classic");
-  const { runtime, player, callbacks, bodies, combat, inventory, actors } = original;
+  const { runtime, creatures, player, callbacks, bodies, combat, inventory, actors } = original;
   original.due(0.8);
   const shootable = [...runtime.entities.values()].find(entity => entity.classname === "trigger_multiple" && entity.target === "t4");
   const door = runtime.find("t4")[0];
@@ -286,17 +298,18 @@ test.skipIf(!existsSync(path))("actual e1m1 source save resumes mover, delay, me
   const templateMode = template.monster?.mode, total = runtime.totalMonsters;
   const clone = runtime.cloneEntity(template);
   callbacks.pain({ attack: null, self: clone.actor, attacker: player.id, damage: 1, kick: 0 });
-  expect(clone.monster?.mode).toBe("pain");
+  expect(creatures.monsters.get(clone.actor)?.currentFrame).toMatch(/^army_pain/);
   expect(template.monster?.mode).toBe(templateMode);
+  expect(creatures.monsters.get(template.actor)?.currentFrame).not.toMatch(/^army_pain/);
   expect(runtime.totalMonsters).toBe(total);
   expect(runtime.body(clone)).toEqual(runtime.body(template));
   const checkpoint = runtime.capture();
-  expect(() => decodeQ1FoundationCheckpoint(encodeCheckpointValue({ ...checkpoint, version: 4 }))).toThrow();
+  expect(() => decodeQ1FoundationCheckpoint(encodeCheckpointValue({ ...checkpoint, version: 4 }))).toThrow("q1-foundation.version");
   expect(checkpoint.entities.some(entity => entity.move !== null && entity.move.done === "door_hit_top")).toBe(true);
   expect(checkpoint.entities.some(entity => entity.callbacks.think === "health_rot")).toBe(true);
   expect(checkpoint.entities.some(entity => entity.callbacks.think === "DelayThink")).toBe(true);
   expect(checkpoint.entities.some(entity => entity.callbacks.think === "player_axe3")).toBe(true);
-  expect(checkpoint.entities.some(entity => entity.callbacks.think === "monster_frame")).toBe(true);
+  expect(checkpoint.entities.some(entity => entity.callbacks.think === "base:monster_frame")).toBe(true);
   const saved: SavedTestWorld = {
     source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(checkpoint)), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(),
     bodies: captureSharedBodies(actors, bodies),
@@ -563,7 +576,7 @@ test.skipIf(!existsSync(path))("native Q1 supply previews match source touches w
 
 
 test.skipIf(!existsSync(path))("declared rerelease gib gravity and corpse enum survive provider checkpoint", async () => {
-  const { runtime, player, bodies } = gameFor(await loadMap());
+  const declared = gameFor(await loadMap()), { runtime, player, bodies } = declared;
   const playerBody = bodies.read(player.id);
   if (playerBody === null) throw new Error("Missing fixture player body");
   const gib = runtime.create("declared_gib");
@@ -575,7 +588,8 @@ test.skipIf(!existsSync(path))("declared rerelease gib gravity and corpse enum s
   const saved = checkpoint.entities.find(entity => entity.classname === "declared_gib");
   expect(saved?.state.movement).toBe("gib"); expect(saved?.state.solid).toBe("corpse");
   expect(saved?.fields.find(field => field.key === "gravity")?.value).toBe("0.5");
-  const classic = gameFor(await loadMap(), undefined, "classic").runtime;
+  const classicGame = gameFor(await loadMap(), undefined, "classic"), classic = classicGame.runtime;
   const invalid = classic.create("declared_gib"); invalid.movement = "gib";
-  expect(() => classic.physicsEntity(invalid.actor, 0.001, 0.001)).toThrow("rerelease physics profile");
+  try { expect(() => classic.physicsEntity(invalid.actor, 0.001, 0.001)).toThrow("rerelease physics profile"); }
+  finally { classicGame.actors.close(); declared.actors.close(); }
 });

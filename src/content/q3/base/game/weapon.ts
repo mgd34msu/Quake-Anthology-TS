@@ -294,7 +294,8 @@ export class WeaponRuntime {
       const target = combat.entities.at(number);
       if (shock ? target.kamikazeShockTime > combat.time : !target.takedamage || target.kamikazeTime > combat.time) continue;
       const link = world.linkState(number);
-      if (link === undefined) throw new Error("Kamikaze area query returned an unlinked entity");
+      // An earlier victim's death may have freed and unlinked this entity; G_Damage ignores it without takedamage.
+      if (link === undefined) continue;
       const axis = (p: number, min: number, max: number): number => p < min ? min - p : p > max ? p - max : 0;
       const dist = length3(vec3(axis(origin.x, link.absbounds.min.x, link.absbounds.max.x), axis(origin.y, link.absbounds.min.y, link.absbounds.max.y), axis(origin.z, link.absbounds.min.z, link.absbounds.max.z)));
       if (dist >= radius) continue;

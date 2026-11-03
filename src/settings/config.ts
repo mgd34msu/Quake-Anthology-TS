@@ -1,5 +1,5 @@
-import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { readFile, rename } from "node:fs/promises";
+import { settingsPath, writeAtomic } from "../core/files/atomic.ts";
 import type { CommandContext } from "../contracts/common.ts";
 import type { InputAction, InputBinding, InputBindingTarget, PhysicalInput, ControllerAxis } from "../contracts/ui.ts";
 import type { CommandBuffer } from "../core/commands/index.ts";
@@ -115,30 +115,26 @@ export function parseGlobalInputTuning(value: unknown): GlobalInputTuning {
     ...(input["alwaysRun"] === undefined ? {} : { alwaysRun: boolean(input["alwaysRun"]) }),
     rumble: boolean(input["rumble"]), rumbleStrength: rumbleStrength(input["rumbleStrength"]) };
 }
-export function settingsPath(root: string, name: string): string {
-  const path = resolve(root, name), child = relative(resolve(root), path);
-  if (child === "" || child === ".." || child.startsWith("../") || isAbsolute(child)) throw new Error("Settings path escapes the writable directory");
-  return path;
-}
-export async function writeAtomic(path: string, contents: string | Uint8Array): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${crypto.randomUUID()}.tmp`;
-  try {
-    const file = await open(temporary, "wx", 0o600);
-    try { await file.writeFile(contents); } finally { await file.close(); }
-    await rename(temporary, path);
-  } finally { await rm(temporary, { force: true }); }
-}
+export { settingsPath, writeAtomic };
 export class ConfigStore {
   constructor(readonly root: string) {}
   // A saved document that is not JSON at all behaves like the absent one
   // every loader already admits; parsed values still face validation.
   private static parsed(text: string): unknown { try { const value: unknown = JSON.parse(text); return value; } catch { return null; } }
+  /** Decode and validate one stored document. One that cannot be read is renamed to `.bad` so the next save does not erase it, and loads as absent. */
+  private async decoded<T>(name: string, text: string, parse: (value: unknown) => T): Promise<T | null> {
+    const value = ConfigStore.parsed(text);
+    if (value !== null) {
+      try { return parse(value); } catch { /* quarantined below like a document that is not JSON */ }
+    }
+    const path = settingsPath(this.root, name);
+    try { await rename(path, `${path}.bad`); } catch { /* the document may already be gone or read-only; defaults still apply */ }
+    return null;
+  }
   async loadGyro(name: string): Promise<GyroProfile | null> {
     const text = await this.loadText(name);
     if (text === null || text.length > 8192) return null;
-    const value = ConfigStore.parsed(text);
-    return value === null ? null : parseGyroProfile(value);
+    return this.decoded(name, text, parseGyroProfile);
   }
   async saveGyro(name: string, profile: GyroProfile): Promise<void> {
     const validated = parseGyroProfile(profile);
@@ -150,18 +146,18 @@ export class ConfigStore {
   }
   async loadInputRouting(name: string): Promise<{ readonly keyboardSeat: number | null } | null> {
     const text = await this.loadText(name); if (text === null) return null;
-    const value = ConfigStore.parsed(text); if (value === null) return null;
-    const data = record(value);
-    if (data["version"] !== 1) throw new Error("Unsupported input routing document");
-    return { keyboardSeat: data["keyboardSeat"] === null ? null : natural(data["keyboardSeat"]) };
+    return this.decoded(name, text, value => {
+      const data = record(value);
+      if (data["version"] !== 1) throw new Error("Unsupported input routing document");
+      return { keyboardSeat: data["keyboardSeat"] === null ? null : natural(data["keyboardSeat"]) };
+    });
   }
   async saveSeat(name: string, settings: SeatSettings): Promise<void> {
     await writeAtomic(settingsPath(this.root, name), `${JSON.stringify(settings, null, 2)}\n`);
   }
   async loadGlobalTuning(name: string): Promise<GlobalInputTuning | null> {
     const text = await this.loadText(name); if (text === null) return null;
-    const value = ConfigStore.parsed(text);
-    return value === null ? null : parseGlobalInputTuning(value);
+    return this.decoded(name, text, parseGlobalInputTuning);
   }
   async saveGlobalTuning(name: string, tuning: GlobalInputTuning): Promise<void> {
     await this.dump(name, `${JSON.stringify(parseGlobalInputTuning(tuning), null, 2)}\n`);
@@ -169,8 +165,7 @@ export class ConfigStore {
   async loadSeat(name: string): Promise<SeatSettings | null> {
     const file = Bun.file(settingsPath(this.root, name));
     if (!await file.exists()) return null;
-    const value = ConfigStore.parsed(await file.text());
-    return value === null ? null : parseSeatSettings(value);
+    return this.decoded(name, await file.text(), parseSeatSettings);
   }
   async saveCvars(name: string, cvars: CvarRegistry, bindings: readonly string[] = []): Promise<void> {
     await writeAtomic(settingsPath(this.root, name), `// Generated by quake-typescript\n${[...bindings, ...cvars.archiveCommands()].join("\n")}\n`);

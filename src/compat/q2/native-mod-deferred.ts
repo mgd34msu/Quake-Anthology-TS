@@ -50,6 +50,12 @@ export class NativeModDeferredDamageState {
     if (relative < 0n || relative % BigInt(table.stride) !== 0n || relative / BigInt(table.stride) >= BigInt(table.count)) throw new Error("Native deferred damage pointer is outside its source table");
     return Number(relative / BigInt(table.stride));
   }
+  /** The edict bytes whose stores `changed` interprets. */
+  watchedFields(): readonly { readonly offset: number; readonly bytes: number }[] {
+    const { receipt, blood } = this.definition;
+    return [{ offset: receipt, bytes: 1 }, { offset: blood.offset, bytes: this.bloodBytes() }];
+  }
+  private bloodBytes(): number { const encoding = this.definition.blood.encoding; return encoding.endsWith("64") ? 8 : encoding.endsWith("16") ? 2 : encoding.endsWith("8") ? 1 : 4; }
   changed(slot: number, range: GuestWrittenRange): void {
     const actor = this.calls.owner(slot); if (actor === null) return;
     const { receipt, blood } = this.definition, hits = (offset: number, bytes: number) => range.byteOffset < offset + bytes && offset < range.byteOffset + range.byteLength;
@@ -58,7 +64,7 @@ export class NativeModDeferredDamageState {
       if (request === null || request.target !== actor.id) throw new Error("Native deferred damage has no original attack provenance");
       this.pending.set(actor.id, captureRequest(request));
     }
-    if (hits(blood.offset, blood.encoding.endsWith("64") ? 8 : blood.encoding.endsWith("16") ? 2 : blood.encoding.endsWith("8") ? 1 : 4) && this.scalar(slot, blood) === 0) this.pending.delete(actor.id);
+    if (hits(blood.offset, this.bloodBytes()) && this.scalar(slot, blood) === 0) this.pending.delete(actor.id);
   }
   attack(actor: ActorId): DamageRequest | null { const request = this.processing.at(-1); return request?.target === actor ? request : null; }
   process<Result>(actor: ActorId, slot: number, original: () => Result): Result {

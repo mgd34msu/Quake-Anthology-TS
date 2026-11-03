@@ -1,5 +1,5 @@
 import type { AttackProvenance } from "./gameplay.ts";
-import type { ActorId, CallbackId, ClientId, OwnedActor, ProviderId, SessionId } from "./identity.ts";
+import type { ActorId, CallbackId, OwnedActor, ProviderId, SessionId } from "./identity.ts";
 import type { Bounds, Plane, Vec3 } from "./math.ts";
 import type { TraceResult } from "./scene.ts";
 import type { FrameContext, SourceTime, ThinkTiming } from "./time.ts";
@@ -109,16 +109,10 @@ export interface Q2AdmissionResult {
   readonly userinfo: string;
 }
 
-export type ClientAdmission =
-  | { readonly kind: "q1"; readonly connect: (client: ClientId) => undefined }
-  | { readonly kind: "q2-classic"; readonly connect: (client: ClientId, userinfo: string) => Q2AdmissionResult }
-  | { readonly kind: "q2-rerelease"; readonly connect: (client: ClientId, userinfo: string, socialId: string, isBot: boolean) => Q2AdmissionResult }
-  | { readonly kind: "q3"; readonly connect: (client: ClientId, firstTime: boolean, isBot: boolean) => string | null };
-
 export interface ActorLifetimePolicy {
   readonly firstDynamicSlot: number;
   readonly reuse: "immediate" | "source-cooldown";
   readonly reusableAfter: (freedAt: SourceTime, now: SourceTime) => boolean;
-  readonly clear: "source-edict" | "source-gentity";
+  readonly clear: "source-edict";
   readonly exhaustion: "fatal" | "qw-last-slot";
 }

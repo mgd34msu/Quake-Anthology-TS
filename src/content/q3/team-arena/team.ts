@@ -73,9 +73,6 @@ export function teamName(team: Team): string {
   return team === Team.TEAM_RED ? "RED" : team === Team.TEAM_BLUE ? "BLUE" : team === Team.TEAM_SPECTATOR ? "SPECTATOR" : "FREE";
 }
 export function otherTeamName(team: Team): string { return teamName(otherTeam(team)); }
-export function teamColorString(team: Team): string {
-  return team === Team.TEAM_RED ? "^1" : team === Team.TEAM_BLUE ? "^4" : team === Team.TEAM_SPECTATOR ? "^3" : "^7";
-}
 export function onSameTeam(gameType: number, first: GameEntity, second: GameEntity): boolean {
   return first.client !== null && second.client !== null && gameType >= GameType.GT_TEAM &&
     first.client.sess.sessionTeam === second.client.sess.sessionTeam;

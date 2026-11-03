@@ -23,6 +23,8 @@ export class MusicPlayer {
     private targetVolume = 0.25;
     private smoothedVolume = Math.fround(0.5);
     paused = false;
+    /** Receives a decoder failure; the damaged track is stopped instead of ending the session. */
+    onFault: ((error: unknown) => void) | null = null;
     private completions = 0;
     get completedPlays(): number { return this.completions; }
     constructor(readonly outputRate: number, readonly family: SoundFamily = "q3", private readonly volumeMode: MusicVolumeMode = "source", readonly controls: MusicControls = new MusicControls()) {
@@ -85,7 +87,14 @@ export class MusicPlayer {
     mix(frames: number): Float64Array {
         if (!this.controls.enabled || this.paused || this.volume <= 0 || this.stream === null)
             return new Float64Array(frames * 2);
-        return this.pcm.mix(frames, this.volume, () => this.nextChunk());
+        try {
+            return this.pcm.mix(frames, this.volume, () => this.nextChunk());
+        }
+        catch (error) {
+            this.stop();
+            this.onFault?.(error);
+            return new Float64Array(frames * 2);
+        }
     }
     close(): void { this.stop(); }
 }

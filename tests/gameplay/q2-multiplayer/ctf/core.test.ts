@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../../support/corpus.ts";
+import { expect } from "bun:test";
+import { corpusTest, corpusFile } from "../../../support/corpus.ts";
 
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { ActorId } from "../../../../src/contracts/identity.ts";
@@ -20,9 +20,11 @@ import { Q2Ctf, ctfPlayer, saveCtfActor, encodeQ2CtfCheckpoint, decodeQ2CtfCheck
 import type { Q2CtfCheckpoint, Q2CtfEvent } from "../../../../src/content/q2/multiplayer/ctf/index.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
 import type { SourceActorCheckpoint } from "../../../../src/world/actors/registry.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ2Bsp } from "../../../../src/formats/q2-map/index.ts";
+import { inertAuthority } from "../../../support/authority.ts";
+const test = corpusTest("q2/ctf/pak0.pak");
 
 interface SavedFixture {
   readonly now: number;
@@ -41,7 +43,7 @@ function fixture(saved: SavedFixture | null = null) {
   const identities = createIdentityOwner("original-q2-ctf"), actors = saved === null ? new SessionActorRegistry(identities) : SessionActorRegistry.restore(identities, saved.slots, saved.sources);
   const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const inventory = new SharedInventoryTable(actors), common = new Map<ActorId, Q2PlayerState>(), events: Q2CtfEvent[] = [], presentation: Q2PresentationEvent[] = [], destinations: (string | null)[] = [];
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   combat.register(createQ2CombatPolicy({ id: "q2:combat", context: request => ({ arithmetic: "binary64", player: common.has(request.target), monster: false,
     attackerPlayer: request.attack.attacker !== null && common.has(request.attack.attacker), hasEnemy: false, easySkill: false, deathmatch: true,
     defenderSphere: false, teamDamageEnabled: false, friendlyFire: true, nuke: false, noKnockback: false, movable: true, rejectTeamDamage: false, suppressPain: false }),
@@ -171,7 +173,7 @@ test("match readiness, delayed spawning, votes, ghost reclaim and admin map perm
 });
 
 test("installed original CTF map rows use the registered flags, team starts and banners", async () => {
-  const archive = await openArchive(`${testCorpusRoot()}/q2/ctf/pak0.pak`);
+  const archive = await openArchive(corpusFile("q2/ctf/pak0.pak"));
   try {
     const entry = archive.entries.find(entry => entry.path.toLowerCase() === "maps/q2ctf1.bsp"); if (entry === undefined) throw new Error("Installed CTF archive has no q2ctf1");
     const map = readQ2Bsp(await archive.readEntry(entry)), scene = fixture(), rows = parseQ2Entities(map.entities, "classic").filter(row => /^(item_flag_team[12]|info_player_team[12]|misc_ctf_(small_)?banner)$/.test(row.classname));

@@ -1,3 +1,4 @@
+import { writeCapture } from "../support/capture.ts";
 import { ApplicationAssets } from "../../src/app/bootstrap/assets.ts";
 import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -33,7 +34,7 @@ for (const backend of ["cpu", "gl"]) test.skipIf(process.env["QUAKE_WORLD_TEXT_A
       expect(first.some(text => text.text === "WORLD TEXT\nSHARED")).toBe(true);
       expect(first.every(text => text.distanceCullFactor === 0.004)).toBe(true);
       const capture = app.captureNextFrame(); await app.step(25); const visible = await capture;
-      await Bun.write(`/tmp/world-text-app-${backend}.png`, encodePng(320, 240, visible));
+      await writeCapture(`world-text-app-${backend}.png`, encodePng(320, 240, visible));
       const reload = spyOn(ApplicationAssets.prototype, "prepareImageRefresh");
       try {
         const local = app.localPlayers[0]; if (local === undefined) throw new Error("No console seat");
@@ -52,8 +53,8 @@ for (const backend of ["cpu", "gl"]) test.skipIf(process.env["QUAKE_WORLD_TEXT_A
         expect(app.simulation.worldText().every(text => text.distanceCullFactor === 0.004)).toBe(true);
         expect(reload).not.toHaveBeenCalled();
         expect(await Bun.file(join(userRoot, "settings/images.cfg")).exists()).toBe(false);
-        await Bun.write('/tmp/world-text-live-' + backend + '-culled.png', encodePng(320, 240, culled));
-        await Bun.write('/tmp/world-text-live-' + backend + '-visible.png', encodePng(320, 240, restored));
+        await writeCapture('world-text-live-' + backend + '-culled.png', encodePng(320, 240, culled));
+        await writeCapture('world-text-live-' + backend + '-visible.png', encodePng(320, 240, restored));
       } finally { reload.mockRestore(); }
       for (const entity of entities) source.game.remove(entity); await app.step(50);
       expect(app.simulation.worldText()).toHaveLength(0);

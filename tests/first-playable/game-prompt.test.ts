@@ -1,5 +1,5 @@
+import { writeCapture } from "../support/capture.ts";
 import { expect, test } from "bun:test";
-import { mkdir } from "node:fs/promises";
 import { Application } from "../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { WorldSeatPresentation } from "../../src/app/bootstrap/presentation.ts";
@@ -28,8 +28,7 @@ test("actual CTF prompts use seat-owned native controls and impulses without pau
     application.input({ seat: first.seat.id, kind: "key", code: 13, down: true, repeat: false, timeMilliseconds: performance.now() });
     await application.step(100);
     expect(one.ui.controller.activeMenu).toBe(gamePromptMenu);
-    await mkdir(".artifacts/tmp/game-prompts", { recursive: true });
-    await Bun.write(".artifacts/tmp/game-prompts/local-two-seat.png", encodePng(640, 960, application.readPixels()));
+    await writeCapture("game-prompts/local-two-seat.png", encodePng(640, 960, application.readPixels()));
     application.input({ seat: first.seat.id, kind: "key", code: 50, down: true, repeat: false, timeMilliseconds: performance.now() });
     expect(one.ui.controller.activeMenu).toBeNull();
     expect(two.ui.controller.activeMenu).toBe(gamePromptMenu);

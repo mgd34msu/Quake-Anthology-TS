@@ -6,7 +6,7 @@ import type { SeatId } from "../../contracts/identity.ts";
 import type { Vec2, Vec4 } from "../../contracts/math.ts";
 import type { CenterPrintState, InputBinding, LegacyUiScript, PhysicalInput, SeatInputEvent, SeatInputFocus,
   SeatUiController, SeatUiState, UiControl, UiControlId, UiDrawCommand, UiDrawContext, UiMenu, UiMenuId, UiNotification } from "../../contracts/ui.ts";
-import { KeyCode } from "../../input/key-codes.ts";
+import { KeyCode } from "../../core/key-codes.ts";
 import { contains, fitUi, intersect, transformUi, uiPoint } from "./layout.ts";
 import type { UiTransform } from "./layout.ts";
 import { nineSlice } from "./skin.ts";
@@ -37,6 +37,15 @@ const quantize = (control: Extract<UiControl, { readonly kind: "slider" }>, valu
   Math.max(control.minimum, Math.min(control.maximum, control.minimum + Math.round((value - control.minimum) / control.step) * control.step));
 
 /** Factories reread live settings and feeders before each input event and draw. */
+/** Face and d-pad buttons as menu keys; the d-pad repeats while held, like the stick. */
+const PAD_BUTTON_KEYS: ReadonlyMap<number, number> = new Map([[0, KeyCode.Enter], [1, KeyCode.Escape], [6, KeyCode.Escape], [11, KeyCode.Up], [12, KeyCode.Down], [13, KeyCode.Left], [14, KeyCode.Right]]);
+
+/** Pad text entry: X inserts a character, the shoulders cycle the one before the cursor, Y deletes it. */
+const PAD_TEXT_CHARACTERS = Array.from("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _-.,:;/!?+=*'\"()[]@#$%&");
+const PAD_TEXT_INSERT = 2, PAD_TEXT_DELETE = 3, PAD_TEXT_PREVIOUS = 9, PAD_TEXT_NEXT = 10;
+/** Back and B together abandon a binding capture; either alone still binds on release. */
+const PAD_CAPTURE_CHORD: readonly number[] = [1, 6];
+
 export class NativeUiController implements SeatUiController {
   readonly seat: SeatId;
   private readonly menus = new Map<UiMenuId, UiMenuFactory>();
@@ -54,6 +63,7 @@ export class NativeUiController implements SeatUiController {
   private shift = false;
   private control = false;
   private capture: BindingCapture | null = null;
+  private readonly chordHeld = new Set<number>();
   private notifications: readonly UiNotification[] = [];
   private centerPrint: CenterPrintState | null = null;
   private scores = false;
@@ -70,7 +80,7 @@ export class NativeUiController implements SeatUiController {
   get activeMenu(): UiMenuId | null { return this.stack.at(-1)?.id ?? null; }
   get bindingCapture(): boolean { return this.capture !== null; }
   captureBinding(accept: (input: PhysicalInput) => void, cancel: () => void): void {
-    this.capture?.cancel(); this.capture = { accept, cancel };
+    this.capture?.cancel(); this.chordHeld.clear(); this.capture = { accept, cancel };
   }
   private active(): { readonly menu: UiMenu; readonly cursor: MenuCursor } | null {
     const cursor = this.stack.at(-1);
@@ -187,6 +197,18 @@ export class NativeUiController implements SeatUiController {
     characters.splice(field.cursor, field.overstrike ? accepted.length : 0, ...accepted); field.cursor += accepted.length;
     control.change(this.seat, characters.join(""));
   }
+  private padText(control: Extract<UiControl, { readonly kind: "text-entry" }>, button: number): boolean {
+    if (button !== PAD_TEXT_INSERT && button !== PAD_TEXT_DELETE && button !== PAD_TEXT_PREVIOUS && button !== PAD_TEXT_NEXT) return false;
+    const field = this.field(control), characters = Array.from(control.text);
+    if (button === PAD_TEXT_INSERT) this.text(control, "a");
+    else if (button === PAD_TEXT_DELETE) { if (field.cursor > 0) { characters.splice(--field.cursor, 1); control.change(this.seat, characters.join("")); } }
+    else if (field.cursor > 0) {
+      const current = PAD_TEXT_CHARACTERS.indexOf(characters[field.cursor - 1] ?? ""), step = button === PAD_TEXT_NEXT ? 1 : -1;
+      characters[field.cursor - 1] = PAD_TEXT_CHARACTERS[(Math.max(0, current) + step + PAD_TEXT_CHARACTERS.length) % PAD_TEXT_CHARACTERS.length] ?? "a";
+      control.change(this.seat, characters.join(""));
+    }
+    return true;
+  }
   private fieldKey(control: Extract<UiControl, { readonly kind: "text-entry" }>, key: number): boolean {
     const field = this.field(control), characters = Array.from(control.text);
     if (key === KeyCode.Left) field.cursor = Math.max(0, field.cursor - 1);
@@ -280,6 +302,13 @@ export class NativeUiController implements SeatUiController {
   private captureEvent(event: SeatInputEvent): boolean {
     const capture = this.capture; if (capture === null) return false;
     if (event.kind === "key" && event.down && event.code === KeyCode.Escape) { this.capture = null; capture.cancel(); return true; }
+    if (event.kind === "controller-button" && PAD_CAPTURE_CHORD.includes(event.button)) {
+      if (event.down) {
+        this.chordHeld.add(event.button);
+        if (PAD_CAPTURE_CHORD.every(button => this.chordHeld.has(button))) { this.chordHeld.clear(); this.capture = null; capture.cancel(); }
+      } else if (this.chordHeld.delete(event.button)) { this.capture = null; capture.accept({ kind: "controller-button", device: event.device, button: event.button }); }
+      return true;
+    }
     let input: PhysicalInput | null = null;
     if (event.kind === "key" && event.down && !event.repeat) input = { kind: "key", code: event.code };
     else if (event.kind === "mouse-button" && event.down) input = { kind: "mouse-button", button: event.button };
@@ -295,6 +324,8 @@ export class NativeUiController implements SeatUiController {
       this.dragging = null; this.menuDragOffset = null; this.heldAxes.clear(); this.shift = false; this.control = false;
       this.capture?.cancel(); this.capture = null;
     }
+    // Modifier state must follow key-ups that arrive with no menu open, or it sticks across the next menu.
+    if (event.kind === "key") { if (event.code === KeyCode.Shift) this.shift = event.down; else if (event.code === KeyCode.Control) this.control = event.down; }
     if (this.captureEvent(event)) return true;
     const active = this.active(); if (active === null) return false;
     switch (event.kind) {
@@ -356,8 +387,13 @@ export class NativeUiController implements SeatUiController {
         break;
       }
       case "controller-button": {
-        const codes = new Map([[0, KeyCode.Enter], [1, KeyCode.Escape], [6, KeyCode.Escape], [11, KeyCode.Up], [12, KeyCode.Down], [13, KeyCode.Left], [14, KeyCode.Right]]);
-        const code = codes.get(event.button); if (code !== undefined) this.key(code, event.down); break;
+        const focused = active.menu.controls.find(control => control.id === active.cursor.focus);
+        if (event.down && focused?.kind === "text-entry" && this.padText(focused, event.button)) break;
+        const code = PAD_BUTTON_KEYS.get(event.button); if (code === undefined) break;
+        const id = `${event.device}:button:${event.button}`, navigation = event.button >= 11 && event.button <= 14;
+        if (!event.down) this.heldAxes.delete(id);
+        else if (navigation) this.heldAxes.set(id, { code, next: event.timeMilliseconds + 300 });
+        this.key(code, event.down); break;
       }
       case "controller-axis": {
         if (event.axis !== "left-x" && event.axis !== "left-y") break;
@@ -375,24 +411,28 @@ export class NativeUiController implements SeatUiController {
   draw(context: UiDrawContext): readonly UiDrawCommand[] {
     if (!context.binding.seat.equals(this.seat)) throw new Error("UI draw delivered to another seat");
     const appearance = this.options.appearance?.() ?? { menuScale: 1, textScale: 1, highContrast: false };
-    this.transform = fitUi(context.binding.safeArea, appearance.menuScale);
+    const area = context.binding.safeArea;
+    if (area.width <= 0 || area.height <= 0) return [];
+    this.transform = fitUi(area, appearance.menuScale);
     if (this.pointerPosition !== null) this.cursor = uiPoint(this.pointerPosition, this.transform);
     for (const held of this.heldAxes.values()) if (context.timeMilliseconds >= held.next) {
       this.key(held.code, true); held.next = context.timeMilliseconds + 80;
     }
     const active = this.active(); if (active === null) return [];
     const originalSkin = this.options.skin();
-    const skin = { ...originalSkin, fontScale: originalSkin.fontScale * appearance.textScale,
+    // Text never drops below 8 physical pixels (the HUD enforces the same floor); rows still cap it to their height.
+    const skin = { ...originalSkin, fontScale: Math.max(originalSkin.fontScale * appearance.textScale, 1 / this.transform.scale),
       colors: accessibleColors(originalSkin.colors, appearance) };
     const commands: UiDrawCommand[] = [];
-    const text = (value: string, x: number, y: number, color: Vec4, align: "left" | "center" | "right" = "left"): void => {
+    const text = (value: string, x: number, y: number, color: Vec4, align: "left" | "center" | "right" = "left", scale = skin.fontScale): void => {
       commands.push({ kind: "text", origin: { x, y }, text: this.options.localize?.(value) ?? value, font: skin.font,
-        scale: skin.fontScale, color, align, shadow: true });
+        scale, color, align, shadow: true });
     };
     // Shrink (then ellipsize) so control text never leaves its rect.
     const measure = (value: string, scale: number): number => this.options.measureText?.(this.options.localize?.(value) ?? value, scale) ?? Array.from(value).length * 8 * scale;
-    const fitText = (value: string, maxWidth: number, base = skin.fontScale): { readonly text: string; readonly scale: number } => {
-      const width = measure(value, base);
+    const fitText = (raw: string, maxWidth: number, base = skin.fontScale): { readonly text: string; readonly scale: number } => {
+      // Fit the localized string, so a truncated source string never misses its catalog entry.
+      const value = this.options.localize?.(raw) ?? raw, width = measure(value, base);
       if (width <= maxWidth) return { text: value, scale: base };
       const shrunk = base * Math.max(0, maxWidth) / Math.max(1, width);
       if (shrunk >= base * 0.7) return { text: value, scale: shrunk };
@@ -404,9 +444,11 @@ export class NativeUiController implements SeatUiController {
       }
       return { text: measure("…", scale) <= maxWidth ? `${glyphs.slice(0, low).join("")}…` : "", scale };
     };
-    const textFit = (value: string, x: number, y: number, maxWidth: number, color: Vec4, align: "left" | "center" | "right" = "left"): number => {
-      const fit = fitText(value, maxWidth);
-      commands.push({ kind: "text", origin: { x, y: y + (8 * skin.fontScale - 8 * fit.scale) / 2 }, text: this.options.localize?.(fit.text) ?? fit.text, font: skin.font,
+    // With a row height the text is also limited vertically, so a large Text size shrinks to its row instead of overlapping the next one.
+    const textFit = (value: string, x: number, y: number, maxWidth: number, color: Vec4, align: "left" | "center" | "right" = "left", rowHeight?: number): number => {
+      const fit = fitText(value, maxWidth, rowHeight === undefined ? skin.fontScale : Math.min(skin.fontScale, Math.max(0.1, (rowHeight - 4) / 8)));
+      const top = rowHeight === undefined ? y + (8 * skin.fontScale - 8 * fit.scale) / 2 : y + Math.min(6, (rowHeight - 8 * fit.scale) / 2);
+      commands.push({ kind: "text", origin: { x, y: top }, text: this.options.localize?.(fit.text) ?? fit.text, font: skin.font,
         scale: fit.scale, color, align, shadow: true });
       return measure(fit.text, fit.scale);
     };
@@ -465,7 +507,7 @@ export class NativeUiController implements SeatUiController {
                 }
                 label = measure("…") <= available ? `${glyphs.slice(0, low).join("")}…` : "";
               }
-              commands.push({ kind: "text", origin: { x: x + 8, y: y + (layout.height - 8 * scale) / 2 }, text: label,
+              commands.push({ kind: "text", origin: { x: x + 8, y: y + (layout.height - 8 * scale) / 2 }, text: this.options.localize?.(label) ?? label,
                 font: skin.font, scale, color: rowColor, align: "left", shadow: true });
               x += width;
             }
@@ -480,12 +522,13 @@ export class NativeUiController implements SeatUiController {
         }
         continue;
       }
-      const right = control.rect.x + control.rect.width - 10, y = control.rect.y + 6;
+      const rowTop = control.rect.y, rowHeight = control.rect.height, base = Math.min(skin.fontScale, Math.max(0.1, (rowHeight - 4) / 8));
+      const right = control.rect.x + control.rect.width - 10, y = rowTop + Math.min(6, (rowHeight - 8 * base) / 2);
       if (control.kind !== "slider") {
         const value = control.kind === "toggle" ? (control.checked ? "On" : "Off")
           : control.kind === "choice" ? (control.choices.find(choice => choice.id === control.selected)?.label ?? "") : "";
-        const valueWidth = value === "" ? 0 : textFit(value, right, y, control.rect.width * 0.45, color, "right");
-        textFit(control.label, control.rect.x + 10, y, control.rect.width - 20 - (valueWidth === 0 ? 0 : valueWidth + 10), color);
+        const valueWidth = value === "" ? 0 : textFit(value, right, rowTop, control.rect.width * 0.45, color, "right", rowHeight);
+        textFit(control.label, control.rect.x + 10, rowTop, control.rect.width - 20 - (valueWidth === 0 ? 0 : valueWidth + 10), color, "left", rowHeight);
       }
       switch (control.kind) {
         case "button": case "toggle": case "choice": break;
@@ -493,11 +536,11 @@ export class NativeUiController implements SeatUiController {
           const x = control.rect.x + control.rect.width * 0.6, width = control.rect.width * 0.32;
           const value = control.valueLabel ?? String(Number(control.value.toFixed(6)));
           const valueRight = x - 12;
-          const measure = (content: string): number => this.options.measureText?.(content, skin.fontScale) ?? Array.from(content).length * 8 * skin.fontScale;
-          const valueScale = skin.fontScale * Math.min(1, control.rect.width * 0.16 / Math.max(1, measure(value)));
-          const labelWidth = valueRight - measure(value) * valueScale / skin.fontScale - 12 - (control.rect.x + 10);
-          const labelScale = skin.fontScale * Math.min(1, Math.max(1, labelWidth) / Math.max(1, measure(control.label)));
-          commands.push({ kind: "text", origin: { x: control.rect.x + 10, y }, text: control.label, font: skin.font, scale: labelScale, color, align: "left", shadow: true });
+          const measure = (content: string): number => this.options.measureText?.(content, base) ?? Array.from(content).length * 8 * base;
+          const valueScale = base * Math.min(1, control.rect.width * 0.16 / Math.max(1, measure(value)));
+          const labelWidth = valueRight - measure(value) * valueScale / base - 12 - (control.rect.x + 10);
+          const labelScale = base * Math.min(1, Math.max(1, labelWidth) / Math.max(1, measure(control.label)));
+          commands.push({ kind: "text", origin: { x: control.rect.x + 10, y }, text: this.options.localize?.(control.label) ?? control.label, font: skin.font, scale: labelScale, color, align: "left", shadow: true });
           commands.push({ kind: "text", origin: { x: valueRight, y }, text: value, font: skin.font, scale: valueScale, color, align: "right", shadow: true });
           const ratio = control.maximum === control.minimum ? 0 : Math.max(0, Math.min(1, (control.value - control.minimum) / (control.maximum - control.minimum)));
           commands.push({ kind: "fill", rect: { x, y: y + 7, width, height: 2 }, color: skin.colors.disabled });
@@ -505,15 +548,15 @@ export class NativeUiController implements SeatUiController {
         }
         case "text-entry": {
           const field = this.field(control), all = Array.from(control.masked === true ? "*".repeat(Array.from(control.text).length) : control.text), available = control.rect.width * 0.5 - 12;
-          const measure = (value: string): number => this.options.measureText?.(value, skin.fontScale) ?? Array.from(value).length * 8 * skin.fontScale;
+          const measure = (value: string): number => this.options.measureText?.(value, base) ?? Array.from(value).length * 8 * base;
           let start = Math.min(field.start, field.cursor), end = field.cursor;
           while (start < field.cursor && measure(all.slice(start, field.cursor).join("")) > available) start++;
           while (end < all.length && measure(all.slice(start, end + 1).join("")) <= available) end++;
           field.start = start;
           const shown = all.slice(start, end).join("");
           const x = control.rect.x + control.rect.width * 0.5;
-          text(shown, x, y, color);
-          if (focused && Math.floor(context.timeMilliseconds / 256) % 2 === 0) text(field.overstrike ? "_" : "|", x + measure(all.slice(start, field.cursor).join("")), y, color);
+          text(shown, x, y, color, "left", base);
+          if (focused && Math.floor(context.timeMilliseconds / 256) % 2 === 0) text(field.overstrike ? "_" : "|", x + measure(all.slice(start, field.cursor).join("")), y, color, "left", base);
           break;
         }
       }

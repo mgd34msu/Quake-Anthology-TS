@@ -102,7 +102,7 @@ test("trace pointers, capsule contacts, table slots and area output retain sourc
   expect(trace.getUint8(40)).toBe(1); expect(trace.getUint8(41)).toBe(2); expect(trace.getUint16(42, true)).toBe(0);
   expect(trace.getInt32(52, true)).toBe(1); expect(f.guest.bytes[312]).toBe(0xcc);
   f.run(QvmGameImport.G_LINKENTITY, [5120]); expect(f.calls.at(-1)).toEqual(["link", 1]);
-  expect(() => f.run(QvmGameImport.G_LINKENTITY, [5121])).toThrow();
+  expect(() => f.run(QvmGameImport.G_LINKENTITY, [5121])).toThrow("Entity slot is outside located game data");
   expect(f.run(QvmGameImport.G_ENTITY_CONTACTCAPSULE, [128, 140, 5120])).toBe(1);
   expect(f.calls.at(-1)).toEqual([{ min: { x: 1, y: 2, z: 3 }, max: { x: 4, y: 5, z: 6 } }, 1, true]);
   expect(f.run(QvmGameImport.G_ENTITIES_IN_BOX, [128, 140, 512, 1])).toBe(1); expect(f.guest.view(512, 4).getInt32(0, true)).toBe(1);

@@ -2,10 +2,10 @@ import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { OriginalPickupOffer, PickupCargoEntry, SourcePickupLifetime } from "../../../src/contracts/original-pickups.ts";
 import { ActorCallbackTable, SessionActorRegistry } from "../../../src/world/actors/index.ts";
-import { GameplayAuthority } from "../../../src/world/gameplay/authority.ts";
 import { SharedInventoryTable } from "../../../src/world/gameplay/inventory.ts";
 import { SharedOriginalPickupAdmission } from "../../../src/world/gameplay/original-pickups.ts";
 import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
+import { inertAuthority } from "../../support/authority.ts";
 
 test("canonical dropped supply preserves one destination and original acceptance", () => {
   const f = fixture();
@@ -29,7 +29,7 @@ function fixture() {
   const player = actors.allocate("q1:world", "q1:player"), pickup = actors.allocate("q1:world", "q1:item_backpack");
   const inventory = new SharedInventoryTable(actors);
   inventory.create(player, [{ item: "q3:ammo/shotgun", count: 2, capacity: 200 }, { item: "q3:weapon/shotgun", count: 0, capacity: 1 }]);
-  const combat = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, new ActorCallbackTable(actors));
   const admission = new SharedOriginalPickupAdmission(actors, combat, inventory);
   const cargo: PickupCargoEntry[] = [{ kind: "counter", item: "q1:ammo/shells", count: 7 }];
   const offer: OriginalPickupOffer = { recipient: player.id, pickup: pickup.id, source: "q1:world", item: "q1:item_backpack", defaultResource: null,

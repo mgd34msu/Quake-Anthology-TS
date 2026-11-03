@@ -25,7 +25,7 @@ test("Q2 horde spawns waves at authored points and advances when cleared", () =>
   };
   const game = {
     entities: { values: () => entities.values() },
-    host: { combat: { read: (id: ActorId) => ({ health: health.get(id) ?? 0 }) } },
+    host: { combat: { read: (id: ActorId) => ({ health: health.get(id) ?? 0 }) }, trace: () => ({ startSolid: false, hit: { kind: "world" } }), emit: () => undefined },
     solid: () => undefined,
     schedule: (entity: FakeEntity, _delay: number, think: unknown) => { scheduled.push({ entity, think }); return undefined; },
     body: (entity: FakeEntity) => ({ origin: entity.origin }),
@@ -45,14 +45,13 @@ test("Q2 horde spawns waves at authored points and advances when cleared", () =>
   tick(); tick();
   expect(horde.wave).toBe(1);
   const spawned = entities.filter(entity => entity.classname.startsWith("monster_"));
-  expect(spawned.length).toBeGreaterThan(0);
-  expect(spawned.length).toBeLessThanOrEqual(12);
+  expect(spawned).toHaveLength(6);
 
   // Clearing the wave and ticking through the intermission advances it.
   for (const monster of spawned) health.set(monster.actor.id, 0);
   tick();
   for (let index = 0; index < 12; index++) tick();
-  expect(horde.wave).toBeGreaterThanOrEqual(2);
+  expect(horde.wave).toBe(2);
   tick();
   expect(entities.filter(entity => entity.classname.startsWith("monster_")).length).toBeGreaterThan(spawned.length);
 

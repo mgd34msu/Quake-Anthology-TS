@@ -112,9 +112,8 @@ export function collisionVectorDistanceSquared(first: Vec3, second: Vec3): numbe
 function shapeInfo(shape: TraceShape): { center: Vec3; mins: Vec3; shape: PatchShape } {
   if (shape.kind === "point") return { center: vec3(0, 0, 0), mins: vec3(0, 0, 0),
     shape: { kind: "point", mins: vec3(0, 0, 0), extents: vec3(0, 0, 0) } };
-  if (!finite(shape.mins) || !finite(shape.maxs) || shape.mins.x > shape.maxs.x || shape.mins.y > shape.maxs.y || shape.mins.z > shape.maxs.z) {
-    throw new RangeError("trace shape requires finite ordered bounds");
-  }
+  // CM_Trace derives offset and size from mins and maxs without ordering them, so a guest may pass reversed bounds.
+  if (!finite(shape.mins) || !finite(shape.maxs)) throw new RangeError("trace shape requires finite bounds");
   const center = scale3(add3(shape.mins, shape.maxs), 0.5);
   const mins = sub3(shape.mins, center);
   const extents = sub3(shape.maxs, center);
@@ -129,8 +128,8 @@ function expansion(shape: PatchShape, plane: CollisionPlane): number {
   if (shape.kind === "capsule") return shape.radius + Math.abs(dot3(plane.normal, shape.offset));
   const normal = plane.normal, signs = plane.signbits;
   if (signs >= 8) throw new RangeError("CM brush plane signbits outside trace offsets");
-  return -dot3(normal, vec3((signs & 1) !== 0 ? shape.extents.x : shape.mins.x,
-    (signs & 2) !== 0 ? shape.extents.y : shape.mins.y, (signs & 4) !== 0 ? shape.extents.z : shape.mins.z));
+  const x = (signs & 1) !== 0 ? shape.extents.x : shape.mins.x, y = (signs & 2) !== 0 ? shape.extents.y : shape.mins.y, z = (signs & 4) !== 0 ? shape.extents.z : shape.mins.z;
+  return -Math.fround(Math.fround(Math.fround(normal.x * Math.fround(x)) + Math.fround(normal.y * Math.fround(y))) + Math.fround(normal.z * Math.fround(z)));
 }
 
 export class CollisionWorld {

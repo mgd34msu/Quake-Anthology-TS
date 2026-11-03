@@ -44,7 +44,7 @@ test("override identity rejection is atomic and missing legacy state does not re
   expect(() => decodeTeamArenaOverrides({ ...active, seats: [first, first] }, destination)).toThrow("do not match");
   expect(() => applyTeamArenaOverrides({ ...active, seats: [first] }, destination)).toThrow("do not match");
   expect(() => decodeTeamArenaOverrides({ ...active, phase: "other" }, destination)).toThrow("phase");
-  expect(() => decodeTeamArenaOverrides({ ...active, seats: [{ ...first, baseline: null }] }, destination)).toThrow();
+  expect(() => decodeTeamArenaOverrides({ ...active, seats: [{ ...first, baseline: null }] }, destination)).toThrow("baseline: expected a string");
   applyTeamArenaOverrides(null, destination); releaseTeamArenaOverrides(null, destination);
   expect(destination.map(row => row.cvars.variableString("ui_drawTimer"))).toEqual(["2", "3"]);
   expect(destination.map(row => row.cvars.variableString("cg_drawTimer"))).toEqual(["1", "1"]);

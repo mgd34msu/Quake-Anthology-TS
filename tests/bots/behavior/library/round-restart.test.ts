@@ -7,7 +7,7 @@ import { BotMemory } from "../../../../src/bots/behavior/library/memory.ts";
 import { BotScriptSources } from "../../../../src/bots/behavior/library/script-sources.ts";
 import { WeightConfigStore } from "../../../../src/bots/behavior/library/weights.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
-import { ScriptGlobalDefines } from "../../../../src/ui/common/legacy/script/preprocessor.ts";
+import { ScriptGlobalDefines } from "../../../../src/content/legacy-script/preprocessor.ts";
 
 test("round rebinding retains map allocations and replaces pickup and observation owners", () => {
   const memory = new BotMemory(), files = new BotAssetFiles();

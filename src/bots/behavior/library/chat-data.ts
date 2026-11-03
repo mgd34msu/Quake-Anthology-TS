@@ -4,8 +4,8 @@ import { SaveReader } from "../../../persistence/value.ts";
  * Copyright (C) 1999-2005 Id Software, Inc.
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
-import { NumberFlag, ScriptLanguageError, type ScriptDiagnostic, type ScriptToken, type SourceLocation } from "../../../ui/common/legacy/script/lexer.ts";
-import type { ScriptSourceReader, ScriptTokenRecord } from "../../../ui/common/legacy/script/preprocessor.ts";
+import { NumberFlag, ScriptLanguageError, type ScriptDiagnostic, type ScriptToken, type SourceLocation } from "../../../content/legacy-script/lexer.ts";
+import type { ScriptSourceReader, ScriptTokenRecord } from "../../../content/legacy-script/preprocessor.ts";
 import { BotMemory, type BotMemoryAllocation } from "./memory.ts";
 
 export const CHAT_ESCAPE = "\x01";
@@ -626,7 +626,7 @@ export class ChatDataParser {
   private number(integer: boolean): number {
     const token = this.required();
     if (token.kind !== "number") this.fail(`expected a number, found ${token.text}`);
-    if (integer && (token.flags & NumberFlag.Integer) === 0) throw new RangeError("PC_ExpectTokenType integer-subtype error formats an uninitialized source string");
+    if (integer && (token.flags & NumberFlag.Integer) === 0) this.fail(`expected integer, found ${token.text}`);
     const value = integer ? token.integerValue : Math.fround(token.floatValue);
     if (!Number.isFinite(value)) throw new RangeError("chat number exceeds finite source range");
     return value;
@@ -699,8 +699,9 @@ export class ChatDataParser {
         } else this.fail(`unexpected ${token.text}`);
       }
     }
+    // The source reports the unclosed context and returns no synonyms, like any other syn.c error.
+    if (contexts.length !== 0) this.fail("unclosed context\n");
     this.dispose();
-    if (contexts.length !== 0) throw new RangeError("BotLoadSynonyms reports a missing context brace through its freed source");
     return groups;
   }
 

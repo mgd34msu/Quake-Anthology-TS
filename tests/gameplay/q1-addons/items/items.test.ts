@@ -1,15 +1,15 @@
 import { SharedPickupAdmission } from "../../../../src/world/gameplay/pickups.ts";
-import { testCorpusRoot } from "../../../support/corpus.ts";
+import { corpusTest, corpusFile } from "../../../support/corpus.ts";
 
 import { expansionSourceSupply } from "../../../../src/content/composition/expansion-source-supply.ts";
 import { Q1_Q2_SUPPLY_PROFILE } from "../../../../src/content/composition/q1-q2-supply.ts";
 import { q2BaseWeaponInventory } from "../../../../src/content/q2/foundation/items.ts";
-import { expect, test } from "bun:test";
+import { expect } from "bun:test";
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { BodyCheckpoint, CombatCheckpoint, InventoryCheckpoint } from "../../../../src/contracts/session.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { Q1Foundation } from "../../../../src/content/q1/foundation/runtime.ts";
 import type { Q1Actor } from "../../../../src/content/q1/foundation/entity.ts";
 import type { Q1FoundationCheckpoint } from "../../../../src/content/q1/foundation/checkpoint.ts";
@@ -27,6 +27,8 @@ import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../.
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ1Bsp, q1EntityValue } from "../../../../src/formats/q1-map/index.ts";
 import type { Q1Entity } from "../../../../src/formats/q1-map/index.ts";
+import { inertAuthority } from "../../../support/authority.ts";
+const test = corpusTest("q1/rerelease/mg3/pak0.pak");
 
 interface Saved {
   readonly source: Q1FoundationCheckpoint;
@@ -38,7 +40,7 @@ function session(saved?: Saved, options: { readonly skill?: 0 | 1 | 2 | 3; reado
   const identity = createIdentityOwner("mg3-items-smoke");
   const actors = saved === undefined ? new SessionActorRegistry(identity) : SessionActorRegistry.restore(identity, saved.slots, saved.sources);
   const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors), events: Q1Event[] = [], players: ActorId[] = [], pending = new Map<OwnedActor, number>();
   let runtime: Q1Foundation | null = null, hit: ActorId | null = null;
   let contents: ReturnType<Q1FoundationHost["contents"]> = "empty";
@@ -128,7 +130,7 @@ test("MG3 coop lava suit respawns after 2.5 seconds and clears its fired target"
 });
 
 test("retail MG3 upgrade identity, capacity refill, repeated pickup and saved continuation", async () => {
-  const archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/mg3/pak0.pak`);
+  const archive = await openArchive(corpusFile("q1/rerelease/mg3/pak0.pak"));
   const state = session();
   try {
     const entry = archive.findEntries("maps/map1.bsp")[0]; if (entry === undefined) throw new Error("Missing retail MG3 map1");
@@ -265,7 +267,7 @@ test("MG3 Bloody Nightmare travel preserves hammer, Bloody SSG and armor with so
 
 
 test("retail MG3 bosses register source controllers and restore their live callbacks", async () => {
-  const archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/mg3/pak0.pak`), state = session();
+  const archive = await openArchive(corpusFile("q1/rerelease/mg3/pak0.pak")), state = session();
   try {
     state.spawn("worldspawn");
     for (const [mapName, classname, health] of [["boss2", "monster_oldone_new", 12000], ["map1", "monster_ghost", 10], ["boss", "monster_orb", 300]] satisfies [string, string, number][]) {

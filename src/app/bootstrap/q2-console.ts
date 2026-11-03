@@ -41,6 +41,7 @@ export class ApplicationQ2Console {
       options.print(`map              : ${current.game.options.mapName}\nnum score ping name\n`);
       for (const player of current.players.states.values()) if (player.connected)
         options.print(`${player.slot} ${player.score} ${player.ping} ${q2OperatorPlayerName(player)}\n`);
+      for (const entry of options.simulation().selectionConsumption()) options.print(`selection ${entry.axis}: ${entry.outcome} (${entry.requested}) ${entry.detail}\n`);
       return undefined;
     });
     register("dumpuser", invocation => {

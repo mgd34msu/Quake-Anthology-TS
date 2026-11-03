@@ -1,5 +1,5 @@
 // Ported from Quake III cl_keys.c fields. GPL-2.0-or-later.
-import { KeyCode } from "../input/key-codes.ts";
+import { KeyCode } from "../core/key-codes.ts";
 import { sourceCommandText } from "../core/commands/index.ts";
 export type FieldClipboard = { readonly kind: "native-unix-unavailable" }
   | { readonly kind: "available"; readonly read: () => Uint8Array | null };

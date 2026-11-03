@@ -5,11 +5,10 @@ import { existsSync } from "node:fs";
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { createSimulation } from "../../../src/app/bootstrap/simulation/index.ts";
-import { gameRootIn, steamCommonDirectories } from "../../../src/content/roots.ts";
+import { gameRootIn } from "../../../src/content/roots.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 
-const corpus = [testCorpusRoot(), testCorpusRoot(), ...steamCommonDirectories()]
-  .find(root => existsSync(root) && gameRootIn(root, "q1") !== null && gameRootIn(root, "q3") !== null);
+const corpus = [testCorpusRoot()].find(root => existsSync(root) && gameRootIn(root, "q1") !== null && gameRootIn(root, "q3") !== null);
 
 async function viewsDuring(game: string, map: string): Promise<{ play: boolean; intermission: boolean; cutscene: boolean }> {
   const parsed = parseApplicationCommand(["--content-root", corpus ?? "", "--game", game, "--map", map, "--movement", "q1", "--character", "q3", "--dedicated"]);

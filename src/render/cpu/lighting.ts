@@ -24,7 +24,6 @@ export interface CpuTriangleLighting extends CpuLighting {
 export function cullTriangleLights(lighting: CpuLighting, positions: readonly [Vec3, Vec3, Vec3]): CpuLighting {
   const parameters = lighting.parameters;
   if (parameters.kind !== "q2-world" || parameters.lights.length === 0) return lighting;
-{}
   const minX = Math.min(positions[0].x, positions[1].x, positions[2].x), maxX = Math.max(positions[0].x, positions[1].x, positions[2].x);
   const minY = Math.min(positions[0].y, positions[1].y, positions[2].y), maxY = Math.max(positions[0].y, positions[1].y, positions[2].y);
   const minZ = Math.min(positions[0].z, positions[1].z, positions[2].z), maxZ = Math.max(positions[0].z, positions[1].z, positions[2].z);
@@ -36,6 +35,7 @@ export function cullTriangleLights(lighting: CpuLighting, positions: readonly [V
     const dz = light.origin.z < minZ ? minZ - light.origin.z : light.origin.z > maxZ ? light.origin.z - maxZ : 0;
     return dx * dx + dy * dy + dz * dz <= reach * reach;
   };
+  // The model pass carries per-light fractions, so the two filters are typed differently even though they read alike.
   if (parameters.pass === "model") {
     const lights = parameters.lights.filter(keep);
     return lights.length === parameters.lights.length ? lighting : { ...lighting, parameters: { ...parameters, lights } };

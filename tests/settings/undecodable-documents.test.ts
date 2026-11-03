@@ -30,3 +30,17 @@ test("undecodable settings documents load as absent", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("a schema-invalid settings document is quarantined and loads as absent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "quake-settings-invalid-"));
+  try {
+    const store = new ConfigStore(root);
+    await mkdir(join(root, "input"), { recursive: true });
+    await writeFile(join(root, "input/seat-1.json"), JSON.stringify({ version: 1, bindings: [] }));
+    expect(await store.loadSeat("input/seat-1.json")).toBeNull();
+    expect(await Bun.file(join(root, "input/seat-1.json.bad")).exists()).toBe(true);
+    expect(await Bun.file(join(root, "input/seat-1.json")).exists()).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

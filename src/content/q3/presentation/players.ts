@@ -53,7 +53,7 @@ export interface ClientInfoSettings {
 }
 export interface ClientInfoHost {
   readonly state: ClientGameState;
-  readonly assets: AssetReader;
+  readonly assets: AssetReader & { readFileLength?(path: string): number | Promise<number> };
   readonly resources: Pick<RendererResources, "registerModel" | "registerSkin">;
   settings(): ClientInfoSettings;
   memoryRemaining(): number;
@@ -311,9 +311,8 @@ export class PlayerPresenter {
     const tokens = Math.min(entity.currentState.generic1, 10);
     const trail = this.host.state.skullTrails[entity.currentState.number];
     if (trail === undefined) {
-      // Corpses have non-client entity numbers. Omit source's out-of-bounds zero write.
-      if (tokens === 0) return;
-      throw new RangeError(`No skull trail for entity ${entity.currentState.number}`);
+      // Corpses have non-client entity numbers, and source indexes cg.skullTrails out of bounds for them; there is nothing to trail.
+      return;
     }
     if (!tokens) { trail.numPositions = 0; return; }
     for (let i = 0; i < tokens - trail.numPositions; i++) {
@@ -460,6 +459,7 @@ export class ClientInfoStore {
   private readonly requests = Array.from({ length: 64 }, () => 0);
   private readonly animationParser = new CommonParseState();
   private lifecycle = 0;
+  entityReset: ((entity: ClientEntity) => void) | null = null;
   constructor(readonly host: ClientInfoHost, private readonly slots: readonly ClientInfo[]) {
     if (slots.length !== 64 || new Set(slots).size !== 64) throw new RangeError("ClientInfoStore requires 64 distinct canonical client slots");
   }
@@ -489,9 +489,10 @@ export class ClientInfoStore {
   }
   private async exists(path: string, check: () => void): Promise<boolean> {
     if (!this.host.assets.has(path)) return false;
-    const bytes = await this.host.assets.read(path);
+    // CG_FileExists only opens the file; read it only when the reader cannot report a length.
+    const length = this.host.assets.readFileLength === undefined ? (await this.host.assets.read(path)).length : await this.host.assets.readFileLength(path);
     check();
-    return bytes.length > 0;
+    return length > 0;
   }
   private async findModel(ci: ClientInfo, settings: ClientInfoSettings, teamName: string, model: string, skin: string, base: string, ext: string, check: () => void): Promise<ClientFile> {
     const team = this.team(ci, settings);
@@ -697,7 +698,6 @@ export class ClientInfoStore {
     next.name = qpath(value("n")); next.color1 = color(value("c1")); next.color2 = color(value("c2"));
     next.botSkill = integer(value("skill")); next.handicap = integer(value("hc")); next.wins = integer(value("w")); next.losses = integer(value("l"));
     const team = integer(value("t"));
-    if (team !== Team.TEAM_FREE && team !== Team.TEAM_RED && team !== Team.TEAM_BLUE && team !== Team.TEAM_SPECTATOR) throw new RangeError(`Invalid player team ${team}`);
     next.team = team; next.teamTask = integer(value("tt")); next.teamLeader = integer(value("tl")) !== 0;
     next.redTeam = value("g_redteam").slice(0, 31); next.blueTeam = value("g_blueteam").slice(0, 31);
     const forced = this.host.state.product === "missionpack" ? "james" : "sarge";
@@ -708,6 +708,7 @@ export class ClientInfoStore {
       if (model.includes("/")) next.skinName = qpath(model.slice(model.indexOf("/") + 1));
       if (head.includes("/")) next.headSkinName = qpath(head.slice(head.indexOf("/") + 1));
     }
+    let loaded = false;
     try {
       if (!this.reuse(next, settings)) {
         const forceDefer = this.host.memoryRemaining() < 4000000;
@@ -715,13 +716,25 @@ export class ClientInfoStore {
           await this.defer(next, settings, check);
           check();
           if (forceDefer) { this.host.print("Memory is low.  Using deferred model.\n"); next.deferred = false; }
-        } else await this.load(next, settings, check);
+        } else { await this.load(next, settings, check); loaded = true; }
       }
     } catch (error) {
       if (!(error instanceof SupersededClientLoad)) throw error;
       return;
     }
-    if (lifecycle === this.lifecycle && at(this.requests, index) === request) { next.infoValid = true; slot.copyFrom(next); }
+    if (lifecycle === this.lifecycle && at(this.requests, index) === request) {
+      next.infoValid = true; slot.copyFrom(next);
+      if (loaded) this.resetEntities(index);
+    }
+  }
+  /** CG_LoadClientInfo ends by resetting every player entity of that client, which may hold lerp state from the old model. */
+  private resetEntities(index: number): void {
+    const reset = this.entityReset;
+    if (reset === null) return;
+    for (let number = 0; number < 1024; number++) {
+      const entity = this.host.state.entityAt(number);
+      if (entity.currentState.clientNum === index && entity.currentState.eType === EntityType.ET_PLAYER) reset(entity);
+    }
   }
   async loadDeferredPlayers(resetPlayerEntity: (entity: ClientEntity) => void): Promise<void> {
     const lifecycle = this.lifecycle, settings = this.host.settings();

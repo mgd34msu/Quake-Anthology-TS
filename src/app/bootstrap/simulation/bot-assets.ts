@@ -1,4 +1,4 @@
-import { loadMountedBotAssetFiles, type BotSourceFiles } from "../../../bots/behavior/assets.ts";
+import { BotAssetFiles, loadMountedBotAssetFiles, type BotSourceFiles } from "../../../bots/behavior/assets.ts";
 import { loadQuake1Knowledge } from "../../../bots/behavior/rerelease/data/knowledge-q1.ts";
 import { Bot_LoadKnowledge } from "../../../bots/behavior/rerelease/data/knowledge-q2.ts";
 import type { BotKnowledge } from "../../../bots/behavior/rerelease/data/knowledge.ts";
@@ -10,7 +10,12 @@ import type { LocalizationTable } from "../../../text/localization.ts";
 export type ApplicationBotAssets = { readonly kind: "q3"; readonly files: BotSourceFiles }
   | { readonly kind: "rerelease"; readonly source: "q1-rerelease" | "q2-rerelease"; readonly files: BotSourceFiles; readonly knowledge: BotKnowledge; readonly localization: LocalizationTable };
 /** Authored map bot definitions win. Classic products without these files keep their existing policy. */
-export async function loadApplicationBotAssets(content: LoadedApplicationContent, simulation: SharedSimulation): Promise<ApplicationBotAssets> {
+export async function loadApplicationBotAssets(content: LoadedApplicationContent, simulation: SharedSimulation, legacyProvenance = false): Promise<ApplicationBotAssets> {
+  const result = await loadBotAssets(content, simulation, legacyProvenance);
+  if (legacyProvenance && result.files instanceof BotAssetFiles) await result.files.prepareLegacyProvenance();
+  return result;
+}
+async function loadBotAssets(content: LoadedApplicationContent, simulation: SharedSimulation, legacyProvenance: boolean): Promise<ApplicationBotAssets> {
   let mounts = await content.forContent(content.recipe.map.entities.content);
   let native = await loadMountedBotAssetFiles(mounts, content.catalog);
   if (simulation.q3Source() !== null || simulation.q3Guest() !== null) return { kind: "q3", files: native };
@@ -38,7 +43,9 @@ export async function loadApplicationBotAssets(content: LoadedApplicationContent
         : selected.provider.startsWith("q1:") ? loadQuake1Knowledge(arsenal)?.weapons : Bot_LoadKnowledge(arsenal).weapons;
       if (weapons === undefined || weapons.length === 0) throw new Error("Selected arsenal lacks authored bot weapon knowledge");
       knowledge.replaceWeapons(weapons);
-      native.add("arsenal/provenance", new TextEncoder().encode(`${selected.provider}\n${selected.content}\n${arsenal.provenance()}`));
+      const arsenalNote = (digest: string): Uint8Array => new TextEncoder().encode(`${selected.provider}\n${selected.content}\n${digest}`);
+      if (legacyProvenance) await arsenal.prepareLegacyProvenance();
+      native.add("arsenal/provenance", arsenalNote(arsenal.provenance()), legacyProvenance ? arsenalNote(arsenal.legacyProvenance()) : undefined);
     }
     const configuration = simulation.q1Source()?.cvars ?? simulation.q2ServerCvars();
     const language = configuration?.variableString("language") || "english";

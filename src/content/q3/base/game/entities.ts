@@ -84,6 +84,7 @@ export class EntityPool {
     }
     checkTime(options.mapStartTime);
     this.#maxClients = options.maxClients;
+    this.rankings.grappleDeath = options.product === "missionpack" ? 28 : 23;
     this.utilities = new GameUtilityScratch(options.print);
     this.clients = Array.from({ length: MAX_CLIENTS }, (_, slot) => options.records.client(slot));
     if (options.eventDebug !== undefined) {

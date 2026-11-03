@@ -245,5 +245,3 @@ export class GameEntity implements SharedEntity {
   }
 }
 
-export function createGameClient(product: Product): GameClient { return new GameClient(product); }
-export function createGameEntity(slot: number, binding: GameEntityBinding): GameEntity { return new GameEntity(slot, binding); }

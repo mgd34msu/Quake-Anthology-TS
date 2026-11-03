@@ -1,0 +1,9 @@
+[
+  ["foundation", "contracts", "types"],
+  ["core"],
+  ["formats", "debug", "guest", "materials"],
+  ["content", "movement", "world", "persistence"],
+  ["bots", "network", "input", "audio", "media", "text", "render", "camera", "capture", "llm", "platform"],
+  ["compat", "settings", "console"],
+  ["app", "ui"]
+]

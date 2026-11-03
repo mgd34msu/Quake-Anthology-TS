@@ -13,8 +13,12 @@ import type { DamageOutcome } from "../../../src/contracts/gameplay.ts";
 import { expect, test } from "bun:test";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
-import { QvmInterpreter, QvmModule, QvmOpcode, parseQvm, parseQvmRestart, qvmArguments, rejectQvmSyscall, resolveQvmArtifact } from "../../../src/compat/qvm/index.ts";
-import type { QvmCancellationScope, QvmFunctionCall, QvmFunctionHook } from "../../../src/compat/qvm/index.ts";
+import { QvmInterpreter } from "../../../src/compat/qvm/interpreter.ts";
+import { QvmModule, qvmArguments } from "../../../src/compat/qvm/module.ts";
+import { QvmOpcode, parseQvm, parseQvmRestart } from "../../../src/compat/qvm/image.ts";
+import { rejectQvmSyscall } from "../../../src/compat/qvm/syscalls.ts";
+import { resolveQvmArtifact } from "../../../src/compat/qvm/artifacts.ts";
+import type { QvmCancellationScope, QvmFunctionCall, QvmFunctionHook } from "../../../src/compat/qvm/interpreter.ts";
 import type { QvmRegionControl } from "../../../src/compat/qvm/interpreter.ts";
 
 type Operation = readonly [QvmOpcode, number?];
@@ -62,7 +66,7 @@ for (const semantics of ["interpreted", "compiled"] satisfies readonly import(".
       });
       expect(asynchronous ? await vm.invokeAsync(qvmArguments([])) : vm.invoke(qvmArguments([]))).toBe(7);
       expect(completions).toBe(1); expect(controls).toHaveLength(2);
-      for (const control of controls) expect(() => control.localWord(24)).toThrow();
+      for (const control of controls) expect(() => control.localWord(24)).toThrow("QVM recursive call requires the active syscall or function hook with no pending child");
       expect(vm.stackPointer).toBe(vm.memory.length); expect(vm.isActive).toBe(false);
     }
   });
@@ -754,11 +758,11 @@ test("declared primary combat maps private traits and reordered extended calls w
   expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageCall: { ...declared.damageCall, roles: { ...declared.damageCall.roles, target: 11 } } }), artifact)).toThrow("exactly once");
   expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageCall: { ...declared.damageCall, extras: [] } }), artifact)).toThrow("exactly once");
   expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageCall: { ...declared.damageCall, extras: [...declared.damageCall.extras, ...Array.from({ length: 55 }, () => ({ index: 0, kind: "int32", value: 0 }))] } }), artifact)).toThrow("OP_ARG");
-  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, armor: { ...declared.armor, call: { ...declared.armor.call, extras: declared.armor.call.extras.map(extra => extra.index === 0 ? { ...extra, value: 0.5 } : extra) } } }), artifact)).toThrow();
+  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, armor: { ...declared.armor, call: { ...declared.armor.call, extras: declared.armor.call.extras.map(extra => extra.index === 0 ? { ...extra, value: 0.5 } : extra) } } }), artifact)).toThrow("save.armor.call: Source combat extra requires a signed integer word");
   expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageCall: { ...declared.damageCall, extras: declared.damageCall.extras.map(extra => extra.index === 5 ? { ...extra, value: 1e100 } : extra) } }), artifact)).toThrow("binary32");
   expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageCall: { ...declared.damageCall, extras: declared.damageCall.extras.map(extra => extra.index === 8 ? { ...extra, value: 262144 } : extra) } }), artifact)).toThrow("artifact data");
   expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageFlags: { ...declared.damageFlags, radius: 64 } }), artifact)).toThrow("overlap");
-  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, state: { ...declared.state, team: { ...declared.state.team, values: [{ value: 8, team: "blue" }] } } }), artifact)).toThrow();
+  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, state: { ...declared.state, team: { ...declared.state.team, values: [{ value: 8, team: "blue" }] } } }), artifact)).toThrow("save.state.team.values[0].team: expected a namespaced identity");
   expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, reactions: { ...declared.reactions, painCall: { arguments: 3, roles: { target: 4, amount: 1 } } } }), artifact)).toThrow("original call");
   const game = new QvmGame({ artifact, host: rejectQvmSyscall }); game.data.setClientCount(1); game.data.locate(4096, 3, 1024, 8192, 1024);
   const actors = new SessionActorRegistry(createIdentityOwner("declared-combat")), actor = actors.allocate(identity.id, "test:player");
@@ -809,7 +813,7 @@ test("declared primary combat maps private traits and reordered extended calls w
     game.module.call(sourceWords, damage);
     expect(view.getInt32(604, true)).toBe(65); expect(second.getInt32(604, true)).toBe(92);
     expect([word(1052), word(1056), word(1024)]).toEqual([float32ToBits(1.25) | 0, 1280, 32]);
-  } finally { binding.close(); game.retire(); }
+  } finally { binding.close(); game.retire(); actors.close(); }
 });
 
 for (const semantics of ["interpreted", "compiled"] satisfies readonly import("../../../src/compat/qvm/interpreter.ts").QvmSemantics[]) {
@@ -823,7 +827,7 @@ for (const semantics of ["interpreted", "compiled"] satisfies readonly import(".
     let observed = 0;
     vm.observeFunction(target, call => { observed++; expect(call.argument(61)).toBe(62); expect(() => call.argument(62)).toThrow("outside source call"); return undefined; });
     vm.bindFunction(target, call => {
-      expect(call.words.byteLength).toBe(248); expect(() => call.words.getInt32(248, true)).toThrow();
+      expect(call.words.byteLength).toBe(248); expect(() => call.words.getInt32(248, true)).toThrow("Out of bounds access");
       expect(call.invoke(Array.from({ length: 62 }, () => 2), target)).toBe(4);
       expect(call.words.getInt32(61 * 4, true)).toBe(62);
       return call.proceed();

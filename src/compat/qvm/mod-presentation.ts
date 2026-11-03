@@ -316,6 +316,7 @@ export class QvmModPresentation {
       this.sceneActors.set(row.slot, row);
     }
     if (baseline) for (const state of scene.snapshot.entities) {
+      if (!Number.isInteger(state.number) || state.number < 0 || state.number >= entities.capacity) throw new Error("Component snapshot entity exceeds cgame centities");
       const view = this.module.memory.dataView(entities.address + state.number * entities.stride, entities.stride);
       view.setInt32(entities.previousEvent, state.eType > declaration.eventEntityType ? 1 : state.event, true);
       view.setInt32(entities.snapshotTime, scene.snapshot.serverTime, true);

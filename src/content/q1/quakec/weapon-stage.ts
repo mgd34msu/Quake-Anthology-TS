@@ -14,16 +14,13 @@ export interface QcWeaponStage {
   readonly repeats: readonly RepeatGate[];
 }
 
-function qcFunctionEnd(program: QcProgram, fn: QcFunction): number {
-  return program.functions.reduce((end, other) => other.firstStatement > fn.firstStatement ? Math.min(end, other.firstStatement) : end, program.statements.length);
-}
 
 /** The declared stage's function shape, as a predicate instead of a rejection. */
 function qcStageFunction(program: QcProgram, name: string): QcFunction | null {
   let value: QcFunction;
   try { value = program.functionNamed(name); } catch { return null; }
   if (value.index === 0 || value.firstStatement <= 0 || value.namedBuiltin || value.parameterSizes.length !== 0) return null;
-  const end = qcFunctionEnd(program, value);
+  const end = program.functionEnd(value);
   if (program.statements.slice(value.firstStatement, end).some(statement => (statement.opcode === QcOpcode.Return || statement.opcode === QcOpcode.Done) && statement.a !== 0)) return null;
   return value;
 }
@@ -32,7 +29,7 @@ function qcDerivedClientCall(program: QcProgram, name: string, result: "void" | 
   let fn: QcFunction;
   try { fn = program.functionNamed(name); } catch { return null; }
   if (fn.firstStatement <= 0 || fn.namedBuiltin) return null;
-  const end = qcFunctionEnd(program, fn);
+  const end = program.functionEnd(fn);
   const returns = program.statements.slice(fn.firstStatement, end).filter(statement => (statement.opcode === QcOpcode.Return || statement.opcode === QcOpcode.Done) && statement.a !== 0);
   if (result === "void" ? returns.length !== 0 : returns.length === 0 || returns.some(statement => statement.a !== 1 && !program.globals.some(global => global.offset === statement.a && global.type === "entity"))) return null;
   // Classic programs declare these parameterless; rerelease programs take
@@ -47,17 +44,23 @@ function qcDerivedClientCall(program: QcProgram, name: string, result: "void" | 
   return null;
 }
 
-/** Find next-shot release gates by the declared validator's structural pattern. */
-function qcDerivedRepeats(program: QcProgram, continuations: ReadonlySet<number>): RepeatGate[] {
+/** Source-temporary predicate and the pure scalar opcode set shared by the repeat-gate analyzers. */
+function qcTemporaryAnalysis(program: QcProgram): { temporary: (word: number, owner: QcFunction) => boolean; pure: ReadonlySet<QcOpcode> } {
   const named = new Set(program.globals.filter(global => global.name !== "" && global.name !== "IMMEDIATE").flatMap(global => Array.from({ length: global.type === "vector" ? 3 : 1 }, (_, index) => global.offset + index)));
   const temporary = (word: number, owner: QcFunction): boolean => Number.isInteger(word) && word >= 28 && word * 4 < program.initialGlobals.length
     && (!named.has(word) || word >= owner.parameterStart && word < owner.parameterStart + owner.localWords);
   const pure = new Set([QcOpcode.LoadF, QcOpcode.NotF, QcOpcode.EqF, QcOpcode.NeF, QcOpcode.Le, QcOpcode.Ge, QcOpcode.Lt, QcOpcode.Gt, QcOpcode.And, QcOpcode.Or, QcOpcode.BitAnd, QcOpcode.BitOr,
     QcOpcode.AddF, QcOpcode.SubF, QcOpcode.MulF, QcOpcode.DivF]);
+  return { temporary, pure };
+}
+
+/** Find next-shot release gates by the declared validator's structural pattern. */
+function qcDerivedRepeats(program: QcProgram, continuations: ReadonlySet<number>): RepeatGate[] {
+  const { temporary, pure } = qcTemporaryAnalysis(program);
   const original = new DataView(program.initialGlobals.buffer, program.initialGlobals.byteOffset, program.initialGlobals.byteLength);
   const repeats: RepeatGate[] = [], ranges: { entry: number; exit: number }[] = [];
   for (const index of continuations) {
-    const owner = program.functionAt(index), end = qcFunctionEnd(program, owner);
+    const owner = program.functionAt(index), end = program.functionEnd(owner);
     for (let entry = owner.firstStatement; entry < end; entry++) {
       const first = program.statements[entry];
       if (first?.opcode !== QcOpcode.LoadF || !temporary(first.c, owner)) continue;
@@ -114,7 +117,7 @@ export function qcWeaponStage(program: QcProgram, declared?: QcPrimaryWeaponStag
       validateQcSourceCall(program, call, new Set<ModCallbackInput>(["self", "time"]), "client stage");
       const name = call.function, fn = program.functionNamed(name);
       if (fn.firstStatement <= 0 || fn.namedBuiltin) throw new QcProgramError("QC client stage requires an original source function");
-      const end = program.functions.reduce((end, other) => other.firstStatement > fn.firstStatement ? Math.min(end, other.firstStatement) : end, program.statements.length);
+      const end = program.functionEnd(fn);
       const returns = program.statements.slice(fn.firstStatement, end).filter(statement => (statement.opcode === QcOpcode.Return || statement.opcode === QcOpcode.Done) && statement.a !== 0);
       if (result === "void" ? returns.length !== 0 : returns.length === 0 || returns.some(statement => !program.globals.some(global => global.offset === statement.a && global.type === "entity")))
         throw new QcProgramError(`QC client stage ${name} does not return ${result}`);
@@ -237,20 +240,16 @@ export function qcDeclaredWeaponStage(program: QcProgram, declared: QcWeaponStag
   const fn = (name: string) => {
     const value = program.functionNamed(name);
     if (value.index === 0 || value.firstStatement <= 0 || value.namedBuiltin || value.parameterSizes.length !== 0) throw new Error("QC weapon stage requires original parameterless source functions");
-    const end = program.functions.reduce((end, other) => other.firstStatement > value.firstStatement ? Math.min(end, other.firstStatement) : end, program.statements.length);
+    const end = program.functionEnd(value);
     if (program.statements.slice(value.firstStatement, end).some(statement => (statement.opcode === QcOpcode.Return || statement.opcode === QcOpcode.Done) && statement.a !== 0)) throw new Error("QC weapon stage function returns a source value");
     return value;
   };
   const dispatcher = fn(declared.dispatcher), continuations = new Set(declared.continuations.map(name => fn(name).index));
   const ranges: { entry: number; exit: number }[] = [];
-  const named = new Set(program.globals.filter(global => global.name !== "" && global.name !== "IMMEDIATE").flatMap(global => Array.from({ length: global.type === "vector" ? 3 : 1 }, (_, index) => global.offset + index)));
-  const temporary = (word: number, owner: QcFunction): boolean => Number.isInteger(word) && word >= 28 && word * 4 < program.initialGlobals.length
-    && (!named.has(word) || word >= owner.parameterStart && word < owner.parameterStart + owner.localWords);
-  const pure = new Set([QcOpcode.LoadF, QcOpcode.NotF, QcOpcode.EqF, QcOpcode.NeF, QcOpcode.Le, QcOpcode.Ge, QcOpcode.Lt, QcOpcode.Gt, QcOpcode.And, QcOpcode.Or, QcOpcode.BitAnd, QcOpcode.BitOr,
-    QcOpcode.AddF, QcOpcode.SubF, QcOpcode.MulF, QcOpcode.DivF]);
+  const { temporary, pure } = qcTemporaryAnalysis(program);
   if (continuations.size === 0 || continuations.size !== declared.continuations.length || continuations.has(dispatcher.index)) throw new Error("QC weapon continuation declarations overlap or are empty");
   const repeats = declared.repeats.map(source => {
-    const owner = fn(source.function), end = program.functions.reduce((end, other) => other.firstStatement > owner.firstStatement ? Math.min(end, other.firstStatement) : end, program.statements.length);
+    const owner = fn(source.function), end = program.functionEnd(owner);
     if (!continuations.has(owner.index) || ranges.some(range => source.entry <= range.exit && source.exit >= range.entry) || !Number.isInteger(source.entry) || !Number.isInteger(source.exit)
       || source.entry < owner.firstStatement || source.exit <= source.entry || source.exit + 2 >= end || !temporary(source.result.word, owner)
       || source.result.value !== 0 && source.result.value !== 1 || source.statements.length !== source.exit - source.entry + 1) throw new Error("QC weapon repeat boundary is outside its original continuation");

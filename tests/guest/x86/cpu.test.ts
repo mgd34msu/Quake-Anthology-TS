@@ -162,12 +162,12 @@ test("faults and unsupported instructions report exact guest instruction bytes",
   expect(lock.kind).toBe("exception");
   if (lock.kind !== "exception" || lock.exception.kind !== "processor") throw new Error("Expected invalid LOCK exception");
   expect(lock.exception.vector).toBe(6);
-  const unsupported = machine([0x90, 0x0f, 0xa2]);
+  const unsupported = machine([0x90, 0x0f, 0x05]);
   const result = unsupported.cpu.run({ instructionBudget: 10, returnAddress: null });
-  if (result.kind !== "unsupported") throw new Error("Expected unsupported CPUID stop");
+  if (result.kind !== "unsupported") throw new Error("Expected unsupported SYSCALL stop");
   expect(result.instructions).toBe(1);
   expect(result.instruction.address.byteOffset).toBe(0x1001n);
-  expect([...result.instruction.bytes]).toEqual([0x0f, 0xa2]);
+  expect([...result.instruction.bytes]).toEqual([0x0f, 0x05]);
   const fault = machine([0x83, 0x03, 0x01]);
   fault.state.registers.write("rbx", 32, 0x1000n);
   const flags = fault.state.flags.value, before = fault.state.registers.checkpoint();
@@ -215,4 +215,31 @@ test.skipIf(!existsSync(retailPath))("actual LMCTF GetGameAPI executes from the 
   expect(memory.readUint32(guestAddress(memory, 0x20089820n))).toBe(3);
   expect(memory.readUint32(guestAddress(memory, 0x20089824n))).toBe(0x200218c0);
   expect(memory.readUint32(guestAddress(memory, 0x20089864n))).toBe(0x3bc);
+});
+
+test("retained decoded instructions are discarded when the guest rewrites the executable bytes", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 4 });
+  memory.map({ base: 0x1000n, byteLength: 0x1000, permissions: "read-write-execute", bytes: new Uint8Array([0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3]) });
+  const state = createGuestProcessorState({ architecture: "i386", instructionPointer: 0x1000n, stackPointer: 0x9000n,
+    flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+  const cpu = new I386Cpu({ state, memory });
+  expect(cpu.run({ instructionBudget: 1, returnAddress: null }).kind).toBe("budget");
+  expect(state.registers.read("rax", 32)).toBe(1n);
+  memory.writeUint8(guestAddress(memory, 0x1001n), 7);
+  state.instructionPointer = 0x1000n;
+  expect(cpu.run({ instructionBudget: 1, returnAddress: null }).kind).toBe("budget");
+  expect(state.registers.read("rax", 32)).toBe(7n);
+  memory.writeUint8(guestAddress(memory, 0x1000n), 0xb9);
+  state.instructionPointer = 0x1000n;
+  cpu.run({ instructionBudget: 1, returnAddress: null });
+  expect(state.registers.read("rcx", 32)).toBe(7n);
+});
+
+test("i386 CPUID reports the virtual CPU, with CMPXCHG8B", () => {
+  const { cpu, state } = machine([0xb8, 0x01, 0x00, 0x00, 0x00, 0x0f, 0xa2]);
+  expect(cpu.run({ instructionBudget: 2, returnAddress: null }).kind).toBe("budget");
+  expect(state.registers.read("rdx", 32) & 0x100n).toBe(0x100n);
+  const vendor = machine([0x31, 0xc0, 0x0f, 0xa2]);
+  expect(vendor.cpu.run({ instructionBudget: 2, returnAddress: null }).kind).toBe("budget");
+  expect(vendor.state.registers.read("rbx", 32)).toBe(0x6b617551n);
 });

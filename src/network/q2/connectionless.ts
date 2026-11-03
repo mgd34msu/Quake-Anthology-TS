@@ -2,6 +2,7 @@
 import type { Q2ProtocolIdentity } from '../../contracts/protocol.ts';
 import { parseQ2Token } from '../../core/common-parse.ts';
 import { ipv4Address, addressKey } from '../common/endpoint.ts';
+import { RconGuard, passwordMatches } from '../common/rcon-guard.ts';
 import type { NetworkAddress, Ipv4Address } from '../common/endpoint.ts';
 import type { DiscoveryWire, ServerStatus } from '../services/discovery.ts';
 import { Q2ChallengeTable, q2OutOfBand, readQ2Connect, readQ2OutOfBand } from './handshake.ts';
@@ -111,59 +112,24 @@ export function q2InfoText(info: ReturnType<Q2ConnectionlessHost['info']>, proto
     return !protocols.some(protocol => protocol.version === version) ? `info\n${info.name}: wrong version\n`
         : `info\n${info.name.padStart(16)} ${info.map.padStart(8)} ${String(info.players).padStart(2)}/${String(info.maxPlayers).padStart(2)}\n`;
 }
-export class Q2ConnectionlessServer {
-    constructor(readonly host: Q2ConnectionlessHost, readonly challenges: Q2ChallengeTable) { }
-    async receive(from: NetworkAddress, bytes: Uint8Array, now: number): Promise<boolean> {
-        const message = readQ2OutOfBand(bytes);
-        if (message === null)
-            return false;
-        const reply = (text: string): void => this.host.reply(from, q2OutOfBand(text));
-        switch (message.command) {
-            case 'ping':
-                reply('ack');
-                return true;
-            case 'status':
-                reply(`print\n${q2StatusText(this.host.status())}`);
-                return true;
-            case 'info': {
-                const text = q2InfoText(this.host.info(), this.host.protocols, Number(message.arguments[0]));
-                if (text !== null) reply(text);
-                return true;
-            }
-            case 'getchallenge':
-                this.host.reply(from, this.challenges.reply(from, now, this.host.protocols));
-                return true;
-            case 'connect': {
-                const request = readQ2Connect(message);
-                if (!this.host.protocols.some(protocol => protocol.version === request.protocol.version)) {
-                    reply('print\nUnsupported protocol.\n');
-                    return true;
-                }
-                if (!this.challenges.validate(from, request.challenge)) {
-                    reply('print\nBad challenge.\n');
-                    return true;
-                }
-                const admission = this.host.connect(from, request);
-                reply(admission.kind === 'accepted' ? `client_connect${admission.responseArguments === undefined ? '' : ` ${admission.responseArguments}`}` : `print\n${admission.reason}\n`);
-                return true;
-            }
-            case 'rcon': await handleQ2Rcon(this.host, from, message, now); return true;
-            default: return false;
-        }
-    }
-}
-
 export type Q2RconHost = Pick<Q2ConnectionlessHost, "profile" | "reply" | "rconPassword" | "limitedRcon" | "rconRateAllowed" | "rechargeRconRate" | "executeRcon">;
 export async function handleQ2Rcon(host: Q2RconHost, from: NetworkAddress, message: Q2ConnectionlessMessage, now: number): Promise<void> {
     const reply = (text: string): void => host.reply(from, q2OutOfBand(text));
     if (host.profile === 'rerelease' && !host.rconRateAllowed(now))
         return;
+    let guard = rconGuards.get(host);
+    if (guard === undefined) { guard = new RconGuard(); rconGuards.set(host, guard); }
+    if (!guard.permitted(from, now))
+        return;
     const password = message.arguments[0] ?? '', full = host.rconPassword(), limit = host.limitedRcon();
-    const limited = !(full.length > 0 && password === full) && host.profile === 'rerelease' && limit !== null && limit.password.length > 0 && password === limit.password;
-    if (!(full.length > 0 && password === full) && !limited) {
+    const fullMatch = passwordMatches(full, password);
+    const limited = !fullMatch && host.profile === 'rerelease' && limit !== null && passwordMatches(limit.password, password);
+    if (!fullMatch && !limited) {
+        guard.failed(from, now);
         reply('print\nBad rcon_password.\n');
         return;
     }
+    guard.succeeded(from);
     if (host.profile === 'rerelease')
         host.rechargeRconRate();
     const cursor = { data: message.text, index: 0 };

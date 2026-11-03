@@ -1,3 +1,4 @@
+import { waitFor } from "../support/wait.ts";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -81,9 +82,9 @@ test("binding writes notify one coalesced immediate persist", async () => {
   const sensitivity = control(bindings, "sensitivity"); if (sensitivity.kind !== "slider") throw new Error("Expected slider");
   sensitivity.write(4); sensitivity.write(4.5); sensitivity.write(5);
   expect(calls).toBe(0);
-  await Bun.sleep(160);
+  await waitFor(() => calls >= 1, "the coalesced persist");
   expect(calls).toBe(1);
   sensitivity.write(5.5);
-  await Bun.sleep(160);
+  await waitFor(() => calls >= 2, "the second persist");
   expect(calls).toBe(2);
 });

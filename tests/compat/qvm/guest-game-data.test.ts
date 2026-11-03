@@ -35,7 +35,7 @@ test('borrowed legacy player updates preserve source-only counters while fresh s
 
 test('player ping borrows the located public int32 field and validates client slots', () => {
   const memory = new QvmMemory(new Uint8Array(16384)), data = new QvmGameData(memory);
-  expect(() => data.playerPing(0)).toThrow();
+  expect(() => data.playerPing(0)).toThrow("Game-data table has a null source pointer");
   data.setClientCount(2);
   data.locate(64, 3, 700, 4096, 600);
   memory.bytes.fill(0xa5, 4096, 5296);
@@ -45,7 +45,7 @@ test('player ping borrows the located public int32 field and validates client sl
   expect(data.playerPing(1)).toBe(87);
   expect(memory.view(4096 + 600 + 448, 4).getUint32(0, true)).toBe(0xa5a5a5a5);
   expect(memory.view(4096 + 600 + 456, 4).getUint32(0, true)).toBe(0xa5a5a5a5);
-  for (const slot of [-1, 0.5, 2, 64]) expect(() => data.playerPing(slot)).toThrow();
+  for (const slot of [-1, 0.5, 2, 64]) expect(() => data.playerPing(slot)).toThrow("Client slot is outside configured game data");
   data.setClientCount(64);
   expect(() => data.playerPing(21)).toThrow('allocation');
 });
@@ -61,17 +61,17 @@ test('located guest spans reject invalid strides, indexes, pointers and wire cap
     [64, 3, 700, 4096, 464], [0, 3, 700, 4096, 600], [64, 3, 700, 0, 600],
     [15000, 3, 700, 4096, 600], [64, 3, 700, 16000, 600],
   ];
-  for (const words of invalid) { expect(() => data.locate(...words)).toThrow(); expect(data.checkpoint()).toEqual(before); }
-  for (const slot of [-1, 0.5, 3, 1023]) expect(() => data.entity(slot)).toThrow();
+  for (const words of invalid) { expect(() => data.locate(...words)).toThrow(/Game-data record exceeds the interpreter allocation|Game-data stride is undersized or unaligned|Game-data tables require aligned nonnull pointers|Q3 wire entity capacity is/); expect(data.checkpoint()).toEqual(before); }
+  for (const slot of [-1, 0.5, 3, 1023]) expect(() => data.entity(slot)).toThrow("Entity slot is outside located game data");
   for (const pointer of [0, 60, 65, 68, 64 + 3 * 700]) {
-    expect(() => data.numberFromPointer(pointer)).toThrow();
-    expect(() => data.entityFromPointer(pointer)).toThrow();
+    expect(() => data.numberFromPointer(pointer)).toThrow(/Entity numbering requires nonnull source pointers|Entity slot is outside located game data/);
+    expect(() => data.entityFromPointer(pointer)).toThrow(/Entity numbering requires nonnull source pointers|Entity slot is outside located game data/);
   }
   expect(data.numberFromPointer(764)).toBe(1);
   expect(data.entityFromPointer(764)).toBe(data.entity(1));
   // The VM masks pointer starts. The located record still must be aligned and in range.
   expect(data.numberFromPointer(16384 + 764)).toBe(1);
-  for (const slot of [-1, 2, 64]) expect(() => data.copyPlayerState(slot)).toThrow();
+  for (const slot of [-1, 2, 64]) expect(() => data.copyPlayerState(slot)).toThrow("Client slot is outside configured game data");
   data.setClientCount(64);
   expect(() => data.copyPlayerState(21)).toThrow('allocation');
 });
@@ -93,6 +93,6 @@ test('relocation preserves old raw aliases while fresh entity and player access 
   expect(data.copyPlayerState(1).pingMilliseconds).toBe(0);
   data.restore(unlocated);
   expect(data.numEntities).toBe(0);
-  expect(() => data.entity(0)).toThrow();
-  expect(() => data.copyPlayerState(0)).toThrow();
+  expect(() => data.entity(0)).toThrow("Entity slot is outside located game data");
+  expect(() => data.copyPlayerState(0)).toThrow("Game-data table has a null source pointer");
 });

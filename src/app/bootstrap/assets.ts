@@ -6,6 +6,7 @@ import { MaterialCinematic } from "../../media/material.ts";
 import type { MediaClock } from "../../media/types.ts";
 import type { RegisteredShaderVideo } from "../../materials/material.ts";
 import { DEFAULT_SHADER_PROFILE } from "../../materials/compile.ts";
+import type { FinishShaderProfile } from "../../materials/material-finish.ts";
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ContentId, GameFamily, ResolvedResourceReference } from "../../contracts/content.ts";
@@ -17,6 +18,8 @@ import { readQ1Bsp } from "../../formats/q1-map/index.ts";
 import { classifyBsp } from "../../formats/bsp-kind.ts";
 import { readQ2Bsp, toQ2WorldGeometry } from "../../formats/q2-map/index.ts";
 import { decodeQ3World, parseEntities } from "../../formats/q3-map/index.ts";
+import { shaderProfileFromCvars } from "./render-settings.ts";
+import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { SceneImageRegistry, SceneShaderRegistry, SceneTextureLoader, WorldScene } from "../../render/scene/index.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
 import { loadMenuFont, loadMenuTypography } from "./menu-font.ts";
@@ -65,23 +68,30 @@ async function paletteFor(mounts: MountedContent, family: GameFamily): Promise<P
   return { colors, source: asset.reference };
 }
 
+/** FS_ListFilteredFiles order: highest-priority mount first, zip order within an archive, sorted names in a directory; first name wins. */
 async function shaderPaths(content: LoadedApplicationContent, mounts: MountedContent): Promise<readonly string[]> {
-  const paths = new Set<string>();
-  const archives = new Set(mounts.plan.mounts.flatMap(mount => mount.kind === "archive" ? [mount.archivePath] : []));
-  for (const product of content.catalog.products) for (const archive of product.archives) {
-    if (!archives.has(archive.path)) continue;
-    for (const entry of archive.entries) if (/^scripts\/[^/]+\.shader$/i.test(entry.path)) paths.add(entry.path);
-  }
-  for (const mount of mounts.plan.mounts) {
-    if (mount.kind !== "loose") continue;
+  const archives = new Map(content.catalog.products.flatMap(product => product.archives).map(archive => [archive.path, archive] as const));
+  const byId = new Map(mounts.plan.mounts.map(mount => [mount.identity.id, mount] as const));
+  const seen = new Set<string>(), paths: string[] = [];
+  const add = (path: string): void => { if (!seen.has(path.toLowerCase())) { seen.add(path.toLowerCase()); paths.push(path); } };
+  for (const id of mounts.plan.defaultOrder) {
+    const mount = byId.get(id);
+    if (mount === undefined) continue;
+    if (mount.kind === "archive") {
+      const entries = archives.get(mount.archivePath)?.entries ?? [];
+      for (const entry of [...entries].sort((left, right) => left.ordinal - right.ordinal)) if (/^scripts\/[^/]+\.shader$/i.test(entry.path)) add(entry.path);
+      continue;
+    }
     const directory = resolve(mount.rootPath, "scripts");
-    const entries = await readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
+    const listed = await readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
       throw error;
     });
-    for (const entry of entries) if (entry.isFile() && entry.name.endsWith(".shader")) paths.add(`scripts/${entry.name}`);
+    const names = listed.filter(entry => entry.isFile() && /\.shader$/i.test(entry.name)).map(entry => entry.name);
+    names.sort((left, right) => { const a = left.toLowerCase(), b = right.toLowerCase(); return a < b ? -1 : a > b ? 1 : 0; });
+    for (const name of names) add(`scripts/${name}`);
   }
-  return [...paths].sort();
+  return paths;
 }
 
 /** Presentation caches are distinct from authoritative map and game state. */
@@ -106,11 +116,22 @@ export class ApplicationAssets {
   private readonly retiredImages = new CleanupStack();
 
   constructor(readonly content: LoadedApplicationContent, owner: RendererResourceOwner, private readonly mediaClock: MediaClock = { sample: () => performance.now() },
-    options: { readonly imagePolicy?: ImagePolicy; readonly modelPolicy?: ModelReplacementPolicy; readonly imageRegistry?: SceneImageRegistry } = {}) {
+    options: { readonly imagePolicy?: ImagePolicy; readonly modelPolicy?: ModelReplacementPolicy; readonly imageRegistry?: SceneImageRegistry; readonly shaderProfile?: () => FinishShaderProfile; readonly warn?: (text: string) => void } = {}) {
     if (options.imageRegistry !== undefined && options.imageRegistry.owner !== owner) throw new Error("Application images belong to another renderer");
     this.images = options.imageRegistry?.fork(mediaClock) ?? new SceneImageRegistry(owner, mediaClock);
     this.imagePolicyValue = options.imagePolicy;
     this.modelPolicyValue = options.modelPolicy ?? DEFAULT_MODEL_REPLACEMENT_POLICY;
+    this.warnText = options.warn;
+    this.shaderProfile = options.shaderProfile ?? ((): FinishShaderProfile => DEFAULT_SHADER_PROFILE);
+  }
+  /** Latched when a provider's shaders load, like r_vertexLight and r_detailTextures. */
+  private readonly shaderProfile: () => FinishShaderProfile;
+  private readonly warned = new Set<string>();
+  private readonly warnText: ((text: string) => void) | undefined;
+  /** Reports a missing optional resource once per key. */
+  warnOnce(key: string, text: string): void {
+    if (this.warned.has(key)) return;
+    this.warned.add(key); this.warnText?.(text);
   }
   get imagePolicy(): ImagePolicy | undefined { return this.imagePolicyValue; }
   get modelPolicy(): ModelReplacementPolicy { return this.modelPolicyValue; }
@@ -134,12 +155,14 @@ export class ApplicationAssets {
         this.imagePolicyValue === undefined ? {} : { policy: this.imagePolicyValue });
       this.activeTextures.add(textures);
       try {
-        const shaders = new SceneShaderRegistry(textures, registrations, DEFAULT_SHADER_PROFILE, path => this.materialMovie(content, mounts, path), family);
+        const shaders = new SceneShaderRegistry(textures, registrations, this.shaderProfile(), path => this.materialMovie(content, mounts, path), family);
         const loadScripts = async (): Promise<void> => {
+          const files: { readonly text: string; readonly source: string }[] = [];
           for (const path of await shaderPaths(this.content, mounts)) {
             const asset = await mounts.open(path);
-            if (asset !== null) shaders.addScript(new TextDecoder().decode(asset.bytes), path);
+            if (asset !== null) files.push({ text: new TextDecoder().decode(asset.bytes), source: path });
           }
+          shaders.addScriptFiles(files);
         };
         if (family === "q3") await shaders.initializeSourceMaterials(loadScripts);
         else await loadScripts();
@@ -363,4 +386,11 @@ export class ApplicationAssets {
     this.modelVariants.clear();
     return undefined;
   }
+}
+
+/** Assets for a world that shares a renderer's image registry and follows the live image and shader policy. */
+export function createWorldAssets(content: LoadedApplicationContent, renderer: { readonly owner: RendererResourceOwner; readonly images: SceneImageRegistry },
+  warn: (text: string) => void, images: { readonly policy: ImagePolicy; readonly modelPolicy: ModelReplacementPolicy; readonly cvars: CvarRegistry } | null): ApplicationAssets {
+  return new ApplicationAssets(content, renderer.owner, undefined, { imageRegistry: renderer.images, warn,
+    ...(images === null ? {} : { imagePolicy: images.policy, modelPolicy: images.modelPolicy, shaderProfile: () => shaderProfileFromCvars(images.cvars) }) });
 }

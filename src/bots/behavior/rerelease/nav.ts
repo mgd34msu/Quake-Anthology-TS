@@ -1,5 +1,6 @@
 // Rerelease brain path vocabulary; searches and movement admission belong to NavigationRuntime.
 import { NavigationRuntime } from "../../navigation/runtime.ts";
+import { KEX_TRAVEL_TRAIN, navigationEdgeIsBarrierJump } from "../../navigation/graph.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { NavigationEdge, NavigationNode } from "../../navigation/types.ts";
 import { bvec, bvecDistance, bvecNormalized, bvecSub, type BotVec3 } from "./math.ts";
@@ -64,11 +65,11 @@ function linkType(edge: NavigationEdge): NavLinkType | null {
     case "walk": case "swim": return NavLinkType.Walk;
     case "crouch": return NavLinkType.Crouch;
     case "ladder": return NavLinkType.Ladder;
-    case "jump": case "water-jump": return edge.sourceTravelType === 5 ? NavLinkType.BarrierJump : NavLinkType.LongJump;
+    case "jump": case "water-jump": return navigationEdgeIsBarrierJump(edge) ? NavLinkType.BarrierJump : NavLinkType.LongJump;
     case "drop": return NavLinkType.WalkOffLedge;
     case "teleport": return NavLinkType.Teleport;
     case "jump-pad": return NavLinkType.Pusher;
-    case "mover": return edge.sourceTravelType === 7 ? NavLinkType.Train : NavLinkType.Elevator;
+    case "mover": return edge.sourceTravelType === KEX_TRAVEL_TRAIN ? NavLinkType.Train : NavLinkType.Elevator;
     case "rocket-jump": case "bfg-jump": case "grapple": case "double-jump":
     case "ramp-jump": case "strafe-jump": case "unknown": return null;
   }
@@ -88,14 +89,15 @@ export class SourceRereleaseNavigation implements BotNavigation {
       && (link.traversal === null || bvecDistance(candidate.start, link.traversal.start) === 0 && bvecDistance(candidate.end, link.traversal.end) === 0));
     return edge === undefined ? { kind: "unavailable" } : this.runtime.trainStep(edge, origin, this.ground()) ?? { kind: "unavailable" };
   }
-  get nodes(): readonly NavGraphNodeT[] { return this.runtime.graph.nodes.map(nodeView); }
+  private views: readonly NavGraphNodeT[] | null = null;
+  get nodes(): readonly NavGraphNodeT[] { return this.views ??= this.runtime.graph.nodes.map(nodeView); }
   get nodeCount(): number { return this.runtime.graph.nodes.length; }
   pathValid(path: NavPathT): boolean {
     return path.generation === this.runtime.generation && path.mapDigest === this.runtime.graph.map.digest;
   }
   planPath(start: BotVec3, goal: BotVec3, options: NavPlanOptions = {}): NavPathT | null {
     const caps = options.caps ?? defaultTraverseCaps(), disabledAreas = new Set<number>();
-    for (const node of this.runtime.graph.nodes) if (caps.avoid?.(nodeView(node)) === true) disabledAreas.add(node.id);
+    if (caps.avoid !== undefined) for (const view of this.nodes) if (caps.avoid(view)) disabledAreas.add(view.index);
     const eligible = (edge: NavigationEdge): boolean => {
       const type = linkType(edge);
       if (type === null || !caps.jump && navLinkIsJump(type) || !caps.entityTraversal && navLinkIsEntity(type)

@@ -1,5 +1,5 @@
 import { SaveReader } from "../../../persistence/value.ts";
-import { readScriptDiagnostic } from "../../../ui/common/legacy/script/lexer.ts";
+import { readScriptDiagnostic } from "../../../content/legacy-script/lexer.ts";
 /*
  * Goal AI translated from id Software's code/botlib/be_ai_goal.c.
  * Copyright (C) 1999-2005 Id Software, Inc.
@@ -9,14 +9,14 @@ import { readScriptDiagnostic } from "../../../ui/common/legacy/script/lexer.ts"
 import type { ActorId } from "../../../contracts/identity.ts";
 import { add3, sub3, scale3, length3, type Vec3, type Bounds } from "../../../core/math.ts";
 import { float32ToBits } from "../../../core/numeric.ts";
-import { ScriptLanguageError, type ScriptDiagnostic, type ScriptToken, type SourceLocation } from "../../../ui/common/legacy/script/lexer.ts";
-import { ScriptSourceReader, type ScriptPreprocessorOptions } from "../../../ui/common/legacy/script/preprocessor.ts";
+import { ScriptLanguageError, type ScriptDiagnostic, type ScriptToken, type SourceLocation } from "../../../content/legacy-script/lexer.ts";
+import { ScriptSourceReader, type ScriptPreprocessorOptions } from "../../../content/legacy-script/preprocessor.ts";
 import { StructureReader } from "./structure.ts";
 import { WeightConfigError, WeightConfigLoadError, WeightConfigStore, type BotRandom, type WeightConfig, type WeightInventory } from "./weights.ts";
 import type { BotLog } from "./log.ts";
 import type { BotScriptReader } from "./script-sources.ts";
 import type { AasBspEntities } from "./bsp-entities.ts";
-import { BotMemory, type BotMemoryAllocation } from "./memory.ts";
+import { allocationView, BotMemory, type BotMemoryAllocation } from "./memory.ts";
 
 export const GoalFlags = Object.freeze({ Item: 1, Roam: 2, Dropped: 4 });
 export const GoalError = Object.freeze({ None: 0, CannotLoadItemWeights: 9, CannotLoadItemConfig: 10 });
@@ -516,11 +516,6 @@ interface GoalReferences {
   readonly indexes: Map<number, BotMemoryAllocation>;
 }
 
-function allocationView(allocation: BotMemoryAllocation): DataView {
-  const bytes = allocation.bytes;
-  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-}
-
 class GoalState {
   readonly avoid: readonly AvoidGoal[];
   constructor(readonly allocation: BotMemoryAllocation, private readonly references: GoalReferences) {
@@ -639,6 +634,8 @@ export class BotGoalLibrary {
   private configuredGameType = 0;
   private world: GoalWorld | null = null;
   private readonly sourceGoals = new Map<number, SourceGoalBinding>();
+  /** Derived from sourceGoals by actor slot and generation; rebuilt whenever the two disagree in size. */
+  private readonly sourceGoalsByActor = new Map<string, SourceGoalBinding>();
   private nextSourceGoal = 0x7fffffff;
   private levelItemHeap: BotMemoryAllocation | null = null;
   // Source globals: levelitems, freelevelitems, numlevelitems, maplocations, campspots.
@@ -1362,7 +1359,12 @@ export class BotGoalLibrary {
       const current = pickups.inspect(client, candidate.actor);
       if (revision !== this.mapRevision) return;
       if (current === null || !current.actor.equals(candidate.actor) || !(current.utility > 0)) continue;
-      let binding = [...this.sourceGoals.values()].find(binding => binding.actor.equals(current.actor));
+      if (this.sourceGoalsByActor.size !== this.sourceGoals.size) {
+        this.sourceGoalsByActor.clear();
+        for (const known of this.sourceGoals.values()) this.sourceGoalsByActor.set(`${known.actor.slot}:${known.actor.generation}`, known);
+      }
+      let binding = this.sourceGoalsByActor.get(`${current.actor.slot}:${current.actor.generation}`);
+      if (binding !== undefined && !binding.actor.equals(current.actor)) binding = undefined;
       const worldMin = add3(current.origin, current.bounds.min), worldMax = add3(current.origin, current.bounds.max);
       const center = scale3(add3(worldMin, worldMax), 0.5);
       const position = navigation.bestReachableArea(center, { min: sub3(worldMin, center), max: sub3(worldMax, center) });
@@ -1374,6 +1376,7 @@ export class BotGoalLibrary {
         const number = this.nextSourceGoal--;
         binding = { actor: current.actor, name: current.name, goal: blankGoal() };
         this.sourceGoals.set(number, binding);
+        this.sourceGoalsByActor.set(`${current.actor.slot}:${current.actor.generation}`, binding);
         binding.goal = copyGoal({ origin: position.origin, area: position.area, mins, maxs,
           entity: current.entity, number, flags: GoalFlags.Item, itemInfo: -1 });
       } else binding.goal = copyGoal({ ...binding.goal, origin: position.origin, area: position.area,

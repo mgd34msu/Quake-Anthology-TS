@@ -1,6 +1,7 @@
-import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdir, mkdtemp, readdir, rename, rm, stat } from "node:fs/promises";
+import { basename, join, relative, resolve } from "node:path";
 import ts from "typescript";
+import { gitState } from "./verify/git.ts";
 import { WorkspaceSnapshot } from "./verify/snapshot.ts";
 
 export type BuildKind = "runtime" | "tools";
@@ -15,13 +16,29 @@ interface BuiltEntry extends BuildEntry {
   readonly bytes: number;
 }
 
+export interface BuildOptions {
+  /** Keep the verified source snapshot after a successful build. */
+  readonly keepSnapshot?: boolean;
+  /** Published builds of this kind to keep in dist/, newest first. */
+  readonly keepBuilds?: number;
+}
+
+export const defaultKeepBuilds = 3;
+const keptFailureSnapshots = 2;
+
+/** Paths are relative to the workspace so evidence does not record a machine layout. */
 export interface BuildEvidence {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly kind: BuildKind;
   readonly builtAt: string;
   readonly directory: string;
   readonly sourceSha256: string;
-  readonly snapshotPath: string;
+  /** HEAD at build time; null outside a git work tree. */
+  readonly commit: string | null;
+  /** True when the tree differed from HEAD, including untracked files; the source hash then does not identify the commit. */
+  readonly dirty: boolean | null;
+  /** Null when the snapshot was removed after a successful build. */
+  readonly snapshotPath: string | null;
   readonly bun: { readonly version: string; readonly revision: string; readonly executable: string };
   readonly typescript: string;
   readonly platform: string;
@@ -30,10 +47,40 @@ export interface BuildEvidence {
   readonly entries: readonly BuiltEntry[];
 }
 
+const usage = "Usage: bun tools/build.ts [--tools] [--keep-snapshot] [--keep-builds=N]";
+
+export function parseBuildOptions(args: readonly string[]): { readonly kind: BuildKind; readonly options: BuildOptions } {
+  let kind: BuildKind = "runtime", keepSnapshot = false, keepBuilds = defaultKeepBuilds;
+  const seen = new Set<string>();
+  for (const arg of args) {
+    const flag = arg.split("=")[0] ?? arg;
+    if (seen.has(flag)) throw new Error(usage);
+    seen.add(flag);
+    if (arg === "--tools") kind = "tools";
+    else if (arg === "--keep-snapshot") keepSnapshot = true;
+    else if (/^--keep-builds=[1-9]\d{0,2}$/.test(arg)) keepBuilds = Number(arg.slice("--keep-builds=".length));
+    else throw new Error(usage);
+  }
+  return { kind, options: { keepSnapshot, keepBuilds } };
+}
+
 export function parseBuildKind(args: readonly string[]): BuildKind {
-  if (args.length === 0) return "runtime";
-  if (args.length === 1 && args[0] === "--tools") return "tools";
-  throw new Error("Usage: bun tools/build.ts [--tools]");
+  return parseBuildOptions(args).kind;
+}
+
+async function directoriesByAge(parent: string, pattern: RegExp): Promise<string[]> {
+  const names = await readdir(parent).catch(() => []);
+  const dated = await Promise.all(names.filter(name => pattern.test(name)).map(async name => ({ path: join(parent, name), time: (await stat(join(parent, name))).mtimeMs })));
+  return dated.sort((left, right) => right.time - left.time).map(entry => entry.path);
+}
+
+async function pruneDirectories(parent: string, pattern: RegExp, keep: number, protectedPath?: string): Promise<void> {
+  const ordered = await directoriesByAge(parent, pattern);
+  let kept = 0;
+  for (const path of ordered) {
+    if (path === protectedPath || kept < keep) { kept += 1; continue; }
+    await rm(path, { recursive: true, force: true });
+  }
 }
 
 async function runGate(snapshotPath: string, name: string): Promise<void> {
@@ -42,22 +89,23 @@ async function runGate(snapshotPath: string, name: string): Promise<void> {
   if (code !== 0) throw new Error(`Build snapshot ${name} failed with exit ${code}.`);
 }
 
-export async function buildWorkspace(directory: string, kind: BuildKind): Promise<BuildEvidence> {
+export async function buildWorkspace(directory: string, kind: BuildKind, options: BuildOptions = {}): Promise<BuildEvidence> {
   if (process.platform !== "linux") throw new Error("The first build target is Linux. Run this build on Linux.");
   const workspace = resolve(directory);
   const entries: readonly BuildEntry[] = kind === "runtime"
     ? [{ source: "src/main.ts", executable: "quake-typescript" }]
-    : [{ source: "docs/validate-plan.ts", executable: "validate-plan" }, { source: "tools/check-policy.ts", executable: "check-policy" },
+    : [{ source: "tools/check-policy.ts", executable: "check-policy" },
       { source: "tools/source-camera.ts", executable: "source-camera" }, { source: "tools/navigation/aas.ts", executable: "aas" }];
   for (const entry of entries) {
     if (!await Bun.file(join(workspace, entry.source)).exists()) {
-      throw new Error(kind === "runtime"
-        ? "Runtime build unavailable: src/main.ts is not implemented. W73 owns the real application entry. Use build:tools to compile existing tooling."
-        : `Build entry is missing: ${entry.source}`);
+      throw new Error(`Build entry is missing: ${entry.source}`);
     }
   }
-  const snapshot = await WorkspaceSnapshot.capture(workspace);
-  const snapshotPath = await snapshot.materialize(join(workspace, ".artifacts", "snapshots"), "build-");
+  const snapshotParent = join(workspace, ".artifacts", "snapshots");
+  // Snapshots of failed builds are kept for diagnosis; older ones are not.
+  await pruneDirectories(snapshotParent, /^build-/, keptFailureSnapshots - 1);
+  const [snapshot, git] = await Promise.all([WorkspaceSnapshot.capture(workspace), gitState(workspace)]);
+  const snapshotPath = await snapshot.materialize(snapshotParent, "build-");
   await runGate(snapshotPath, "typecheck");
   await runGate(snapshotPath, "policy");
   const dist = join(workspace, "dist");
@@ -85,13 +133,15 @@ export async function buildWorkspace(directory: string, kind: BuildKind): Promis
     }
     const finalDirectory = join(dist, `${kind}-${snapshot.manifest.sha256.slice(0, 16)}-${candidate.slice(candidate.lastIndexOf("-") + 1)}`);
     const evidence: BuildEvidence = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       kind,
       builtAt: new Date().toISOString(),
-      directory: finalDirectory,
+      directory: relative(workspace, finalDirectory),
       sourceSha256: snapshot.manifest.sha256,
-      snapshotPath,
-      bun: { version: Bun.version, revision: Bun.revision, executable: process.execPath },
+      commit: git.commit,
+      dirty: git.dirty,
+      snapshotPath: options.keepSnapshot === true ? relative(workspace, snapshotPath) : null,
+      bun: { version: Bun.version, revision: Bun.revision, executable: basename(process.execPath) },
       typescript: ts.version,
       platform: process.platform,
       architecture: process.arch,
@@ -102,7 +152,7 @@ export async function buildWorkspace(directory: string, kind: BuildKind): Promis
     await Bun.write(join(candidate, "build.json"), metadata);
     for (const entry of builtEntries) {
       await Bun.write(join(candidate, `${entry.executable}.build.json`), `${JSON.stringify({
-        schemaVersion: 1, sourceSha256: evidence.sourceSha256, executableSha256: entry.sha256,
+        schemaVersion: 2, sourceSha256: evidence.sourceSha256, commit: evidence.commit, dirty: evidence.dirty, executableSha256: entry.sha256,
         source: entry.source, bun: evidence.bun, typescript: evidence.typescript,
       }, null, 2)}\n`);
     }
@@ -111,7 +161,10 @@ export async function buildWorkspace(directory: string, kind: BuildKind): Promis
     const pointer = join(dist, `.${kind}-${Date.now()}-${crypto.randomUUID()}.json`);
     await Bun.write(pointer, metadata);
     await rename(pointer, join(dist, `${kind}.json`));
-    process.stdout.write(`Built ${kind} from ${snapshot.manifest.sha256}: ${finalDirectory}\n`);
+    if (options.keepSnapshot !== true) await rm(snapshotPath, { recursive: true, force: true });
+    await pruneDirectories(dist, new RegExp(`^${kind}-[0-9a-f]{16}-`), options.keepBuilds ?? defaultKeepBuilds, finalDirectory);
+    const state = git.commit === null ? "no git commit" : `commit ${git.commit}${git.dirty === true ? " (dirty tree)" : ""}`;
+    process.stdout.write(`Built ${kind} from ${snapshot.manifest.sha256}, ${state}: ${finalDirectory}\n`);
     return evidence;
   } finally {
     if (!published) await rm(candidate, { recursive: true, force: true });
@@ -120,7 +173,8 @@ export async function buildWorkspace(directory: string, kind: BuildKind): Promis
 
 if (import.meta.main) {
   try {
-    await buildWorkspace(process.cwd(), parseBuildKind(process.argv.slice(2)));
+    const parsed = parseBuildOptions(process.argv.slice(2));
+    await buildWorkspace(process.cwd(), parsed.kind, parsed.options);
   } catch (error) {
     process.stderr.write(`Build failed: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;

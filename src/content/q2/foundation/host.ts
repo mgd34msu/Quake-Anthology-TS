@@ -23,6 +23,8 @@ export interface Q2GameOptions {
   readonly skill: 0 | 1 | 2 | 3;
   readonly mode: "singleplayer" | "coop" | "deathmatch";
   readonly deathmatchFlags: number;
+  /** Rerelease g_instagib: every pickup is removed and players start with a railgun and 99 slugs instead of the blaster. */
+  readonly instagib?: boolean;
   readonly maxClients: number;
   readonly provider: ProviderId;
   readonly damagePowerupOwner?: ProviderId;
@@ -31,6 +33,7 @@ export interface Q2GameOptions {
   readonly combatProvider: ProviderId;
   readonly inventoryProvider: ProviderId;
   readonly movementProvider: ProviderId;
+  readonly playerName?: (actor: ActorId) => string | null;
 }
 
 export interface Q2SpawnFields {
@@ -42,7 +45,7 @@ export interface Q2SpawnFields {
 export type Q2PresentationEvent =
   | { readonly kind: "model"; readonly actor: ActorId; readonly path: string; readonly attachedModels: readonly string[]; readonly frame: number; readonly oldFrame: number; readonly scale: number; readonly alpha: number; readonly skin: number; readonly effects: number; readonly renderFlags: number }
   | { readonly kind: "visibility"; readonly actor: ActorId; readonly visible: boolean }
-  | { readonly kind: "sound"; readonly actor: ActorId | null; readonly origin: Vec3; readonly path: string; readonly channel: number; readonly volume: number; readonly attenuation: number; readonly reliable: boolean; readonly loop: "start" | "stop" | "once"; readonly loopOwner?: ProviderId }
+  | { readonly kind: "sound"; readonly actor: ActorId | null; readonly origin: Vec3; readonly path: string; readonly channel: number; readonly volume: number; readonly attenuation: number; readonly reliable: boolean; readonly loop: "start" | "stop" | "once"; readonly loopOwner?: ProviderId; /** gi.local_sound: heard only by the entity it is attached to. */ readonly local?: boolean }
   | { readonly kind: "centerprint"; readonly actor: ActorId; readonly text: string; readonly instant?: boolean; readonly durationSeconds?: number }
   | { readonly kind: "print"; readonly actor: ActorId | null; readonly level: "low" | "medium" | "high" | "chat"; readonly text: string }
   | { readonly kind: "help"; readonly slot: 1 | 2; readonly text: string }
@@ -191,6 +194,7 @@ export class Q2Entity {
   map = "";
   style = 0;
   transitionStarted = false;
+  itemDropped = false;
   clipMask = 0x6000003;
   projectile = false;
   dodgeable = false;
@@ -257,7 +261,14 @@ export interface Q2GameServices {
   readonly sourceCallbacks: Q2SourceCallbacks;
   readonly options: Q2GameOptions;
   readonly entities: ReadonlyMap<ActorId, Q2Entity>;
+  /** Registers a projectile whose projectile and dodgeable flags are set, for monster dodge checks. */
+  markDodgeable(entity: Q2Entity): undefined;
+  dodgeables(): Iterable<Q2Entity>;
   readonly currentActor: ActorId | null;
+  /** level.disguise_violator and its expiry: a disguised player who fired is the next target of every monster. */
+  /** game.helpchanged: counts use_target_help firings. */
+  helpChanged: number;
+  disguiseViolation: { readonly actor: ActorId; readonly until: number } | null;
   readonly counters: { totalSecrets: number; foundSecrets: number; totalGoals: number; foundGoals: number; totalMonsters: number; killedMonsters: number; serverFlags: number };
   spawn(fields: Q2SpawnFields): Q2Entity;
   create(classname: string, values?: ReadonlyMap<string, string>): Q2Entity;

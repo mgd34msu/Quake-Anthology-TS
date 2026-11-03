@@ -4,6 +4,10 @@ import { BinaryError } from "../../core/binary/index.ts";
 import { bitsToFloat32, float32ToBits } from "../../core/numeric.ts";
 import { createMessageHuffman } from "./huffman.ts";
 
+// writeBits runs once per scalar; a shared scratch list avoids an array and closure per call (it never re-enters).
+const scratchBits: number[] = [];
+const putScratchBit = (bit: number): void => { scratchBits.push(bit); };
+
 export type MessageMode = "bitstream" | "oob";
 export const MAX_MESSAGE_LENGTH = 16384;
 
@@ -95,15 +99,15 @@ export class MessageWriter {
       return;
     }
     let remaining = value >>> 0;
-    const encoded: number[] = [];
-    const putBit = (bit: number): void => { encoded.push(bit); };
+    const encoded = scratchBits;
+    encoded.length = 0;
     for (let i = 0; i < (width & 7); i++) {
-      putBit(remaining & 1);
+      putScratchBit(remaining & 1);
       remaining >>>= 1;
     }
     const codec = createMessageHuffman();
     for (let i = width & 7; i < width; i += 8) {
-      codec.encodeSymbol(remaining & 255, putBit);
+      codec.encodeSymbol(remaining & 255, putScratchBit);
       remaining >>>= 8;
     }
     const size = ((this.position + encoded.length) >>> 3) + 1;

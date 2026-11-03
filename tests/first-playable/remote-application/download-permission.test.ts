@@ -1,9 +1,8 @@
-import { expect, spyOn, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect, spyOn } from "bun:test";
+import { corpusTest, corpusFile } from "../../support/corpus.ts";
 
-import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { RemoteApplication } from "../../../src/app/bootstrap/remote-application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -11,13 +10,16 @@ import { Q2PeerDownload } from "../../../src/app/bootstrap/network/q2-downloads.
 import { DownloadSink } from "../../../src/network/services/downloads.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { SeatConsole } from "../../../src/console/session.ts";
+import { trackedTempDirectories } from "../../support/temp-directories.ts";
+const test = corpusTest("q2/baseq2/pak0.pak");
+const tempDirectory = trackedTempDirectories();
 
 for (const mode of ["disabled", "http-off"] satisfies readonly ("disabled" | "http-off")[]) test(`Q2 remote applies saved ${mode} download permission before signon`, async () => {
-  const root = await mkdtemp(join(tmpdir(), "q2-remote-policy-")), serverUsers = join(root, "server"), clientUsers = join(root, "client");
+  const root = await tempDirectory("q2-remote-policy-"), serverUsers = join(root, "server"), clientUsers = join(root, "client");
   const destination = join(clientUsers, "q2/baseq2/sound/permission-fixture.wav"), cfg = join(clientUsers, "q2/baseq2/settings/client.cfg");
   await mkdir(join(clientUsers, "q2/baseq2/settings"), { recursive: true });
   await Bun.write(cfg, `set allow_download ${mode === "disabled" ? 0 : 1}\nset cl_http_downloads ${mode === "http-off" ? 0 : 1}\n`);
-  const archive = await openArchive(`${testCorpusRoot()}/q2/baseq2/pak0.pak`);
+  const archive = await openArchive(corpusFile("q2/baseq2/pak0.pak"));
   const entry = archive.findEntries("sound/berserk/attack.wav")[0]; if (entry === undefined) throw new Error("Missing fixture sound");
   const sound = await archive.readEntry(entry); archive.close();
   await mkdir(join(serverUsers, "q2/baseq2/sound"), { recursive: true });

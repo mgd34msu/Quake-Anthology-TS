@@ -2,7 +2,7 @@ import type { ActorId } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { BotKnowledge } from "../../../bots/behavior/rerelease/data/knowledge.ts";
-import { BotContents, BotEntityKind, type BotWorldT, type BotEntityT, type BotSoundT } from "../../../bots/behavior/rerelease/world.ts";
+import { BotContents, BotEntityKind, type BotWorldT, type BotEntityT, type BotSelfT, type BotSoundT } from "../../../bots/behavior/rerelease/world.ts";
 import { SourceRereleaseNavigation } from "../../../bots/behavior/rerelease/nav.ts";
 import type { ApplicationBotNavigation } from "./navigation.ts";
 import type { SharedSimulation } from "./runtime.ts";
@@ -23,8 +23,28 @@ export interface RereleaseWorldOptions {
   identify(actor: ActorId): number;
   elapsed(): number;
   sounds(): readonly BotSoundT[];
+  readonly snapshot: RereleaseFrameSnapshot;
 }
 function normalized(name: string): string { return name.replace(/^.*:/, "").replace(/^.*weapon[/_]/, "").replaceAll("_", "").replaceAll("/", ""); }
+/**
+ * Nothing the simulation exposes to bots changes while their commands are
+ * being collected, so within one frame the entity list is the same for every
+ * bot and a bot's own state is the same for every call of its think. The first
+ * asker builds each; outside a frame nothing is retained.
+ */
+export class RereleaseFrameSnapshot {
+  private open = false;
+  private serial = 0;
+  private list: readonly BotEntityT[] | null = null;
+  begin(): void { this.open = true; this.serial++; this.list = null; }
+  end(): void { this.open = false; this.list = null; }
+  get active(): boolean { return this.open; }
+  get frame(): number { return this.serial; }
+  entities(build: () => readonly BotEntityT[]): readonly BotEntityT[] {
+    if (!this.open) return build();
+    return this.list ??= build();
+  }
+}
 export function nativeWeaponItem(simulation: SharedSimulation, actor: ActorId, knowledge: BotKnowledge, number: number): ItemId | null {
   const weapon = knowledge.weaponByNumber(number);
   return weapon === undefined ? null : simulation.playerUi(actor).items.find(item => item.kind === "weapon" && normalized(item.id) === normalized(weapon.name))?.id ?? null;
@@ -40,9 +60,8 @@ export function createRereleaseBotWorld(options: RereleaseWorldOptions, actor: A
     const result = simulation.scene.trace({ start, end, shape, target: { kind: "world" }, policy, numeric, passActor: actor });
     return { fraction: result.fraction, endpos: result.end, startsolid: result.startSolid || result.allSolid, hitId: result.hit.kind === "actor" ? options.identify(result.hit.actor) : -1 };
   };
-  return {
-    time: () => simulation.timeSeconds, frameTime: () => options.elapsed() / 1000,
-    self: () => {
+  let remembered: { readonly frame: number; readonly value: BotSelfT } | null = null;
+  const self = (): BotSelfT => {
       const movement = player(), body = simulation.bodies.read(actor), ui = simulation.playerUi(actor);
       if (body === null) throw new Error("Native bot lost shared body");
       const groundClass = body.ground === null ? null : simulation.botEntity(body.ground)?.classname;
@@ -66,6 +85,15 @@ export function createRereleaseBotWorld(options: RereleaseWorldOptions, actor: A
         onGround: body.ground !== null, onLift: groundClass === "func_plat" || groundClass === "func_plat2" || groundClass === "func_train",
         waterLevel: movement.waterLevel, team: objectives.team(actor), dead: ui.health <= 0,
         hasProtection: simulation.combat.read(actor)?.invulnerable ?? false, carryingObjective: objectives.carrying(actor) };
+  };
+  return {
+    time: () => simulation.timeSeconds, frameTime: () => options.elapsed() / 1000,
+    self: () => {
+      if (!options.snapshot.active) return self();
+      if (remembered?.frame === options.snapshot.frame) return remembered.value;
+      const value = self();
+      remembered = { frame: options.snapshot.frame, value };
+      return value;
     },
     traceLine: (start, end) => trace(start, end, { kind: "point" }),
     traceBox: (start, min, max, end) => trace(start, end, { kind: "box", bounds: { min, max } }),
@@ -75,7 +103,7 @@ export function createRereleaseBotWorld(options: RereleaseWorldOptions, actor: A
       return (result.contents & 8) !== 0 ? BotContents.Lava : (result.contents & 16) !== 0 ? BotContents.Slime
         : (result.contents & 32) !== 0 ? BotContents.Water : (result.contents & 1) !== 0 ? BotContents.Solid : BotContents.Empty;
     },
-    entities: () => {
+    entities: () => options.snapshot.entities(() => {
       const entities: BotEntityT[] = [];
       for (const observation of simulation.actors.observations()) {
         const target = observation.id, body = simulation.bodies.read(target);
@@ -94,7 +122,7 @@ export function createRereleaseBotWorld(options: RereleaseWorldOptions, actor: A
           hasHealth: (combat?.health ?? entity?.health ?? 0) > 0, hasTargetname: entity !== null && entity.targetname !== "", carryingObjective: objectives.carrying(target) });
       }
       return entities;
-    },
+    }),
     hearing: options.sounds, nav: () => nav,
   };
 }

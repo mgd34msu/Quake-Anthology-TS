@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExecutableRecipe, ProviderReference, ResolvedResourceReference } from "../../src/contracts/content.ts";
+import type { ExecutableRecipe } from "../../src/contracts/content.ts";
 import { createContentDigest, createResourceId } from "../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { SaveImage } from "../../src/contracts/session.ts";
@@ -12,31 +12,21 @@ import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBo
 import { GameplayAuthority, SharedInventoryTable } from "../../src/world/gameplay/index.ts";
 import { createNumericOperations, Q3_BINARY32_PROFILE } from "../../src/core/numeric.ts";
 import { captureSharedBodies, restoreSharedWorldState, restoreSharedBodyLinks } from "../../src/persistence/world-state.ts";
-import { decodeSaveImage, encodeSaveImage, readSaveImage, sourceActorsCheckpoint, writeSaveImage } from "../../src/persistence/save-image.ts";
+import { decodeSaveImage, encodeSaveImage, readSaveHeader, readSaveImage, sourceActorsCheckpoint, writeSaveImage } from "../../src/persistence/save-image.ts";
+import { loadU32LE, storeU32LE } from "../../src/foundation/binary.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, SaveReader } from "../../src/persistence/value.ts";
 import { readRecipe } from "../../src/persistence/recipe.ts";
 import { decodeQ2ClassicLevel, encodeQ2ClassicLevel, restoreQ2ClassicRecord } from "../../src/persistence/q2-classic.ts";
 import type { Q2ClassicSaveLayout } from "../../src/persistence/q2-classic.ts";
-import { decodeQ3ClientSession, encodeQ3ClientSession } from "../../src/persistence/q3.ts";
 import { validateSimulationSave } from "../../src/app/bootstrap/simulation/save.ts";
 import type { PoweredProtectionState } from "../../src/contracts/gameplay.ts";
 import type { SharedWorldRestoreHost } from "../../src/persistence/world-state.ts";
+import { recipeFixture } from "../support/save-fixtures.ts";
 import { capturePrimaryProtection } from "../../src/persistence/protection.ts";
 import type { CombatState } from "../../src/contracts/gameplay.ts";
+import { inertAuthority } from "../support/authority.ts";
 
-function recipe(): ExecutableRecipe {
-  const content = "q1:classic:id1:fixture";
-  const provider = (role: string): ProviderReference => ({ provider: `q1:${role}`, content });
-  const raw: Omit<ResolvedResourceReference, "id"> = { requestedPath: "maps/start.bsp", provenance: { kind: "loose", memberPath: "maps/start.bsp", mount: { kind: "loose", identity: { id: "mount:q1:fixture", content, generation: 2 }, rootPath: "/fixture" } },
-    digest: createContentDigest("0".repeat(64)), byteLength: 123, resolution: { kind: "default-order", plan: "mount-plan:fixture:1", rank: 0 } };
-  const geometry = { ...raw, id: createResourceId(raw) };
-  return { schemaVersion: 3, id: "recipe:fixture:1", preset: "recipe:fixture:1", map: { geometryContent: content, geometry, entities: provider("game") }, campaign: { kind: "campaign", mission: provider("mission"), gamecode: provider("game") },
-    movement: provider("movement"), character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
-    presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: content, hud: provider("hud"), effects: provider("effects"), audio: provider("audio") }, engineBehavior: provider("engine"), combat: provider("combat"), inventory: provider("inventory"), match: provider("match"), transition: provider("transition"),
-    execution: [{ kind: "typescript", owner: provider("game"), implementation: "q1:official", role: "server-game", api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } }],
-    mounts: { id: "mount-plan:fixture:1", mounts: [raw.provenance.mount], defaultOrder: [raw.provenance.mount.identity.id], prefixOrders: [] }, resources: [geometry], timing: [],
-    ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } } };
-}
+const recipe = recipeFixture;
 
 function poweredRestore(storage: ReturnType<SharedWorldRestoreHost["storage"]>, powered: PoweredProtectionState) {
   const identity = createIdentityOwner("powered-save"), original = new SessionActorRegistry(identity);
@@ -44,13 +34,13 @@ function poweredRestore(storage: ReturnType<SharedWorldRestoreHost["storage"]>, 
   const state = { health: 73, armor: { regular: { kind: "q1", points: 50, absorption: 0.6, item: "q1:armor/yellow" }, powered },
     mass: 200, canTakeDamage: true, invulnerable: false, team: null } satisfies SaveImage["combat"][number]["state"];
   const entries = [{ item: "q2:cells", count: 20, capacity: 200 }] satisfies SaveImage["inventories"][number]["entries"];
-  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+  const image: SaveImage = { schemaVersion: 4, consumption: [], recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
     nextEventSequence: 0, clocks: [], random: [], actors: original.checkpoint(), bodies: [], combat: [{ actor: savedActor, state }],
     inventories: [{ actor: savedActor, entries }], configurations: [], thinks: [], providers: [], guests: [] };
   const actors = SessionActorRegistry.restore(identity, image.actors, original.sourceCheckpoint()); original.close();
   const restored = actors.resolveSaved(savedActor); if (restored === null) throw new Error("Missing restored player");
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const combat = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, new ActorCallbackTable(actors));
   const inventory = new SharedInventoryTable(actors);
   if (storage !== "copied") {
     combat.create(restored, { ...state, armor: { regular: state.armor.regular, powered: { kind: "none" } } });
@@ -86,7 +76,7 @@ test("regular component saves retain copied primary armor and leave original sou
     const initial: CombatState = { health: 73, armor: { regular: { kind: "q1", points: 61, absorption: 0.6, item: "q1:armor/yellow" }, powered: { kind: "none" } },
       mass: 200, canTakeDamage: true, invulnerable: false, team: null };
     const makeCombat = (actors: SessionActorRegistry, actor: typeof player) => {
-      const combat = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+      const combat = inertAuthority(actors, new ActorCallbackTable(actors));
       if (storage === "copied") combat.create(actor, initial);
       else {
         let state = initial;
@@ -104,12 +94,12 @@ test("regular component saves retain copied primary armor and leave original sou
     const state = oldCombat.read(player.id); if (state === null) throw new Error("Missing saved combat");
     const primary = capturePrimaryProtection(original, oldCombat);
     expect(new SaveReader(decodeCheckpointValue(primary.bytes)).list(value => value).length).toBe(storage === "copied" ? 1 : 0);
-    const image = decodeSaveImage(encodeSaveImage({ schemaVersion: 3, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+    const image = decodeSaveImage(encodeSaveImage({ schemaVersion: 4, consumption: [], recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
       nextEventSequence: 0, clocks: [], random: [], actors: original.checkpoint(), bodies: [], combat: [{ actor: savedActor, state }],
       inventories: [], configurations: [], thinks: [], providers: [primary], guests: [] }));
     const actors = SessionActorRegistry.restore(identity, image.actors, original.sourceCheckpoint()); original.close();
     const restored = actors.resolveSaved(savedActor); if (restored === null) throw new Error("Missing restored actor");
-    const combat = storage === "copied" ? new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined }) : makeCombat(actors, restored);
+    const combat = storage === "copied" ? inertAuthority(actors, new ActorCallbackTable(actors)) : makeCombat(actors, restored);
     const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
     const completion = restoreSharedWorldState(image, { actors, bodies, combat, inventory: new SharedInventoryTable(actors), storage: () => storage }, { deferProtection: true });
     const remove = attach(combat, restored);
@@ -164,10 +154,10 @@ test("source reconstruction validates declared component fuel without imposing u
   } finally { pending.actors.close(); }
 });
 
-test("save version 3 preserves independent armor and reads version 2 without losing depleted equipment", () => {
+test("save version 4 preserves independent armor and reads version 2 without losing depleted equipment", () => {
   const armor = { regular: { kind: "q1", points: 0, absorption: 0.8, item: "q1:armor/red" }, powered: { kind: "shield", cells: 77 } } satisfies SaveImage["combat"][number]["state"]["armor"];
   const state = { health: 73, armor, mass: 200, canTakeDamage: true, invulnerable: false, team: null };
-  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+  const image: SaveImage = { schemaVersion: 4, consumption: [], recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
     nextEventSequence: 0, clocks: [], random: [], actors: [], bodies: [], combat: [{ actor: { slot: 0, generation: 0 }, state }],
     inventories: [], configurations: [], thinks: [], providers: [], guests: [] };
   expect(decodeSaveImage(encodeSaveImage(image)).combat[0]?.state.armor).toEqual(armor);
@@ -176,7 +166,7 @@ test("save version 3 preserves independent armor and reads version 2 without los
   const header = new TextEncoder().encode("QTSAVE2\n"), payload = encodeCheckpointValue(legacy), bytes = new Uint8Array(header.length + payload.length);
   bytes.set(header); bytes.set(payload, header.length);
   const decoded = decodeSaveImage(bytes);
-  expect(decoded.schemaVersion).toBe(3);
+  expect(decoded.schemaVersion).toBe(4);
   expect(decoded.legacyArmorLayout).toBe(true);
   expect(decoded.combat[0]?.state.armor).toEqual({ regular: { kind: "q2", points: 0, normalProtection: 0.8, energyProtection: 0.6, item: "q2:armor/body" }, powered: { kind: "shield", cells: 77 } });
   expect(decodeSaveImage(encodeSaveImage(decoded))).toEqual(decoded);
@@ -192,7 +182,7 @@ test("prebound restore verifies exact source values and retains writable authori
   const body = { origin: { ...zero, x: -0 }, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: savedGround };
   const state = { health: 73, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null } satisfies SaveImage["combat"][number]["state"];
   const entry = { item: "q1:ammo/nails", count: -3, capacity: 200, countPolicy: { kind: "source-counter", arithmetic: "binary32" } } satisfies SaveImage["inventories"][number]["entries"][number];
-  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+  const image: SaveImage = { schemaVersion: 4, consumption: [], recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
     nextEventSequence: 0, clocks: [], random: [], actors: original.checkpoint(),
     bodies: [{ actor: savedActor, body, attachment: null, linked: null, linkCount: 0 }], combat: [{ actor: savedActor, state }],
     inventories: [{ actor: savedActor, entries: [entry] }], configurations: [], thinks: [], providers: [], guests: [] };
@@ -205,7 +195,7 @@ test("prebound restore verifies exact source values and retains writable authori
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   bodies.bind(restored, { read: () => ({ ...body, origin: { ...zero, x: words.getFloat32(0, true) }, ground: restoredGround.id }),
     write: value => { words.setFloat32(0, value.origin.x, true); return undefined; } });
-  const combat = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, new ActorCallbackTable(actors));
   combat.bind(restored, { read: () => ({ ...state, health: words.getFloat32(4, true) }), writeHealth: value => { words.setFloat32(4, value, true); return undefined; }, writeArmor: () => undefined });
   const inventory = new SharedInventoryTable(actors);
   let capacity = entry.capacity;
@@ -247,7 +237,7 @@ test("prebound restore verifies exact source values and retains writable authori
 
 test("simulation restore rejects missing, duplicate and foreign source records before construction", () => {
   const frame = { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" } satisfies SaveImage["frame"];
-  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame, nextEventSequence: 0,
+  const image: SaveImage = { schemaVersion: 4, consumption: [], recipe: recipe(), frame, nextEventSequence: 0,
     clocks: [{ provider: "q1:game", time: frame.time }], random: [{ provider: "q1:game", state: { kind: "msvcrt-rand", seed: 1, draws: 0 } }],
     actors: [], bodies: [], combat: [], inventories: [], configurations: [], thinks: [], guests: [],
     providers: [sourceActorsCheckpoint([]), { provider: "q1:game", schema: "world:simulation", version: 11, bytes: encodeCheckpointValue({}) },
@@ -279,13 +269,13 @@ test("saved body attachments remap anchor generations and preserve their follow 
   bodies.create(anchor, state); bodies.create(child, { ...state, origin: { x: 8, y: 0, z: 0 } });
   bodies.attach(child, { anchor: anchor.id, follow: { kind: "translation", offset: { x: 8, y: 0, z: 0 } } });
   bodies.link(anchor); bodies.link(child);
-  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+  const image: SaveImage = { schemaVersion: 4, consumption: [], recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
     nextEventSequence: 0, clocks: [], random: [], actors: actors.checkpoint(), bodies: captureSharedBodies(actors, bodies), combat: [], inventories: [], configurations: [], thinks: [], providers: [], guests: [] };
   const saved = decodeSaveImage(encodeSaveImage(image));
   actors.close();
   const restored = SessionActorRegistry.restore(identity, saved.actors, []), callbacks = new ActorCallbackTable(restored);
   const restoredBodies = new SharedBodyTable(restored, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  restoreSharedWorldState(saved, { actors: restored, bodies: restoredBodies, combat: new GameplayAuthority(restored, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined }), inventory: new SharedInventoryTable(restored), storage: () => "copied" });
+  restoreSharedWorldState(saved, { actors: restored, bodies: restoredBodies, combat: inertAuthority(restored, callbacks), inventory: new SharedInventoryTable(restored), storage: () => "copied" });
   restoreSharedBodyLinks(saved, { actors: restored, bodies: restoredBodies });
   const restoredAnchor = restored.resolveSaved(anchor.id), restoredChild = restored.resolveSaved(child.id);
   if (restoredAnchor === null || restoredChild === null) throw new Error("Missing restored attachment actors");
@@ -299,7 +289,7 @@ test("saved body attachments remap anchor generations and preserve their follow 
 });
 
 test("saved gameplay selections cannot silently restart without their private checkpoint", () => {
-  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+  const image: SaveImage = { schemaVersion: 4, consumption: [], recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
     nextEventSequence: 0, clocks: [], random: [], actors: [], bodies: [], combat: [], inventories: [], configurations: [], thinks: [], providers: [], guests: [] };
   expect(decodeSaveImage(encodeSaveImage(image)).mods).toBeUndefined();
   expect(decodeSaveImage(encodeSaveImage({ ...image, recipe: { ...image.recipe, mods: [] } })).mods).toBeUndefined();
@@ -314,7 +304,7 @@ test("unified save reconstructs actors, bytes, source clocks and callback identi
   const actors = new SessionActorRegistry(createIdentityOwner("before-save"));
   const actor = actors.allocateAtSource("q1:game", 7, "q1:player");
   const module = { id: "q3:fixture", artifactPath: "vm/qagame.qvm", digest: createContentDigest("1".repeat(64)), revision: "1" } satisfies Q2ClassicSaveLayout["module"];
-  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame: { frame: 3, time: { kind: "seconds", value: 2.5 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" }, nextEventSequence: 19,
+  const image: SaveImage = { schemaVersion: 4, consumption: [], recipe: recipe(), frame: { frame: 3, time: { kind: "seconds", value: 2.5 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" }, nextEventSequence: 19,
     clocks: [{ provider: "q1:game", time: { kind: "seconds", value: 2.5 } }], random: [{ provider: "q1:game", state: { kind: "msvcrt-rand", seed: 1234, draws: 17 } }], actors: actors.checkpoint(),
     bodies: [{ actor: actor.id, attachment: null, linkCount: 0, linked: null, body: { origin: { x: 12, y: 20, z: -0 }, angles: { x: 0, y: 45, z: 0 }, velocity: { x: 10, y: 0, z: 0 }, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null } }],
     combat: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state: { health: 73, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, noKnockback: true, team: null } }],
@@ -367,7 +357,7 @@ test("recipe map product survives base geometry fallback and rejects the old sch
   const selected: ExecutableRecipe = { ...base, map: { ...base.map, geometryContent: "q1:rerelease:hipnotic:fixture" } };
   expect(readRecipe(new SaveReader(selected, "recipe"))).toEqual(selected);
   expect(selected.map.geometryContent).not.toBe(selected.map.geometry.provenance.mount.identity.content);
-  expect(() => readRecipe(new SaveReader({ ...selected, schemaVersion: 1 }, "recipe"))).toThrow();
+  expect(() => readRecipe(new SaveReader({ ...selected, schemaVersion: 1 }, "recipe"))).toThrow("recipe.schemaVersion: expected 3");
 });
 
 test("provider checkpoint values retain 64-bit bytes and reject live Maps", () => {
@@ -391,12 +381,6 @@ test("classic native records preserve private bytes and relocate typed saved poi
   expect(restored[11]).toBe(231);
 });
 
-test("Q3 session cvars use original seven signed integer fields", () => {
-  const text = "2 1200 3 -1 15 7 1";
-  expect(encodeQ3ClientSession(decodeQ3ClientSession(text))).toBe(text);
-  expect(decodeQ3ClientSession("4294967298 0 0 0 0 0 0").team).toBe(2);
-});
-
 test("schema 3 monster targets retain old references and encode native defaults and exceptions", () => {
   const base = recipe(), definition = { source: base.map.entities, classname: "monster_army" };
   for (const enemies of [
@@ -408,7 +392,7 @@ test("schema 3 monster targets retain old references and encode native defaults 
     expect(readRecipe(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(selected))))).toEqual(selected);
   }
   for (const target of [{ kind: "unknown" }, { kind: "map-defined", source: definition.source }, { kind: "map-defined", classname: "monster_army" }]) {
-    expect(() => readRecipe(new SaveReader({ ...base, enemies: { kind: "replace", default: target, byClassname: {} } }))).toThrow();
+    expect(() => readRecipe(new SaveReader({ ...base, enemies: { kind: "replace", default: target, byClassname: {} } }))).toThrow("save.enemies.default");
   }
 });
 
@@ -422,7 +406,7 @@ test("environment selection roundtrips and older recipes retain game defaults", 
   const { environment: _environment, ...presentation } = base.presentation;
   expect(readRecipe(new SaveReader({ ...base, presentation })).presentation.environment).toEqual({ kind: "audio-content" });
   for (const environment of [null, { kind: "automatic-fallback" }, { kind: "selected", resource: { content: base.presentation.audio.content } }]) {
-    expect(() => readRecipe(new SaveReader({ ...base, presentation: { ...base.presentation, environment } }))).toThrow();
+    expect(() => readRecipe(new SaveReader({ ...base, presentation: { ...base.presentation, environment } }))).toThrow("save.presentation.environment");
   }
 });
 
@@ -433,7 +417,7 @@ test("Doppler choice survives saves and legacy omission preserves source behavio
   expect(readRecipe(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(selected)))).presentation.doppler).toEqual({ kind: "disabled" });
   const { doppler: _doppler, ...presentation } = base.presentation;
   expect(readRecipe(new SaveReader({ ...base, presentation })).presentation.doppler).toEqual({ kind: "source" });
-  expect(() => readRecipe(new SaveReader({ ...base, presentation: { ...presentation, doppler: { kind: "realistic" } } }))).toThrow();
+  expect(() => readRecipe(new SaveReader({ ...base, presentation: { ...presentation, doppler: { kind: "realistic" } } }))).toThrow("save.presentation.doppler.kind: expected source or disabled");
 });
 
 test("QVM behavior recipes preserve declared private layout and reject missing or aliased fields",()=>{
@@ -460,4 +444,70 @@ test("native recipe saves retain declaration identity and normalize only the kno
   expect(restore({ ...base, weaponBehaviors: [selection] })).toEqual(selection);
   expect(restore({ ...base, weaponBehaviors: [legacy] })).toEqual(selection);
   expect(() => restore({ ...base, weaponBehaviors: [{ ...selection, component: { ...selection.component, declaration: { ...declaration, id: "test:changed" } } }] })).toThrow("differs");
+});
+
+test("save envelope 5 carries a header readable without the payload and still loads version 3 and 4 images", async () => {
+  const image: SaveImage = { schemaVersion: 4, consumption: [], recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+    nextEventSequence: 0, clocks: [], random: [], actors: [], bodies: [], combat: [], inventories: [], configurations: [], thinks: [], providers: [], guests: [] };
+  const bytes = encodeSaveImage(image);
+  expect(new TextDecoder().decode(bytes.subarray(0, 8))).toBe("QTSAVE5\n");
+  const directory = await mkdtemp(join(tmpdir(), "save-header-"));
+  try {
+    const path = join(directory, "v4.sav");
+    await Bun.write(path, bytes);
+    expect(await readSaveHeader(path)).toEqual({ map: image.recipe.map.geometry.requestedPath, content: image.recipe.map.entities.content });
+    // A header read must not touch the payload: a corrupt payload still lists, and fails only when loaded.
+    const corrupt = bytes.slice();
+    await Bun.write(path, corrupt.subarray(0, corrupt.length - 40));
+    expect((await readSaveHeader(path))?.map).toBe(image.recipe.map.geometry.requestedPath);
+    expect(() => decodeSaveImage(corrupt.subarray(0, corrupt.length - 40))).toThrow();
+    // Version 3 envelope: no header, payload schema 3.
+    const v3Payload = encodeCheckpointValue({ ...image, schemaVersion: 3 }), v3 = new Uint8Array(8 + v3Payload.length);
+    v3.set(new TextEncoder().encode("QTSAVE3\n")); v3.set(v3Payload, 8);
+    const v3Path = join(directory, "v3.sav");
+    await Bun.write(v3Path, v3);
+    expect(await readSaveHeader(v3Path)).toBeNull();
+    expect(decodeSaveImage(v3)).toEqual(decodeSaveImage(bytes));
+    // Version 4 envelope: header plus payload schema 3.
+    const header = encodeCheckpointValue({ map: image.recipe.map.geometry.requestedPath, content: image.recipe.map.entities.content });
+    const v4 = new Uint8Array(12 + header.length + v3Payload.length);
+    v4.set(new TextEncoder().encode("QTSAVE4\n")); storeU32LE(v4, 8, header.length); v4.set(header, 12); v4.set(v3Payload, 12 + header.length);
+    const v4Path = join(directory, "v4.sav");
+    await Bun.write(v4Path, v4);
+    expect((await readSaveHeader(v4Path))?.content).toBe(image.recipe.map.entities.content);
+    expect(decodeSaveImage(v4)).toEqual(decodeSaveImage(bytes));
+    // A header that disagrees with the recipe is rejected.
+    const headerLength = loadU32LE(bytes, 8), forgedHeader = encodeCheckpointValue({ map: "maps/elsewhere.bsp", content: image.recipe.map.entities.content });
+    const rest = bytes.subarray(12 + headerLength), lying = new Uint8Array(12 + forgedHeader.length + rest.length);
+    lying.set(bytes.subarray(0, 8)); storeU32LE(lying, 8, forgedHeader.length); lying.set(forgedHeader, 12); lying.set(rest, 12 + forgedHeader.length);
+    expect(() => decodeSaveImage(lying)).toThrow("header differs");
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("saves written before schema 4 load and migrate to an empty selection-consumption record (DOCS3-004)", () => {
+  const consumption = [{ axis: "movement", requested: "q3:movement", outcome: "honored", detail: "q3 interposed at the guest Pmove" }] satisfies SaveImage["consumption"];
+  const image: SaveImage = { schemaVersion: 4, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+    nextEventSequence: 0, clocks: [], random: [], actors: [], bodies: [], combat: [], inventories: [], configurations: [], thinks: [], providers: [], guests: [], consumption };
+  const current = encodeSaveImage(image);
+  expect(new TextDecoder().decode(current.subarray(0, 8))).toBe("QTSAVE5\n");
+  expect(decodeSaveImage(current)).toEqual(image);
+  // The previous writer: QTSAVE4 envelope, schema 3 payload, optional consumption.
+  const { consumption: _consumption, ...rest } = image;
+  const headerLength = loadU32LE(current, 8), header = current.subarray(12, 12 + headerLength);
+  for (const [magic, payloadImage] of [["QTSAVE4\n", { ...rest, schemaVersion: 3 }], ["QTSAVE4\n", { ...rest, schemaVersion: 3, consumption }]] as const) {
+    const payload = encodeCheckpointValue(payloadImage), old = new Uint8Array(12 + header.length + payload.length);
+    old.set(new TextEncoder().encode(magic)); storeU32LE(old, 8, header.length); old.set(header, 12); old.set(payload, 12 + header.length);
+    const loaded = decodeSaveImage(old);
+    expect(loaded.schemaVersion).toBe(4);
+    expect(loaded.consumption).toEqual([]);
+    expect(decodeSaveImage(encodeSaveImage(loaded))).toEqual(loaded);
+  }
+  // The earlier unframed QTSAVE3 envelope.
+  const v3 = encodeCheckpointValue({ ...rest, schemaVersion: 3 }), unframed = new Uint8Array(8 + v3.length);
+  unframed.set(new TextEncoder().encode("QTSAVE3\n")); unframed.set(v3, 8);
+  expect(decodeSaveImage(unframed).consumption).toEqual([]);
+  // A schema 4 payload must carry the record.
+  const missing = encodeCheckpointValue({ ...rest, schemaVersion: 4 }), broken = new Uint8Array(12 + header.length + missing.length);
+  broken.set(current.subarray(0, 8)); storeU32LE(broken, 8, header.length); broken.set(header, 12); broken.set(missing, 12 + header.length);
+  expect(() => decodeSaveImage(broken)).toThrow("consumption");
 });

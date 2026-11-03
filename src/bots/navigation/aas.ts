@@ -3,6 +3,7 @@
 // Copyright (C) 1999-2005 Id Software, Inc. SPDX-License-Identifier: GPL-2.0-or-later
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
+import { add3, dot3, length3, normalize3, scale3, sub3, vec3 } from "../../core/math.ts";
 
 export interface AasAsset {
   readonly kind: "aas"; readonly source: string; readonly version: 4 | 5; readonly bspChecksum: number;
@@ -91,11 +92,32 @@ export function parseAas(bytes: Uint8Array, source = "<aas>", expectedBspChecksu
   }
   for (const setting of settings) range(setting.firstReach, setting.reachCount, reachability.length, "reachability");
   for (const reach of reachability) index(reach.area, areas.length, "reachable area");
+  if (nodes.length < 2) throw new BinaryError(source, 0, "AAS has no BSP root node");
+  // A tree gives each node one parent and never re-enters the root; a DAG would make area queries exponential.
+  const parented = new Uint8Array(nodes.length);
   for (const [number, node] of nodes.entries()) if (number !== 0) {
     index(node.plane, planes.length, "node plane");
-    for (const child of node.children) index(Math.abs(child), child > 0 ? nodes.length : areas.length, "node child");
+    for (const child of node.children) {
+      index(Math.abs(child), child > 0 ? nodes.length : areas.length, "node child");
+      if (child <= 0) continue;
+      if (child === 1 || parented[child] === 1) throw new BinaryError(source, 0, "AAS BSP node has more than one parent");
+      parented[child] = 1;
+    }
+  }
+  const claimed = new Uint8Array(reachability.length);
+  for (const setting of settings) for (let reach = setting.firstReach; reach < setting.firstReach + setting.reachCount; reach++) {
+    if (claimed[reach] === 1) throw new BinaryError(source, 0, "AAS area reachability ranges overlap");
+    claimed[reach] = 1;
+  }
+  for (const [number, setting] of settings.entries()) {
+    if (number === 0) continue;
+    if (setting.cluster > 0) {
+      index(setting.cluster, clusters.length, "area cluster");
+      if (setting.clusterArea < 0) throw new BinaryError(source, 0, "AAS cluster area is negative");
+    } else if (setting.cluster < 0) index(-setting.cluster, portals.length, "area portal");
   }
   for (const portal of portals) {
+    if (portal.clusterAreas[0] < 0 || portal.clusterAreas[1] < 0) throw new BinaryError(source, 0, "AAS portal cluster area is negative");
     index(portal.area, areas.length, "portal area"); index(portal.frontCluster, clusters.length, "front cluster"); index(portal.backCluster, clusters.length, "back cluster");
   }
   for (const portal of portalIndexes) index(portal, portals.length, "portal");
@@ -162,4 +184,62 @@ export function aasBBoxAreas(asset: AasAsset, bounds: Bounds, maximum = asset.ar
     if (planeDistance(plane, back) < 0) stack.push({ node: node.children[1], depth: frame.depth + 1 });
   }
   return [...found].reverse().slice(0, maximum);
+}
+
+const traceFloat = Math.fround, traceZero: Vec3 = vec3(0, 0, 0);
+function traceAt<T>(values: readonly T[], index: number): T {
+  const value = values[index];
+  if (value === undefined) throw new RangeError(`Missing AAS trace record ${index}`);
+  return value;
+}
+const traceSame = (a: Vec3, b: Vec3): boolean => a.x === b.x && a.y === b.y && a.z === b.z;
+const traceAdvance = (start: Vec3, amount: number, direction: Vec3): Vec3 => add3(start, scale3(direction, amount));
+export interface AasTrace { readonly startSolid: boolean; readonly fraction: number; readonly end: Vec3; readonly entityNum: number; readonly lastArea: number; readonly area: number; readonly plane: number; }
+interface TracePiece { readonly start: Vec3; readonly end: Vec3; readonly node: number; readonly plane: number; }
+/**
+ * AAS_TraceClientBBox: a walk down the area tree that stops at the first leaf not admitting `presence`.
+ * It sees no entities, so a mover linked over the floor does not stop it, unlike a BSP trace.
+ */
+export function aasTraceClientBBox(asset: AasAsset, start: Vec3, end: Vec3, presence: number, print: (text: string) => void = () => {}): AasTrace {
+  for (const point of [start, end]) if (![point.x, point.y, point.z].every(Number.isFinite)) throw new RangeError("Non-finite AAS trace point");
+  const stack: TracePiece[] = [{ start: vec3(start.x, start.y, start.z), end: vec3(end.x, end.y, end.z), node: 1, plane: 0 }];
+  let lastArea = 0;
+  const push = (piece: TracePiece): boolean => {
+    stack.push(piece);
+    if (stack.length < 127) return true;
+    print("AAS_TraceBoundingBox: stack overflow\n");
+    return false;
+  };
+  const overflow = (): AasTrace => ({ startSolid: false, fraction: 0, end: vec3(0, 0, 0), entityNum: 0,
+    lastArea, area: 0, plane: 0 });
+  while (stack.length > 0) {
+    const piece = stack.pop();
+    if (piece === undefined) break;
+    if (piece.node <= 0) {
+      if (piece.node === 0 || (traceAt(asset.settings, -piece.node).presence & presence) === 0) {
+        const startSolid = traceSame(piece.start, start), direction = startSolid ? traceZero : normalize3(sub3(end, start));
+        const fraction = startSolid ? 0 : traceFloat(length3(sub3(piece.start, start)) / length3(sub3(end, start)));
+        const hitEnd = startSolid ? piece.start : traceAdvance(piece.start, -0.125, direction);
+        const plane = dot3(direction, traceAt(asset.planes, piece.plane).normal) > 0 ? piece.plane ^ 1 : piece.plane;
+        return { startSolid, fraction, end: hitEnd, entityNum: 0, lastArea, area: piece.node === 0 ? 0 : -piece.node, plane };
+      }
+      lastArea = -piece.node;
+      continue;
+    }
+    const node = traceAt(asset.nodes, piece.node), plane = traceAt(asset.planes, node.plane);
+    let front = traceFloat(dot3(piece.start, plane.normal) - plane.distance);
+    const back = traceFloat(dot3(piece.end, plane.normal) - plane.distance);
+    if (front >= 0 && back >= 0) { if (!push({ ...piece, node: node.children[0] })) return overflow(); }
+    else if (front < 0 && back < 0) { if (!push({ ...piece, node: node.children[1] })) return overflow(); }
+    else {
+      if (front === back) front = traceFloat(front - traceFloat(0.001));
+      let fraction = traceFloat((front < 0 ? front + 0.125 : front - 0.125) / traceFloat(front - back));
+      if (fraction < 0) fraction = traceFloat(0.001);
+      else if (fraction > 1) fraction = traceFloat(0.999);
+      const middle = traceAdvance(piece.start, fraction, sub3(piece.end, piece.start)), side = front < 0 ? 1 : 0;
+      if (!push({ start: middle, end: piece.end, node: node.children[side === 0 ? 1 : 0], plane: node.plane })) return overflow();
+      if (!push({ start: piece.start, end: middle, node: node.children[side], plane: piece.plane })) return overflow();
+    }
+  }
+  return { startSolid: false, fraction: 1, end, entityNum: 0, lastArea, area: 0, plane: 0 };
 }

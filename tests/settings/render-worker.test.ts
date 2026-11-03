@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { rendererBackends } from "../support/gl.ts";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { bindRendererSettings } from "../../src/ui/settings/services.ts";
 
 test("render-worker CLI distinguishes no override from explicit off and preserves renderer", () => {
-  for (const renderer of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) {
+  for (const renderer of rendererBackends) {
     for (const value of ["0", "1"]) {
       const parsed = parseApplicationCommand(["--renderer", renderer, "--render-worker", value]);
       if (parsed.kind !== "menu") throw new Error("Expected menu options");

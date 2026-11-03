@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { expect } from "bun:test";
+import { corpusTest, corpusFile } from "../../support/corpus.ts";
 
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -9,7 +9,7 @@ import { openArchive } from "../../../src/content/archive/index.ts";
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
 import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
 import { Q1EntityServices } from "../../../src/content/q1/foundation/entity-services.ts";
 import type { Q1Event, Q1FoundationHost } from "../../../src/content/q1/foundation/types.ts";
 import { ZERO, PLAYER_BOUNDS } from "../../../src/content/q1/foundation/types.ts";
@@ -19,6 +19,8 @@ import { captureSharedBodies } from "../../../src/persistence/world-state.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../src/persistence/q1-foundation.ts";
 import type { Q1FoundationCheckpoint } from "../../../src/content/q1/foundation/checkpoint.ts";
 import type { BodyCheckpoint, CombatCheckpoint } from "../../../src/contracts/session.ts";
+import { inertAuthority } from "../../support/authority.ts";
+const test = corpusTest("q1/rerelease/id1/pak0.pak");
 
 interface Saved {
   readonly source: Q1FoundationCheckpoint;
@@ -28,7 +30,7 @@ interface Saved {
   readonly combat: readonly CombatCheckpoint[];
 }
 async function geometry(): Promise<Q1Map> {
-  const archive = await openArchive(`${testCorpusRoot()}/q1/rerelease/id1/pak0.pak`);
+  const archive = await openArchive(corpusFile("q1/rerelease/id1/pak0.pak"));
   try {
     const entry = archive.findEntries("maps/e1m1.bsp")[0]; if (entry === undefined) throw new Error("Missing e1m1 geometry");
     return readQ1Bsp(await archive.readEntry(entry), { source: "maps/e1m1.bsp" });
@@ -41,7 +43,7 @@ function equipment(map: Q1Map, saved?: Saved, edition: "classic" | "rerelease" =
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const pending = new Map<OwnedActor, number>(), events: Q1Event[] = [];
   let contents: ReturnType<Q1FoundationHost["contents"]> = "empty";
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors);
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
     trace: request => {

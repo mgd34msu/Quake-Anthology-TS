@@ -12,7 +12,6 @@ export function guestPointer(memory: MappedGuestMemory, raw: bigint): GuestAddre
 }
 function registerWidth(cpu: GuestCpu): 32 | 64 { return cpu.state.architecture === "i386" ? 32 : 64; }
 function stackPointer(cpu: GuestCpu): bigint { return cpu.state.registers.read("rsp", registerWidth(cpu)); }
-const simdViews = new WeakMap<Uint8Array, DataView>();
 
 function readLocations(cpu: GuestCpu, locations: readonly AbiLocation[], size: number): Uint8Array {
   const output = new Uint8Array(size);
@@ -73,8 +72,7 @@ function readScalar(cpu: GuestCpu, layout: GuestValueLayout, locations: readonly
     } else if (location.kind === "sse") {
       const registers = cpu.state.simd.xmm, start = location.register * 16;
       if (start + location.bytes > registers.length) throw new RangeError("ABI XMM register is unavailable");
-      let view = simdViews.get(registers);
-      if (view === undefined) { view = new DataView(registers.buffer, registers.byteOffset, registers.byteLength); simdViews.set(registers, view); }
+      const view = cpu.state.simd.scratch.scalar.view;
       value = layout.storage === "float32" ? view.getFloat32(start, true) : view.getFloat64(start, true);
     } else return null;
     return { kind: layout.storage, value };

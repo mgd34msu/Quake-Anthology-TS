@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { testCorpusRoot } from "../../../support/corpus.ts";
+import { corpusFile } from "../../../support/corpus.ts";
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,13 +16,14 @@ import { CvarRegistry } from "../../../../src/core/cvars/index.ts";
 import { createNumericOperations, Q2_DONOR_PROFILE } from "../../../../src/core/numeric.ts";
 import { decodeQ2Map } from "../../../../src/formats/q2-map/index.ts";
 import { ActorCallbackTable, SessionActorRegistry } from "../../../../src/world/actors/index.ts";
-import { GameplayAuthority, SharedInventoryTable } from "../../../../src/world/gameplay/index.ts";
+import { SharedInventoryTable } from "../../../../src/world/gameplay/index.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
 import type { Q2PresentationEvent } from "../../../../src/content/q2/foundation/host.ts";
 import { CLASSIC_Q2_ABI } from "../../../../src/compat/q2/classic/layout.ts";
 import { allocateClassicString } from "../../../../src/compat/q2/classic/records.ts";
 import type { GuestCallContext } from "../../../../src/contracts/execution.ts";
 import { parseEntities } from "../../../../src/core/common-parse.ts";
+import { inertAuthority } from "../../../support/authority.ts";
 
 function required<T>(value: T | null | undefined): T { if (value === null || value === undefined) throw new Error("Missing fixture value"); return value; }
 test("native CRT files preserve dispositions, cursor-independent IO and contained mounted reads", () => {
@@ -43,7 +44,7 @@ test("native CRT files preserve dispositions, cursor-independent IO and containe
     expect(open("outside/native-test", { read: true, write: true, creation: 2 })).toBeNull();
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
-const dll = `${testCorpusRoot()}/q2/ctf/gamex86.dll`, pak = `${testCorpusRoot()}/q2/baseq2/pak0.pak`;
+const dll = corpusFile("q2/ctf/gamex86.dll"), pak = corpusFile("q2/baseq2/pak0.pak");
 test.skipIf(!existsSync(dll) || !existsSync(pak))("actual DLL shares BSP collision, borrowed actors, player state, wire messages and disk lifetime", async () => {
   const archive = await openArchive(pak);
   const geometry = decodeQ2Map(await archive.readEntry(required(archive.findEntries("maps/base1.bsp")[0])), "base1");
@@ -60,7 +61,7 @@ test.skipIf(!existsSync(dll) || !existsSync(pak))("actual DLL shares BSP collisi
     const getServices = (): ClassicGuestServices => { if (services === null) throw new Error("Missing native services"); return services; };
     const physics = new SharedPhysics({ actors, callbacks, scene, numeric: Q2_DONOR_PROFILE, sourceOrder: (a, b) => a.slot - b.slot,
       worldActor: () => required(getServices().host.edicts.at(0).currentActor()), onBlocked: () => undefined });
-    const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined }), inventory = new SharedInventoryTable(actors);
+    const combat = inertAuthority(actors, callbacks), inventory = new SharedInventoryTable(actors);
     const cvars = new CvarRegistry({ dialect: "q2-classic", context: { session: actors.session, origin: { kind: "server-console" } } });
     cvars.register("maxclients", "4");
     let clientCommand: { readonly arguments: readonly string[]; readonly args: string } = { arguments: [], args: "" };
@@ -115,4 +116,18 @@ test.skipIf(!existsSync(dll) || !existsSync(pak))("actual DLL shares BSP collisi
     source.host.save("WriteGame", "save/game.sav"); expect(readFileSync(join(root, "save/game.sav")).length).toBeGreaterThan(1000);
     source.close(); expect(actors.ownedBy("q2:ctf-native")).toHaveLength(0); expect(source.memory.mappings()).toHaveLength(0); source = null;
   } finally { source?.discard(); await mounts.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("native CRT writes refuse executable or console-script names and stop at the file size quota", () => {
+  const root = mkdtempSync(join(tmpdir(), "classic-files-quota-"));
+  try {
+    const open = classicGuestFiles(root);
+    for (const name of ["autoexec.cfg", "pak9.pak", "game.dll", "vm\\qagame.qvm", "x.PK3"]) expect(open(name, { read: false, write: true, creation: 2 })).toBeNull();
+    expect(existsSync(join(root, "autoexec.cfg"))).toBe(false);
+    const file = required(open("save/game.sav", { read: true, write: true, creation: 2 }));
+    expect(file.write(0, Uint8Array.of(1, 2, 3))).toBe(3);
+    expect(file.write(64 * 1024 * 1024, Uint8Array.of(1))).toBe(0);
+    expect(file.size()).toBe(3);
+    file.close();
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

@@ -1,6 +1,7 @@
 // Quake net_dgrm.c and QuakeWorld sv_main.c connectionless negotiation. GPL-2.0-or-later.
 import { parseQ1Token } from '../../core/common-parse.ts';
 import { addressKey } from '../common/endpoint.ts';
+import { RconGuard, passwordMatches } from '../common/rcon-guard.ts';
 import type { NetworkAddress } from '../common/endpoint.ts';
 import { MessageReader, SizeBuf, PacketError, MSG_WriteByte, MSG_WriteLong, MSG_WriteString } from './message.ts';
 import { NETFLAG_CTL } from './channels.ts';
@@ -228,8 +229,10 @@ export class QuakeWorldChallenges {
     constructor(readonly random: () => number, readonly capacity = 1024) { }
     issue(address: NetworkAddress, nowMilliseconds: number): number {
         const key = addressKey(address, false), existing = this.records.get(key);
-        if (existing !== undefined)
+        if (existing !== undefined && nowMilliseconds / 1000 - existing.issued <= 30)
             return existing.challenge;
+        if (existing !== undefined)
+            this.records.delete(key);
         if (this.records.size >= this.capacity) {
             let oldestKey = '', time = Infinity;
             for (const [entry, record] of this.records)
@@ -239,11 +242,14 @@ export class QuakeWorldChallenges {
                 }
             this.records.delete(oldestKey);
         }
-        const challenge = ((this.random() & 32767) << 16) ^ (this.random() & 32767);
+        const challenge = (this.random() & 0x7fffffff) || 1;
         this.records.set(key, { challenge, issued: Math.trunc(nowMilliseconds / 1000) });
         return challenge;
     }
-    validate(address: NetworkAddress, challenge: number): boolean { return this.records.get(addressKey(address, false))?.challenge === challenge; }
+    validate(address: NetworkAddress, challenge: number, nowMilliseconds?: number): boolean {
+        const record = this.records.get(addressKey(address, false));
+        return record !== undefined && record.challenge === challenge && (nowMilliseconds === undefined || nowMilliseconds / 1000 - record.issued <= 30);
+    }
 }
 export interface QuakeWorldConnectRequest {
     readonly from: NetworkAddress;
@@ -272,6 +278,7 @@ export interface QuakeWorldConnectionHost {
     executeAdmin(command: string, write: (text: string) => void): void | Promise<void>;
 }
 export class QuakeWorldConnectionlessServer {
+    private readonly rconGuard = new RconGuard();
     constructor(readonly host: QuakeWorldConnectionHost, readonly challenges: QuakeWorldChallenges) { }
     async receive(bytes: Uint8Array, from: NetworkAddress, nowMilliseconds: number): Promise<readonly Uint8Array[]> {
         if (this.host.blocked(from))
@@ -288,8 +295,13 @@ export class QuakeWorldConnectionlessServer {
             return [quakeWorldOutOfBand(reply === null ? 'm' : reply)];
         }
         if (command === 'rcon') {
-            if (this.host.rconPassword === '' || args[1] !== this.host.rconPassword)
+            if (!this.rconGuard.permitted(from, nowMilliseconds))
+                return [];
+            if (!passwordMatches(this.host.rconPassword, args[1] ?? '')) {
+                this.rconGuard.failed(from, nowMilliseconds);
                 return [quakeWorldOutOfBand('nBad rcon_password.\n')];
+            }
+            this.rconGuard.succeeded(from);
             const replies: Uint8Array[] = [];
             let output = '';
             const flush = (): void => {
@@ -313,7 +325,7 @@ export class QuakeWorldConnectionlessServer {
         if (args[1] !== '28')
             return [quakeWorldOutOfBand('n\nServer uses QuakeWorld protocol 28.\n')];
         const qport = Number.parseInt(args[2] ?? '', 10), challenge = Number.parseInt(args[3] ?? '', 10);
-        if (!Number.isInteger(qport) || qport < 0 || qport > 65535 || !this.challenges.validate(from, challenge))
+        if (!Number.isInteger(qport) || qport < 0 || qport > 65535 || !this.challenges.validate(from, challenge, nowMilliseconds))
             return [quakeWorldOutOfBand('n\nBad challenge.\n')];
         const info = new Map(quakeWorldInfo((args[4] ?? '').slice(0, 1022))), spectatorKey = info.get('spectator') ?? '', spectator = spectatorKey !== '' && spectatorKey !== '0', password = spectator ? this.host.spectatorPassword : this.host.password, supplied = spectator ? spectatorKey : info.get('password') ?? '';
         if (password !== '' && password.toLowerCase() !== 'none' && password !== supplied)

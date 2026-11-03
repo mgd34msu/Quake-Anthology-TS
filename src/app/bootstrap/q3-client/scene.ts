@@ -7,7 +7,7 @@ import type { Q3RendererResources } from "../../../content/q3/presentation/resou
 import { SceneModelRenderer } from "../../../render/scene/models/renderer.ts";
 import { sourceDrawGroup, type SceneOperation } from "../../../render/scene/submissions.ts";
 import { prepareMaterialBatches } from "../../../materials/evaluate.ts";
-import { DEFAULT_RAIL_SETTINGS, beamBatch, defaultModelBatch, polyGeometry, railGeometry, spriteGeometry } from "../../../render/scene/particles/primitives.ts";
+import { DEFAULT_RAIL_SETTINGS, type RailSettings, beamBatch, defaultModelBatch, polyGeometry, railGeometry, spriteGeometry } from "../../../render/scene/particles/primitives.ts";
 import { createViewProjector } from "../../../render/scene/view.ts";
 import type { WorldViewInput } from "../../../render/scene/world.ts";
 import type { ProviderSceneAssets } from "../assets.ts";
@@ -18,6 +18,7 @@ import { currentRemap } from "../../../render/scene/material-registrations.ts";
 export interface Q3SceneRenderOptions {
   readonly viewOffset?: Vec3;
   readonly noWorldModel: boolean;
+  readonly rail?: RailSettings;
   readonly splitScreen: boolean;
   readonly supplementalViewWeapon: boolean;
 }
@@ -104,7 +105,7 @@ export class ApplicationQ3SceneRenderer {
       if (entity.kind === "beam") operations.push(sourceDrawGroup(compiled, order, [beamBatch(entity, project, state, white)]));
       else {
         const geometry = entity.kind === "sprite" ? spriteGeometry(entity, input.camera.axis, input.camera.clip.kind === "portal" && input.camera.clip.mirror)
-          : railGeometry(entity, input.camera.origin, DEFAULT_RAIL_SETTINGS);
+          : railGeometry(entity, input.camera.origin, options.rail ?? DEFAULT_RAIL_SETTINGS);
         operations.push(sourceDrawGroup(compiled, order, prepareMaterialBatches(remap?.material ?? compiled, geometry,
           { ...world.materialContext(input, undefined, fog?.volume ?? null), entityRGBA: entity.shaderRGBA, shaderTexCoord: entity.shaderTexCoord, timeOffset: entity.shaderTime + (remap?.timeOffset ?? 0) })));
       }

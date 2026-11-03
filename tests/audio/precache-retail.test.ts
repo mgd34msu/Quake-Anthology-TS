@@ -1,5 +1,5 @@
-import { testCorpusRoot } from "../support/corpus.ts";
-import { expect, test } from "bun:test";
+import { testCorpusRoot, corpusTest } from "../support/corpus.ts";
+import { expect } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import { applicationResourceRequests } from "../../src/app/bootstrap/precache.ts
 import { createSimulation } from "../../src/app/bootstrap/simulation/index.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { monsterSources } from "../../src/content/monsters/definitions.ts";
+const test = corpusTest("q1/id1/pak0.pak", "q2/baseq2/pak0.pak", "q2/rerelease/baseq2/pak0.pak");
 
 test("native source precaches feed the shared list and actual decoded sound cache survives first-use path aliases", async () => {
   const root = await mkdtemp(join(tmpdir(), "shared-precache-"));

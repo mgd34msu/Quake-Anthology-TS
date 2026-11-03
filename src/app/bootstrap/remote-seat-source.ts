@@ -23,7 +23,8 @@ import { ServerPakSet } from '../../network/q3/pak-references.ts';
 import { compareQ3Packages } from '../../network/q3/pure.ts';
 import type { LoadedApplicationContent, RemoteContentMounts } from './content.ts';
 import type { PresentationTime } from './frame-clock.ts';
-import { mapResourcePath, type ApplicationOptions } from './options.ts';
+import type { ApplicationOptions } from './options.ts';
+import { serverMapPath } from './server-map.ts';
 import type { ClientDownloadPermission, ClientDownloadProgress } from './network/client-download-policy.ts';
 import { Q1ClientNetwork } from './network/q1-client.ts';
 import { QwClientNetwork } from './network/qw-client.ts';
@@ -234,7 +235,7 @@ export class RemoteSeatSource {
     if (seed === null) throw new Error('Q3 world loading requires its selected content owner');
     const assertCurrent = (): void => { this.assertOpen(); if (generation !== connection.generation || hooks.currentContent() !== seed) throw new Error('Remote Q3 content loading was cancelled'); };
     assertCurrent();
-    const prepared = await Q3ClientContent.open({ ...hooks.options(), map: mapResourcePath(world.map) }, connection.gameState.get(1) ?? '', connection.checksumFeed, seed);
+    const prepared = await Q3ClientContent.open({ ...hooks.options(), map: serverMapPath(world.map) }, connection.gameState.get(1) ?? '', connection.checksumFeed, seed);
     try {
       assertCurrent();
       const content = await hooks.loadQ3World(world, connection, prepared.content);

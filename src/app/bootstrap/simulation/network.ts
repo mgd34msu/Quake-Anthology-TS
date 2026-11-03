@@ -140,17 +140,20 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
         }
         return result.sort((a, b) => a.number - b.number);
     };
+    // Every client of one step sees the same server-side states, so they are built once per output and protocol.
+    let cachedStates: { readonly output: object; readonly protocol: Q2ProtocolIdentity; readonly states: readonly EntityStateT[] } | null = null;
+    const frameEntityStates = (protocol: Q2ProtocolIdentity, output: object): readonly EntityStateT[] => {
+        if (cachedStates !== null && cachedStates.output === output && cachedStates.protocol === protocol) return cachedStates.states;
+        const states = entityStates(protocol);
+        cachedStates = { output, protocol, states };
+        return states;
+    };
     const visibleEntities = (player: Q2ApplicationPlayer, states: readonly EntityStateT[], origin: Vec3): readonly EntityStateT[] => {
         const scene = simulation.scene, leaf = scene.pointLeaf(origin), area = scene.leafArea(leaf), cluster = scene.leafCluster(leaf);
         const fat = scene.boxLeaves({ min: { x: origin.x - 8, y: origin.y - 8, z: origin.z - 8 }, max: { x: origin.x + 8, y: origin.y + 8, z: origin.z + 8 } }, 64);
         const clusters = [...new Set(fat.leaves.map(index => scene.leafCluster(index)))];
         const byNumber = new Map([...source.game.entities.values()].map(entity => [sourceNumber(entity.actor.id), entity]));
-        return states.filter(state => {
-            const entity = byNumber.get(state.number);
-            if (entity === undefined)
-                return false;
-            if (entity.owner?.equals(player.actor))
-                state.solid = 0;
+        const visible = (state: EntityStateT, entity: NonNullable<ReturnType<typeof byNumber.get>>): boolean => {
             if (state.number === player.sourceEntity)
                 return true;
             // Rerelease speaker ATTN_LOOP_NONE carries source SVF_NOCULL semantics.
@@ -170,6 +173,14 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
             if (!leaves.some(index => clusters.some(from => scene.clusterVisible(from, scene.leafCluster(index), 'pvs'))))
                 return false;
             return state.modelindex !== 0 || Math.hypot(origin.x - body.origin.x, origin.y - body.origin.y, origin.z - body.origin.z) <= 400;
+        };
+        return states.flatMap(shared => {
+            const entity = byNumber.get(shared.number);
+            if (entity === undefined)
+                return [];
+            // Own projectiles stop being solid for their owner alone, so the shared record is copied first.
+            const state = entity.owner?.equals(player.actor) ? Object.assign(new EntityStateT(), shared, { solid: 0 }) : shared;
+            return visible(state, entity) ? [state] : [];
         });
     };
     const playerState = (player: Pick<Q2ApplicationPlayer, 'actor'>): PlayerStateT => {
@@ -223,6 +234,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
         state.stats[3] = view?.ammo ?? ui.ammo?.count ?? 0;
         state.stats[5] = view?.armor ?? (ui.armor.regular.kind === 'none' ? 0 : ui.armor.regular.points);
         state.stats[9] = view?.timer?.seconds ?? 0;
+        state.stats[11] = view?.helpIcon === true ? image('i_help') : 0;
         state.stats[13] = view?.layouts ?? 0;
         state.stats[14] = view?.score ?? 0;
         state.stats[16] = view?.selectedItem === null || view === null ? 0 : inventoryOrdinal(view.selectedItem);
@@ -264,7 +276,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
                     const value = q2EffectToWire(event);
                     // Presentation effects currently retain no native multicast scope; preserve existing server routing.
                     if (value !== null) emit({ kind: 'temporary-entity', value }, { kind: 'all' }, false);
-                } else if (event.kind === 'sound' && event.loop === 'once') {
+                } else if (event.kind === 'sound' && event.loop === 'once' && event.local !== true) {
                     const recipient: MvdRecipient = event.attenuation === 0 || (event.channel & 8) !== 0 ? { kind: 'all' } : { kind: 'phs', leaf: simulation.scene.pointLeaf(event.origin) };
                     emit({ kind: 'sound', sound: { flags: 0, index: sound(event.path), entity: event.actor === null ? 0 : item.sourceEntity ?? sourceNumber(event.actor), channel: event.channel & 7, position: event.origin, volume: event.volume, attenuation: event.attenuation, delaySeconds: 0 } }, recipient, event.reliable || (event.channel & 16) !== 0);
                 } else if (event.kind === 'monster-muzzleflash') {
@@ -378,11 +390,19 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
             return { data: { servercount: 1, attractloop: false, gamedir: options.content.catalog.product(simulation.recipe.map.entities.content).expectation.contentDirectory.split('/').at(-1) ?? 'baseq2', clientnum: player.sourceEntity - 1, levelname: configs.get(0) ?? '', serverState: 2, ...(protocol.kind === 'q2-r1q2' ? { r1q2Version: protocol.revision, r1q2StrafejumpHack: false } : protocol.kind === 'q2-q2pro' ? { q2proVersion: protocol.revision, wireFlags: 0 } : {}), serverFps: source.game.options.edition === 'rerelease' ? 40 : 10 }, configStrings: new Map(configs), baselines: new Map(entities.map(entity => [entity.number, entity])) };
         },
         frame: (player, output, protocol = options.protocol): Q2WireFrame => { const body = simulation.bodies.read(player.actor); if (body === null)
-            throw new Error('Network player body disappeared'); const state = playerState(player), origin = { x: body.origin.x + (state.viewoffset[0] ?? 0), y: body.origin.y + (state.viewoffset[1] ?? 0), z: body.origin.z + (state.viewoffset[2] ?? 0) }; return { serverFrame: output.snapshot.frame.frame, deltaFrame: -1, suppressedCount: 0, areaBits: simulation.scene.areaBits(simulation.scene.leafArea(simulation.scene.pointLeaf(origin))), player: state, entities: visibleEntities(player, entityStates(protocol), origin) }; },
+            throw new Error('Network player body disappeared'); const state = playerState(player), origin = { x: body.origin.x + (state.viewoffset[0] ?? 0), y: body.origin.y + (state.viewoffset[1] ?? 0), z: body.origin.z + (state.viewoffset[2] ?? 0) }; return { serverFrame: output.snapshot.frame.frame, deltaFrame: -1, suppressedCount: 0, areaBits: simulation.scene.areaBits(simulation.scene.leafArea(simulation.scene.pointLeaf(origin))), player: state, entities: visibleEntities(player, frameEntityStates(protocol, output), origin) }; },
         events: (player, _output, events) => {
             updateMovementConfigs();
             const messages: Q2ApplicationServerEvent[] = [];
             const targets = (actor: ActorId | null): boolean => actor === null || actor.equals(player.actor);
+            // SV_Multicast: the listener's cluster must see the origin's and the areas must be connected.
+            const reaches = (origin: Vec3, kind: 'pvs' | 'phs'): boolean => {
+                const body = simulation.bodies.read(player.actor);
+                if (body === null) return true;
+                const scene = simulation.scene, here = scene.pointLeaf(body.origin), there = scene.pointLeaf(origin);
+                return scene.areasConnected(scene.leafArea(here), scene.leafArea(there)) && scene.clusterVisible(scene.leafCluster(here), scene.leafCluster(there), kind);
+            };
+            const flashReaches = (actor: ActorId): boolean => { const origin = simulation.bodies.read(actor)?.origin; return origin === undefined || reaches(origin, 'pvs'); };
             for (const item of events) {
                 if (item.kind === 'q2-player') {
                     const event = item.event;
@@ -412,15 +432,15 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
                         configs.set(layout.lights + event.style, event.pattern);
                     else if (event.kind === 'effect') {
                         const value = q2EffectToWire(event);
-                        if (value !== null)
+                        if (value !== null && reaches(event.origin, 'phs'))
                             messages.push({ kind: 'temporary-entity', value });
                     }
-                    else if (event.kind === 'sound' && event.loop === 'once')
+                    else if (event.kind === 'sound' && event.loop === 'once' && (event.local !== true || targets(event.actor)) && (event.attenuation === 0 || (event.channel & 8) !== 0 || reaches(event.origin, 'phs')))
                         messages.push({ kind: 'sound', reliable: event.reliable, sound: { flags: 0, index: sound(event.path), entity: event.actor === null ? 0 : item.sourceEntity ?? sourceNumber(event.actor), channel: event.channel, position: event.origin, volume: event.volume, attenuation: event.attenuation, delaySeconds: 0 } });
-                    else if (event.kind === 'monster-muzzleflash')
+                    else if (event.kind === 'monster-muzzleflash' && flashReaches(event.actor))
                         messages.push({ kind: 'muzzle-flash', entity: item.sourceEntity ?? sourceNumber(event.actor), flash: event.flash, monster: true, silenced: false });
                 }
-                else if (item.kind === 'q2-weapon' && item.event.kind === 'muzzleflash')
+                else if (item.kind === 'q2-weapon' && item.event.kind === 'muzzleflash' && flashReaches(item.event.actor))
                     messages.push({ kind: 'muzzle-flash', entity: item.sourceEntity ?? sourceNumber(item.event.actor), flash: item.event.flash, monster: false, silenced: item.event.silenced });
             }
             const known = knownConfigs.get(player.client.slot);

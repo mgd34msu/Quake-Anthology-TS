@@ -76,14 +76,14 @@ export function validateClassicCombatProfile(profile: ClassicCombatProfile): voi
  * client+740, itemList RVA497c8 stride 72 (body 1, combat 2, jacket 3, screen 5,
  * shield 6, grenades 12, cells 23), G_Spawn RVA186a0, G_FreeEdict RVA18750
  * (memset 896, freetime +272, inuse +88), GetGameAPI edict_size 896,
- * ClientThink RVA31690 v_angle at client+3460, invincible frame at client+3716,
+ * ClientThink RVA31690 v_angle at client+3640 (client+3460 is resp.cmd_angles), invincible frame at client+3716,
  * ClientUserinfoChanged RVA31290 userinfo at client+188 (512, netname at 700),
  * pers capacities at client+1764 (grenades 1776), level framenum RVA73fe0. */
 export const xatrix1998CombatProfile: ClassicCombatProfile = {
   calls: { pain: stockNativeCombatCall("pain", CLASSIC_Q2_ABI), death: stockNativeCombatCall("death", CLASSIC_Q2_ABI), damage: stockNativeCombatCall("damage"), regularArmor: stockNativeCombatCall("regular-armor"), powerArmor: stockNativeCombatCall("power-armor") },
   digest: "sha256:0b0d119ea9ed1abbce02f32fe1243bcb69457d10a34a49b775c473210bcb65a3", game: "xatrix", entityBytes: 896,
   fields: { health: 480, damageable: 512, flags: 264, mass: 400, velocity: 376, pain: 452, die: 456 },
-  client: { inventory: 740, inventoryCount: 256, maxGrenades: 1776, invincibleFrame: 3716, userinfo: 188, userinfoBytes: 512, viewAngles: 3460 },
+  client: { inventory: 740, inventoryCount: 256, maxGrenades: 1776, invincibleFrame: 3716, userinfo: 188, userinfoBytes: 512, viewAngles: 3640 },
   entries: { damage: 0x48b0, powerArmor: 0x4de0, regularArmor: 0x4fc0, spawn: 0x186a0, free: 0x18750 },
   globals: { levelFrame: 0x73fe0, itemList: 0x497c8, itemBytes: 72 },
   items: { jacket: 3, combat: 2, body: 1, screen: 5, shield: 6, cells: 23, grenades: 12 },

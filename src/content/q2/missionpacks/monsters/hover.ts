@@ -5,7 +5,8 @@ import { zero } from "../../foundation/fields.ts";
 import type { Q2Think } from "../../foundation/host.ts";
 import { health, visible } from "../../foundation/monsters/ai.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
-import { monsterFlash } from "../../rerelease/monsters/common.ts";
+import { throwGib } from "../../foundation/monsters/gibs.ts";
+import { monsterFlash, rereleaseRandom } from "../../rerelease/monsters/common.ts";
 import { monsterPowerArmor, restoreMonsterPowerArmor } from "./power-armor.ts";
 import { monsterMass, rogueBlockedCheckShot } from "./rogue-common.ts";
 import type { Q2MissionPackMonsterState } from "./state.ts";
@@ -63,6 +64,15 @@ export function createRogueHoverDefinitions(weapons: Q2MissionPackMonsterWeapons
         if (daedalus) weapons.fireBlaster2(context.entity, context.game, aim.start, aim.direction, 1, 1000, 8);
         else context.weapons.fireBlaster(context.entity, context.game, aim.start, aim.direction, 1, 1000, context.entity.frame === hoverFrame.attak104 ? 64 : 0);
         return monsterFlash(context, daedalus ? 145 : 62, aim.start, aim.direction);
+      },
+      hover_dying(context) {
+        const { entity, game } = context;
+        if (game.body(entity).ground !== null) return hoverDeadThink(entity, game);
+        if (rereleaseRandom(context).integer(2) !== 0) return undefined;
+        game.host.emit({ kind: "effect", effect: "q2:plain-explosion", origin: game.body(entity).origin, direction: zero, count: 1, color: 0 });
+        const organic = rereleaseRandom(context).integer(2) !== 0;
+        throwGib(entity, game, organic ? "models/objects/gibs/sm_meat/tris.md2" : "models/objects/gibs/sm_metal/tris.md2", 120, { metallic: !organic });
+        return undefined;
       },
       hover_dead(context) {
         context.state.corpse = true;

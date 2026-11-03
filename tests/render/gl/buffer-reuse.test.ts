@@ -110,9 +110,9 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GL retained prepared buffers
       const abandoned = renderer.prepareGeometry(triangle(1, -0.5)); abandoned.cleanup(); abandoned.cleanup();
       const failed = renderer.prepareGeometry(inputB);
       failed.begin();
-      expect(() => failed.applyTexture(0, { kind: "bind-image", image: { ...image, ordinal: 999 } })).toThrow();
+      expect(() => failed.applyTexture(0, { kind: "bind-image", image: { ...image, ordinal: 999 } })).toThrow("OpenGL image is not registered");
       failed.cleanup();
-      expect(() => renderer.prepareGeometry({ ...inputB, indices: [0, 1, 99] })).toThrow();
+      expect(() => renderer.prepareGeometry({ ...inputB, indices: [0, 1, 99] })).toThrow("vertex index is outside its allocation");
       a.begin(); a.applyTexture(0, inputA.texture); a.draw(); a.cleanup(); a.cleanup();
       const pixels = renderer.readPixels(), depth: number[] = [];
       for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) depth.push(renderer.readDepthPixel(x, y));
@@ -126,6 +126,6 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GL retained prepared buffers
     expect(frame()).toEqual(fresh);
     const retained = renderer.prepareGeometry(inputA);
     renderer.close(); retained.cleanup(); retained.cleanup();
-    expect(() => retained.begin()).toThrow();
+    expect(() => retained.begin()).toThrow("closed");
   } finally { GeometryBuffer.prototype.pack = packed; renderer.close(); window.close(); }
 });

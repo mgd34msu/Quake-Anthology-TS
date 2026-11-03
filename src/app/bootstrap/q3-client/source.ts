@@ -71,8 +71,9 @@ export class ApplicationQ3Source implements SnapshotSource {
     this.validateRoundActor(actor, source);
     this.currentActor = actor; this.pendingRoundTime = null;
   }
+  private readonly configstringScratch: string[] = new Array<string>(1024).fill("");
   private configstrings(source: Q3SourcePresentationState): void {
-    const strings = Array.from({ length: 1024 }, () => "");
+    const strings = this.configstringScratch.fill("");
     for (const entry of source.configstrings) strings[entry.index] = entry.value;
     for (const [index, value] of strings.entries()) {
       if (this.strings[index] === value) continue;

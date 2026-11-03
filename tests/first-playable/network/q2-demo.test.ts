@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile } from "../../support/corpus.ts";
 
 import { openArchive } from '../../../src/content/archive/index.ts';
 import { existsSync } from 'node:fs';
@@ -8,6 +8,7 @@ import type { Q2WireFrame, EntityStateT } from '../../../src/network/q2/index.ts
 import { writeQ2DemoRecord, finishQ2Demo } from '../../../src/network/q2/demo.ts';
 import { Q2ClientReceiver, type Q2ClientReceiverHost } from '../../../src/app/bootstrap/network/q2-client-receiver.ts';
 import { Q2DemoPlayback } from '../../../src/app/bootstrap/network/q2-demo.ts';
+import { literal } from "../../support/literal.ts";
 const wire = new Q2WireCodec({ kind: 'q2-classic', version: 34 });
 function join(parts: readonly Uint8Array[]): Uint8Array { const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0)); let at = 0; for (const p of parts) { out.set(p, at); at += p.length; } return out; }
 function command(text: string): Uint8Array { return encodeQ2ServerEvent(wire, { kind: 'command-text', text }); }
@@ -85,12 +86,13 @@ test('invalid delta does not advance time; nextFrame skips metadata', async () =
 });
 
 test('truncated headers, payloads and invalid codec bytes reject rather than report EOF', async () => {
-    for (const bytes of [new Uint8Array([1]), new Uint8Array([5, 0, 0, 0, 1]), demo([new Uint8Array([254])])]) {
-        const playback = new Q2DemoPlayback(bytes, host()); await expect(playback.nextFrame()).rejects.toThrow(); playback.close();
+    for (const [bytes, message] of literal([[new Uint8Array([1]), 'Truncated Q2 demo record header'], [new Uint8Array([5, 0, 0, 0, 1]), 'Truncated Q2 demo packet'],
+        [demo([new Uint8Array([254])]), 'Q2 service opcode 254 has no binding']])) {
+        const playback = new Q2DemoPlayback(bytes, host()); await expect(playback.nextFrame()).rejects.toThrow(message); playback.close();
     }
 });
 
-const recording = `${testCorpusRoot()}/q2/ctf/demos/2014-01-07-2001-lfctf1.dm2`;
+const recording = corpusFile("q2/ctf/demos/2014-01-07-2001-lfctf1.dm2");
 (existsSync(recording) ? test : test.skip)('installed protocol34 recording prepares bare precache and advances through its actual EOF', async () => {
     const frameTimes: number[] = [];
     const bytes = await Bun.file(recording).bytes(); let maps = 0, frames = 0, last = -1, bare = 0;
@@ -143,8 +145,8 @@ test('EOF byte offset includes only a consumed sentinel and excludes trailing by
 
 test('corrupt records inside a disconnect block remain decoder errors', async () => {
     const playback = new Q2DemoPlayback(demo([join([encodeQ2ServerEvent(wire, { kind: 'disconnect' }), new Uint8Array([254])])]), host());
-    await expect(playback.nextFrame()).rejects.toThrow();
-    await expect(playback.nextFrame()).rejects.toThrow(); playback.close();
+    await expect(playback.nextFrame()).rejects.toThrow('Q2 service opcode 254 has no binding');
+    await expect(playback.nextFrame()).rejects.toThrow('Q2 service opcode 254 has no binding'); playback.close();
 });
 
 test('receiver source overrides host readMode for both network and demo', async () => {
@@ -157,7 +159,7 @@ test('receiver source overrides host readMode for both network and demo', async 
     expect(recorded.phase).toBe('active'); recorded.close();
 });
 
-const retailPak = `${testCorpusRoot()}/q2/baseq2/pak0.pak`;
+const retailPak = corpusFile("q2/baseq2/pak0.pak");
 test.skipIf(!existsSync(retailPak))('bundled protocol26 demo reaches world preparation and every recorded frame before EOF', async () => {
     const archive = await openArchive(retailPak);
     try {

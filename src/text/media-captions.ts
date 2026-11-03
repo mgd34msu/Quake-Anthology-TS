@@ -17,7 +17,7 @@ export class SeatMediaCaptions {
   private prepared = "";
   private request = 0;
   private liveRequest = "";
-  constructor(private readonly seat: SeatId, private readonly read: (path: string) => Promise<Uint8Array | null>, private readonly localization: LocalizationCatalog | null = null, private readonly kind: "subtitle" | "caption" = "subtitle", private readonly liveLanguage?: { readonly read: () => string; readonly failed: (error: unknown) => void }) {
+  constructor(private readonly seat: SeatId, private readonly read: (path: string) => Promise<Uint8Array | null>, private readonly localization: LocalizationCatalog | null = null, private readonly kind: "subtitle" | "caption" = "subtitle", private readonly liveLanguage?: { readonly read: () => string; readonly failed: (error: unknown) => void }, private readonly warn?: (text: string) => void) {
     this.timeline = new CaptionTimeline(seat, localization ?? new LocalizationCatalog(seat));
   }
   async prepare(source: string, language: string): Promise<void> {
@@ -33,7 +33,7 @@ export class SeatMediaCaptions {
       const localization = this.localization ?? await loadLocalizationResources(this.seat, language, this.read);
       if (request !== this.request) return;
       this.timeline = new CaptionTimeline(this.seat, localization);
-      this.timeline.replace(parseSubtitleText(new TextDecoder().decode(bytes), path).map(cue => ({ ...cue, kind: this.kind })));
+      this.timeline.replace(parseSubtitleText(new TextDecoder().decode(bytes), path, this.warn === undefined ? undefined : reason => this.warn?.(`${reason}\n`)).map(cue => ({ ...cue, kind: this.kind })));
       this.prepared = key; return;
     }
     this.prepared = key;

@@ -29,8 +29,9 @@ export class SourceParticles {
     const q1: SceneParticle[] = this.q1.slice().reverse().map(particle => ({ kind: "indexed", origin: particle.origin, paletteIndex: particle.color, alpha: 1, size: 1 }));
     this.q1 = this.q1.map(particle => advanceQ1Particle(particle, elapsed, 800));
     const q2: SceneParticle[] = [], retained: Q2ParticleState[] = [];
-    for (const particle of this.q2) { const sample = sampleQ2Particle(particle, seconds * 1000); if (sample !== null) { q2.unshift(sample); if (particle.alphaVelocity !== -10000) retained.push(particle); } }
+    for (const particle of this.q2) { const sample = sampleQ2Particle(particle, seconds * 1000); if (sample !== null) { q2.push(sample); if (particle.alphaVelocity !== -10000) retained.push(particle); } }
     this.q2 = retained;
+    q2.reverse();
     return { q1, q2 };
   }
   q1Impact(origin: Vec3, direction: Vec3, color: number, count: number, seconds: number): void {
@@ -100,8 +101,10 @@ export class SourceParticles {
     }
   }
   q1ColorExplosion(origin: Vec3, seconds: number, colorStart: number, colorLength: number): void {
-    if (!Number.isInteger(colorStart) || colorStart < 0 || colorStart > 255 || !Number.isInteger(colorLength) || colorLength < 1 || colorLength > 255)
+    if (!Number.isInteger(colorStart) || colorStart < 0 || colorStart > 255 || !Number.isInteger(colorLength) || colorLength > 255)
       throw new Error("Invalid Quake colored explosion palette range");
+    // A zero-length range divides by zero in the source; the explosion is dropped.
+    if (colorLength < 1) return;
     for (let i = 0; i < 512 && this.q1.length < this.capacity; i++) {
       const component = (base: number): readonly [number, number] => [base + this.rand() % 32 - 16, this.rand() % 512 - 256];
       const x = component(origin.x), y = component(origin.y), z = component(origin.z);

@@ -41,7 +41,8 @@ export class X86Decoder {
   repeat: "none" | "f2" | "f3" = "none";
   lock = false;
   readonly opcode: number;
-  constructor(readonly state: GuestProcessorState, readonly memory: MappedGuestMemory) {
+  /** `prefetched` replays bytes a guarded cache already fetched from this address; bytes beyond it are fetched live. */
+  constructor(readonly state: GuestProcessorState, readonly memory: MappedGuestMemory, readonly prefetched?: readonly number[]) {
     this.start = state.instructionPointer;
     this.cursor = this.start;
     while (true) {
@@ -65,9 +66,11 @@ export class X86Decoder {
   byte(): number {
     if (this.bytes.length >= 15) throw new X86ProcessorFault(13, "Instruction exceeds the 15-byte architectural limit", 0n);
     if (this.cursor > this.state.segments.cs.limit) throw new X86ProcessorFault(13, "Instruction exceeds CS limit", 0n);
-    const byte = this.memory.fetchByte(BigInt.asUintN(32, this.state.segments.cs.base + this.cursor));
+    const cached = this.prefetched?.[this.bytes.length];
+    const byte = cached ?? this.memory.fetchByte(BigInt.asUintN(32, this.state.segments.cs.base + this.cursor));
     this.bytes.push(byte);
-    this.cursor = BigInt.asUintN(32, this.cursor + 1n);
+    const next = this.cursor + 1n;
+    this.cursor = next > 0xffffffffn ? 0n : next;
     return byte;
   }
   immediate(width: X86Width): bigint {

@@ -91,3 +91,19 @@ test.skipIf(!hasFixture)("invalid read and seek bounds preserve decoder position
   expect(decoder.positionFrames).toBe(0);
   expect(decoder.read(1)?.frames).toBe(1);
 });
+
+test.skipIf(!hasFixture)("PLATFORM-002 a corrupt page is skipped instead of failing the read", async () => {
+  const temporary = mkdtempSync(join(tmpdir(), "quake-vorbis-hole-"));
+  try {
+    const bytes = new Uint8Array(await Bun.file(fixture).arrayBuffer()), middle = Math.floor(bytes.length / 2);
+    for (let index = 0; index < 64; index++) bytes[middle + index] = (bytes[middle + index] ?? 0) ^ 0xff;
+    const path = join(temporary, "corrupt.ogg");
+    await Bun.write(path, bytes);
+    const decoder = VorbisDecoder.open(path);
+    try {
+      let frames = 0;
+      for (let chunk = decoder.read(4096); chunk !== null; chunk = decoder.read(4096)) frames += chunk.frames;
+      expect(frames).toBeGreaterThan(4096);
+    } finally { decoder.close(); }
+  } finally { rmSync(temporary, { recursive: true, force: true }); }
+});

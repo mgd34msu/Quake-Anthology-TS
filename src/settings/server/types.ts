@@ -1,4 +1,4 @@
-import type { CvarSettingSpec } from "../../ui/settings/index.ts";
+import type { CvarSettingSpec } from "../setting-spec.ts";
 
 export type ServerSettingId = `server:${string}`;
 export type ServerApplyAt = "live" | "next-match" | "next-map" | "restart";

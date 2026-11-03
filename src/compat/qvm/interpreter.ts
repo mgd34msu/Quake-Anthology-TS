@@ -14,6 +14,11 @@ import type { VmRegistration } from "./registry.ts";
 import { QvmSymbols } from "./symbols.ts";
 import type { QvmSymbolLoadOptions } from "./symbols.ts";
 
+/** Per root invocation. Retail frames use a few million; this only stops code that never returns. */
+const QVM_INSTRUCTION_BUDGET = 100_000_000;
+/** Return records kept outside guest memory (two words per call) for the compiled-semantics profile. */
+const QVM_MAX_RETURN_WORDS = 2 * 65_536;
+
 export type QvmArguments = readonly [
   number, number, number, number, number, number, number, number, number, number,
 ];
@@ -84,7 +89,8 @@ export interface QvmFunctionCall extends Pick<QvmSyscall, "invoke" | "invokeAsyn
   proceedAsync(): Promise<number>;
 }
 export type QvmFunctionHook = (call: QvmFunctionCall) => QvmSystemCallResult;
-export type QvmFunctionResolver = (instructionIndex: number, firstArgument: number, words: DataView) => QvmFunctionHook | undefined;
+/** `words` views the call's argument words and is only built when the resolver asks for it. */
+export type QvmFunctionResolver = (instructionIndex: number, firstArgument: number, words: () => DataView) => QvmFunctionHook | undefined;
 export interface QvmFunctionObservation extends Pick<QvmSyscall, "invoke" | "invokeAsync" | "cancelFunction"> {
   readonly instructionIndex: number;
   argument(index: number): number;
@@ -238,7 +244,8 @@ export class QvmInterpreter {
   constructor(image: QvmImage, private readonly systemCall: QvmSystemCall,
     profile: QvmAllocationProfile = { kind: "unaccounted" },
     private readonly registration: VmRegistration | null = null,
-    private readonly semantics: QvmSemantics = "interpreted",
+    /** "interpreted" is vm_interpreted.c, the reference semantics (vm_game 1); "compiled" is the JIT behaviour id ships by default. */
+    readonly semantics: QvmSemantics = "interpreted",
     private readonly storeEffect: (scope: Pick<QvmSyscall, "invoke" | "invokeAsync" | "cancelFunction">, perform: () => undefined) => undefined = (_scope, perform) => perform(),
   ) {
     this.source = image.source;
@@ -910,7 +917,9 @@ export class QvmInterpreter {
       let evaluationStarted = false;
       let profileSymbol = debug ? this.symbols.valueToFunctionSymbol(0) : null;
       const debugString = (): string => `${this.indent()}${operands.count}`;
+      let executed = 0;
       for (;;) {
+        if (++executed > QVM_INSTRUCTION_BUDGET) throw new CommonError("drop", "VM instruction budget exceeded");
         const counter = this.counterEvaluation;
         if (counter !== null && (--counter.remaining < 0 || !counter.ranges.some(range => pc >= range.start && pc < range.end)))
           throw new Error("QVM counter evaluation escaped its admitted original functions or instruction budget");
@@ -1013,10 +1022,16 @@ export class QvmInterpreter {
             if (target >= 0) {
               if (counter !== null && !counter.functions.has(target)) throw new Error("QVM counter evaluation called an undeclared source function");
               const binding = counter === null ? this.functionHooks?.get(target) : undefined, observers = counter === null ? this.functionObservers?.get(target) : undefined;
-              const hook = counter === null ? binding?.hook ?? this.functionResolver?.resolve(target, this.readWord(sp + 8), this.addressSpace.dataView(sp + 8, this.sourceArgumentBytes(this.sourceInstruction(returnPC - 1)))) : undefined;
+              const hook = counter === null ? binding?.hook ?? this.functionResolver?.resolve(target, this.readWord(sp + 8), () => this.addressSpace.dataView(sp + 8, this.sourceArgumentBytes(this.sourceInstruction(returnPC - 1)))) : undefined;
               if (binding === undefined && hook !== undefined && this.codeWord(this.targetPC(target)) !== QvmOpcode.OP_ENTER)
                 throw new Error("QVM resolver requires a function entry instruction");
-              if (hook === undefined && observers === undefined) { returns?.push(sp, returnPC); pc = this.targetPC(target); }
+              if (hook === undefined && observers === undefined) {
+                if (returns !== null) {
+                  if (returns.length >= QVM_MAX_RETURN_WORDS) throw new CommonError("drop", "VM call depth exceeded");
+                  returns.push(sp, returnPC);
+                }
+                pc = this.targetPC(target);
+              }
               else {
                 const savedCallLevel = this.callLevel, savedStack = this.programStack;
                 this.programStack = sp - 4;
@@ -1100,8 +1115,12 @@ export class QvmInterpreter {
             if (count < 0 || source < 0 || destination < 0 || source + count > this.dataMask || destination + count > this.dataMask) {
               throw new CommonError("drop", "OP_BLOCK_COPY out of range");
             }
-            // Q3's compiled VM accepts unaligned literals; ioquake's VM_BlockCopy checks bounds and copies bytes.
-            this.addressSpace.copyBytes(destination, source, count);
+            // The range check above is a deliberate safety deviation (id's JIT masks the pointers). Within range the copy
+            // matches vm_x86.c: whole words only (count >> 2) and strictly forward, so an overlapping copy smears.
+            const wordBytes = (count >> 2) << 2;
+            if (destination > source && destination < source + wordBytes) {
+              for (let offset = 0; offset < wordBytes; offset += 4) this.addressSpace.copyBytes(destination + offset, source + offset, 4);
+            } else this.addressSpace.copyBytes(destination, source, wordBytes);
             break;
           }
           case QvmOpcode.OP_BCOM:
