@@ -36,7 +36,8 @@ for (const fixture of [{ movement: "q3", character: "q3", residual: 0 }, { movem
       expect(() => simulation.beginSourceRoundSettlement()).toThrow("fresh matching");
       await session.stepAsync({ elapsedMilliseconds: 100 + fixture.residual, commands: [] });
       const initial = accounting(simulation), start = simulation.timeSeconds * 1000, initialFrame = simulation.clock.frame.frame;
-      expect(start).toBe(100); expect(initial.scheduled - start).toBe(fixture.residual);
+      // admission runs sv_init's three 100ms pre-connect frames before the stepped 100ms
+      expect(start).toBe(400); expect(initial.scheduled - start).toBe(fixture.residual);
       expect(simulation.restartSourceRound()).toEqual([client.id]);
       simulation.beginSourceRoundSettlement();
       const source = simulation.q3Source();

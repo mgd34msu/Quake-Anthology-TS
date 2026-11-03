@@ -268,6 +268,7 @@ import { captureMovementPlayer, readMovementPlayer, readQ1Travel, readQ2View, re
 import { simulationProviderCheckpoint, simulationSaveReader, savedSimulationSettings, simulationQuakeCCheckpoint, simulationQ3GuestCheckpoint, validateSimulationSave, nativeQ3RuntimeReader, savedSourceCvars, nativeQ2RereleaseSave, nativeQ2OriginalSave, nativeQ2SavedClients } from "./save.ts";
 import { saveQ2Attack, restoreQ2Attack } from "../../../content/q2/foundation/checkpoint.ts";
 import type { PlayerAdmission, PlayerView, PlayerUi, PlayerUiItem, SimulationTravel, SimulationOptions, SimulationPresentation, SimulationPresentationEvent } from "./types.ts";
+import { createSourceStrategy, type SourceStrategy, type SourceStrategyHost } from "./source-strategy.ts";
 import { q1PowerupTimers, q2PowerupTimers, q3PowerupTimers } from "./powerup-timers.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
@@ -283,7 +284,7 @@ function isQ1Barrel(classname: string): boolean { return classname === "misc_exp
 function sourceModel(path: string): number | null { return /^\*[0-9]+$/.test(path) ? Number(path.slice(1)) : null; }
 
 
-type SourceRuntime = { readonly kind: "loading" }
+export type SourceRuntime = { readonly kind: "loading" }
   | { readonly kind: "quakec"; readonly game: QuakeCSource }
   | { readonly kind: "q1"; readonly game: Q1Foundation; readonly composition: Q1SourceComposition; readonly cvars: CvarRegistry }
   | { readonly kind: "q3"; readonly game: Q3SourceRuntime }
@@ -434,6 +435,15 @@ export class SharedSimulation implements Simulation {
   private worldTextFrame = -1;
   private worldTextSnapshot: readonly WorldText[] = [];
   private source: SourceRuntime = { kind: "loading" };
+  private readonly sourceHost: SourceStrategyHost = {
+    q2Views: this.q2Views,
+    playerClient: actor => this.playerClient(actor),
+    nativeQ2Client: actor => this.nativeQ2Client(actor),
+    hasCutscene: actor => this.requirePlayer(actor).cutscene !== null,
+    userinfoChanged: (actor, previous) => { if (this.sourcePlayerUserinfo(actor) !== previous) this.notifyClientEvent("userinfo", actor); } };
+  /** Per-source behavior; replaced together with `source` by setSource. */
+  private strategy: SourceStrategy = createSourceStrategy(this.source, this.sourceHost);
+  private setSource(source: SourceRuntime): void { this.source = source; this.strategy = createSourceStrategy(source, this.sourceHost); }
   private pendingNativeTravel: ((nextFrame: () => Promise<void>) => Promise<Extract<SourceRuntime, { readonly kind: "q2-native" }>>) | null = null;
   private disposeSourceCombat: (() => undefined) | null = null;
   private sourceFrame: FrameContext;
@@ -781,7 +791,7 @@ export class SharedSimulation implements Simulation {
       qvm: entry => this.createQvmWeaponBehavior(entry),
       native: (entry, nextFrame) => this.createNativeWeaponBehavior(entry, nextFrame) });
     try {
-    this.source = this.createSource(loading);
+    this.setSource(this.createSource(loading));
     if (this.foreignMatch.flags.lmctf && this.source.kind === "q1") this.source.game.registerWeaponRules(this.foreignMatch.flags.q1HasteRules());
     if (this.source.kind === "q2-native") this.source.game.services.setPlayerVelocityWriter((actor, velocity) => {
       if (this.playerClient(actor.id) === null) throw new Error("Native movement write requires an admitted player");
@@ -6039,83 +6049,26 @@ export class SharedSimulation implements Simulation {
   }
 
   private storePlayerUserinfo(actor: ActorId, userinfo: string): void {
-    const client = this.playerClient(actor), source = this.source;
+    const client = this.playerClient(actor);
     if (client === null) throw new Error("Component userinfo has no admitted client");
-    if (source.kind === "q2-native") source.game.setUserinfoStorage(client.slot + 1, userinfo);
-    else if (source.kind === "q3-qvm") source.game.state.setUserinfo(client.slot, userinfo);
-    else if (source.kind === "q3") source.game.host.engine.setUserinfo(client.slot, userinfo);
-    else if (source.kind === "quakec") source.game.setClientInfoStorage(client, q2Userinfo(userinfo));
-    else if (source.kind === "q1") {
-      const info = source.composition.clients.require(actor).userinfo; info.clear();
-      for (const [name, value] of q2Userinfo(userinfo)) info.set(name, value);
-    } else if (source.kind === "q2") {
-      const player = source.players.states.get(actor); if (player === undefined) throw new Error("Component userinfo has no Q2 player");
-      player.userinfo = userinfo;
-    } else throw new Error("Component userinfo requires an initialized source");
+    this.strategy.storeUserinfo(actor, client, userinfo);
   }
   sourcePlayerName(actor: ActorId): string { return q2Userinfo(this.sourcePlayerUserinfo(actor) ?? "").get("name") ?? "unconnected"; }
   get q1Paused(): boolean { return this.q1PauseState; }
   toggleQ1Pause(actor: ActorId | null): string {
-    const source = this.source;
-    if (source.kind !== "q1" && source.kind !== "quakec") throw new Error("Pause requires a Quake source server");
-    const cvars = source.kind === "q1" ? source.cvars : source.game.cvars;
-    if (actor !== null && cvars.find("pausable")?.numericValue === 0) return "Pause not allowed.\n";
-    if (actor !== null && source.kind === "quakec" && source.game.kind === "quakeworld" && source.game.isSpectatorClient(actor))
-      return "Spectators can not pause.\n";
+    const pause = this.strategy.pause();
+    if (pause === null) throw new Error("Pause requires a Quake source server");
+    if (actor !== null && pause.cvars.find("pausable")?.numericValue === 0) return "Pause not allowed.\n";
+    if (actor !== null && pause.isSpectator(actor)) return "Spectators can not pause.\n";
     this.q1PauseState = !this.q1PauseState;
     const name = actor === null ? "Server" : q2Userinfo(this.sourcePlayerUserinfo(actor) ?? "").get("name") ?? "unconnected";
     return `${name} ${this.q1PauseState ? "paused" : "unpaused"} the game\n`;
   }
-  sourcePlayerUserinfo(actor: ActorId): string | null {
-    const source = this.source;
-    if (source.kind === "q1") return [...source.composition.clients.require(actor).userinfo].map(([name, value]) => `\\${name}\\${value}`).join("");
-    if (source.kind === "q2") return source.players.states.get(actor)?.userinfo ?? null;
-    if (source.kind === "q3" || source.kind === "q3-qvm") {
-      const client = this.playerClient(actor);
-      return client === null ? null : source.kind === "q3" ? source.game.host.engine.getUserinfo(client.slot) : source.game.state.getUserinfo(client.slot) ?? null;
-    }
-    if (source.kind === "q2-native") return source.game.clients.find(client => client.slot === this.nativeQ2Client(actor).slot + 1)?.userinfo ?? null;
-    if (source.kind === "quakec") {
-      const client = this.playerClient(actor);
-      return client === null ? null : [...source.game.clientInfo(client)].map(([name, value]) => `\\${name}\\${value}`).join("");
-    }
-    return null;
-  }
+  sourcePlayerUserinfo(actor: ActorId): string | null { return this.strategy.userinfo(actor); }
   updatePlayerUserinfo(actor: ActorId, userinfo: string): void | Promise<void> {
-    const source = this.source;
     const previousUserinfo = this.sourcePlayerUserinfo(actor);
     if (previousUserinfo === userinfo) return;
-    if (source.kind === "q3-qvm") {
-      const player = source.game.players().find(player => player.actor.equals(actor));
-      if (player === undefined) throw new Error("Q3 guest userinfo has no admitted client");
-      return source.game.userinfo(player, userinfo);
-    }
-    if (source.kind === "q2-native") {
-      const slot = this.nativeQ2Client(actor).slot + 1;
-      if (source.game.clients.find(client => client.slot === slot)?.userinfo !== userinfo) source.game.userinfo(slot, userinfo);
-    } else if (source.kind === "q3") {
-      const client = this.playerClient(actor); if (client === null) throw new Error("Q3 userinfo has no admitted client");
-      source.game.host.engine.setUserinfo(client.slot, userinfo);
-      source.game.admission.userinfoChanged(client.slot);
-    } else if (source.kind === "q1") {
-      const previous = source.composition.clients.require(actor).userinfo, values = q2Userinfo(userinfo);
-      if (previous.size === values.size && [...values].every(([name, value]) => previous.get(name) === value)) return;
-      source.composition.userinfo(actor, values);
-    } else if (source.kind === "quakec") {
-      const client = this.playerClient(actor); if (client === null) return;
-      const previous = source.game.clientInfo(client), values = q2Userinfo(userinfo);
-      if (previous.size === values.size && [...values].every(([name, value]) => previous.get(name) === value)) return;
-      source.game.setClientInfo(client, values);
-    } else if (source.kind === "q2") {
-      const state = source.players.states.get(actor), entity = source.game.entity(actor);
-      if (state === undefined || entity === null || state.userinfo === userinfo) return;
-      const previousFov = state.fov, previousRequest = q2Userinfo(state.userinfo).get("fov"), player = this.requirePlayer(actor);
-      source.players.userinfoChanged(entity, source.game, userinfo);
-      if (player.cutscene !== null || state.chaseTarget !== null || (entity.flags & 0x4000) !== 0 || previousRequest === q2Userinfo(userinfo).get("fov")) state.fov = previousFov;
-      const view = this.q2Views.get(actor);
-      if (view?.fov === previousFov) this.q2Views.set(actor, { ...view, fov: state.fov });
-    }
-    if (this.sourcePlayerUserinfo(actor) !== previousUserinfo) this.notifyClientEvent("userinfo", actor);
+    return this.strategy.updateUserinfo(actor, userinfo, previousUserinfo);
   }
   playerView(actor: ActorId): PlayerView {
     let view = this.sourcePlayerView(actor);
@@ -6755,7 +6708,7 @@ export class SharedSimulation implements Simulation {
       this.events.take(); this.events.takePresentation(); this.transitions.reset(); this.levelChange = null;
       this.debugLineStore.clear(); this.debugLineSnapshot = []; this.worldTextStore.clear(); this.worldTextSnapshot = [];
       const game = new Q3SourceRuntime({ ...previous.game.options, sessionCarry: carry }, previous.game.host);
-      this.source = { kind: "q3", game };
+      this.setSource({ kind: "q3", game });
       if (providerFamily(this.recipe.combat.provider) === "q3") this.disposeSourceCombat = this.combat.register(game.bridge.policy());
       game.load();
       this.sourceRoundSettlement = { kind: "ready", source: game };

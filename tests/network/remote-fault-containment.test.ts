@@ -144,9 +144,16 @@ test.skipIf(!q1)("map changes release the previous simulation", async () => {
       app.queueCommand("map", [travel % 2 === 0 ? "e1m2" : "e1m1"], null);
       for (let frame = 0; frame < 5; frame++) await app.step(50);
     }
-    await Bun.sleep(0); Bun.gc(true); Bun.gc(true);
+    // Finalizers and weak-ref clearing run on later macrotasks: collect until the survivor count is zero or stops changing.
+    const survivors = () => worlds.filter(world => world.deref() !== undefined).length;
+    let remaining = survivors(), stable = 0;
+    for (let round = 0; round < 50 && remaining > 0 && stable < 5; round++) {
+      await Bun.sleep(10); Bun.gc(true); Bun.gc(true);
+      const next = survivors();
+      stable = next === remaining ? stable + 1 : 0; remaining = next;
+    }
     // No previous world may survive a full collection.
-    expect(worlds.filter(world => world.deref() !== undefined).length).toBe(0);
+    expect(remaining).toBe(0);
   } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
 }, 180000);
 

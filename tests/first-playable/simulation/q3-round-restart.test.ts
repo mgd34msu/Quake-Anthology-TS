@@ -17,6 +17,7 @@ test("Q3 rounds retain shared services and retire actors and listeners", async (
  const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts, skill: 1, mode: "deathmatch", seed: 1, maxClients: 1 });
  try {
   let player = simulation.admitPlayer(client).actor;
+  // admission also runs sv_init's three 100ms pre-connect frames
   simulation.step({ elapsedMilliseconds: 500, commands: [] });
   const scene = simulation.scene, clock = simulation.clock, registry = simulation.actors, first = simulation.q3Source();
   if (first === null) throw new Error("Missing source");
@@ -36,7 +37,7 @@ test("Q3 rounds retain shared services and retire actors and listeners", async (
     player = admitted.actor;
     expect(simulation.q3Source()).not.toBe(old); expect(registry.isLive(oldPlayer)).toBe(false); expect(registry.isLive(player)).toBe(true);
     expect(simulation.clientIdentities()).toEqual([client]); expect(simulation.scene).toBe(scene); expect(simulation.clock).toBe(clock); expect(simulation.actors).toBe(registry);
-    expect(simulation.timeSeconds).toBe(0.5); expect(simulation.q3Source()?.host.cvars).toBe(cvars); expect(cvars.variableValue("g_speed")).toBe(450);
+    expect(simulation.timeSeconds).toBe(0.8); expect(simulation.q3Source()?.host.cvars).toBe(cvars); expect(cvars.variableValue("g_speed")).toBe(450);
     expect(subscriptions - unsubscriptions).toBe(3); expect(retiredCalls).toBe(0);
    }
    simulation.drainPresentationEvents();
@@ -46,7 +47,7 @@ test("Q3 rounds retain shared services and retire actors and listeners", async (
     expect(restored.sourceRestartPlan()).toEqual({ kind: "source-reset" });
     expect(restored.restartSourceRound()).toEqual([client]);
     expect(restored.actors.isLive(restored.admitPlayer(client).actor)).toBe(true);
-    expect(restored.timeSeconds).toBe(0.5);
+    expect(restored.timeSeconds).toBe(0.8);
     expect(restored.q3Source()?.host.cvars.variableValue("g_speed")).toBe(450);
    } finally { restored.close(); }
    const active = simulation.q3Source(); cvars.set("sv_maxclients", "2", true);
@@ -103,7 +104,7 @@ test("console latched restart requests and change-back survive save restore and 
     simulation.drainPresentationEvents();
     const restored = createSimulation({ ...options, restore: simulation.checkpoint(), restoredClients: [client] });
     try {
-     expect(restored.timeSeconds).toBe(0.25); expect(restored.sourceRestartPlan()).toEqual({ kind: "replace-world", reason });
+     expect(restored.timeSeconds).toBe(0.55); expect(restored.sourceRestartPlan()).toEqual({ kind: "replace-world", reason });
      expect(restored.q3Source()?.host.cvars.find(name)?.latchedValue).toBe(requested);
     } finally { restored.close(); }
    } finally { simulation.close(); }

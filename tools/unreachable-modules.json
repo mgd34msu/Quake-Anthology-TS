@@ -1,8 +1,4 @@
 {
-  "src/compat/q3/native/imports.ts": "Quake Live game API 10 and Q3 1.32 native module wrappers over the ELF loader. The Quake Live binaries are not in the corpus (tests/compat/q3/native/fixture.ts needs quakelive/baseq3/bin.pk3). Unwired until the ELF loader is.",
-  "src/compat/q3/native/index.ts": "Quake Live game API 10 and Q3 1.32 native module wrappers over the ELF loader. The Quake Live binaries are not in the corpus (tests/compat/q3/native/fixture.ts needs quakelive/baseq3/bin.pk3). Unwired until the ELF loader is.",
-  "src/compat/q3/native/module.ts": "Quake Live game API 10 and Q3 1.32 native module wrappers over the ELF loader. The Quake Live binaries are not in the corpus (tests/compat/q3/native/fixture.ts needs quakelive/baseq3/bin.pk3). Unwired until the ELF loader is.",
-  "src/compat/q3/native/syscall.ts": "Quake Live game API 10 and Q3 1.32 native module wrappers over the ELF loader. The Quake Live binaries are not in the corpus (tests/compat/q3/native/fixture.ts needs quakelive/baseq3/bin.pk3). Unwired until the ELF loader is.",
   "src/formats/q3-model/lod.ts": "MD3 LOD registration (tr_model.c). The scene MD3 model has no LOD slots yet (only MD4 selects an LOD in render/scene/models/prepare.ts).",
   "src/guest/elf/index.ts": "Linux ELF loader. Loads and initializes the supplied lmctf gamei386.so.glibc, but running it as a Q2 game needs about 25 more libc services (fopen, fgets, sscanf, vsprintf, localtime, rand, strncmp, atan2 ...), a linux-i386 branch in the classic guest source, game selection and the classic guest save format (abi is pinned to windows-i386). Not yet wired.",
   "src/guest/elf/parse.ts": "ELF loader internals; see src/guest/elf/index.ts.",

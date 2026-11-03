@@ -3,7 +3,10 @@ import { expect, test } from "bun:test";
 import { createContentDigest } from "../../../../src/contracts/content.ts";
 import type { ModuleIdentity } from "../../../../src/contracts/execution.ts";
 import { inspectElf } from "../../../../src/guest/elf/index.ts";
-import { NativeQ3Syscalls, Quake3VmModule } from "../../../../src/compat/q3/native/index.ts";
+import { NativeGameMemory, nativeQ3GameCall, NativeQ3Syscalls, Quake3VmModule } from "../../../../src/compat/q3/native/index.ts";
+import { QvmGameImport } from "../../../../src/compat/qvm/abi.ts";
+import { qvmIntrinsicSyscall } from "../../../../src/compat/qvm/syscalls.ts";
+import { SparseGuestMemory } from "../../../../src/guest/core/index.ts";
 import { CodeBuilder, SYNTHETIC_ELF, syntheticElfModule } from "../../../support/elf-modules.ts";
 import { nativeGameFixtureFrom, nativeGuestProcess } from "./fixture.ts";
 
@@ -160,4 +163,29 @@ test("a synthetic Q3 module without vmMain is refused by the Q3 1.32 wrapper", (
   const process = nativeGuestProcess(fixtureOf("q3-no-vmmain", bytes));
   const syscalls = new NativeQ3Syscalls(process.callbacks, process.abi, () => 0);
   expect(() => new Quake3VmModule({ image: process.image, runner: process.runner, context: process.context, instructionBudget: 1000 }, syscalls.address)).toThrow("requires dllEntry and vmMain");
+});
+
+test("every game import a QVM qagame can issue decodes to the same engine call for a native module, with its pointers in the native address space", () => {
+  const memory = new SparseGuestMemory({ module: identity("trap-table"), pointerBytes: 4 });
+  const base = memory.map({ base: 0x20000n, byteLength: 4096, permissions: "read-write" }), guest = new NativeGameMemory(memory);
+  const codes = Object.values(QvmGameImport).filter((value): value is QvmGameImport => typeof value === "number");
+  expect(codes.length).toBeGreaterThan(90);
+  for (const code of codes) {
+    const words = new DataView(new ArrayBuffer(64)); words.setInt32(0, code, true);
+    const call = nativeQ3GameCall(words, guest, ["say"]);
+    expect(call).toMatchObject({ kind: "engine", role: "qagame", code, commandArguments: ["say"], abiProfile: "q3-modern" });
+  }
+  // Unknown trap numbers stay extensions, which the shared table rejects as unbound.
+  const unknown = new DataView(new ArrayBuffer(64)); unknown.setInt32(0, 9999, true);
+  expect(nativeQ3GameCall(unknown, guest, null)).toMatchObject({ kind: "extension", code: 9999 });
+  // libc and math traps execute in the engine against absolute guest addresses: memset, then strncpy from a guest string.
+  const at = Number(base.byteOffset);
+  const words = (...values: number[]): DataView => { const view = new DataView(new ArrayBuffer(64)); values.forEach((value, index) => view.setInt32(index * 4, value, true)); return view; };
+  memory.write(memory.offset(base, 256n), new TextEncoder().encode("hello\0"));
+  expect(qvmIntrinsicSyscall("qagame", "q3-modern", words(100, at, 0x5a, 8), guest)).toBe(0);
+  expect(guest.span(at, 8)).toEqual(new Uint8Array(8).fill(0x5a));
+  expect(qvmIntrinsicSyscall("qagame", "q3-modern", words(102, at, at + 256, 8), guest)).toBe(at);
+  expect(guest.readString(at)).toBe("hello");
+  expect(() => guest.span(0x90000, 4)).toThrow();
+  expect(() => guest.view(0, 4)).toThrow("nonnull");
 });
