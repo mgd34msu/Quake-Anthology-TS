@@ -1,6 +1,7 @@
 /node_modules/
 /dist/
 /.artifacts/
+/build/
 
 # Local runtime data and generated output.
 /qfiles/
