@@ -1,10 +1,4 @@
 {
-  "Bash:ZXhpdCBjb2RlIG4gZGlz": {
-    "signature": "Bash:ZXhpdCBjb2RlIG4gZGlz",
-    "totalAttempts": 2,
-    "documented": false,
-    "lastAttempt": "2026-11-02T07:41:45.923Z"
-  },
   "Bash:ZXhpdCBjb2RlIG4=": {
     "signature": "Bash:ZXhpdCBjb2RlIG4=",
     "totalAttempts": 4,
@@ -49,9 +43,9 @@
   },
   "Bash:ZXhpdCBjb2RlIG4gPHBh": {
     "signature": "Bash:ZXhpdCBjb2RlIG4gPHBh",
-    "totalAttempts": 1,
+    "totalAttempts": 2,
     "documented": false,
-    "lastAttempt": "2026-11-02T11:41:21.430Z"
+    "lastAttempt": "2026-11-03T08:20:40.022Z"
   },
   "Bash:ZXhpdCBjb2RlIG4gYXN5": {
     "signature": "Bash:ZXhpdCBjb2RlIG4gYXN5",

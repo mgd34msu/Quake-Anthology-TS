@@ -123,7 +123,8 @@ export class Deriver {
     const depth = stack.indexOf(type);
     if (depth >= 0) return `~${depth}`;
     if (this.checker.isArrayType(type)) return `[${this.structure(this.checker.getTypeArguments(type as ts.TypeReference)[0] ?? type, stack)}]`;
-    const props = this.props(type);
+    // Well-known symbol members (`__@iterator@115`) carry compiler-assigned ids that shift whenever the program changes.
+    const props = this.props(type).filter(prop => !prop.name.startsWith("__@"));
     if (props.length === 0 || type.flags & (ts.TypeFlags.StringLike | ts.TypeFlags.NumberLike | ts.TypeFlags.BooleanLike)) return this.leaf(type);
     stack.push(type);
     const text = `{${props.map(prop => `${prop.name}${this.optional(prop) ? "?" : ""}:${this.structure(this.propType(prop), stack)}`).join(";")}}`;
@@ -479,7 +480,10 @@ function mergeCases(existing: string, derived: string, kept: readonly string[], 
   return `${next.header}${chunks.join("\n")}${closing}`;
 }
 
-export function derive(source: string): Derivation {
+const spdx = "// SPDX-License-Identifier: GPL-2.0-or-later";
+
+export function derive(input: string): Derivation {
+  const source = input.startsWith(`${spdx}\n`) ? input : `${spdx}\n${input}`;
   const lines = source.split("\n");
   const readRegions = regions(lines, readHead);
   const writeRegions = regions(lines, writeHead);
