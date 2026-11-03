@@ -4,7 +4,7 @@ import { corpusFile } from "../../support/corpus.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
 import { captureQcCheckpoint, restoreQcCheckpoint } from "../../../src/compat/qc/executor.ts";
-import { QcEntityMemory, QcMachine, QcStrings, applyQcEntityPairs, classicQcEntityLayout, createQcActorBindings, createQcBuiltins, createQcSourceSlotStorage, describeQcHost, loadQcProgram, qcLinkBounds, saveQcEntityPairs } from "../../../src/compat/qc/index.ts";
+import { QcEntityMemory, QcMachine, QcStrings, applyQcEntityPairs, classicQcEntityLayout, createQcActorBindings, createQcBuiltins, createQcSourceSlotStorage, loadQcProgram, qcLinkBounds, saveQcEntityPairs } from "../../../src/compat/qc/index.ts";
 import type { QcBuiltin, QcHostBuiltinName, QcProgram } from "../../../src/compat/qc/index.ts";
 import type { ModuleIdentity } from "../../../src/contracts/execution.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";

@@ -1,10 +1,10 @@
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
-import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
+import type { ActorId } from "../../../../src/contracts/identity.ts";
 import type { Vec3 } from "../../../../src/contracts/math.ts";
 import type { TraceResult } from "../../../../src/contracts/scene.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
 import { SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
-import type { Q2FoundationHost, Q2PresentationEvent, Q2TraceRequest } from "../../../../src/content/q2/foundation/host.ts";
+import type { Q2TraceRequest } from "../../../../src/content/q2/foundation/host.ts";
 import { Q2Foundation } from "../../../../src/content/q2/foundation/runtime.ts";
 import { Q2Ballistics } from "../../../../src/content/q2/foundation/weapons/ballistics.ts";
 import { Q2Monsters } from "../../../../src/content/q2/foundation/monsters/index.ts";

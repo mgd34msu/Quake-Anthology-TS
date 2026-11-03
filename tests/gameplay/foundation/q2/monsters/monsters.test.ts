@@ -2,12 +2,11 @@ import { expect } from "bun:test";
 import { testCorpusRoot, corpusTest, corpusDescribe } from "../../../../support/corpus.ts";
 
 import { createIdentityOwner } from "../../../../../src/contracts/identity.ts";
-import type { OwnedActor } from "../../../../../src/contracts/identity.ts";
 import type { Vec3 } from "../../../../../src/contracts/math.ts";
 import type { TraceResult } from "../../../../../src/contracts/scene.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../../src/world/actors/index.ts";
 import { SharedInventoryTable } from "../../../../../src/world/gameplay/index.ts";
-import type { Q2Edition, Q2Entity, Q2FoundationHost, Q2GameServices, Q2PresentationEvent, Q2TraceRequest } from "../../../../../src/content/q2/foundation/host.ts";
+import type { Q2Edition, Q2Entity, Q2FoundationHost, Q2GameServices, Q2TraceRequest } from "../../../../../src/content/q2/foundation/host.ts";
 import { Q2Foundation } from "../../../../../src/content/q2/foundation/runtime.ts";
 import { Q2Weapons } from "../../../../../src/content/q2/foundation/weapons/index.ts";
 import { Q2Monsters, throwGib } from "../../../../../src/content/q2/foundation/monsters/index.ts";

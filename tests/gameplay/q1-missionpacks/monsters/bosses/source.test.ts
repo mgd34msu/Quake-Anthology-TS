@@ -3,7 +3,7 @@ import { testCorpusRoot, corpusTest } from "../../../../support/corpus.ts";
 
 import type { ActorId, OwnedActor } from "../../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../../src/contracts/identity.ts";
-import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../../../src/world/actors/index.ts";
+import { SessionActorRegistry, ActorCallbackTable, translatedBodyBounds } from "../../../../../src/world/actors/index.ts";
 import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../../src/world/gameplay/index.ts";
 import { createSceneQueries } from "../../../../../src/world/collision/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../../../src/core/numeric.ts";
@@ -12,7 +12,6 @@ import { openArchive } from "../../../../../src/content/archive/index.ts";
 import { readQ1Bsp, q1EntityValue } from "../../../../../src/formats/q1-map/index.ts";
 import { Q1Foundation } from "../../../../../src/content/q1/foundation/runtime.ts";
 import type { Q1Actor } from "../../../../../src/content/q1/foundation/entity.ts";
-import type { Q1Event, Q1FoundationHost } from "../../../../../src/content/q1/foundation/types.ts";
 import { PLAYER_BOUNDS, ZERO, vadd, vscale, length } from "../../../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base } from "../../../../../src/content/q1/base/index.ts";
 import { registerMissionPackArsenal } from "../../../../../src/content/q1/missionpacks/arsenal.ts";

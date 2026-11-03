@@ -132,7 +132,6 @@ async function corpseLane(game: string, library: string, squadRespawn: boolean):
     input(false);
     for (let i = 0; i < 20; i++) await app.step(50);
     const others = app.simulation.presentations().filter(p => !p.actor.equals(local.actor) && !p.viewWeapon);
-    console.log('DBG', JSON.stringify(app.simulation.presentations().map(p => [p.family, p.path, p.frame, p.visible, p.viewWeapon, p.actor.slot])));
     return { respawned: app.simulation.playerUi(local.actor).health > 0,
       corpses: others.filter(p => p.path === "progs/player.mdl").map(p => `${p.family}#${p.frame}`),
       guestCorpses: others.filter(p => p.path.startsWith("players/") && !p.path.includes("deadbods")).map(p => p.path) };

@@ -8,7 +8,7 @@ import { medicFrame } from "../../../../src/content/q2/rerelease/monsters/tables
 import { decodeQ2MissionPackMonstersCheckpoint, encodeQ2MissionPackMonstersCheckpoint } from "../../../../src/persistence/q2-missionpacks.ts";
 import { expect } from "bun:test";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
-import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
+import type { ActorId } from "../../../../src/contracts/identity.ts";
 import type { Vec3 } from "../../../../src/contracts/math.ts";
 import type { TraceResult } from "../../../../src/contracts/scene.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
@@ -16,7 +16,7 @@ import { SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from ".
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ2Bsp } from "../../../../src/formats/q2-map/index.ts";
 import { parseQ2Entities } from "../../../../src/content/q2/foundation/fields.ts";
-import type { Q2FoundationHost, Q2PresentationEvent, Q2SpawnFields, Q2TraceRequest } from "../../../../src/content/q2/foundation/host.ts";
+import type { Q2SpawnFields, Q2TraceRequest } from "../../../../src/content/q2/foundation/host.ts";
 import { Q2Foundation } from "../../../../src/content/q2/foundation/runtime.ts";
 import { Q2Ballistics } from "../../../../src/content/q2/foundation/weapons/ballistics.ts";
 import { Q2Monsters } from "../../../../src/content/q2/foundation/monsters/index.ts";

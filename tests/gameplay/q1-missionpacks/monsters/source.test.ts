@@ -1,16 +1,14 @@
 import { expect, test } from "bun:test";
 import { corpusFile, corpusHasFile } from "../../../support/corpus.ts";
 
-import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
+import type { ActorId } from "../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
-import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
+import { SessionActorRegistry, ActorCallbackTable } from "../../../../src/world/actors/index.ts";
 import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
-import { Q1_DONOR_PROFILE } from "../../../../src/core/numeric.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ1Bsp, q1EntityValue } from "../../../../src/formats/q1-map/index.ts";
 import { Q1Foundation } from "../../../../src/content/q1/foundation/runtime.ts";
-import type { Q1Event, Q1FoundationHost } from "../../../../src/content/q1/foundation/types.ts";
 import { PLAYER_BOUNDS, ZERO, vadd } from "../../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base } from "../../../../src/content/q1/base/index.ts";
 import { monsterFrames } from "../../../../src/content/q1/base/frames.ts";

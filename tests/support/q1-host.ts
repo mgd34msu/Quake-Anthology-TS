@@ -2,10 +2,11 @@
 import type { ActorId, OwnedActor } from "../../src/contracts/identity.ts";
 import type { TransitionIntent } from "../../src/contracts/gameplay.ts";
 import { Q1_DONOR_PROFILE } from "../../src/core/numeric.ts";
-import type { Q1Actor, Q1Event, Q1FoundationHost } from "../../src/content/q1/foundation/types.ts";
+import type { Q1Event, Q1FoundationHost } from "../../src/content/q1/foundation/types.ts";
+import type { Q1Actor } from "../../src/content/q1/foundation/entity.ts";
 import { SharedBodyTable, translatedBodyBounds } from "../../src/world/actors/index.ts";
 import type { ActorCallbackTable, SessionActorRegistry } from "../../src/world/actors/index.ts";
-import type { SceneQueries } from "../../src/world/collision/index.ts";
+import type { SharedSceneQueries } from "../../src/world/collision/index.ts";
 import type { GameplayAuthority, SharedInventoryTable } from "../../src/world/gameplay/index.ts";
 
 /** The parts every Q1 test host is built over. `scene` is the real map collision; without it the world is an open void. */
@@ -15,7 +16,7 @@ export interface Q1HostParts {
   readonly bodies: SharedBodyTable;
   readonly combat: GameplayAuthority;
   readonly inventory: SharedInventoryTable;
-  readonly scene?: SceneQueries;
+  readonly scene?: SharedSceneQueries;
   /** Reported as the hit actor when a trace strikes the map. */
   readonly world?: () => ActorId | null;
   /** The game that owns the entities; read lazily because the host is built before the game. */
@@ -35,7 +36,7 @@ type Contents = ReturnType<Q1FoundationHost["contents"]>;
 const contentsByCode = new Map<number, Contents>([[-2, "solid"], [-3, "water"], [-4, "slime"], [-5, "lava"], [-6, "sky"]]);
 
 /** Body linking as the production scene does: a live solid or trigger entity links as a box or its brush model, anything else is unlinked. */
-export function q1SceneBodies(actors: SessionActorRegistry, scene: SceneQueries, entity: Q1HostParts["entity"]): SharedBodyTable {
+export function q1SceneBodies(actors: SessionActorRegistry, scene: SharedSceneQueries, entity: Q1HostParts["entity"]): SharedBodyTable {
   return new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onUnlink: actor => { scene.unlink(actor); return undefined; }, onLink: body => {
     const source = entity(body.actor);
     if (source === null || source === undefined || source.solid === "none" || source.classname === "worldspawn") { scene.unlink(body.actor); return undefined; }

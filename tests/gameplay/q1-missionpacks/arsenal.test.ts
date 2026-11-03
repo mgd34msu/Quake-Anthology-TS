@@ -12,12 +12,11 @@ import { registerSelectedQ1MissionWeapons } from "../../../src/content/compositi
 import { Q1SelectedArsenal } from "../../../src/app/bootstrap/simulation/arsenal/q1.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
+import type { ActorId } from "../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
-import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
+import { SessionActorRegistry, ActorCallbackTable } from "../../../src/world/actors/index.ts";
 import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
-import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
 import { Q1Foundation } from "../../../src/content/q1/foundation/runtime.ts";
@@ -25,7 +24,6 @@ import { Q1EntityServices } from "../../../src/content/q1/foundation/entity-serv
 import { registerHipnoticWeapons } from "../../../src/content/q1/missionpacks/arsenal.ts";
 import { missionWeapons } from "../../../src/content/q1/missionpacks/types.ts";
 import { fireRogueLava } from "../../../src/content/q1/missionpacks/rogue-weapons.ts";
-import type { Q1Event, Q1FoundationHost } from "../../../src/content/q1/foundation/types.ts";
 import { PLAYER_BOUNDS, ZERO, vadd, weaponItem } from "../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base } from "../../../src/content/q1/base/index.ts";
 import { Q1CharacterActor } from "../../../src/content/q1/base/player.ts";

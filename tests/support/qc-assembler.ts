@@ -3,7 +3,7 @@ import { QcOpcode } from "../../src/compat/qc/program.ts";
 
 export type QcAsmType = "float" | "vector" | "string" | "entity" | "field" | "function";
 const typeCodes: Record<QcAsmType, number> = { string: 1, float: 2, vector: 3, entity: 4, field: 5, function: 6 };
-const reserved = ["", "return", "", "", "parm0", "", "", "parm1", "", "", "parm2", "", "", "parm3", "", "", "parm4", "", "", "parm5", "", "", "parm6", "", "", "parm7", "", ""];
+
 /** QC `self`, `other`, `world`, `time` and the other engine-owned globals follow the reserved words in progs.dat order. */
 const engineGlobals: readonly (readonly [string, QcAsmType])[] = [
   ["self", "entity"], ["other", "entity"], ["world", "entity"], ["activator", "entity"], ["time", "float"], ["frametime", "float"], ["force_retouch", "float"],

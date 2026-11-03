@@ -1,6 +1,8 @@
 import type { EnemySelection, MonsterDefinitionReference } from "../../../contracts/content.ts";
 import { parseQ2Entities } from "../../../content/q2/foundation/fields.ts";
 import type { Q2SpawnFields } from "../../../content/q2/foundation/host.ts";
+import { IdIndex } from "../../../foundation/id-index.ts";
+import { StringTable } from "../../../foundation/strings.ts";
 import { q1OrdinaryMonsters, q2OrdinaryMonsters } from "./monster-runtime.ts";
 
 export interface GuestMonsterReplacement {
@@ -91,4 +93,32 @@ export function planGuestMonsters(entities: string, edition: "classic" | "rerele
   if (spans.length !== authored.length) throw new Error("Native monster admission could not segment the authored entities");
   const text = authored.flatMap(entity => removed.has(entity.ordinal) ? [] : [entities.slice(spans[entity.ordinal]?.[0] ?? 0, spans[entity.ordinal]?.[1] ?? 0) + "\n"]).join("");
   return { entities: text, replacements, kept };
+}
+
+/**
+ * Replacement plans per (entity text, edition), admitted once on the shared foundation: the text is
+ * interned in a StringTable, the (text id, edition) pair is the IdIndex key, and the plan lives in a
+ * dense array the index points into. A plan depends only on the recipe and options, so it is
+ * computed on first demand and never invalidated.
+ */
+export class GuestMonsterPlans {
+  readonly #texts = new StringTable(() => 0);
+  readonly #index = new IdIndex();
+  readonly #plans: (GuestMonsterPlan | null)[] = [];
+
+  constructor(private readonly compute: (text: string, edition: "classic" | "rerelease") => GuestMonsterPlan | null) {}
+
+  plan(text: string, edition: "classic" | "rerelease"): GuestMonsterPlan | null {
+    const key = this.#texts.intern(text), discriminator = edition === "classic" ? 0 : 1;
+    const found = this.#index.find(key, discriminator);
+    if (found >= 0) return this.#plans[found] ?? null;
+    const plan = this.compute(text, edition);
+    this.#index.reserve(1);
+    this.#index.insert(key, discriminator, this.#plans.length);
+    this.#plans.push(plan);
+    return plan;
+  }
+
+  /** The guest entity string with replaced monsters stripped, or the text unchanged when nothing is selected. */
+  entities(text: string, edition: "classic" | "rerelease"): string { return this.plan(text, edition)?.entities ?? text; }
 }

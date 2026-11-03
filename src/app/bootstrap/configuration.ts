@@ -336,6 +336,11 @@ function configurationScriptReader(content: ApplicationConfigurationContent, opt
     baseLooseRoots: roots(base), gameLooseRoots: roots(product), seatRoot: consoleConfigRoot(options.userContentRoot) });
 }
 
+/** Created outside the preparing function: the closure outlives it, and that function's scope also holds the caller's loading state (AUDIT-001). */
+function hostPrinter(host: Pick<ApplicationHost, "print">): (text: string) => void {
+  return text => { host.print(text); };
+}
+
 export async function prepareInitialConfiguration(options: ApplicationOptions, content: ApplicationConfigurationContent,
   session: EngineSession, identity: IdentityOwner, localSeats: Map<ClientId, SessionSeat>, settings: ConfigStore,
   host: Pick<ApplicationHost, "print">, sourceArchive: readonly CvarArchiveEntry[], defaultCapacity: number, nextFrame: () => Promise<void>,
@@ -348,13 +353,13 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
   const context: CommandContext = { session: session.session, origin: { kind: "server-console" } };
   const campaign = sourceProgramProduct(content.catalog, content.selection.source.content).expectation.campaign;
   const source = createStartupSource(options, { source: content.selection.source, match: content.selection.match,
-    rules: options.rules ?? (campaign === "ctf" || campaign === "lrctf" ? "ctf" : "standard") }, dialect, context, defaultCapacity, text => host.print(text));
+    rules: options.rules ?? (campaign === "ctf" || campaign === "lrctf" ? "ctf" : "standard") }, dialect, context, defaultCapacity, hostPrinter(host));
   registerGtvCvars(source);
-  const inputCvars = new CvarRegistry({ dialect: movement, context, print: text => host.print(text) });
+  const inputCvars = new CvarRegistry({ dialect: movement, context, print: hostPrinter(host) });
   const image = await ApplicationImageSettings.open({ deferPersistence: true, context, dialect,
     ...(options.renderWorker === undefined ? {} : { renderWorker: options.renderWorker }),
-    audioOutputFormat: (await loadAudioSettings(settings, text => host.print(text))).outputFormat ?? defaultAudioOutputFormat,
-    ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => host.print(text) });
+    audioOutputFormat: (await loadAudioSettings(settings, hostPrinter(host))).outputFormat ?? defaultAudioOutputFormat,
+    ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: hostPrinter(host) });
   const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
     consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
     mountedScript: sourceScriptReader(content.catalog, content.mounts, content.selection.engineBehavior.content),
@@ -364,7 +369,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
   try {
     const sharedArchive = [...image?.persistedEntries ?? [], ...await loadInputDeviceSettings(inputDeviceStore(options.userContentRoot))];
     if (image?.cvars.find("volume") !== undefined) {
-      const audio = await loadAudioSettings(settings, text => host.print(text));
+      const audio = await loadAudioSettings(settings, hostPrinter(host));
       if (audio.outputFormat !== undefined) {
         writeAudioOutputCvars(image.cvars, audio.outputFormat);
         sharedArchive.push(...audioOutputCvarNames.map(name => ({ name, value: image.cvars.variableString(name) })));
@@ -376,7 +381,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
     }
     if (image !== null) {
       const view = new ApplicationViewSettings(value => image.cvars.set("fov", String(value)));
-      await view.load(settings, text => host.print(text));
+      await view.load(settings, hostPrinter(host));
       const release = view.bindCvars(image.cvars);
       if (view.override !== null && !sharedArchive.some(entry => entry.name === "fov")) sharedArchive.push({ name: "fov", value: String(view.fieldOfView) });
       release();
@@ -388,10 +393,10 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
       if (client !== null && local !== null) localSeats.set(client.id, local);
       const id = local?.id ?? identity.seat(index);
       const seatContext: CommandContext = local === null ? context : { session: session.session, origin: { kind: "local-seat", seat: id, client: local.client.id } };
-      const cvars = new CvarRegistry({ dialect, context: seatContext, print: text => host.print(text), cheatsAllowed: () => source.variableValue("sv_cheats") === 1 });
+      const cvars = new CvarRegistry({ dialect, context: seatContext, print: hostPrinter(host), cheatsAllowed: () => source.variableValue("sv_cheats") === 1 });
       registerPlayerUserinfo(cvars, index, options.character === "q2" ? options.characterModel : "male"); applyCharacterAppearance(cvars, options);
       if (dialect === "q3") initializeQ3ClientCvars(cvars, { name: `Player ${index + 1}`, model: q3ClientModel(options.character, options.characterModel) });
-      const mouse = new MouseSettings(new CvarRegistry({ dialect, context: seatContext, print: text => host.print(text) }));
+      const mouse = new MouseSettings(new CvarRegistry({ dialect, context: seatContext, print: hostPrinter(host) }));
       seats.push({ context: seatContext, id, cvars, mouse,
         profile: options.dedicated ? null : await settings.loadSeat(`input/seat-${index + 1}.json`),
         archive: options.dedicated ? [] : await loadCvarArchive(configurationStore(options, content, content.selection.engineBehavior.content), ["client", content.selection.engineBehavior.content, content.selection.engineBehavior.provider, String(index)], dialect),
@@ -399,7 +404,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
     }
     const requests: ConfigurationCommandRequest[] = [];
     const prepared = new PreparedStartup(source, inputCvars, scripts, { startupCommands: options.startupCommands ?? [], ...(options.q3Product === undefined ? {} : { q3Policy: options.q3Product.policy }), dialect, movementDialect: movement, seats, shared: image?.cvars ?? null,
-      sharedNames: source.snapshots().map(variable => variable.name), print: text => host.print(text),
+      sharedNames: source.snapshots().map(variable => variable.name), print: hostPrinter(host),
       forward: (name, args, sourceContext) => {
         let origin = sourceContext.origin; while (origin.kind === "script") origin = origin.caller;
         requests.push({ target: "application", name, arguments_: args, seat: origin.kind === "local-seat" ? origin.seat : null, source: sourceContext });

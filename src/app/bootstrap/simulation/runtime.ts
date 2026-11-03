@@ -47,7 +47,7 @@ import type { WeaponBehaviorRuntimeCheckpoint } from "./weapon-behavior-runtime.
 import { quakeCFreeMovement } from "./quakec-client-adapter.ts";
 import { quakeWorldCommandSlices } from "../../../movement/q1/quakeworld.ts";
 import { prepareNativeQ2Map } from "./native-q2-map.ts";
-import { planGuestMonsters, type GuestMonsterPlan } from "./guest-monsters.ts";
+import { planGuestMonsters, GuestMonsterPlans, type GuestMonsterPlan } from "./guest-monsters.ts";
 import { createForeignQ2WorldModules, type ForeignQ2WorldModules } from "./foreign-q2-world.ts";
 import { createForeignQ1WorldModules, type ForeignQ1WorldModules } from "./foreign-q1-world.ts";
 import { parseQ1Entities } from "../../../formats/q1-map/entities.ts";
@@ -125,7 +125,6 @@ import { numberField, parseQ2Entities } from "../../../content/q2/foundation/fie
 import type { SelectedMonsterSource } from "./monster-runtime.ts";
 import { monsterSource } from "../../../content/monsters/definitions.ts";
 import type { MonsterMission } from "../../../content/monsters/authored.ts";
-import { setMonsterRoute } from "../../../content/q1/base/monsters.ts";
 import type { GrappleSlotHost } from "./grapple-runtime.ts";
 import { q2AttackFrames, q2ReverseFrames, q2WeaponAnimationRate, q2PowerupSound, q2WeaponRecoil } from "../../../content/q2/foundation/weapons/presentation.ts";
 import { readGrappleRuntimeCheckpoint } from "./grapple-checkpoint.ts";
@@ -174,6 +173,7 @@ import { Q1_Q2_SUPPLY_PROFILE, q1Q2PickupSelect, q1Q2SupplyLoadout } from "../..
 import { Q2Lmctf } from "../../../content/q2/multiplayer/lmctf/runtime.ts";
 import { emitQ2ShadowLights } from "../../../content/q2/foundation/shadow-lights.ts";
 import { SimulationBotServices } from "./bots.ts";
+import { MonsterAdmission } from "./monster-admission.ts";
 import { ForeignMatchRules } from "./foreign-match-rules.ts";
 import type { ForeignMatchHost } from "./foreign-match-host.ts";
 import { readQ1FoundationCheckpoint } from "../../../persistence/q1-foundation.ts";
@@ -334,7 +334,7 @@ export class SharedSimulation implements Simulation {
   /** Last guest health per native client, to derive pain/death/respawn. */
   private readonly nativeCharacterHealth = new Map<ActorId, number>();
   /** Selected-monster replacement plans per guest entity text. */
-  private readonly guestMonsterPlans = new Map<string, GuestMonsterPlan | null>();
+  private readonly guestMonsterPlans = new GuestMonsterPlans((text, edition) => this.planGuestMonsterReplacement(text, edition));
   private guestMonstersAdmitted = false;
   private pendingGuestMonsterReport: string | null = null;
   private readonly sharedTravelApplied = new Set<ActorId>();
@@ -1231,6 +1231,45 @@ export class SharedSimulation implements Simulation {
     this.foreignWorld = { reference, edition, program, modules, random, clock };
   }
 
+  /** The Q1 composition's host services over the simulation's shared players, combat and transitions; every Q1 world (primary or foreign adjunct) is built from this one set. */
+  private q1CompositionServices(spec: { readonly cvars: CvarRegistry; readonly campaign: Q1CampaignState; readonly campaignId: ProviderId | ProviderReference["provider"];
+    readonly content: ContentId; readonly time: () => SourceTime; readonly gravityCvar?: boolean;
+    readonly weaponServices: NonNullable<Q1CompositionServices["weaponServices"]>; readonly selectWeapon: NonNullable<Q1CompositionServices["selectWeapon"]> }): Q1CompositionServices {
+    const { cvars, campaign, campaignId, content } = spec;
+    return { sharedGrapple: this.sharedGrapple(),
+      cvar: name => cvars.variableValue(name),
+      setCvar: (name, value) => {
+        cvars.set(name, value, true);
+        if (spec.gravityCvar === true && name === "sv_gravity") this.setWorldGravity(cvars.variableValue(name));
+        if (name === "skill") { const skill = cvars.variableValue(name); if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Q1 skill must be 0..3"); campaign.skill = skill; }
+        return undefined;
+      },
+      emit: event => { if (event.kind === "level-presentation") return this.events.emit(content, { kind: "q1-level", event: event.event });
+        if (event.kind === "addon") return this.emitQ1Addon(content, event.event, spec.time());
+        return this.events.emit(content, { kind: "q1-composition", event }); },
+      selectedPlayer: actor => { const player = this.requirePlayer(actor), lifecycle = this.q1Characters.get(player.actor)?.lifecycle, life = lifecycle?.life;
+        return { deadFlag: life === "dying" ? 1 : life === "dead" ? 2 : life === "respawnable" ? 3 : (this.combat.read(actor)?.health ?? 0) > 0 ? 0 : 2,
+          isBot: this.botServices.isBot(actor), viewAngles: player.viewAngles, viewOffset: lifecycle?.viewOffset ?? this.q2Views.get(actor)?.offset ?? { x: 0, y: 0, z: player.viewHeight }, frame: player.animation.state.kind === "q1" || player.animation.state.kind === "q2" ? player.animation.state.frame : 0,
+          waterType: player.waterType === -3 || player.waterType === 32 ? "water" : player.waterType === -4 || player.waterType === 16 ? "slime" : player.waterType === -5 || player.waterType === 8 ? "lava" : "empty",
+          waterLevel: player.waterLevel === 3 ? 3 : player.waterLevel === 2 ? 2 : player.waterLevel === 1 ? 1 : 0,
+          teleportUntil: player.state.kind === "q1-netquake" ? player.state.teleportTimeSeconds : 0 }; },
+      setObserver: (actor, enabled) => { const player = this.requirePlayer(actor); this.setPlayerMovement(actor, { kind: "noclip", enabled }); this.combat.setTraits(player.actor, { canTakeDamage: !enabled }); this.bodies.link(player.actor); return undefined; },
+      placePlayer: (actor, spot, travel) => this.placeQ1Player(this.requirePlayer(actor.id), spot, travel),
+      disconnect: actor => { const player = this.requirePlayer(actor); return this.actors.release(player.actor); },
+      teleport: (actor, origin, angles, velocity, until) => { const player = this.requirePlayer(actor); return this.setPlayerMovement(actor, { kind: "teleport", origin, angles, velocity, commandAngles: player.commandAngles, holdMilliseconds: Math.max(0, (until - this.timeSeconds) * 1000), spectator: false }); },
+      weaponServices: spec.weaponServices,
+      cheatArsenal: (actor, category) => category === undefined
+        ? this.grantSelectedArsenal(actor, "weapons") && this.grantSelectedArsenal(actor, "ammo") : this.grantSelectedArsenal(actor, category),
+      giveSelectedItem: (actor, args) => this.giveSelectedItem(actor, args),
+      selectedWeapon: actor => this.playerUi(actor).activeWeapon, selectedAmmo: actor => this.playerUi(actor).ammo?.item ?? null,
+      selectWeapon: spec.selectWeapon,
+      weaponChanged: actor => { const player = this.requirePlayer(actor); player.arsenal = this.arsenal(player); return undefined; },
+      promptSupported: actor => { const player = this.player(actor); return player !== null && (this.options.promptSupported?.(player.client) ?? false); },
+      restartSession: (map, flags) => { this.q1Restart = true; campaign.flags = flags; this.transitions.admit({ kind: "campaign-level", campaign: campaignId, map: `q1:${map}`, spawnPoint: "", gates: [], cause: null }); return undefined; },
+      finishCampaign: () => { this.transitions.admit({ kind: "campaign-complete", campaign: campaignId, gates: [] }); return undefined; },
+    };
+  }
+
   /** Build the authored-family world adjunct for a foreign Q1 map. The
    * primary TS source keeps players/match ownership; the adjunct spawns
    * and steps the authored entities the primary has no spawn for. */
@@ -1256,32 +1295,9 @@ export class SharedSimulation implements Simulation {
       teamplay: "0", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", sv_cheats: "0", footsteps: "1" };
     for (const [name, value] of Object.entries(cvarDefaults)) cvars.register(name, value);
     let modules: ForeignQ1WorldModules;
-    const services: Q1CompositionServices = { sharedGrapple: this.sharedGrapple(),
-      cvar: name => cvars.variableValue(name), setCvar: (name, value) => { cvars.set(name, value, true); if (name === "skill") { const skill = cvars.variableValue(name); if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Q1 skill must be 0..3"); adjunctCampaign.skill = skill; } return undefined; },
-      emit: event => { if (event.kind === "level-presentation") return this.events.emit(content, { kind: "q1-level", event: event.event });
-        if (event.kind === "addon") return this.emitQ1Addon(content, event.event, clock.frame.time);
-        return this.events.emit(content, { kind: "q1-composition", event }); },
-      selectedPlayer: actor => { const player = this.requirePlayer(actor), lifecycle = this.q1Characters.get(player.actor)?.lifecycle, life = lifecycle?.life;
-        return { deadFlag: life === "dying" ? 1 : life === "dead" ? 2 : life === "respawnable" ? 3 : (this.combat.read(actor)?.health ?? 0) > 0 ? 0 : 2,
-          isBot: this.botServices.isBot(actor), viewAngles: player.viewAngles, viewOffset: lifecycle?.viewOffset ?? this.q2Views.get(actor)?.offset ?? { x: 0, y: 0, z: player.viewHeight }, frame: player.animation.state.kind === "q1" || player.animation.state.kind === "q2" ? player.animation.state.frame : 0,
-          waterType: player.waterType === -3 || player.waterType === 32 ? "water" : player.waterType === -4 || player.waterType === 16 ? "slime" : player.waterType === -5 || player.waterType === 8 ? "lava" : "empty",
-          waterLevel: player.waterLevel === 3 ? 3 : player.waterLevel === 2 ? 2 : player.waterLevel === 1 ? 1 : 0,
-          teleportUntil: player.state.kind === "q1-netquake" ? player.state.teleportTimeSeconds : 0 }; },
-      setObserver: (actor, enabled) => { const player = this.requirePlayer(actor); this.setPlayerMovement(actor, { kind: "noclip", enabled }); this.combat.setTraits(player.actor, { canTakeDamage: !enabled }); this.bodies.link(player.actor); return undefined; },
-      placePlayer: (actor, spot, travel) => this.placeQ1Player(this.requirePlayer(actor.id), spot, travel),
-      disconnect: actor => { const player = this.requirePlayer(actor); return this.actors.release(player.actor); },
-      teleport: (actor, origin, angles, velocity, until) => { const player = this.requirePlayer(actor); return this.setPlayerMovement(actor, { kind: "teleport", origin, angles, velocity, commandAngles: player.commandAngles, holdMilliseconds: Math.max(0, (until - this.timeSeconds) * 1000), spectator: false }); },
+    const services = this.q1CompositionServices({ cvars, campaign: adjunctCampaign, campaignId: campaign, content, time: () => clock.frame.time,
       weaponServices: () => modules.game,
-      cheatArsenal: (actor, category) => category === undefined
-        ? this.grantSelectedArsenal(actor, "weapons") && this.grantSelectedArsenal(actor, "ammo") : this.grantSelectedArsenal(actor, category),
-      giveSelectedItem: (actor, args) => this.giveSelectedItem(actor, args),
-      selectedWeapon: actor => this.playerUi(actor).activeWeapon, selectedAmmo: actor => this.playerUi(actor).ammo?.item ?? null,
-      selectWeapon: (actor, item) => this.selectedArsenal !== null && this.selectedArsenal.select(actor, item),
-      weaponChanged: actor => { const player = this.requirePlayer(actor); player.arsenal = this.arsenal(player); return undefined; },
-      promptSupported: actor => { const player = this.player(actor); return player !== null && (this.options.promptSupported?.(player.client) ?? false); },
-      restartSession: (map, flags) => { this.q1Restart = true; adjunctCampaign.flags = flags; this.transitions.admit({ kind: "campaign-level", campaign, map: `q1:${map}`, spawnPoint: "", gates: [], cause: null }); return undefined; },
-      finishCampaign: () => { this.transitions.admit({ kind: "campaign-complete", campaign, gates: [] }); return undefined; },
-    };
+      selectWeapon: (actor, item) => this.selectedArsenal !== null && this.selectedArsenal.select(actor, item) });
     modules = createForeignQ1WorldModules({ host: this.q1ActorHost(reference, runtime), program, campaign: adjunctCampaign, services,
       foundation: { provider: reference.provider, edition, skill: this.options.skill, physicsEdition: this.q1PhysicsEdition,
         deathmatch: this.options.mode === "deathmatch" ? 1 : 0, coop: this.options.mode === "coop", maxClients: this.options.maxClients,
@@ -1339,6 +1355,12 @@ export class SharedSimulation implements Simulation {
     return undefined;
   }
 
+  private monsterAdmission(selected: () => SelectedMonsters | null): MonsterAdmission {
+    return new MonsterAdmission({ recipe: this.recipe, actors: this.actors, physics: this.physics, scene: this.scene,
+      execution: actor => this.actorExecutions.get(actor), sourceFor: definition => this.monsterSourceFor(definition),
+      definitionOf: actor => selected()?.definitions.get(actor) });
+  }
+
   private prepareSelectedMonsters(): undefined {
     const selection = this.recipe.enemies;
     if (selection.kind !== "replace") return undefined;
@@ -1352,15 +1374,12 @@ export class SharedSimulation implements Simulation {
       : foreignQ2 !== null ? { kind: "q2", game: foreignQ2.modules.game, items: foreignQ2.modules.items } : primary;
     const authoredMonsters = foreignQ2 !== null ? foreignQ2.modules.monsters : primary.kind === "q2" ? primary.monsters : null;
     const authoredMovers = foreignQ2 !== null ? foreignQ2.modules.movers : primary.kind === "q2" ? primary.movers : null;
+    const admission = this.monsterAdmission(() => selected);
     const selected = new SelectedMonsters(selection, map, { attach: (actor, definition, mission) => this.attachMonster(actor, definition, mission),
       validatePlacement: (entry, definition, relocated) => {
-        const body = this.bodies.read(entry.actor.id);
-        if (body === null) throw new Error("Started selected monster has no shared body");
-        const source = this.monsterSourceFor(definition);
-        const trace = this.scene.geometryTrace({ start: body.origin, end: body.origin, shape: { kind: "box", bounds: body.bounds },
-          target: { kind: "world" }, passActor: entry.actor.id, numeric: providerTiming(this.recipe, definition.source.provider).numeric,
-          policy: source.kind === "q1" ? { kind: "q1", move: "normal", hull: null } : { kind: "q2", contentsMask: 1, leafContents: "merged" } });
-        if (trace.startSolid || trace.allSolid) {
+        const { body, strategy, solid } = admission.probe(entry, definition);
+        const source = strategy.source;
+        if (solid) {
           if (map.kind === "q1" && isQ1TeleportStaging(map.game, body)) {
             entry.placement = { kind: "teleport", origin: body.origin };
             return true;
@@ -1385,18 +1404,13 @@ export class SharedSimulation implements Simulation {
               : this.options.world.kind === "q1-bsp" ? this.options.world.entityList[entry.sourceOrdinal]?.properties.find(property => property.key === "origin")?.value : undefined;
             const flags = entity?.movementFlags ?? q2Entity?.flags ?? 0;
             const locomotion = (flags & 2) !== 0 ? "swim" : (flags & 1) !== 0 ? "fly" : "walk";
-            const medium = (origin: Vec3): number => {
-              if (source.kind === "q2") return source.game.host.pointContents(origin) & 56;
-              const contents = source.game.host.contents(origin);
-              return contents === "water" ? 32 : contents === "slime" ? 16 : contents === "lava" ? 8 : 0;
-            };
+            const medium = (origin: Vec3): number => strategy.medium(origin);
             const originalMedium = medium(body.origin);
             const blockers: ActorId[] = [];
             const search = (excluded: readonly ActorId[]) => nativeBounds === undefined || position === undefined ? null : nearbyMonsterPlacement({ body, locomotion, worldActor: this.worldActor(),
               sameMedium: origin => medium(origin) === originalMedium,
               authored: { origin: relocated ?? parseVector(position), bounds: nativeBounds, locomotion: nativeMovement === "fly" || nativeMovement === "swim" ? nativeMovement : "walk" },
-              query: { target: { kind: "world" }, passActor: entry.actor.id, numeric: providerTiming(this.recipe, definition.source.provider).numeric,
-                policy: source.kind === "q1" ? { kind: "q1", move: "normal", hull: null } : { kind: "q2", contentsMask: 1, leafContents: "merged" } },
+              query: admission.query(entry, definition, strategy),
               blockedBy: actor => { if (!blockers.some(value => value.equals(actor))) blockers.push(actor); return undefined; },
               trace: query => this.scene.traceExcluding(query, excluded) });
             const placement = search([]);
@@ -1420,7 +1434,7 @@ export class SharedSimulation implements Simulation {
                 this.bodies.link(entry.actor);
                 return false;
               }
-              throw new Error(`Selected monster placement obstructed in ${this.recipe.map.geometry.requestedPath}: source ${entry.sourceOrdinal} ${entry.classname} -> ${definition.source.provider}/${definition.classname}`);
+              throw admission.obstructed(entry, definition);
             }
             this.bodies.write(entry.actor, { ...body, ...placement });
             if (entity !== null && locomotion === "walk") entity.movementFlags |= 512;
@@ -1442,31 +1456,7 @@ export class SharedSimulation implements Simulation {
           return !traversal.locked && traversal.destination === null && (origin.x !== barrier.origin.x || origin.y !== barrier.origin.y || origin.z !== barrier.origin.z);
         });
       },
-      resume: (actor, activator) => {
-        const entry = this.actorExecutions.get(actor);
-        if (entry === undefined || (entry.kind === "q3" || entry.kind === "q3-source") || entry.kind === "quakec") throw new Error("Activated monster has no creature source continuation");
-        if (entry.kind === "q1") {
-          const start = entry.entity.think; entry.services.cancel(entry.entity);
-          start?.();
-          if (this.actors.isLive(actor) && activator !== null) entry.entity.use?.(null, activator);
-        } else {
-          const start = entry.entity.think; entry.services.cancel(entry.entity);
-          start?.(entry.entity, entry.services);
-          if (this.actors.isLive(actor) && activator !== null) entry.entity.use?.(entry.entity, entry.services, null, activator);
-        }
-        return undefined;
-      },
-      enemy: actor => { const entry = this.actorExecutions.get(actor); return entry?.kind === "q1" ? entry.entity.monster?.enemy ?? null : entry?.kind === "q2" ? entry.entity.enemy : null; },
-      oldEnemy: actor => { const entry = this.actorExecutions.get(actor); return entry?.kind === "q1" ? entry.entity.monster?.oldEnemy ?? null : entry?.kind === "q2" ? entry.readMonster()?.oldEnemy ?? null : null; },
-      setRoute: (actor, goal, pauseUntil) => {
-        const definition = selected.definitions.get(actor);
-        if (definition === undefined) throw new Error("Selected route actor has no creature definition");
-        const source = this.monsterSourceFor(definition);
-        if (source.kind === "q2") return source.monsters.setRoute(actor, goal, pauseUntil);
-        const entity = source.game.entity(actor);
-        if (entity === null) throw new Error("Selected Q1 route actor has no source continuation");
-        return setMonsterRoute(source.game, entity, goal, pauseUntil);
-      } });
+      ...admission });
     for (const definition of selectedMonsterDefinitions(selection)) this.monsterSourceFor(definition);
     if (map.kind === "q1") {
       map.game.monsterAdmission = { resolve: (classname, source) => selected.resolve(classname, new Map(source.properties.map(property => [property.key, property.value]))), spawn: (actor, fields, ordinal, definition) => selected.admitQ1(actor, fields, ordinal, definition) };
@@ -1517,22 +1507,17 @@ export class SharedSimulation implements Simulation {
     return entries;
   }
 
-  private guestMonsterPlan(text: string, edition: "classic" | "rerelease"): GuestMonsterPlan | null {
-    const key = edition + "\0" + text;
-    const cached = this.guestMonsterPlans.get(key);
-    if (cached !== undefined) return cached;
+  private guestMonsterPlan(text: string, edition: "classic" | "rerelease"): GuestMonsterPlan | null { return this.guestMonsterPlans.plan(text, edition); }
+
+  private guestMonsterEntities(text: string, edition: "classic" | "rerelease"): string { return this.guestMonsterPlans.entities(text, edition); }
+
+  private planGuestMonsterReplacement(text: string, edition: "classic" | "rerelease"): GuestMonsterPlan | null {
     const selection = this.recipe.enemies;
     // Only native guest spawn sites call this, and some run before the
     // source runtime exists; gate on the recipe alone so early calls
     // cannot cache an empty plan.
-    const plan = selection.kind !== "replace" ? null : planGuestMonsters(text, edition,
+    return selection.kind !== "replace" ? null : planGuestMonsters(text, edition,
       this.options.world.kind === "q1-bsp" ? "q1" : this.options.world.kind === "q3-bsp" ? "q3" : "q2", selection, this.options.skill, this.options.mode, this.guestMonsterProjection(edition));
-    this.guestMonsterPlans.set(key, plan);
-    return plan;
-  }
-
-  private guestMonsterEntities(text: string, edition: "classic" | "rerelease"): string {
-    return this.guestMonsterPlan(text, edition)?.entities ?? text;
   }
 
   /** Selected monsters for worlds whose source program is not itself a
@@ -1578,15 +1563,11 @@ export class SharedSimulation implements Simulation {
       if (adjunctGame === null) throw new Error("Native monster adjunct game was not created");
       map = { kind: "q2", game: adjunctGame, items: createQ2ItemModule({ weaponPicked: () => undefined, silencer: () => undefined, powerArmor: () => undefined, foreignItems: q3ForeignItemDefinitions }) };
     }
+    const admission = this.monsterAdmission(() => selected);
     const selected = new SelectedMonsters(selection, map, { attach: (actor, definition, mission) => this.attachMonster(actor, definition, mission),
       validatePlacement: (entry, definition, relocated) => {
-        const body = this.bodies.read(entry.actor.id);
-        if (body === null) throw new Error("Started selected monster has no shared body");
-        const monsterSource = this.monsterSourceFor(definition);
-        const trace = this.scene.geometryTrace({ start: body.origin, end: body.origin, shape: { kind: "box", bounds: body.bounds },
-          target: { kind: "world" }, passActor: entry.actor.id, numeric: providerTiming(this.recipe, definition.source.provider).numeric,
-          policy: monsterSource.kind === "q1" ? { kind: "q1", move: "normal", hull: null } : { kind: "q2", contentsMask: 1, leafContents: "merged" } });
-        if (trace.startSolid || trace.allSolid) {
+        const { body, strategy, solid } = admission.probe(entry, definition);
+        if (solid) {
           const native = modules === null ? null : modules.monsters.definition(entry.classname, modules.game);
           const species = modules === null ? baseSpecies.find(candidate => candidate.classnames.includes(entry.classname)) : undefined;
           // Authored hulls drive reachability; classes without a species
@@ -1596,50 +1577,21 @@ export class SharedSimulation implements Simulation {
           const nativeMovement = native?.locomotion ?? species?.movement;
           const authored = parseQ2Entities(this.options.world.entities, edition)[entry.sourceOrdinal];
           const position = authored?.values.get("origin");
-          const medium = (origin: Vec3): number => {
-            if (monsterSource.kind === "q2") return monsterSource.game.host.pointContents(origin) & 56;
-            const contents = monsterSource.game.host.contents(origin);
-            return contents === "water" ? 32 : contents === "slime" ? 16 : contents === "lava" ? 8 : 0;
-          };
+          const medium = (origin: Vec3): number => strategy.medium(origin);
           const originalMedium = medium(body.origin);
           const placement = position === undefined ? null : nearbyMonsterPlacement({ body, locomotion: "walk", worldActor: this.worldActor(),
             sameMedium: origin => medium(origin) === originalMedium,
             authored: { origin: relocated ?? parseVector(position), bounds: nativeBounds, locomotion: nativeMovement === "fly" || nativeMovement === "swim" ? nativeMovement : "walk" },
-            query: { target: { kind: "world" }, passActor: entry.actor.id, numeric: providerTiming(this.recipe, definition.source.provider).numeric,
-              policy: monsterSource.kind === "q1" ? { kind: "q1", move: "normal", hull: null } : { kind: "q2", contentsMask: 1, leafContents: "merged" } },
+            query: admission.query(entry, definition, strategy),
             blockedBy: () => undefined, trace: query => this.scene.traceExcluding(query, []) });
-          if (placement === null) throw new Error(`Selected monster placement obstructed in ${this.recipe.map.geometry.requestedPath}: source ${entry.sourceOrdinal} ${entry.classname} -> ${definition.source.provider}/${definition.classname}`);
+          if (placement === null) throw admission.obstructed(entry, definition);
           this.bodies.write(entry.actor, { ...body, ...placement });
           this.bodies.link(entry.actor);
         }
         return true;
       },
       placementReady: () => false,
-      resume: (actor, activator) => {
-        const entry = this.actorExecutions.get(actor);
-        if (entry === undefined || (entry.kind === "q3" || entry.kind === "q3-source") || entry.kind === "quakec") throw new Error("Activated monster has no creature source continuation");
-        if (entry.kind === "q1") {
-          const start = entry.entity.think; entry.services.cancel(entry.entity);
-          start?.();
-          if (this.actors.isLive(actor) && activator !== null) entry.entity.use?.(null, activator);
-        } else {
-          const start = entry.entity.think; entry.services.cancel(entry.entity);
-          start?.(entry.entity, entry.services);
-          if (this.actors.isLive(actor) && activator !== null) entry.entity.use?.(entry.entity, entry.services, null, activator);
-        }
-        return undefined;
-      },
-      enemy: actor => { const entry = this.actorExecutions.get(actor); return entry?.kind === "q1" ? entry.entity.monster?.enemy ?? null : entry?.kind === "q2" ? entry.entity.enemy : null; },
-      oldEnemy: actor => { const entry = this.actorExecutions.get(actor); return entry?.kind === "q1" ? entry.entity.monster?.oldEnemy ?? null : entry?.kind === "q2" ? entry.readMonster()?.oldEnemy ?? null : null; },
-      setRoute: (actor, goal, pauseUntil) => {
-        const definition = selected.definitions.get(actor);
-        if (definition === undefined) throw new Error("Selected route actor has no creature definition");
-        const routeSource = this.monsterSourceFor(definition);
-        if (routeSource.kind === "q2") return routeSource.monsters.setRoute(actor, goal, pauseUntil);
-        const entity = routeSource.game.entity(actor);
-        if (entity === null) throw new Error("Selected Q1 route actor has no source continuation");
-        return setMonsterRoute(routeSource.game, entity, goal, pauseUntil);
-      } });
+      ...admission });
     for (const definition of selectedMonsterDefinitions(selection)) this.monsterSourceFor(definition);
     this.selectedMonsters = selected;
     return undefined;
@@ -3284,6 +3236,8 @@ export class SharedSimulation implements Simulation {
       if (this.options.restore === undefined) cvars.set("nextserver", this.options.q2NextServer ?? "", true);
       this.q2ServerRegistry = cvars;
       this.initializeServerSettings(cvars);
+      // A map start is where a latched server setting takes effect, and the guest reads the live value when it initializes.
+      if (retained === undefined && this.options.restore === undefined) cvars.applyLatched();
       if (this.options.restore !== undefined) restoreQ2ServerCvars(cvars, savedSourceCvars(this.options.restore));
       const runtime: ActorHostRuntime = { numeric: timing.numeric, random: this.random, now: () => this.timeSeconds, frameSeconds: () => native.edition === "classic" ? 0.1 : 0.025,
         schedule: (actor, due) => due === null ? this.scheduler.cancel(actor) : this.schedule(actor, due) };
@@ -3665,36 +3619,13 @@ export class SharedSimulation implements Simulation {
         if (cvars.find("horde") === undefined) cvars.register("horde", "0");
         cvars.set("horde", "1", true);
       }
-      const services: Q1CompositionServices = { sharedGrapple: this.sharedGrapple(),
-        cvar: name => cvars.variableValue(name), setCvar: (name, value) => { cvars.set(name, value, true); if (name === "sv_gravity") this.setWorldGravity(cvars.variableValue(name)); if (name === "skill") { const skill = cvars.variableValue(name); if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Q1 skill must be 0..3"); this.q1Campaign.skill = skill; } return undefined; },
-        emit: event => { if (event.kind === "level-presentation") return this.events.emit(content, { kind: "q1-level", event: event.event });
-          if (event.kind === "addon") return this.emitQ1Addon(content, event.event, this.sourceFrame.time);
-          return this.events.emit(content, { kind: "q1-composition", event }); },
-        selectedPlayer: actor => { const player = this.requirePlayer(actor), lifecycle = this.q1Characters.get(player.actor)?.lifecycle, life = lifecycle?.life;
-          return { deadFlag: life === "dying" ? 1 : life === "dead" ? 2 : life === "respawnable" ? 3 : (this.combat.read(actor)?.health ?? 0) > 0 ? 0 : 2,
-            isBot: this.botServices.isBot(actor), viewAngles: player.viewAngles, viewOffset: lifecycle?.viewOffset ?? this.q2Views.get(actor)?.offset ?? { x: 0, y: 0, z: player.viewHeight }, frame: player.animation.state.kind === "q1" || player.animation.state.kind === "q2" ? player.animation.state.frame : 0,
-            waterType: player.waterType === -3 || player.waterType === 32 ? "water" : player.waterType === -4 || player.waterType === 16 ? "slime" : player.waterType === -5 || player.waterType === 8 ? "lava" : "empty",
-            waterLevel: player.waterLevel === 3 ? 3 : player.waterLevel === 2 ? 2 : player.waterLevel === 1 ? 1 : 0,
-            teleportUntil: player.state.kind === "q1-netquake" ? player.state.teleportTimeSeconds : 0 }; },
-        setObserver: (actor, enabled) => { const player = this.requirePlayer(actor); this.setPlayerMovement(actor, { kind: "noclip", enabled }); this.combat.setTraits(player.actor, { canTakeDamage: !enabled }); this.bodies.link(player.actor); return undefined; },
-        placePlayer: (actor, spot, travel) => this.placeQ1Player(this.requirePlayer(actor.id), spot, travel),
-        disconnect: actor => { const player = this.requirePlayer(actor); return this.actors.release(player.actor); },
-        teleport: (actor, origin, angles, velocity, until) => { const player = this.requirePlayer(actor); return this.setPlayerMovement(actor, { kind: "teleport", origin, angles, velocity, commandAngles: player.commandAngles, holdMilliseconds: Math.max(0, (until - this.timeSeconds) * 1000), spectator: false }); },
+      const services = this.q1CompositionServices({ cvars, campaign: this.q1Campaign, campaignId: campaign, content, time: () => this.sourceFrame.time, gravityCvar: true,
         weaponServices: () => this.selectedWeaponSource?.kind === "q1" ? this.selectedWeaponSource.game : this.selectedArsenal === null && this.source.kind === "q1" ? this.source.game : null,
-        cheatArsenal: (actor, category) => category === undefined
-          ? this.grantSelectedArsenal(actor, "weapons") && this.grantSelectedArsenal(actor, "ammo") : this.grantSelectedArsenal(actor, category),
-        giveSelectedItem: (actor, args) => this.giveSelectedItem(actor, args),
-        selectedWeapon: actor => this.playerUi(actor).activeWeapon, selectedAmmo: actor => this.playerUi(actor).ammo?.item ?? null,
         selectWeapon: (actor, item) => { if (this.source.kind !== "q1") return false;
           if (this.selectedArsenal !== null) return this.selectedArsenal.select(actor, item);
           const game = this.source.game;
           const weapon = [...Q1_WEAPONS, ...game.registeredWeapons.keys()].find(value => game.weaponItem(value) === item);
-          return weapon !== undefined && game.selectWeapon(this.requirePlayer(actor).actor, weapon); },
-        weaponChanged: actor => { const player = this.requirePlayer(actor); player.arsenal = this.arsenal(player); return undefined; },
-        promptSupported: actor => { const player = this.player(actor); return player !== null && (this.options.promptSupported?.(player.client) ?? false); },
-        restartSession: (map, flags) => { this.q1Restart = true; this.q1Campaign.flags = flags; this.transitions.admit({ kind: "campaign-level", campaign, map: `q1:${map}`, spawnPoint: "", gates: [], cause: null }); return undefined; },
-        finishCampaign: () => { this.transitions.admit({ kind: "campaign-complete", campaign, gates: [] }); return undefined; },
-      };
+          return weapon !== undefined && game.selectWeapon(this.requirePlayer(actor).actor, weapon); } });
       const selectedProgram = selectedSourceProgram(recipe);
       // Quake 64 is the id1 campaign on N64-authored maps; its BSP/texture
       // dialect is handled by the unified Q1 map reader, not a new program.
@@ -6999,13 +6930,11 @@ export class SharedSimulation implements Simulation {
       const source = this.source, content = this.recipe.map.entities.content;
       for (const state of source.game.entityStates()) {
         const info = source.game.entityInfo(state.number);
-        if (state.number > 0 && state.number < 14) console.log('DBG3', state.number, info.actor === null, info.active, info.serverFlags, state.modelIndexes);
         if (state.number === 0 || info.actor === null || !info.active || (info.serverFlags & 1) !== 0) continue;
         // A foreign selected character replaces the guest player model;
         // the selected-character presentation below draws this actor.
         if (this.foreignNativeCharacter() && this.nativeCharacterHost(info.actor) !== undefined) continue;
         const appearance = source.game.modelAppearance(state.number);
-        if (appearance.path.startsWith('players/')) console.log('DBG2', state.number, appearance.path, state.frame, this.nativeCharacterHost(info.actor) !== undefined);
         const delta = { x: state.origin.x - state.oldOrigin.x, y: state.origin.y - state.oldOrigin.y, z: state.origin.z - state.oldOrigin.z };
         const continuous = fraction < 1 && delta.x * delta.x + delta.y * delta.y + delta.z * delta.z <= 512 * 512;
         const model = { actor: info.actor, content, family: "q2", frame: state.frame, oldFrame: "oldFrame" in state ? state.oldFrame : state.frame,
