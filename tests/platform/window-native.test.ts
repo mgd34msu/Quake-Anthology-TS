@@ -20,7 +20,9 @@ describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL w
     expect(process.env["WAYLAND_DISPLAY"]).toBeUndefined();
     expect(process.env["SDL_AUDIODRIVER"]).toBe("dummy");
     const driver = process.env["SDL_VIDEODRIVER"];
-    if (driver !== "dummy") {
+    // The offscreen driver (the GL tier's default) needs no display at all.
+    if (driver === "offscreen") expect(process.env["DISPLAY"]).toBeUndefined();
+    else if (driver !== "dummy") {
       expect(driver).toBe("x11");
       expect(process.env["DISPLAY"]).toBe(process.env["QUAKE_OWNED_DISPLAY"]);
       expect(process.env["DISPLAY"]).toMatch(/^:\d+$/);
