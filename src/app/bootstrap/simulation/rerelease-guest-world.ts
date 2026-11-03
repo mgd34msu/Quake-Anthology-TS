@@ -22,7 +22,8 @@ export interface RereleaseGuestWorldOptions {
 }
 export interface RereleaseGuestSave {
   readonly game: RereleaseSourceSave;
-  readonly level: RereleaseSourceSave;
+  /** Null when the save never wrote the current level, which then spawns fresh. */
+  readonly level: RereleaseSourceSave | null;
 }
 export interface RereleaseGuestRevisit {
   readonly level: RereleaseSourceSave;
@@ -469,7 +470,7 @@ export class RereleaseGuestWorld {
     this.#phase = "initialized";
     this.services.drainMessages();
     restoreServerState();
-    this.source.host.readSave("level", saved.level, "checkpoint");
+    if (saved.level !== null) this.source.host.readSave("level", saved.level, "checkpoint");
     this.services.completeSpawn();
     this.#phase = "running";
   }
@@ -484,7 +485,7 @@ export class RereleaseGuestWorld {
       this.#phase = "initialized";
       this.services.drainMessages();
       restoreServerState();
-      await this.source.host.readSaveLoading("level", saved.level, nextFrame, "checkpoint");
+      if (saved.level !== null) await this.source.host.readSaveLoading("level", saved.level, nextFrame, "checkpoint");
       this.services.completeSpawn();
       this.#phase = "running";
     });

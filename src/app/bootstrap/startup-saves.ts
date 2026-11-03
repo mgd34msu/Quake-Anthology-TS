@@ -3,7 +3,8 @@ import { mkdir, readdir, stat } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 import type { NativeSaveLayout } from "../../settings/native-saves.ts";
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
-import { kexQ2SaveRestorable, readKexQ2SaveArchive } from "../../persistence/kex-q2-save.ts";
+import { readKexQ2SaveArchive } from "../../persistence/kex-q2-save.ts";
+import { q2ClassicFolderHeader } from "../../persistence/q2-save-folder.ts";
 import { readSavedGame, readSaveHeader } from "../../persistence/saved-game.ts";
 import { selectQ1SaveProduct } from "../../persistence/q1-selection.ts";
 import { savedSimulationSettings } from "./simulation/index.ts";
@@ -26,6 +27,21 @@ export async function resolveExternalSavePath(directories: readonly string[], na
     }
   }
   return null;
+}
+
+/** Quake II keeps one folder per save. Each is listed once: by its `server.ssv` when the original format is there, else by the engine image. */
+async function scanSlotFolders(root: string, collect: (path: string) => void, fail: (message: string) => void): Promise<void> {
+  try {
+    for (const entry of await readdir(root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name.toLowerCase() === "current") continue;
+      const names = await readdir(join(root, entry.name));
+      const handle = names.find(name => name.toLowerCase() === "server.ssv") ?? names.find(name => name.toLowerCase() === "qts.sav");
+      if (handle !== undefined) collect(join(root, entry.name, handle));
+    }
+  } catch (cause) {
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return;
+    fail("Some saved games could not be read. Check access and refresh.");
+  }
 }
 
 export interface StartupSaveRow {
@@ -62,6 +78,8 @@ export class StartupSaves {
     private readonly nativeFolders: readonly {
       readonly root: string;
       readonly depth: number;
+      /** A Quake II slot is a folder of files, listed once through its `server.ssv` or else its engine image. */
+      readonly arrangement?: "files" | "folders";
     }[] = [],
   ) {}
   get list(): StartupSaveList {
@@ -79,7 +97,8 @@ export class StartupSaves {
     if (!/^[\p{L}\p{N} _-]{1,48}$/u.test(label)) throw new Error("Use 1-48 letters, numbers, spaces, - or _.");
     const path = native === null ? join(this.directory, `${label}.sav`) : native.locate(label);
     await mkdir(dirname(path), { recursive: true });
-    if (await Bun.file(path).exists()) throw new Error("Name exists. Select its slot to overwrite.");
+    for (const taken of native === null ? [path] : [path, native.originalPath(label)])
+      if (taken !== null && (await Bun.file(taken).exists())) throw new Error("Name exists. Select its slot to overwrite.");
     return path;
   }
   async refresh(): Promise<void> {
@@ -114,19 +133,15 @@ export class StartupSaves {
         seen.add(path);
         files.push({ path, id: `external/${index}/${relative(root, path)}` });
       });
-    for (const [index, folder] of this.nativeFolders.entries())
-      await scan(
-        folder.root,
-        path => {
-          if (seen.has(path)) return;
-          seen.add(path);
-          files.push({
-            path,
-            id: `native/${index}/${relative(folder.root, path)}`,
-          });
-        },
-        folder.depth,
-      );
+    for (const [index, folder] of this.nativeFolders.entries()) {
+      const collect = (path: string): void => {
+        if (seen.has(path)) return;
+        seen.add(path);
+        files.push({ path, id: `native/${index}/${relative(folder.root, path)}` });
+      };
+      if (folder.arrangement === "folders") await scanSlotFolders(folder.root, collect, message => (error = message));
+      else await scan(folder.root, collect, folder.depth);
+    }
     for (const { path, id } of files) {
       const identity = await stat(path).catch(() => null);
       const cached = identity === null ? undefined : this.rowCache.get(path);
@@ -149,11 +164,10 @@ export class StartupSaves {
           map = "Unknown map",
           game = "Quake II (rerelease)",
           savedAtMilliseconds = 0;
-        let unavailable: string | null = "Retail Quake II saves with recorded client or level state cannot be restored by this engine yet.";
+        let unavailable: string | null = null;
         try {
           savedAtMilliseconds = (await stat(path)).mtimeMs;
-          const save = await readKexQ2SaveArchive(path),
-            info = save.info;
+          const info = (await readKexQ2SaveArchive(path)).info;
           if (info.comment !== "") label = info.comment;
           map = info.mapCommand;
           if (info.timestamp > 0n && info.timestamp < 253402300800n) savedAtMilliseconds = Number(info.timestamp) * 1000;
@@ -164,13 +178,38 @@ export class StartupSaves {
               basename(candidate.expectation.contentDirectory).toLowerCase() === (info.gameDirectory ?? "").toLowerCase(),
           );
           if (product !== undefined) game = `${product.expectation.title} (${product.expectation.edition})`;
-          if (kexQ2SaveRestorable(save))
-            unavailable = product === undefined || product.availability.kind !== "installed" ? "Required game content is not installed." : null;
+          if (product === undefined || product.availability.kind !== "installed") unavailable = "Required game content is not installed.";
         } catch (cause) {
           unavailable = cause instanceof Error ? cause.message : "This saved game is unreadable or uses an unsupported save version.";
         }
         paths.set(id, path);
         rows.push(remember({ id, label, map, game, savedAtMilliseconds, unavailable }));
+        continue;
+      }
+      if (basename(path).toLowerCase() === "server.ssv") {
+        const slot = basename(dirname(path)),
+          gameDirectory = basename(dirname(dirname(dirname(path))));
+        let label = slot,
+          map = "Unknown map",
+          unavailable: string | null = null,
+          game = "Quake II";
+        try {
+          const header = q2ClassicFolderHeader(await Bun.file(path).bytes());
+          label = header.comment.trim() === "" ? slot : header.comment.trim();
+          map = header.map.replace(/^maps\//, "").replace(/\.bsp$/, "");
+          const product = this.catalog.products.find(
+            candidate =>
+              candidate.expectation.family === "q2" &&
+              candidate.expectation.edition === "classic" &&
+              basename(candidate.expectation.contentDirectory).toLowerCase() === gameDirectory.toLowerCase(),
+          );
+          if (product !== undefined) game = `${product.expectation.title} (${product.expectation.edition})`;
+          if (product === undefined || product.availability.kind !== "installed") unavailable = "Required game content is not installed.";
+        } catch (cause) {
+          unavailable = cause instanceof Error ? cause.message : "This saved game is unreadable or uses an unsupported save version.";
+        }
+        paths.set(id, path);
+        rows.push(remember({ id, label, map, game, savedAtMilliseconds: identity?.mtimeMs ?? 0, unavailable }));
         continue;
       }
       const name = basename(path).replace(/\.sav$/i, "");

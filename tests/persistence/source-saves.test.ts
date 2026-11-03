@@ -37,7 +37,7 @@ import { openArchive } from "../../src/content/archive/index.ts";
 import { QcMachine, QcEntityMemory, classicQcEntityLayout, createQcBuiltins, loadQcProgram } from "../../src/compat/qc/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../src/core/numeric.ts";
 
-// No WinQuake save or q2repro rerelease-format save is in the corpus; QTS_TEST_Q1_REFERENCE_SAVE and QTS_TEST_Q2_REFERENCE_SAVE_DIR supply them.
+// No WinQuake save or q2repro rerelease-format save is in the corpus; QTS_TEST_Q1_REFERENCE_SAVE and QTS_TEST_Q2_REFERENCE_SAVE_DIR (an unpacked rerelease save) supply them.
 // A variable that is set but names a missing path fails instead of skipping.
 function referencePath(variable: string): string | null {
   const value = process.env[variable];
@@ -94,14 +94,14 @@ test.skipIf(q1Save === "")("reads and rewrites the actual WinQuake reference sav
   }
 });
 
-test.skipIf(q2Root === "")("roundtrips actual q2repro rerelease engine and game saves", async () => {
+test.skipIf(q2Root === "")("roundtrips an actual rerelease engine save folder's server, level and game files", async () => {
   const serverBytes = new Uint8Array(await Bun.file(join(q2Root, "server.ssv")).arrayBuffer());
   const server = decodeQ2RereleaseServer(serverBytes);
   expect(server.mapCommand).toContain("base1");
   expect(encodeQ2RereleaseServer(server)).toEqual(serverBytes);
   const levelBytes = new Uint8Array(await Bun.file(join(q2Root, "base1.sv2")).arrayBuffer());
-  const levelMetadata = decodeQ2RereleaseLevelMetadata(levelBytes, 12448);
-  expect(encodeQ2RereleaseLevelMetadata(levelMetadata, 12448)).toEqual(levelBytes);
+  const levelMetadata = decodeQ2RereleaseLevelMetadata(levelBytes);
+  expect(encodeQ2RereleaseLevelMetadata(levelMetadata)).toEqual(levelBytes);
   const game = decodeQ2RereleaseGame(await Bun.file(join(q2Root, "game.ssv")).text());
   expect(decodeQ2RereleaseGame(encodeQ2RereleaseGame(game))).toEqual(game);
   const level = decodeQ2RereleaseLevel(await Bun.file(join(q2Root, "base1.sav")).text());

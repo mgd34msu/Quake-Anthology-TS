@@ -110,64 +110,54 @@ test("Quake saves reject truncated or unsupported headers instead of guessing", 
   expect(() => decodeQ1Save(new TextEncoder().encode(text.slice(0, 300)))).toThrow();
 });
 
-/** q2repro src/server/save.c: the server.ssv magic "SSV2", version 1, a 64-bit timestamp, a kind byte, then C strings; the cvar list ends with an empty name. */
+/** The rerelease engine's server.ssv: "EVAS", a kind byte, u32-length strings, a 64-bit timestamp, then the latched cvar pairs to the end of the file. */
 function rereleaseServer(): Uint8Array {
   const parts: number[] = [];
   const u32 = (value: number): void => {
-    const view = new DataView(new ArrayBuffer(4));
-    view.setUint32(0, value, true);
-    parts.push(...new Uint8Array(view.buffer));
+    parts.push(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255);
   };
   const text = (value: string): void => {
-    parts.push(...new TextEncoder().encode(value), 0);
+    u32(value.length);
+    parts.push(...new TextEncoder().encode(value));
   };
-  u32(0x32565353);
-  u32(1);
-  u32(0x6531a2b4);
-  u32(0x1);
+  parts.push(...new TextEncoder().encode("EVAS"));
   parts.push(1);
   text("Outer Base");
-  text('gamemap "*base1"');
+  u32(0x6531a2b4);
+  u32(0x1);
+  text("base1");
   const settings: readonly (readonly [string, string])[] = [
     ["skill", "1"],
     ["deathmatch", "0"],
     ["coop", "0"],
     ["g_coop_squad_respawn", "1"],
+    ["g_start_items", ""],
   ];
   for (const [name, value] of settings) {
     text(name);
     text(value);
   }
-  text("");
   return Uint8Array.from(parts);
 }
 
-/** The level metadata container: "SAV2", version 1, (u16 index, C string) pairs up to the terminator index, then a length-prefixed portal bitmap. */
-function rereleaseLevel(configstringEnd: number): Uint8Array {
+/** The level metadata (.sv2): (u32 index, u8 length, text) per non-empty slot, an index of -1, then the u16 portal count and one byte per portal. */
+function rereleaseLevel(): Uint8Array {
   const parts: number[] = [];
-  const u16 = (value: number): void => {
-    parts.push(value & 255, value >>> 8);
-  };
   const u32 = (value: number): void => {
     parts.push(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255);
   };
-  const text = (value: string): void => {
-    parts.push(...new TextEncoder().encode(value), 0);
-  };
-  u32(0x32564153);
-  u32(1);
   const configstrings: readonly (readonly [number, string])[] = [
     [0, "Outer Base"],
     [3, "maps/base1.bsp"],
     [34, "base1"],
-    [1500, "#w_blaster"],
+    [11999, "#w_blaster"],
   ];
   for (const [index, value] of configstrings) {
-    u16(index);
-    text(value);
+    u32(index);
+    parts.push(value.length, ...new TextEncoder().encode(value));
   }
-  u16(configstringEnd);
-  parts.push(3, 0xff, 0x01, 0x80);
+  u32(0xffffffff);
+  parts.push(3, 0, 1, 0, 1);
   return Uint8Array.from(parts);
 }
 
@@ -177,21 +167,24 @@ test("a hand-assembled rerelease server.ssv and level container decode and re-en
   expect(decoded.kind).toBe(1);
   expect(decoded.timestamp).toBe((1n << 32n) | 0x6531a2b4n);
   expect(decoded.comment).toBe("Outer Base");
-  expect(decoded.mapCommand).toBe('gamemap "*base1"');
-  expect(decoded.cvars.map(cvar => cvar.name)).toEqual(["skill", "deathmatch", "coop", "g_coop_squad_respawn"]);
+  expect(decoded.mapCommand).toBe("base1");
+  expect(decoded.cvars.map(cvar => cvar.name)).toEqual(["skill", "deathmatch", "coop", "g_coop_squad_respawn", "g_start_items"]);
   expect(encodeQ2RereleaseServer(decoded)).toEqual(server);
   expect(() => decodeQ2RereleaseServer(server.slice(0, server.length - 4))).toThrow();
   const bad = server.slice();
-  bad[4] = 2;
-  expect(() => decodeQ2RereleaseServer(bad)).toThrow("unsupported server save version");
+  bad[0] = 0x53;
+  expect(() => decodeQ2RereleaseServer(bad)).toThrow("EVAS");
 
-  const end = 2048 + 20;
-  const level = rereleaseLevel(end);
-  const metadata = decodeQ2RereleaseLevelMetadata(level, end);
-  expect(metadata.configstrings.map(entry => entry.index)).toEqual([0, 3, 34, 1500]);
-  expect(metadata.portalBytes).toEqual(Uint8Array.from([0xff, 0x01, 0x80]));
-  expect(encodeQ2RereleaseLevelMetadata(metadata, end)).toEqual(level);
-  expect(() => decodeQ2RereleaseLevelMetadata(level, end - 5000)).toThrow();
+  const level = rereleaseLevel();
+  const metadata = decodeQ2RereleaseLevelMetadata(level);
+  expect(metadata.configstrings.map(entry => entry.index)).toEqual([0, 3, 34, 11999]);
+  expect(metadata.portalBytes).toEqual(Uint8Array.from([1, 0, 1]));
+  expect(encodeQ2RereleaseLevelMetadata(metadata)).toEqual(level);
+  expect(() => decodeQ2RereleaseLevelMetadata(level.slice(0, level.length - 1))).toThrow();
+  const outside = level.slice();
+  outside[0] = 0xa0;
+  outside[1] = 0x30;
+  expect(() => decodeQ2RereleaseLevelMetadata(outside)).toThrow("outside");
 });
 
 test("a hand-written rerelease game and level JSON keep their numbers and entity indices through a roundtrip", () => {

@@ -5,6 +5,7 @@ import type { ProviderCheckpoint } from "../../../contracts/session.ts";
 import type { RereleaseSourceSave } from "../../../compat/q2/rerelease/host.ts";
 import type { RereleaseDeferredDamageSave, RereleaseSavedActor } from "../../../compat/q2/rerelease/deferred-damage.ts";
 import { readModule } from "../../../persistence/execution.ts";
+import { NATIVE_Q2_ORIGINAL_VERSION } from "../../../persistence/provider-ownership.ts";
 import { readSavedActor } from "../../../persistence/save-image.ts";
 import { readVector } from "../../../persistence/shared.ts";
 import { readQ2AttackCheckpoint } from "../../../persistence/q2-foundation.ts";
@@ -29,9 +30,21 @@ export interface Q2RereleaseNativeSave extends Q2RereleaseNativeIdentity {
   readonly autosave: boolean;
   readonly server: Q2RereleaseLevelState & { readonly cvars: Uint8Array };
   readonly game: RereleaseSourceSave;
-  readonly level: RereleaseSourceSave;
+  /** The current map's level state, or null when it was never written (an autosave taken on entering the map). */
+  readonly level: RereleaseSourceSave | null;
   readonly visitedLevels: readonly Q2RereleaseVisitedLevel[];
 }
+/** The files of a rerelease save archive read back, before they are bound to a launched module. */
+export interface Q2RereleaseNativeImport {
+  readonly map: string;
+  readonly spawnPoint: string;
+  readonly autosave: boolean;
+  readonly server: Q2RereleaseLevelState & { readonly latched: readonly { readonly name: string; readonly value: string }[] };
+  readonly game: RereleaseSourceSave;
+  readonly level: RereleaseSourceSave | null;
+  readonly visitedLevels: readonly Q2RereleaseVisitedLevel[];
+}
+
 function boundedInteger(reader: SaveReader, maximum: number): number {
   const value = reader.integer(0);
   if (value > maximum) throw new Error("Native API 2023 value exceeds its public range");
@@ -107,7 +120,7 @@ function mapPath(reader: SaveReader): string {
   return path;
 }
 export function decodeQ2RereleaseNativeSave(record: ProviderCheckpoint, expected: Q2RereleaseNativeIdentity): Q2RereleaseNativeSave {
-  if (record.provider !== expected.module.id || record.schema !== "q2:rerelease-native-original" || record.version !== 1)
+  if (record.provider !== expected.module.id || record.schema !== "q2:rerelease-native-original" || (record.version !== 1 && record.version !== 2))
     throw new Error("Unsupported rerelease native source save provider");
   const reader = new SaveReader(decodeCheckpointValue(record.bytes), "q2.rerelease-native-original"),
     api = reader.field("api");
@@ -142,12 +155,17 @@ export function decodeQ2RereleaseNativeSave(record: ProviderCheckpoint, expected
     autosave: reader.field("autosave").boolean(),
     server: { ...readLevel(state), cvars },
     game,
-    level: readRereleaseSourceSave(reader.field("level")),
+    level: record.version === 1 ? readRereleaseSourceSave(reader.field("level")) : reader.field("level").nullable(readRereleaseSourceSave),
     visitedLevels,
   };
 }
 export function encodeQ2RereleaseNativeSave(save: Q2RereleaseNativeSave): ProviderCheckpoint {
-  const record: ProviderCheckpoint = { provider: save.module.id, schema: "q2:rerelease-native-original", version: 1, bytes: encodeCheckpointValue(save) };
+  const record: ProviderCheckpoint = {
+    provider: save.module.id,
+    schema: "q2:rerelease-native-original",
+    version: NATIVE_Q2_ORIGINAL_VERSION,
+    bytes: encodeCheckpointValue(save),
+  };
   decodeQ2RereleaseNativeSave(record, save);
   return record;
 }

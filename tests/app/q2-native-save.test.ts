@@ -28,7 +28,7 @@ test("API2023 checkpoint retains native JSON and projections under exact module 
   const checkpoint = encodeQ2RereleaseNativeSave(save),
     restored = decodeQ2RereleaseNativeSave(checkpoint, save);
   expect(restored).toEqual(save);
-  expect(restored.level.native).toEqual(source.native);
+  expect(restored.level?.native).toEqual(source.native);
   expect(() => decodeQ2RereleaseNativeSave(checkpoint, { ...save, module: { ...save.module, digest: createContentDigest("34".repeat(32)) } })).toThrow(
     "selected module",
   );

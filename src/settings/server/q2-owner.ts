@@ -139,6 +139,17 @@ export function restoreQ2ServerCvars(cvars: CvarRegistry, value: unknown): void 
   });
 }
 
+/**
+ * SV_ReadServerFile: each latched pair a save recorded is forced into the live registry, so a game module that
+ * registers the variable afterwards finds the saved value. A name the registry has not met yet is created without flags.
+ */
+export function applyQ2LatchedCvars(cvars: CvarRegistry, latched: readonly { readonly name: string; readonly value: string }[]): void {
+  for (const { name, value } of latched) {
+    if (cvars.find(name) === undefined) cvars.register(name, value, 0);
+    else cvars.set(name, value, true);
+  }
+}
+
 export function q2ServerSettingCollections(match: string, q2Combat: boolean, rerelease = false): readonly ServerSettingCollection[] {
   return [
     q2SpawnSettings(),

@@ -14,6 +14,7 @@ import type { BodyState } from "../../../contracts/world.ts";
 import type { Q2FoundationHost } from "../../../content/q2/foundation/host.ts";
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
 import type { MappedGuestMemory } from "../../../guest/core/contracts.ts";
+import { GuestMemoryFault } from "../../../guest/core/memory.ts";
 import {
   classicNumber,
   classicPointer,
@@ -325,12 +326,25 @@ export class ClassicGuestServices {
     }
     return undefined;
   }
+  /**
+   * While a level file loads, the game module links each edict before it points `client` back at its own client array,
+   * so the pointer is the one the saving process wrote. That address means nothing here and may be unmapped; the player
+   * has no velocity to read until the module has connected it.
+   */
+  private linkableClientPrefix(slot: number): DataView | null {
+    try {
+      return this.host.edicts.clientPrefix(slot);
+    } catch (error) {
+      if (error instanceof GuestMemoryFault && error.reason === "unmapped") return null;
+      throw error;
+    }
+  }
   private body(record: RawEntityView): BodyState {
     const cachedActor = record.currentActor(),
       cached = cachedActor === null ? undefined : this.motionBodies.get(cachedActor);
     if (cached !== undefined) return cached;
     const view = record.bytes;
-    const client = record.slot > 0 && record.slot <= this.options.maxClients ? this.host.edicts.clientPrefix(record.slot) : null;
+    const client = record.slot > 0 && record.slot <= this.options.maxClients ? this.linkableClientPrefix(record.slot) : null;
     const actor = record.currentActor(),
       pending = actor === null ? undefined : this.#readPlayerVelocity?.(actor);
     const motion = actor === null ? undefined : this.inputMotion.get(actor)?.read();

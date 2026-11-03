@@ -349,11 +349,11 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
         if (save.edition !== "classic") throw new Error("Native mod save ABI differs");
         const original = decodeQ2ClassicOriginalSave(save.original, identity);
         cvars.restoreSaveState(decodeCheckpointValue(original.server.cvars));
-        await files.restoreLoading(original, identity, async (game, level) => {
+        await files.restoreLoading(original, async (game, level) => {
           await source.host.saveLoading("ReadGame", game, options.nextFrame);
           await spawn();
           for (const entry of original.server.configstrings) retained.setConfigstring(entry.index, entry.value);
-          await source.host.saveLoading("ReadLevel", level, options.nextFrame);
+          if (level !== null) await source.host.saveLoading("ReadLevel", level, options.nextFrame);
         });
       },
       close() {

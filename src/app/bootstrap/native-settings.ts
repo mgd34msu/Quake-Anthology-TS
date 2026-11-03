@@ -112,13 +112,16 @@ export function nativeFolders(native: NativeConfig | null): readonly string[] {
 }
 
 /** Every installed stock game's native save folders, for the saved-game lists. */
-export function nativeSaveFolders(catalog: InstalledCatalog, redirect: string | undefined): readonly { readonly root: string; readonly depth: number }[] {
-  const folders = new Map<string, number>();
+export function nativeSaveFolders(
+  catalog: InstalledCatalog,
+  redirect: string | undefined,
+): readonly { readonly root: string; readonly depth: number; readonly arrangement: "files" | "folders" }[] {
+  const folders = new Map<string, { depth: number; arrangement: "files" | "folders" }>();
   for (const product of catalog.products) {
     const native = stockNativeConfig(catalog, product.id, [product.id], redirect);
     if (native === null) continue;
     const layout = nativeSaveLayout(native.layout, product.expectation);
-    for (const root of layout.scan) folders.set(root, Math.max(folders.get(root) ?? 0, layout.depth));
+    for (const root of layout.scan) folders.set(root, { depth: Math.max(folders.get(root)?.depth ?? 0, layout.depth), arrangement: layout.arrangement });
   }
-  return [...folders].map(([root, depth]) => ({ root, depth }));
+  return [...folders].map(([root, folder]) => ({ root, ...folder }));
 }

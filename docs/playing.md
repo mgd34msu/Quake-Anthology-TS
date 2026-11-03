@@ -151,11 +151,13 @@ is accepted for old configuration files but no longer schedules saves.
 
 In a stock game, `save NAME` writes where the original does: Quake `<gamedir>/NAME.sav` in
 the original format (v5, v6 in the rerelease) with an engine sidecar `NAME.qtsave` beside
-it, so the original game can load the slot and this engine restores everything; Quake II,
-Quake III and the rerelease Quake II cannot be written in their original formats, so the
-engine's own format goes under the original's `save` folder (see
-[save-format.md](save-format.md#where-saves-live)). Mixed compositions write the shared
-format, including mixed-game state, in the user store. `save NAME v5` or `v6` still
+it, so the original game can load the slot and this engine restores everything. Quake II
+on its original game module (`--q2-game`) writes id's `save/NAME/` folder, the rerelease its
+`NAME.pak.gz`, again with a sidecar, and entering a level autosaves to `save0` the way the
+original does. Quake II on the engine's own game logic and Quake III cannot be written in
+their original formats, so the engine's own format goes under the original's `save` folder
+(see [save-format.md](save-format.md#where-saves-live)). Mixed compositions write the
+shared format, including mixed-game state, in the user store. `save NAME v5` or `v6` still
 exports an original Quake save explicitly. Demos, screenshots and server logs of a stock
 game likewise go into the game's own folders with the original names, and demos and
 saves from earlier versions are moved there on first launch

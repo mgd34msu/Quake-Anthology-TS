@@ -128,7 +128,7 @@ and with the original name:
 | Level shots | | | | `<gamedir>/levelshots/MAP.tga` |
 | Logs | `<gamedir>/qconsole.log` with `-condebug` | `<gamedir>/qconsole.log` with `-condebug` | `<gamedir>/qconsole.log` with `logfile` 1 (2 flushes each write) | `<gamedir>/qconsole.log` with `logfile` 1 (2 flushes each write); `<gamedir>/games.log` from `g_log` |
 | Server `writeip` | `<gamedir>/listip.cfg` | `<gamedir>/listip.cfg` | `<gamedir>/listip.cfg` | |
-| Saves | `<gamedir>/NAME.sav` | none | `<gamedir>/save/NAME/qts.sav` | `<gamedir>/save/NAME.sav` |
+| Saves | `<gamedir>/NAME.sav` | none | `<gamedir>/save/NAME/` (`server.ssv`, `game.ssv`, `MAP.sav`, `MAP.sv2`; the engine's own `qts.sav` where only that fits) | `<gamedir>/save/NAME.sav` |
 
 Quake and Quake II numbering starts at 00 and keeps counting past 99; Quake III
 stops at `shot9999`. The `screenshot`, `screenshotJPEG` and `screenshotPNG`
@@ -137,9 +137,66 @@ server, a client connected to a remote server and the front end; each game suppl
 Quake II and III, the `-condebug` launch flag for Quake and QuakeWorld). In the
 rerelease the same files go beneath the Saved Games folder: Quake saves go to
 `NAME.sav` in the Quake folder (the rerelease's own `s1.sav` sits there), Quake II
-saves to `<gamedir>/save/`, beside the rerelease's own `saveN.pak.gz`.
+saves to `<gamedir>/save/NAME.pak.gz`, the rerelease's own `saveN.pak.gz` naming.
 Quake II classic games whose guest module writes files (its `save/` folders and
 `game` state) write into the same folder.
+
+**Quake II saves.** A stock Quake II game runs either the original game module
+(`gamex86.dll`, or `game_x64.dll` in the rerelease, selected with `--q2-game`) or the
+engine's own game logic. With the original module `save NAME` writes what id's
+engine writes, and `load NAME` reads what the original wrote:
+
+- Classic: the folder `<gamedir>/save/NAME/` holds `server.ssv` (a 32 byte comment, the
+  128 byte map command and the latched cvars, `skill`, `coop`, `deathmatch`,
+  `maxclients` and the rest, as 128 byte name and value pairs), `game.ssv` (the
+  module's `WriteGame`), and for every level of the unit `MAP.sav` (the module's
+  `WriteLevel`) and `MAP.sv2` (the 2080 configstrings of 64 bytes and the 1024 area
+  portal ints). The files go through `<gamedir>/save/current/`: the level and server
+  files are written there, then the folder is copied to `NAME` (`SV_CopySaveGame`),
+  and `load` copies `NAME` back to `current/`. The comment is `HH:MM MM/DD  level name`,
+  or `ENTERING level name` for an autosave. `save current` is refused, as is any name
+  with `..`, `/` or `\`.
+- Rerelease: `<gamedir>/save/NAME.pak.gz`, a gzip PACK of `game.ssv` (the module's
+  `WriteGameJson`), `server.ssv` (`EVAS` binary: kind, comment, timestamp, map command,
+  latched cvars), and for every level `MAP.sav` (`WriteLevelJson`) and `MAP.sv2` (the
+  non-empty configstrings of 96 byte slots, then the map's area portal bytes).
+- Autosaves follow the original: entering a level (`map`, `gamemap`, a level change)
+  writes `save0`. Like the original, it holds the levels already left but no file for
+  the level just entered; loading it spawns that level fresh with the saved game
+  state. The rerelease autosave has kind 1 in `server.ssv`.
+- `load` accepts these folders and archives however they were written, including the
+  original game's. The files start the original module on the recorded map with the
+  recorded cvars and read `game.ssv` before the map and its level file after, the order
+  `SV_Loadgame` uses; a level the unit left earlier is read back from its own file when
+  the unit returns to it. Deathmatch saves do not exist and are refused.
+- The menus and the front end list both kinds: one row per folder (not one per level
+  file) or pak, labelled with the comment.
+
+State the original files cannot carry stays in the engine's format beside them:
+`qts.qtsave` in the classic folder and `NAME.qtsave` beside the pak, holding the
+engine's save image and the SHA-256 of the original files it was written beside.
+The sidecar covers every local seat, the engine state shared with mixed content
+(foreign characters, weapons, inventories, random streams, clocks) and, in the
+rerelease, deferred damage and entity projections. The original game never reads the
+sidecar. Loading follows one rule: the original files are authoritative. While the
+sidecar's recorded hash still matches the files, the engine restores everything
+from it; if the original game rewrote the slot, or a file was changed, added or
+removed, the sidecar is ignored and the files alone start the module. The engine
+names the sidecar so that the original's wipe and copy (`*.sav`, `*.sv2`) never touch
+it.
+
+When the engine's own game logic runs the game, the original's files cannot be
+written, and the engine does not fake them. `game.ssv` and `MAP.sav` are the original
+module's memory: its `game_locals_t` and `gclient_t` structs and one raw `edict_t` per
+entity, with the module's own function pointers and field tables resolved to names.
+The engine's logic keeps the same game in other structures (item, mover, monster, weapon
+and player systems, and no `edict_t`), so there is nothing to dump that the original
+module would read back, and a file built from guesses would load into a changed game.
+That path writes `save/NAME/qts.sav` (classic) or `save/NAME.sav` (rerelease) and
+replaces any original-format files in the slot, so one slot never holds two games'
+state. Loading a folder or pak in the original format always runs the original module,
+even in a game that was launched on the engine's logic; the module must be installed.
+Custom and mixed games keep the engine format in the user store, not in these folders.
 
 Menus and the front end list demos and saves from these folders as well as the
 user store. Earlier versions kept a stock game's demos and saves in the user store;

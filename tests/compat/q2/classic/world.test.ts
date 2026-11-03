@@ -334,7 +334,7 @@ for (const fixture of [
           (game, level, autosave) => running.world.writeOriginal(game, level, autosave),
         );
         expect(save.game.length).toBeGreaterThan(1000);
-        expect(save.level.length).toBeGreaterThan(1000);
+        expect(save.level?.length ?? 0).toBeGreaterThan(1000);
         const record = encodeQ2ClassicOriginalSave(save),
           decoded = decodeQ2ClassicOriginalSave(record, { module: running.world.module, map: map.map });
         const reconstruction = { actors: running.actors.checkpoint(), sources: running.actors.sourceCheckpoint() };
@@ -346,7 +346,7 @@ for (const fixture of [
         await loaded.world.initLoading(async () => {
           await Bun.sleep(0);
         });
-        await loaded.files.restoreLoading(decoded, { module: loaded.world.module, map: map.map }, (game, level) =>
+        await loaded.files.restoreLoading(decoded, (game, level) =>
           loaded.world.restoreOriginalLoading(
             game,
             level,

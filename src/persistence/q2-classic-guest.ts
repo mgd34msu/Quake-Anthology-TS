@@ -4,6 +4,7 @@ import type { ModuleIdentity } from "../contracts/execution.ts";
 import type { ProviderCheckpoint } from "../contracts/session.ts";
 import type { WindowsCapabilities, WindowsFile } from "../guest/runtime/windows/contracts.ts";
 import { readModule } from "./execution.ts";
+import { NATIVE_Q2_ORIGINAL_VERSION } from "./provider-ownership.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, SaveReader } from "./value.ts";
 
 export interface Q2ClassicOriginalIdentity {
@@ -30,16 +31,37 @@ export interface Q2ClassicOriginalSave extends Q2ClassicOriginalIdentity {
   readonly autosave: boolean;
   readonly server: Q2ClassicOriginalServerState;
   readonly game: Uint8Array;
-  readonly level: Uint8Array;
+  /**
+   * The current map's `MAP.sav`, or null when the map was entered but never written, which is what the original's
+   * `current/` folder holds for the level an autosave was taken on entering. Loading such a save spawns the map fresh.
+   */
+  readonly level: Uint8Array | null;
+  readonly visitedLevels: readonly Q2ClassicVisitedLevel[];
+}
+/**
+ * The original files of a save folder read back, before they are bound to a launched module. The recorded cvars are
+ * the latched pairs `server.ssv` holds, to be forced into the live registry; they are not a registry capture.
+ */
+export interface Q2ClassicOriginalImport {
+  readonly map: string;
+  readonly spawnPoint: string;
+  readonly autosave: boolean;
+  readonly server: Q2ClassicLevelState & { readonly latched: readonly { readonly name: string; readonly value: string }[] };
+  readonly game: Uint8Array;
+  readonly level: Uint8Array | null;
   readonly visitedLevels: readonly Q2ClassicVisitedLevel[];
 }
 
+/**
+ * Version 2 allows the current level to be absent. Version 1 always carried it and decodes unchanged; the only
+ * difference a version 1 record has is that its `level` field is present.
+ */
 export function encodeQ2ClassicOriginalSave(save: Q2ClassicOriginalSave): ProviderCheckpoint {
   validate(save, save);
-  return { provider: save.module.id, schema: "q2:classic-native-original", version: 1, bytes: encodeCheckpointValue(save) };
+  return { provider: save.module.id, schema: "q2:classic-native-original", version: NATIVE_Q2_ORIGINAL_VERSION, bytes: encodeCheckpointValue(save) };
 }
 export function decodeQ2ClassicOriginalSave(record: ProviderCheckpoint, expected: Q2ClassicOriginalIdentity): Q2ClassicOriginalSave {
-  if (record.schema !== "q2:classic-native-original" || record.version !== 1 || record.provider !== expected.module.id)
+  if (record.schema !== "q2:classic-native-original" || (record.version !== 1 && record.version !== 2) || record.provider !== expected.module.id)
     throw new Error("Unsupported classic native source save provider");
   const reader = new SaveReader(decodeCheckpointValue(record.bytes), "q2.classic-native-original");
   const api = reader.field("api");
@@ -64,7 +86,7 @@ export function decodeQ2ClassicOriginalSave(record: ProviderCheckpoint, expected
     autosave: reader.field("autosave").boolean(),
     server,
     game: reader.field("game").bytes(),
-    level: reader.field("level").bytes(),
+    level: record.version === 1 ? reader.field("level").bytes() : reader.field("level").nullable(level => level.bytes()),
     visitedLevels,
   };
   validate(save, expected);
@@ -114,7 +136,7 @@ function validate(save: Q2ClassicOriginalSave, expected: Q2ClassicOriginalIdenti
     visited.add(level.map);
   }
   decodeCheckpointValue(save.server.cvars);
-  if (save.game.length === 0 || save.level.length === 0) throw new Error("Classic native save requires both original files");
+  if (save.game.length === 0 || (save.level !== null && save.level.length === 0)) throw new Error("Classic native save requires its original game file");
 }
 
 type OpenFile = NonNullable<WindowsCapabilities["openFile"]>;
@@ -132,6 +154,13 @@ interface Operation {
   readonly entries: Map<string, Entry>;
 }
 const ROOT = "__qts_original_save/";
+
+/** A save whose current level was never written has only the game file to hand to the module. */
+function restoreFiles(save: Pick<Q2ClassicOriginalSave, "game" | "level">): ReadonlyMap<string, Uint8Array> {
+  const files = new Map<string, Uint8Array>([["game", save.game]]);
+  if (save.level !== null) files.set("level", save.level);
+  return files;
+}
 
 /** Only callback-owned save files enter this overlay; ordinary guest files keep their original owner. */
 export class ClassicOriginalSaveFiles {
@@ -252,39 +281,22 @@ export class ClassicOriginalSaveFiles {
     });
   }
 
-  restore(save: Q2ClassicOriginalSave, expected: Q2ClassicOriginalIdentity, read: (gamePath: string, levelPath: string) => void): void {
-    validate(save, expected);
-    this.run(
-      "restore",
-      new Map([
-        ["game", save.game],
-        ["level", save.level],
-      ]),
-      operation => {
-        read(operation.game, operation.level);
-        this.assertClosed(operation);
-        if ([...operation.entries.values()].some(entry => !entry.read)) throw new Error("Native restore callbacks did not consume both original files");
-      },
-    );
+  restore(save: Pick<Q2ClassicOriginalSave, "game" | "level">, read: (gamePath: string, levelPath: string | null) => void): void {
+    this.run("restore", restoreFiles(save), operation => {
+      read(operation.game, save.level === null ? null : operation.level);
+      this.assertClosed(operation);
+      if ([...operation.entries.values()].some(entry => !entry.read)) throw new Error("Native restore callbacks did not consume the original files");
+    });
   }
   async restoreLoading(
-    save: Q2ClassicOriginalSave,
-    expected: Q2ClassicOriginalIdentity,
-    read: (gamePath: string, levelPath: string) => Promise<void>,
+    save: Pick<Q2ClassicOriginalSave, "game" | "level">,
+    read: (gamePath: string, levelPath: string | null) => Promise<void>,
   ): Promise<void> {
-    validate(save, expected);
-    await this.runLoading(
-      "restore",
-      new Map([
-        ["game", save.game],
-        ["level", save.level],
-      ]),
-      async operation => {
-        await read(operation.game, operation.level);
-        this.assertClosed(operation);
-        if ([...operation.entries.values()].some(entry => !entry.read)) throw new Error("Native restore callbacks did not consume both original files");
-      },
-    );
+    await this.runLoading("restore", restoreFiles(save), async operation => {
+      await read(operation.game, save.level === null ? null : operation.level);
+      this.assertClosed(operation);
+      if ([...operation.entries.values()].some(entry => !entry.read)) throw new Error("Native restore callbacks did not consume the original files");
+    });
   }
 
   /** Normal gamemap retains the DLL and game globals; only departed level bytes are captured. */

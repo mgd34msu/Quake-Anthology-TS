@@ -14,8 +14,10 @@ name writes:
 | --- | --- | --- |
 | Quake (classic) | `<gamedir>/NAME.sav` | NetQuake v5 |
 | Quake rerelease | `Saved Games/.../Quake/NAME.sav` | v6 |
-| Quake II (classic) | `<gamedir>/save/NAME/qts.sav` | shared container |
-| Quake II rerelease | `Saved Games/.../Quake II/<gamedir>/save/NAME.sav` | shared container |
+| Quake II (classic), original game module | `<gamedir>/save/NAME/` | `server.ssv`, `game.ssv`, `MAP.sav`, `MAP.sv2`, with the sidecar `qts.qtsave` |
+| Quake II (classic), engine game logic | `<gamedir>/save/NAME/qts.sav` | shared container |
+| Quake II rerelease, original game module | `Saved Games/.../Quake II/<gamedir>/save/NAME.pak.gz` | gzip PACK of the same files in the rerelease's encodings, with the sidecar `NAME.qtsave` |
+| Quake II rerelease, engine game logic | `Saved Games/.../Quake II/<gamedir>/save/NAME.sav` | shared container |
 | Quake III | `<gamedir>/save/NAME.sav` | shared container |
 
 For Quake the original format cannot hold mixed or engine-only state, so the engine writes
@@ -24,9 +26,14 @@ behind the signature `QTSIDE1\n` and the SHA-256 of the `NAME.sav` it belongs to
 `NAME.sav` restores everything from the sidecar while the hash still matches; if the original
 game has rewritten the slot, the sidecar is ignored and the original file loads. When the
 original format cannot be produced (a state the v5/v6 writer rejects), the shared container is
-written to `NAME.sav` instead. Quake II and Quake III cannot be written in id's save formats
-(`server.ssv`, `game.ssv`, the rerelease `.pak.gz`), so the shared container goes under the
-original's folder and naming; the original games do not read those files.
+written to `NAME.sav` instead. Quake II on its original game module writes the original's own
+files and the sidecar beside them, the same way: the sidecar holds the shared container behind
+`QTSIDE1\n` and the SHA-256 of all the original files (names compared without case), and it is
+used only while that hash matches. The layouts, the `current` folder workflow and what the
+engine's own game logic cannot write are in
+[content-layout.md](content-layout.md#where-files-are-read-and-written). Quake III and Quake II
+on the engine's own game logic cannot be written in id's save formats, so the shared container
+goes under the original's folder and naming; the original games do not read those files.
 
 `~/.local/share/quake-typescript/saves/` (or `saves/` inside a custom `--user-content-root`)
 remains the location for mixed combinations, for autosaves, for names that include a path and

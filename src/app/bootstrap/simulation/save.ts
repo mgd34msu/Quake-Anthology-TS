@@ -14,13 +14,18 @@ import { SaveReader, decodeCheckpointValue } from "../../../persistence/value.ts
 import { decodeApplicationBotsCheckpoint, type DecodedApplicationBotsCheckpoint } from "./bots.ts";
 import { savedQ3GuestClients } from "./q3/guest-runtime.ts";
 import type { Q3GuestCheckpoint } from "./q3/engine.ts";
-import { saveProviderContract, validateSaveProviderOwner } from "../../../persistence/provider-ownership.ts";
+import { saveProviderContract, saveProviderVersionSupported, validateSaveProviderOwner } from "../../../persistence/provider-ownership.ts";
 
 export function simulationProviderCheckpoint(image: SaveImage, schema: ProviderCheckpoint["schema"]): ProviderCheckpoint {
   const matches = image.providers.filter(value => value.schema === schema);
   const value = matches[0];
   const expected = saveProviderContract(schema, image.recipe.map.entities.provider);
-  if (value === undefined || matches.length !== 1 || value.provider !== expected.provider || value.version !== expected.version)
+  if (
+    value === undefined ||
+    matches.length !== 1 ||
+    value.provider !== expected.provider ||
+    !saveProviderVersionSupported(schema, value.version, expected.version)
+  )
     throw new Error(`Missing or unsupported saved provider ${schema}`);
   return value;
 }

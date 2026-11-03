@@ -75,11 +75,21 @@ test("native save layouts follow the originals", () => {
   expect(q1.original).toBe("v5");
   expect(nativeSaveLayout(folder, { family: "q1", edition: "rerelease", contentDirectory: "q1/rerelease/id1" }).original).toBe("v6");
   const q2 = nativeSaveLayout(folder, { family: "q2", edition: "classic", contentDirectory: "q2/baseq2" });
+  // The engine-format file of a slot, and the file the original keeps there.
   expect(q2.locate("quick")).toBe("/g/save/quick/qts.sav");
-  expect(q2.original).toBeNull();
-  expect(nativeSaveLayout(folder, { family: "q2", edition: "rerelease", contentDirectory: "q2/rerelease/baseq2" }).locate("save0")).toBe(
-    "/g/baseq2/save/save0.sav",
-  );
+  expect(q2.originalPath("quick")).toBe("/g/save/quick/server.ssv");
+  expect(q2.original).toBe("q2-folder");
+  expect(q2.slot("/g/save/quick/server.ssv")).toBe("quick");
+  expect(q2.slot("/g/save/quick/base1.sav")).toBeNull();
+  expect(() => q2.locate("current")).toThrow("current");
+  expect(() => q2.locate("../x")).toThrow("Bad savedir");
+  const rerelease = nativeSaveLayout(folder, { family: "q2", edition: "rerelease", contentDirectory: "q2/rerelease/baseq2" });
+  expect(rerelease.locate("save0")).toBe("/g/baseq2/save/save0.sav");
+  expect(rerelease.originalPath("save0")).toBe("/g/baseq2/save/save0.pak.gz");
+  expect(rerelease.original).toBe("q2-pak");
+  expect(rerelease.slot("/g/baseq2/save/save0.pak.gz")).toBe("save0");
+  expect(q2.candidates("save0")).toEqual(["/g/save/save0/server.ssv", "/g/save/save0/qts.sav"]);
+  expect(nativeSaveLayout(folder, { family: "q3", edition: "classic", contentDirectory: "q3a/baseq3" }).original).toBeNull();
   expect(insideNativeSaves(q1, "/g/s1.sav")).toBe(true);
   expect(insideNativeSaves(q1, "/elsewhere/s1.sav")).toBe(false);
 });

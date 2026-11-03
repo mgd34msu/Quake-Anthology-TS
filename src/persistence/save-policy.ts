@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { closeSync, constants, openSync, writeSync, fsyncSync } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
-import { extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { CommandContext } from "../contracts/common.ts";
 import { containedFileParts, openContainedParent } from "../core/files/contained.ts";
 
@@ -78,8 +78,23 @@ export function containedSaveName(directory: string, path: string, extension = "
 
 /** Commit through a held parent descriptor so directory replacement cannot redirect a save. */
 export async function writeContainedSave(directory: string, path: string, bytes: Uint8Array, extension = ".sav"): Promise<void> {
-  const name = containedSaveName(directory, path, extension);
-  await mkdir(directory, { recursive: true });
+  await commitContained(directory, containedSaveName(directory, path, extension), bytes);
+}
+
+/**
+ * A file of a native save folder, which has the original's own names (`server.ssv`, `MAP.sv2`, `current/`). It is
+ * contained like any save, but it has no fixed extension and may sit in the `current` working folder.
+ */
+export async function writeContainedNativeFile(directory: string, path: string, bytes: Uint8Array): Promise<void> {
+  const name = relative(resolve(directory), resolve(path));
+  if (name === "" || isAbsolute(name) || name === ".." || name.startsWith(`..${sep}`))
+    throw new RangeError(`Save path is outside the save directory: ${resolve(directory)}`);
+  containedFileParts(name);
+  await commitContained(directory, name, bytes);
+}
+
+async function commitContained(directory: string, name: string, bytes: Uint8Array): Promise<void> {
+  await mkdir(resolve(directory, dirname(name)), { recursive: true });
   const parent = openContainedParent(directory, name, true);
   const temporary = `/proc/self/fd/${parent.descriptor}/.${parent.leaf}.${crypto.randomUUID()}.tmp`;
   let descriptor: number | null = null;

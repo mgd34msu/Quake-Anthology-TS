@@ -82,6 +82,7 @@ import {
   cvarServerSettingsOwner,
   registerQ2ServerCvars,
   restoreQ2ServerCvars,
+  applyQ2LatchedCvars,
   serverDefinitionsForRecipe,
 } from "../../../settings/server/index.ts";
 import { q2SourceDeathmatchFlags, q2RereleaseItemServices } from "../../../settings/server/q2-owner.ts";
@@ -311,6 +312,7 @@ import type {
   PlayerAdmission,
   PlayerView,
   PlayerUi,
+  SaveCaptureOptions,
   SimulationTravel,
   SimulationOptions,
   SimulationPresentation,
@@ -1494,11 +1496,14 @@ export class SharedSimulation implements Simulation {
         primaryQ3.game.host.cvars.clearModified("g_gametype");
       } else if (primaryNative !== null) {
         if (options.nativeQ2Travel === undefined && loading !== nativeLoading) {
-          primaryNative.game.init();
-          primaryNative.game.spawn(
-            this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
-            this.guestMonsterEntities(options.world.entities, primaryNative.edition),
-          );
+          if (options.nativeImport !== undefined) this.strategy.importOriginal(options.nativeImport);
+          else {
+            primaryNative.game.init();
+            primaryNative.game.spawn(
+              this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
+              this.guestMonsterEntities(options.world.entities, primaryNative.edition),
+            );
+          }
         }
         // Retained travel already spawned the new map during source creation;
         // either way the guest world exists now and replacements can join it.
@@ -1575,6 +1580,9 @@ export class SharedSimulation implements Simulation {
           simulation.restore(options.restore, true);
           if (options.travel !== undefined) simulation.restoreCampaignTravel(options.travel);
           if (simulation.sourceCollisionSettings !== null) simulation.scene.bindCollisionSettings(simulation.sourceCollisionSettings);
+        } else if (options.nativeImport !== undefined) {
+          await simulation.strategy.importLoading(options.nativeImport, nextFrame);
+          simulation.admitGuestMonsters();
         } else {
           await loadingNative.game.initLoading(nextFrame);
           await loadingNative.game.spawnLoading(
@@ -5435,6 +5443,7 @@ export class SharedSimulation implements Simulation {
       // A map start is where a latched server setting takes effect, and the guest reads the live value when it initializes.
       if (retained === undefined && this.options.restore === undefined) cvars.applyLatched();
       if (this.options.restore !== undefined) restoreQ2ServerCvars(cvars, savedSourceCvars(this.options.restore));
+      if (this.options.nativeImport !== undefined) applyQ2LatchedCvars(cvars, this.options.nativeImport.server.latched);
       const runtime: ActorHostRuntime = {
         numeric: timing.numeric,
         random: this.random,
@@ -11749,8 +11758,8 @@ export class SharedSimulation implements Simulation {
     this.events.assertLocalMediaConsumed();
     this.strategy.assertSaveReady();
   }
-  checkpoint(): SaveImage {
-    return this.checkpointFromSource();
+  checkpoint(options: SaveCaptureOptions = {}): SaveImage {
+    return this.checkpointFromSource(options.autosave === true);
   }
   async checkpointModsForTravel(): Promise<ModTravelCheckpoint | undefined> {
     this.assertOpen();
@@ -11763,7 +11772,7 @@ export class SharedSimulation implements Simulation {
       this.checkpointInProgress = false;
     }
   }
-  async checkpointLoading(nextFrame: () => Promise<void>): Promise<SaveImage> {
+  async checkpointLoading(nextFrame: () => Promise<void>, options: SaveCaptureOptions = {}): Promise<SaveImage> {
     this.assertCheckpointReady();
     this.strategy.assertSavable();
     this.checkpointInProgress = true;
@@ -11773,13 +11782,14 @@ export class SharedSimulation implements Simulation {
     try {
       mods = await this.modOwner?.checkpoint();
       behaviors = await this.weaponBehavior.checkpointLoading(nextFrame);
-      captured = await this.strategy.captureGuestSave(nextFrame);
+      captured = await this.strategy.captureGuestSave(nextFrame, options.autosave === true);
     } finally {
       this.checkpointInProgress = false;
     }
-    return this.checkpointFromSource(captured, behaviors, mods);
+    return this.checkpointFromSource(options.autosave === true, captured, behaviors, mods);
   }
   private checkpointFromSource(
+    autosave: boolean,
     rereleaseSave?: import("./rerelease-guest-world.ts").RereleaseGuestSave,
     weaponBehaviors?: WeaponBehaviorRuntimeCheckpoint,
     mods?: ModSessionCheckpoint,
@@ -11788,7 +11798,7 @@ export class SharedSimulation implements Simulation {
     if (mods === undefined && this.modOwner !== null && this.modOwner.enabled().length !== 0)
       throw new Error("Selected gameplay mods require asynchronous checkpointLoading");
     this.strategy.requireLoaded("The selected source world has not completed loading");
-    const nativeOriginal = this.strategy.originalSave(rereleaseSave);
+    const nativeOriginal = this.strategy.originalSave(rereleaseSave, autosave);
     const provider = this.recipe.map.entities.provider;
     for (const player of this.playerStates.values()) player.arsenal = this.arsenal(player);
     // A selected monster's native source binding is only a projection into
@@ -11979,6 +11989,7 @@ export class SharedSimulation implements Simulation {
   /** Checks and request shared by the synchronous and the frame-by-frame restore of an original native save. */
   private nativeRestorePrelude<
     O extends {
+      readonly level: unknown;
       readonly server: {
         readonly configstrings: readonly { readonly index: number; readonly value: string }[];
         readonly portals: readonly { readonly portal: number; readonly open: boolean }[];
@@ -12001,6 +12012,8 @@ export class SharedSimulation implements Simulation {
         spawnPoint: this.initialSpawnPoint,
       },
       applyServerState: (): void => {
+        // A level the save never wrote keeps the strings and portals the fresh spawn just set.
+        if (original.level === null) return;
         source.game.restoreConfigstrings(new Map(original.server.configstrings.map(entry => [entry.index, entry.value])));
         for (const { portal, open } of original.server.portals) {
           this.areaPortals.set(portal, open);

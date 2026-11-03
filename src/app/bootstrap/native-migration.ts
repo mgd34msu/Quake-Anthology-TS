@@ -84,7 +84,14 @@ export async function migrateNativeData(catalog: InstalledCatalog, options: Pick
         // Only engine-format saves carry the product they belong to; original-format files stay where they are.
         const header = await readSaveHeader(path).catch(() => null);
         if (header === null || header.content !== product.id) continue;
-        await moveInto(path, layout.locate(name));
+        // A slot name the original refuses (`current`, one with a path separator) stays where it is.
+        let target: string;
+        try {
+          target = layout.locate(name);
+        } catch {
+          continue;
+        }
+        await moveInto(path, target);
       }
     } catch (error) {
       // A folder that cannot be written leaves its data in the user store, which is still read.

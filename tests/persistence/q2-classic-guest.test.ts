@@ -40,11 +40,12 @@ test("original native callbacks capture and restore exact files through the same
   );
   const decoded = decodeQ2ClassicOriginalSave(encodeQ2ClassicOriginalSave(save), identity);
   expect(decoded).toEqual(save);
-  files.restore(decoded, identity, (game, level) => {
+  files.restore(decoded, (game, level) => {
     for (const [path, expected] of [
       [game, save.game],
       [level, save.level],
-    ] satisfies readonly (readonly [string, Uint8Array])[]) {
+    ] satisfies readonly (readonly [string | null, Uint8Array | null])[]) {
+      if (path === null || expected === null) throw new Error("Missing callback file");
       const file = files.openFile(path, { read: true, write: false, creation: 3 });
       if (file === null) throw new Error("Missing callback file");
       expect(file.read(0, file.size())).toEqual(expected);
@@ -54,7 +55,7 @@ test("original native callbacks capture and restore exact files through the same
   expect(() => files.openFile("__qts_original_save/game.ssv", { read: true, write: false, creation: 3 })).toThrow("outside");
 });
 
-test("module mismatch rejects before callbacks, and partial or leaked captures cannot publish", () => {
+test("a different module or map rejects at decode, and partial or leaked captures cannot publish", () => {
   const files = new ClassicOriginalSaveFiles();
   const save = files.capture(
     identity,
@@ -64,14 +65,10 @@ test("module mismatch rejects before callbacks, and partial or leaked captures c
       write(files, level, Uint8Array.of(2));
     },
   );
-  let calls = 0;
-  expect(() =>
-    files.restore(save, { ...identity, module: { ...identity.module, revision: "changed" } }, () => {
-      calls++;
-    }),
-  ).toThrow("differs");
-  expect(calls).toBe(0);
-  expect(() => files.restore(save, identity, () => {})).toThrow("consume both");
+  const record = encodeQ2ClassicOriginalSave(save);
+  expect(() => decodeQ2ClassicOriginalSave(record, { ...identity, module: { ...identity.module, revision: "changed" } })).toThrow("differs");
+  expect(() => decodeQ2ClassicOriginalSave(record, { ...identity, map: "maps/base2.bsp" })).toThrow("differs");
+  expect(() => files.restore(save, () => {})).toThrow("consume the original files");
   expect(() =>
     files.capture(
       identity,
@@ -122,7 +119,7 @@ test("save overlay delegates ordinary files and refuses restore-time writes", ()
     },
   );
   expect(() =>
-    files.restore(save, identity, game => {
+    files.restore(save, game => {
       files.openFile(game, { read: true, write: true, creation: 3 });
     }),
   ).toThrow("read-only");

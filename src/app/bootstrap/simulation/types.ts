@@ -62,6 +62,11 @@ export type NativeQ2GuestOptions = NativeQ2GuestCallbacks &
       >)
   );
 
+/** How a checkpoint is taken. An autosave is the snapshot the original writes on entering a level, not a player's save. */
+export interface SaveCaptureOptions {
+  readonly autosave?: boolean;
+}
+
 export interface SimulationOptions {
   readonly preparedQvmGrapple?: import("../qvm-grapple-selection.ts").PreparedQvmGrapple;
   readonly preparedMods?: readonly import("../../../world/session/mods.ts").PreparedMod[];
@@ -79,6 +84,8 @@ export interface SimulationOptions {
   readonly q2Guest?: NativeQ2GuestOptions;
   readonly nativeQ2Travel?: NativeQ2Travel;
   readonly originalSaveCandidate?: true;
+  /** The files of an original Quake II save folder to start the native world from, instead of a fresh spawn. */
+  readonly nativeImport?: import("./source-strategy.ts").NativeQ2Import;
   readonly startItems?: string;
   /** Local player's Q1 shirt/pants colors for foreign-character presentation. */
   readonly playerColors?: { readonly top: number; readonly bottom: number };

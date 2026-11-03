@@ -190,6 +190,11 @@ import { Q3_WEAPON_ITEMS, q3WeaponItem } from "../../content/q3/foundation/arsen
 import { assertLoadPathAllowed, saveCommandPath, saveUnavailable, type SavePurpose } from "../../persistence/save-policy.ts";
 import { writeSavedGame } from "../../persistence/saved-game.ts";
 import { prepareApplicationSave } from "./original-save.ts";
+import { clearQ2OriginalFiles, writeQ2NativeSave } from "./q2-native-saves.ts";
+import { rereleaseAutosaveName } from "./simulation/native-q2-rerelease-pak.ts";
+import { readQ2Bsp } from "../../formats/q2-map/index.ts";
+import { Q2SaveStore } from "../../persistence/q2-save-store.ts";
+import type { Q2SaveFiles } from "../../persistence/q2-save-folder.ts";
 import { EngineSession } from "../../world/session/index.ts";
 import type { SessionClient, SessionConnection, SessionSeat } from "../../world/session/index.ts";
 import { SharedTransitionCoordinator } from "../../world/gameplay/transitions.ts";
@@ -923,19 +928,29 @@ export class Application {
     );
   }
 
+  /** The engine's own sources autosave, and so does a stock Quake II game on its original module, which writes the original's `save0`. */
+  private autosaveAvailable(): boolean {
+    if (this.levelRecoveryAvailable(this.simulation, this.options)) return true;
+    const native = this.nativeSaves();
+    return (
+      native !== null &&
+      this.nativeQ2Original(native) &&
+      !this.options.dedicated &&
+      this.options.network.kind === "offline" &&
+      this.simulation.options.mode === "singleplayer"
+    );
+  }
+
   private async autosaveLevel(): Promise<void> {
-    if (
-      !this.levelRecoveryAvailable(this.simulation, this.options) ||
-      this.saveUnavailable("autosave") !== null ||
-      this.sourceCvars()?.variableValue("sv_autosave") === 0
-    )
-      return;
+    if (!this.autosaveAvailable() || this.saveUnavailable("autosave") !== null || this.sourceCvars()?.variableValue("sv_autosave") === 0) return;
     const directory = join(this.saveDirectory, this.content.catalog.product(this.content.recipe.map.entities.content).expectation.id);
     try {
-      await mkdir(directory, { recursive: true });
-      const path = join(directory, "autosave.sav");
-      await this.saveGame(path);
-      this.host.print(`Autosaved ${path}.\n`);
+      // The original game module's autosave is the original's `save0` slot, written the way id's engine writes it on entering a level.
+      const native = this.nativeSaves(),
+        original = native !== null && this.nativeQ2Original(native);
+      if (!original) await mkdir(directory, { recursive: true });
+      const path = original ? native.locate(rereleaseAutosaveName(false)) : join(directory, "autosave.sav");
+      this.host.print(`Autosaved ${await this.saveGame(path, "shared", { autosave: true })}.\n`);
     } catch (error) {
       this.host.print(`Autosave failed: ${error instanceof Error ? error.message : String(error)}\n`);
     }
@@ -6628,9 +6643,9 @@ export class Application {
     );
   }
 
-  private async captureSharedImage(): Promise<SaveImage> {
+  private async captureSharedImage(autosave = false): Promise<SaveImage> {
     const captured = await serviceLoading(
-      nextFrame => this.simulation.checkpointLoading(nextFrame),
+      nextFrame => this.simulation.checkpointLoading(nextFrame, { autosave }),
       () => {
         if (!this.closed) this.graphical?.input.pollLoadingEvents();
       },
@@ -6660,7 +6675,21 @@ export class Application {
     return native !== null && !/[\\/]/.test(name) ? native.locate(name) : saveCommandPath(this.saveDirectory, name);
   }
 
-  async saveGame(path: string, format: ApplicationSaveFormat = "shared"): Promise<void> {
+  /** Whether the game module that runs the world is the original one whose files the native save folder holds. */
+  private nativeQ2Original(native: NativeSaveLayout): boolean {
+    const world = this.simulation.q2Native();
+    return (
+      world !== null && ((native.original === "q2-folder" && world.edition === "classic") || (native.original === "q2-pak" && world.edition === "rerelease"))
+    );
+  }
+
+  private async rereleasePortalCount(map: string): Promise<number> {
+    const geometry = this.simulation.scene.geometry;
+    if (map === this.content.recipe.map.geometry.requestedPath && geometry.kind === "q2-bsp") return geometry.areaPortals.length;
+    return readQ2Bsp(await this.content.mounts.read(map), map).areaPortals.length;
+  }
+
+  async saveGame(path: string, format: ApplicationSaveFormat = "shared", saving: { readonly autosave?: boolean } = {}): Promise<string> {
     if (this.closed) throw new Error("Application is closed");
     const unavailable = this.saveUnavailable("manual");
     if (unavailable !== null) throw new Error(unavailable);
@@ -6702,7 +6731,7 @@ export class Application {
           );
           if (!inNative) {
             await writeSavedGame(directory, path, { kind: "q1-source", data });
-            return;
+            return path;
           }
           await writeSavedGame(directory, path, { kind: "q1-source", data }, await this.captureSharedImage());
           written = true;
@@ -6711,9 +6740,21 @@ export class Application {
           if (!inNative || format !== "shared") throw error;
         }
       }
-      if (written) return;
-      const image = await this.captureSharedImage();
+      if (written) return path;
+      const image = await this.captureSharedImage(saving.autosave === true);
+      const slot = inNative ? native.slot(path) : null;
+      const q2Slot = inNative && slot !== null && (native.original === "q2-folder" || native.original === "q2-pak");
+      if (q2Slot && format === "shared" && this.nativeQ2Original(native)) {
+        if (await writeQ2NativeSave({ native, slot, image, now: new Date(), portalCount: map => this.rereleasePortalCount(map) }))
+          return native.originalPath(slot) ?? path;
+      }
+      // The engine's own game logic cannot produce the original's files, and a slot keeps one kind of save.
+      if (q2Slot) {
+        await clearQ2OriginalFiles(native, slot);
+        path = native.locate(slot);
+      }
       await writeSavedGame(directory, path, { kind: "shared", image });
+      return path;
     } finally {
       this.worldOperation = "idle";
       this.worldOperationCompletion = null;
@@ -6728,17 +6769,32 @@ export class Application {
     await this.restoreSavedGame(path, sourceProduct);
   }
 
+  /** SV_Loadgame copies the slot to `current`, where the level files of the running unit live. A folder that cannot be written leaves the load intact. */
+  private async adoptQ2Current(files: Q2SaveFiles): Promise<void> {
+    const native = this.nativeSaves();
+    if (native === null || native.original !== "q2-folder") return;
+    try {
+      const store = new Q2SaveStore(native.root);
+      await store.wipe("current");
+      await store.write("current", files);
+    } catch (error) {
+      this.host.print(`Could not update the current save folder: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  }
+
   private async restoreSavedGame(path: string, sourceProduct?: string): Promise<void> {
     if (this.campaignMovie !== null) throw new Error("Finish or skip the campaign cinematic before loading a save");
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
     this.worldOperation = "loading";
     const completion = Promise.withResolvers<void>();
     this.worldOperationCompletion = completion.promise;
+    let loadedFolder: Q2SaveFiles | undefined;
     try {
       try {
         await serviceLoading(
           async nextFrame => {
-            const { image, options } = await prepareApplicationSave(this.options, this.content.catalog, path, sourceProduct);
+            const { image, options, folder } = await prepareApplicationSave(this.options, this.content.catalog, path, sourceProduct, nextFrame);
+            loadedFolder = folder;
             const unit = new CampaignUnit();
             unit.restore(image);
             await this.prepareAndReplaceWorld(
@@ -6767,6 +6823,7 @@ export class Application {
         this.pendingRestart = null;
         this.pendingTransition = null;
         this.pendingSave = null;
+        if (loadedFolder !== undefined) await this.adoptQ2Current(loadedFolder);
       } finally {
         this.worldOperation = "idle";
         this.worldOperationCompletion = null;
@@ -8356,9 +8413,7 @@ export class Application {
       if (bot !== undefined) this.bots?.disconnect(bot.client.id.slot);
     } else if (command.name === "save") {
       const { name, format } = parseSaveRequest(command.arguments_);
-      const path = this.savePath(name);
-      await this.saveGame(path, format);
-      print(`Saved ${path}.\n`);
+      print(`Saved ${await this.saveGame(this.savePath(name), format)}.\n`);
     } else if (command.name === "weapnext" || command.name === "weapprev" || command.name === "use") {
       this.simulation.playerCommand(this.commandActor(command.seat), command.name, command.arguments_);
     } else if (command.name === "say" || command.name === "say_team") {
@@ -8375,6 +8430,14 @@ export class Application {
       const { name, sourceProduct } = parseLoadRequest(command.arguments_);
       const native = this.nativeSaves();
       let path = this.savePath(name);
+      // A stock game finds its slot the way the original does: the original format first, then the engine's, in every folder it reads.
+      if (native !== null && !/[\\/]/.test(name)) {
+        for (const candidate of native.candidates(name))
+          if (await Bun.file(candidate).exists()) {
+            path = candidate;
+            break;
+          }
+      }
       if (!(await Bun.file(path).exists()) && native !== null) path = saveCommandPath(this.saveDirectory, name);
       if (!(await Bun.file(path).exists())) path = (await resolveExternalSavePath(this.externalSaveDirectories, name)) ?? path;
       assertLoadPathAllowed(this.saveDirectory, path, command.source, {

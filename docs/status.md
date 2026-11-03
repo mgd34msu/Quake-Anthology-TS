@@ -68,8 +68,7 @@ is not a claim that every original game, mod, device or campaign works.
 - Quake III key authorization is off unless `cl_authorizeKey` is set.
 - Saves are refused while hosting or joined to a network game, in deathmatch (except
   server-administration saves), and during intermission. Foreign Tag, LMCTF and DeathBall
-  sessions refuse to save rather than write a partial save. Original Quake II rerelease
-  saves that record client or level state cannot be restored; only transition-shaped saves can.
+  sessions refuse to save rather than write a partial save.
 - On a map from another game, DeathBall and LMCTF synthesize their entities from
   deathmatch spawns. Horde is the exception: on a Quake or Quake II map it needs an authored
   `horde_manager` and monster spawn points.

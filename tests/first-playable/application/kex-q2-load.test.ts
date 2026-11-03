@@ -117,7 +117,7 @@ test.skipIf(!existsSync(join(testCorpusRoot(), "q2/rerelease/baseq2/pak0.pak")))
 );
 
 test.skipIf(!existsSync(join(testCorpusRoot(), "q2/rerelease/baseq2/pak0.pak")))(
-  "retail KEX save with recorded client state is refused, not partially restored",
+  "a retail KEX save for a game directory that is not installed is refused before the running world changes",
   async () => {
     const root = await mkdtemp(join(tmpdir(), "quake-kex-refuse-"));
     try {
@@ -126,11 +126,8 @@ test.skipIf(!existsSync(join(testCorpusRoot(), "q2/rerelease/baseq2/pak0.pak")))
         path,
         gzipSync(
           pakWith([
-            ["server.ssv", kexServerSave("Mid-level", "base1", "baseq2")],
-            [
-              "game.ssv",
-              new TextEncoder().encode(JSON.stringify({ clients: [{ pers: { health: 37 } }], game: { autosaved: false, maxclients: 1 }, save_version: 1 })),
-            ],
+            ["server.ssv", kexServerSave("Mid-level", "base1", "nosuchgame")],
+            ["game.ssv", new TextEncoder().encode(JSON.stringify({ clients: [{}], game: { autosaved: true, maxclients: 1 }, save_version: 1 }))],
           ]),
         ),
       );
@@ -158,7 +155,9 @@ test.skipIf(!existsSync(join(testCorpusRoot(), "q2/rerelease/baseq2/pak0.pak")))
       if (parsed.kind !== "run") throw new Error("Missing launch");
       const app = await Application.open(parsed.options, { print: () => undefined });
       try {
-        await expect(app.loadGame(path)).rejects.toThrow("cannot be restored");
+        const before = app.simulation;
+        await expect(app.loadGame(path)).rejects.toThrow("nosuchgame is not installed");
+        expect(app.simulation).toBe(before);
       } finally {
         await app.close();
       }

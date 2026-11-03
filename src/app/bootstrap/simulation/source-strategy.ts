@@ -98,12 +98,19 @@ import {
   nativeQ2OriginalSave,
   nativeQ2SavedClients,
 } from "./save.ts";
-import { encodeQ2RereleaseNativeSave } from "./native-q2-rerelease-save.ts";
+import { encodeQ2RereleaseNativeSave, type Q2RereleaseNativeImport } from "./native-q2-rerelease-save.ts";
+import type { Q2ClassicOriginalImport } from "../../../persistence/q2-classic-guest.ts";
 import type { RereleaseGuestSave } from "./rerelease-guest-world.ts";
 import { encodeQ2ClassicOriginalSave } from "../../../persistence/q2-classic-guest.ts";
 import { restoreQ2Attack } from "../../../content/q2/foundation/checkpoint.ts";
 import type { AttackProvenance } from "../../../contracts/gameplay.ts";
 import type { SourceRuntime } from "./runtime.ts";
+
+/** The files of an original save folder or archive, read back and not yet bound to a module. */
+export type NativeQ2Import = Q2ClassicOriginalImport | Q2RereleaseNativeImport;
+function isRereleaseImport(imported: NativeQ2Import): imported is Q2RereleaseNativeImport {
+  return !(imported.game instanceof Uint8Array);
+}
 
 export interface GuestMonsterProxy {
   allocate(): number | null;
@@ -112,6 +119,8 @@ export interface GuestMonsterProxy {
 
 /** The server state an original native save carries. */
 export interface NativeSavedServer {
+  /** Null when the save never wrote the current level, which leaves the freshly spawned level and its configstrings alone. */
+  readonly level: unknown;
   readonly server: {
     readonly configstrings: readonly { readonly index: number; readonly value: string }[];
     readonly portals: readonly { readonly portal: number; readonly open: boolean }[];
@@ -580,11 +589,18 @@ export interface SourceStrategy {
   /** Refuses an original save the source cannot represent. */
   assertSavable(): void;
   /** The source's own save taken a frame at a time, when it has one. */
-  captureGuestSave(nextFrame: () => Promise<void>): Promise<RereleaseGuestSave | undefined>;
-  /** The source's own original save as a checkpoint provider; null when it keeps none. */
-  originalSave(guestSave?: RereleaseGuestSave): SaveProvider | null;
+  captureGuestSave(nextFrame: () => Promise<void>, autosave: boolean): Promise<RereleaseGuestSave | undefined>;
+  /**
+   * The source's own original save as a checkpoint provider; null when it keeps none. An autosave is what the original
+   * writes on entering a level: it carries no file for a level the unit has not left before.
+   */
+  originalSave(guestSave: RereleaseGuestSave | undefined, autosave: boolean): SaveProvider | null;
   /** Restores the source's own original save a frame at a time. */
   restoreLoading(save: SaveImage, nextFrame: () => Promise<void>): Promise<void>;
+  /** Starts the world from the files of an original save folder, a frame at a time. */
+  importLoading(imported: NativeQ2Import, nextFrame: () => Promise<void>): Promise<void>;
+  /** Starts the world from the files of an original save folder. */
+  importOriginal(imported: NativeQ2Import): void;
   /** Restores the source's own original save and reconnects its saved clients. */
   restoreGuest(save: SaveImage, nativeRestored: boolean): void;
   /** The map edition a native guest declares itself; null defers to the map's own edition. */
@@ -1235,14 +1251,20 @@ class LoadingStrategy implements SourceStrategy {
   assertSavable(): void {
     /* the source has no original save restrictions */
   }
-  captureGuestSave(_nextFrame: () => Promise<void>): Promise<RereleaseGuestSave | undefined> {
+  captureGuestSave(_nextFrame: () => Promise<void>, _autosave: boolean): Promise<RereleaseGuestSave | undefined> {
     return Promise.resolve(undefined);
   }
-  originalSave(_guestSave?: RereleaseGuestSave): SaveProvider | null {
+  originalSave(_guestSave: RereleaseGuestSave | undefined, _autosave: boolean): SaveProvider | null {
     return null;
   }
   restoreLoading(_save: SaveImage, _nextFrame: () => Promise<void>): Promise<void> {
     throw new Error("Native original loading requires its source provider");
+  }
+  importLoading(_imported: NativeQ2Import, _nextFrame: () => Promise<void>): Promise<void> {
+    throw new Error("An original save folder needs a native Quake II game module");
+  }
+  importOriginal(_imported: NativeQ2Import): void {
+    throw new Error("An original save folder needs a native Quake II game module");
   }
   restoreGuest(_save: SaveImage, _nativeRestored: boolean): void {
     /* only a native Q2 source restores its own original save */
@@ -2986,31 +3008,36 @@ class Q2NativeStrategy extends LoadedStrategy {
     if (this.source.edition === "rerelease" && (registry === null || registry.variableValue("deathmatch") !== 0))
       throw new Error("Native Quake II original saves require a non-deathmatch source game");
   }
-  override captureGuestSave(nextFrame: () => Promise<void>): Promise<RereleaseGuestSave | undefined> {
-    return this.source.edition === "rerelease" ? this.source.game.writeSaveLoading(false, nextFrame) : Promise.resolve(undefined);
+  override captureGuestSave(nextFrame: () => Promise<void>, autosave: boolean): Promise<RereleaseGuestSave | undefined> {
+    return this.source.edition === "rerelease" ? this.source.game.writeSaveLoading(autosave, nextFrame) : Promise.resolve(undefined);
   }
-  override originalSave(rereleaseSave?: RereleaseGuestSave): SaveProvider | null {
+  override originalSave(rereleaseSave: RereleaseGuestSave | undefined, autosave: boolean): SaveProvider | null {
     const source = this.source,
       host = this.host,
       cvars = host.q2ServerRegistry,
       map = host.recipe.map.geometry.requestedPath;
     if (cvars === null || cvars.variableValue("deathmatch") !== 0) throw new Error("Native Quake II original saves require a non-deathmatch source game");
     const portals = [...host.areaPortals].map(([portal, open]) => ({ portal, open }));
-    if (source.edition === "rerelease")
+    // The original has written no file for a level it was only just entered; it has one for a level the unit returned to.
+    const unwritten = autosave && !source.visited.has(map);
+    if (source.edition === "rerelease") {
+      const written = rereleaseSave ?? source.game.writeSave(autosave);
       return encodeQ2RereleaseNativeSave({
         module: source.game.module,
         map,
         api: { kind: "q2-rerelease-game", version: 2023 },
         abi: "windows-x86-64",
-        autosave: false,
+        autosave,
         server: {
           configstrings: [...source.game.configstrings()].map(([index, value]) => ({ index, value })),
           portals,
           cvars: encodeCheckpointValue(cvars.captureSaveState()),
         },
-        ...(rereleaseSave ?? source.game.writeSave(false)),
+        game: written.game,
+        level: unwritten ? null : written.level,
         visitedLevels: [...source.visited.values()].filter(level => level.map !== map),
       });
+    }
     const captured = source.files.capture(
       { module: source.game.module, map },
       () => ({
@@ -3018,9 +3045,14 @@ class Q2NativeStrategy extends LoadedStrategy {
         portals,
         cvars: encodeCheckpointValue(cvars.captureSaveState()),
       }),
-      (game, level, autosave) => source.game.writeOriginal(game, level, autosave),
+      (game, level, written) => source.game.writeOriginal(game, level, written),
+      autosave,
     );
-    return encodeQ2ClassicOriginalSave({ ...captured, visitedLevels: [...source.visited.values()].filter(level => level.map !== map) });
+    return encodeQ2ClassicOriginalSave({
+      ...captured,
+      level: unwritten ? null : captured.level,
+      visitedLevels: [...source.visited.values()].filter(level => level.map !== map),
+    });
   }
   override async restoreLoading(save: SaveImage, nextFrame: () => Promise<void>): Promise<void> {
     const source = this.source,
@@ -3039,8 +3071,55 @@ class Q2NativeStrategy extends LoadedStrategy {
     });
     await source.game.initLoading(nextFrame);
     plan.afterInit();
-    await source.files.restoreLoading(plan.original, { module: source.game.module, map: host.recipe.map.geometry.requestedPath }, async (game, level) => {
+    await source.files.restoreLoading(plan.original, async (game, level) => {
       await source.game.restoreOriginalLoading(game, level, plan.request, plan.applyServerState, nextFrame);
+    });
+  }
+  /** SV_Loadgame on the files of a save folder: game state first, then the map, then its level file. */
+  override async importLoading(imported: NativeQ2Import, nextFrame: () => Promise<void>): Promise<void> {
+    const source = this.source,
+      host = this.host;
+    if (source.edition === "rerelease") {
+      if (!isRereleaseImport(imported)) throw new Error("A classic save folder needs a classic game module");
+      const plan = host.nativeRestorePrelude(source, imported, original => {
+        for (const level of original.visitedLevels) source.visited.set(level.map, level);
+      });
+      await source.game.initLoading(nextFrame);
+      plan.afterInit();
+      await source.game.readSaveLoading({ game: imported.game, level: imported.level }, plan.request, plan.applyServerState, nextFrame);
+      return;
+    }
+    if (isRereleaseImport(imported)) throw new Error("A rerelease save archive needs a rerelease game module");
+    const plan = host.nativeRestorePrelude(source, imported, original => {
+      for (const level of original.visitedLevels) source.visited.set(level.map, level);
+    });
+    await source.game.initLoading(nextFrame);
+    plan.afterInit();
+    await source.files.restoreLoading(imported, async (game, level) => {
+      await source.game.restoreOriginalLoading(game, level, plan.request, plan.applyServerState, nextFrame);
+    });
+  }
+  override importOriginal(imported: NativeQ2Import): void {
+    const source = this.source,
+      host = this.host;
+    if (source.edition === "rerelease") {
+      if (!isRereleaseImport(imported)) throw new Error("A classic save folder needs a classic game module");
+      const plan = host.nativeRestorePrelude(source, imported, original => {
+        for (const level of original.visitedLevels) source.visited.set(level.map, level);
+      });
+      source.game.init();
+      plan.afterInit();
+      source.game.readSave({ game: imported.game, level: imported.level }, plan.request, plan.applyServerState);
+      return;
+    }
+    if (isRereleaseImport(imported)) throw new Error("A rerelease save archive needs a rerelease game module");
+    const plan = host.nativeRestorePrelude(source, imported, original => {
+      for (const level of original.visitedLevels) source.visited.set(level.map, level);
+    });
+    source.game.init();
+    plan.afterInit();
+    source.files.restore(imported, (game, level) => {
+      source.game.restoreOriginal(game, level, plan.request, plan.applyServerState);
     });
   }
   override restoreGuest(save: SaveImage, nativeRestored: boolean): void {
@@ -3060,7 +3139,7 @@ class Q2NativeStrategy extends LoadedStrategy {
       });
       source.game.init();
       plan.afterInit();
-      source.files.restore(plan.original, { module: source.game.module, map: host.recipe.map.geometry.requestedPath }, (game, level) => {
+      source.files.restore(plan.original, (game, level) => {
         source.game.restoreOriginal(game, level, plan.request, plan.applyServerState);
       });
     }

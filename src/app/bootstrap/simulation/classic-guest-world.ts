@@ -497,7 +497,7 @@ export class ClassicGuestWorld {
     });
   }
   /** Source save files restore gameplay, not CPU/CRT process state. Clients subsequently follow original admission. */
-  restoreOriginal(gamePath: string, levelPath: string, map: ClassicGuestMap, restoreServerState: () => void): void {
+  restoreOriginal(gamePath: string, levelPath: string | null, map: ClassicGuestMap, restoreServerState: () => void): void {
     this.operation(() => {
       if (this.#phase !== "initialized") throw new Error("Original API 3 import requires a fresh initialized candidate");
       this.source.host.save("ReadGame", gamePath);
@@ -506,14 +506,14 @@ export class ClassicGuestWorld {
       this.source.host.runFrame();
       this.services.drainMessages();
       restoreServerState();
-      this.source.host.save("ReadLevel", levelPath);
+      if (levelPath !== null) this.source.host.save("ReadLevel", levelPath);
       this.services.completeSpawn();
       this.#phase = "running";
     });
   }
   async restoreOriginalLoading(
     gamePath: string,
-    levelPath: string,
+    levelPath: string | null,
     map: ClassicGuestMap,
     restoreServerState: () => void,
     nextFrame: () => Promise<void>,
@@ -526,7 +526,7 @@ export class ClassicGuestWorld {
       await this.source.host.callLoading("RunFrame", [], nextFrame);
       this.services.drainMessages();
       restoreServerState();
-      await this.source.host.saveLoading("ReadLevel", levelPath, nextFrame);
+      if (levelPath !== null) await this.source.host.saveLoading("ReadLevel", levelPath, nextFrame);
       this.services.completeSpawn();
       this.#phase = "running";
     });
