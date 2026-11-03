@@ -81,12 +81,14 @@ canonical family names (`q1`, `q2`, `q3a`):
 
 The `content/` tree mirrors the installed layout. Use
 `--user-content-root /path/to/writable-content` to change the writable content root.
-This option does not relocate the sibling saves and settings directories.
+With the default root, `saves/` and `settings/` sit beside `content/`; with
+`--user-content-root X` they are `X/saves` and `X/settings`. LLM credentials
+stay in the default `settings` folder regardless (see below).
 
 Startup scripts such as `config.cfg` and `autoexec.cfg` load from selected
 content. Existing personal configs can therefore affect a launch. LLM credentials
-and preferences live in the shared `settings` folder next to the writable content root
-(`~/.local/share/quake-typescript/settings/`); see
+and preferences live in `~/.local/share/quake-typescript/settings/`, even when
+`--user-content-root` is set; see
 [credential and preference files](console-and-llm.md#credential-and-preference-files).
 
 QVM components write to `.mods/PRODUCT/COMPONENT_ID/` under the user-content root.

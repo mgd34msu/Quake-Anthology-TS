@@ -123,8 +123,6 @@ export interface SparseGuestMemoryOptions {
   readonly module: ModuleIdentity;
   readonly pointerBytes: GuestPointerBytes;
   readonly allocationBase?: bigint;
-  /** Upper bound on bytes mapped at once. Guests allocate through the host, so this bounds what a module can pin. */
-  readonly maximumMappedBytes?: number;
 }
 export interface GuestExecutableBlock {
   readonly unchanged: () => boolean;
@@ -142,8 +140,6 @@ export class SparseGuestMemory implements MappedGuestMemory {
   #mappings: Mapping[] = [];
   readonly #backingChanges = new WeakMap<ArrayBufferLike, BackingChanges>();
   #mappingGeneration = 0;
-  readonly #maximumMappedBytes: number;
-  #mappedTotal = 0;
   readonly #slabs: { readonly base: bigint; readonly used: Uint8Array; next: number }[] = [];
   readonly #freePages: number[] = [];
   readonly #allocationHints = new Map<bigint, { readonly base: bigint; readonly byteLength: number }>();
@@ -239,7 +235,6 @@ export class SparseGuestMemory implements MappedGuestMemory {
     this.addressSpace = Symbol(options.module.id);
     this.#limit = 1n << BigInt(options.pointerBytes * 8);
     this.#allocationBase = options.allocationBase ?? 0x10000n;
-    this.#maximumMappedBytes = options.maximumMappedBytes ?? 0x40000000;
     this.#range(this.#allocationBase, 0, "map");
   }
 
@@ -258,8 +253,6 @@ export class SparseGuestMemory implements MappedGuestMemory {
 
   map(options: GuestMapOptions): GuestAddress {
     this.#available(options.base, options.byteLength);
-    if (this.#mappedTotal + options.byteLength > this.#maximumMappedBytes)
-      this.#fault("quota", options.base, options.byteLength, "map", `guest mappings would exceed ${this.#maximumMappedBytes} bytes`);
     if (options.bytes !== undefined && options.bytes.byteLength > options.byteLength) {
       throw new RangeError("Initial guest bytes exceed the mapping length");
     }
@@ -960,7 +953,6 @@ export class SparseGuestMemory implements MappedGuestMemory {
       this.#backingChanges.set(mapping.bytes.buffer, changes);
     }
     this.#mappingGeneration += 1;
-    this.#mappedTotal += mapping.byteLength;
     this.#mappings.splice(this.#firstEndAfter(mapping.base), 0, mappedBytes({ ...mapping, changes }));
     return undefined;
   }
@@ -1054,7 +1046,6 @@ export class SparseGuestMemory implements MappedGuestMemory {
       const mappingEnd = mapping.end;
       const startOffset = Number((base > mapping.base ? base : mapping.base) - mapping.base);
       const endOffset = Number((end < mappingEnd ? end : mappingEnd) - mapping.base);
-      if (permissions === null) this.#mappedTotal -= endOffset - startOffset;
       if (startOffset > 0) next.push(mappedBytes({ ...mapping, byteLength: startOffset, bytes: mapping.bytes.subarray(0, startOffset) }));
       if (permissions !== null)
         next.push(

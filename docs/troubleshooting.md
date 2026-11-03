@@ -58,8 +58,8 @@ graphical client to the menu. Only a fault outside those paths ends the process.
 
 The first start hashes your archives; later starts reuse a cache of archive digests at
 `~/.local/share/quake-typescript/cache/archive-digests.json`, keyed on size, times and inode.
-`QTS_NO_DIGEST_CACHE=1` forces a full re-hash (slow; for suspected cache problems).
-`QTS_STARTUP_TIMING=1` prints the time spent in each startup phase to stderr.
+Setting `QTS_NO_DIGEST_CACHE` (to any value) forces a full re-hash (slow; for suspected cache problems).
+Setting `QTS_STARTUP_TIMING` prints the time spent in each startup phase to stderr.
 
 ## Content and mods
 

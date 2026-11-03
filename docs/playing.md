@@ -46,10 +46,11 @@ Under **Match**, **Match rules** offers more than the standard game:
   maps; Quake III plays escalating bot waves on any map. On a Quake II world run by
   the built-in TypeScript game the launcher refuses Horde unless the map carries an
   authored `horde_manager` and monster spawn points. Worlds run by an original game DLL
-  skip that check. Horde needs single player or cooperative mode.
-- **Tag** (Rogue's token deathmatch) runs on any deathmatch map in any game;
-  the token spawns at a deathmatch spawn point when the map has none.
-- **Capture the Flag** and **Loki's Minions CTF** run in every game as modes of their own.
+  skip that check. Outside Quake III, Horde needs single player or cooperative mode.
+- **Tag** (Rogue's token deathmatch) runs on any deathmatch map in any game.
+- **Capture the Flag** and **Loki's Minions CTF** are modes of their own; the menu greys
+  out a choice when its product (for example Threewave CTF or the Quake II CTF/LMCTF
+  module) is not installed.
   Maps with authored flags use them; on any other map with deathmatch spawns the flag
   bases are synthesized from the farthest deathmatch spawns.
 - **DeathBall** runs in every game. A Quake II world needs its authored DeathBall entities
@@ -103,8 +104,8 @@ Under **Custom game → Kit**:
 | Control | Choices |
 | --- | --- |
 | Hook | Off, Weapon slot, Offhand |
-| Hook style | Threewave for Q1, Q2, or Q3; LMCTF for Q2; LRCTF for Q3 |
-| Grenades | Off, On |
+| Hook style | The hook implementations available for the selected game (shown only when Hook is not Off) |
+| Offhand grenades | Off, On (needs Quake II grenade assets) |
 
 Hook style selects the source implementation independently from placement. The
 picker lists hook providers rather than every installed mod and combines classic
@@ -141,6 +142,9 @@ the original formats cannot retain their extra state.
 `load NAME` detects the format. If an original save matches several installed
 products, use `load NAME PRODUCT_ID` to select its source. The console commands
 `help save` and `help load` show the syntax.
+
+`load` of a save outside the save directory is accepted from the local console. Scripts, game
+modules and remote clients need the game started with `--allow-load-paths`.
 
 Keep the exact original modules and matching declarations used by a saved game.
 Changed or missing declarations can prevent restoring private source state.

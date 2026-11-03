@@ -53,6 +53,9 @@ Product ids come from `--list-content`. Clients join with `--connect-q1`, `--con
   It requires `--listen` on a Quake product and is rejected for QuakeWorld.
 - `--q2-protocol 34|35[:1904|1905]|36[:revision]|4038|1038|2023` selects the Quake II wire. It
   requires `--listen`, `--listen-q2` or `--connect-q2`.
+- `--vm-game 0|1|2` follows id's `vm_game` for Quake III mods. `0` runs the mod's native
+  `qagame` module (`qagamex86.dll` or `qagamei386.so`) when it ships one and otherwise falls
+  back to bytecode; `1` and `2` run the bytecode.
 - `--ipx-dosbox HOST[:PORT]` and `--ipx-native` carry the native protocols over IPX (a DOSBox
   IPXNET relay or a host `AF_IPX` socket). They do not apply to QuakeWorld or the unified
   transport.
@@ -84,17 +87,26 @@ would from the local console.
 ## Administration
 
 - **rcon.** QuakeWorld, Quake II and Quake III servers accept rcon. Failed password attempts
-  back off per source address, and the password comparison is timing safe. The password
+  back off per source address, and the password comparison is timing safe. After three failures from one address, further attempts are refused for an
+  increasing time (up to 60 seconds). The password
   travels unencrypted, as in the original games.
 - **Limits** applied automatically: a flood gate before connectionless packets (loopback
   exempt), per-address connection caps (4 for NetQuake, 8 for the others), a 30 second life
-  for challenges, and a movement time budget per client.
+  for Quake II challenges, and a movement time budget per client.
+- **Load paths.** `load` of a save outside the save directory is accepted only from the local
+  console. Start the server with `--allow-load-paths` to let scripts, game modules and remote
+  clients do it too; leave it off on a public server.
+- **Developer impulses.** `sv_gate_dev_impulses` (default 0) set to 1 puts the developer
+  impulses of Dimension of the Machine (MG1) and Dawn of the Machine (MG3) behind `sv_cheats`
+  in coop and deathmatch.
+- **Quake III movement.** `pmove_ladders` (default 1) lets Quake III movement climb ladders on
+  Quake and Quake II maps; set it to 0 to disable.
 - **Downloads.** Servers offer files with asset extensions only. Client-side limits are
   128 MiB per asset, 1 GiB per package and 2 GiB per Quake II session.
 
 ## Faults
 
-A fault caused by one peer's input drops that peer. A fault in the frame restarts the map. A
+A fault caused by one peer's input drops that peer. A fault in the frame restarts the current map. A
 dedicated server exits with an error after more than three such faults in 60 seconds. Look in
 `~/.local/share/quake-typescript/crash.log` ([troubleshooting.md](troubleshooting.md)).
 

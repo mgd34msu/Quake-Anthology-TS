@@ -83,9 +83,7 @@ Use `--renderer cpu` for software rendering. Gamma defaults to `1`; higher
 values brighten the final image. The accepted range is `0.5` through `3`.
 
 The [playing guide](playing.md) covers explicit game, map, and movement selections.
-The installed-build record
-identifies the local delivered executable and its verification limits. Building
-current source does not by itself qualify every game or platform.
+Building current source does not by itself qualify every game or platform.
 
 ## Check a change
 
@@ -95,12 +93,15 @@ Use checks appropriate to the changed code:
 bun run typecheck
 bun run policy
 bun test path/to/relevant.test.ts
+bun run test:unit
 ```
+
+`test:unit` runs the suite without game data or a native window; `test:corpus` and
+`test:gl` need `QTS_TEST_CORPUS` (see [CONTRIBUTING.md](../CONTRIBUTING.md#tests)).
 
 The project enforces strong typing and source boundaries, including restrictions
 on unsafe casts and `any`. Some tests need installed game data or native libraries.
 A focused passing check does not establish full gameplay compatibility.
 
 Update the relevant user guide when commands, settings, features, or directory
-requirements change. Keep implementation evidence in the
-status documents, and keep the main README concise.
+requirements change, and keep the main README concise.

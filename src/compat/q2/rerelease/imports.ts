@@ -211,7 +211,8 @@ export class RereleaseCoreImports {
       }
       case "TagMalloc": {
         const rawSize = integer(args, 0);
-        if (rawSize < 0n || rawSize > 0x1000_0000n) throw new RangeError("Q2 TagMalloc size exceeds mapped-memory allocation limit");
+        // Only the guest's own address space limits an allocation; a size past it faults when it is mapped.
+        if (rawSize < 0n || rawSize > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Q2 TagMalloc size is outside the guest address space");
         const size = Math.max(1, Number(rawSize)),
           tag = number(1);
         const address = allocateNativeMemory(this.memory, size, `Q2 tag ${tag}`);

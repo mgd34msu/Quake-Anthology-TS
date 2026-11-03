@@ -32,10 +32,13 @@ What is isolated:
 - **Quake II DLLs are emulated, not loaded.** `gamex86.dll` and `game_x64.dll` are mapped
   into a software x86/x64 CPU (`src/guest`). Guest code has no direct system-call access.
   It sees only the import table the host provides (`gi.*`). Each call is bounded by an
-  instruction budget, guest memory is capped (1 GiB mapped, 256 MiB for classic `TagMalloc`),
-  and the file services refuse writes to names such as `.cfg .rc .dll .so .exe .pak .pk3 .qvm
-  .bsp`, cap one file at 64 MiB, a session at 512 MiB and 256 written files.
-  Private cvars are hidden from the guest and protected from guest writes.
+  instruction budget, guest memory is limited only by the guest's own address space, and the file services for classic DLLs refuse writes to names ending in `.cfg .rc
+  .dll .so .dylib .exe .bat .sh .pak .pk3 .qvm .bsp`, cap one file at 64 MiB, a session's growth
+  at 512 MiB and the number of written files at 256. Private cvars (rcon passwords) are hidden
+  from the guest and it cannot overwrite them.
+- **Quake II `AddCommandString` is filtered.** A game DLL can append only `map`, `gamemap`,
+  `kick`, `say`, `echo`, `exec` and `wait` to the server console. Everything else (`quit`,
+  `rcon`, `set*`, `bind`, `alias` and so on) is dropped and logged.
 - **Native Quake III game modules are emulated too, and only on request.** A mod's
   `qagamex86.dll` or `qagamei386.so` runs in the same software x86 CPU and System V / Windows
   runtime as the Quake II DLLs, with the same instruction budget and memory cap, and reaches the
@@ -52,11 +55,12 @@ What is isolated:
 
 What is **not** isolated:
 
-- A guest can issue console commands (`AddCommandString` in Quake II). There is no
-  allowlist and no distinct "game module" origin for those commands; they run as the
-  engine's own console would (audit item GUEST-002, recorded for an owner decision).
-  A hostile module can therefore run commands such as `exec`, `alias`, `connect` or
-  `writeconfig` within the user's own directories and network reach.
+- Quake III game, cgame and UI modules (bytecode or native) can issue console commands through
+  the engine's system calls (`trap_SendConsoleCommand`, `trap_Cmd_ExecuteText`). There is no
+  allowlist and no distinct "game module" origin for those commands; they run as the engine's
+  own console would. A hostile module can therefore run commands such as `exec`, `alias`,
+  `connect` or `writeconfig` within the user's own directories and network reach. The Quake II
+  filter above still lets a DLL `exec` a config script that is already installed.
 - A hostile module can consume CPU and memory up to the limits above, and can make the
   game unusable for as long as the instruction budget allows.
 - Emulator or host-service bugs are not ruled out. Emulation is a hardening layer, not a
@@ -73,13 +77,13 @@ cannot lose.
 
 ## Network trust model
 
-Peers are untrusted. Servers apply per-address connection limits, a connectionless-packet
-flood gate, bounded challenge lifetimes (30 s), a movement time budget per client,
-bounded decompression for downloads and Quake II stream data, and a failure backoff on
-rcon password attempts (comparison with a timing-safe digest). The mixed-game (`qts://`)
-transport authenticates a join with a stateless HMAC cookie. See the audit tracker
-NET for each control and the
-items deliberately left open.
+Peers are untrusted. Servers apply per-address connection limits (4 NetQuake peers, 8 for
+QuakeWorld, Quake II, KEX and `qts://`), a connectionless-packet flood gate, bounded Quake II
+challenge lifetimes (30 s), a movement time budget per client, bounded decompression for
+downloads and Quake II stream data, and a failure backoff on rcon password attempts (three
+free attempts, then a delay that doubles per failure up to 60 s, per source address; the
+password is compared as a timing-safe digest). The mixed-game (`qts://`) transport
+authenticates a join with a stateless HMAC cookie.
 
 Things to know before you host:
 
@@ -87,21 +91,23 @@ Things to know before you host:
   clear, as they do in the original games.
 - NetQuake and the native KEX LAN protocol have no handshake secret an original client
   could echo, so a spoofed packet can disconnect an admitted peer by address or take a lobby
-  slot (NET-007, NET-022). Both listeners stay open by default so original clients can join.
-  Mitigations always on: a connectionless-packet gate, at most 4 NetQuake / 8 KEX peers per
-  address, and a 10 s drop of silent admitted NetQuake peers. Start the server with
+  slot. Both listeners stay open by default so original clients can join. Mitigations always
+  on: a connectionless-packet gate, at most 4 NetQuake / 8 KEX peers per address, and a 10 s
+  drop of NetQuake peers that never answer after connecting. Start the server with
   `--lan-only` to make NetQuake and KEX LAN hosts ignore every datagram from a non-private
   address (loopback, RFC 1918, link-local, unique-local, IPX). Use it, or a firewall, on any
   host that is not meant to be reachable from the internet.
-- Server-supplied downloads are restricted to asset extensions and size limits (128 MiB per
-  asset, 1 GiB per package, 2 GiB per Quake II session). HTTP download servers on private,
-  loopback or link-local hosts are refused unless the game server is itself private.
-  Automatic downloads stay on by default (`allow_download 1`, `cl_http_downloads 1`, as in
-  Q2PRO), and downloaded packages (`pak`, `pkz`, `pk3`) stay mounted in later sessions, where
-  they can shadow assets. HTTP packages have their own switch: set
-  `cl_http_package_downloads 0` to refuse them while keeping other downloads (NET-013). The
-  Quake II native client keeps an interrupted download as `<name>.part` with a
-  `<name>.part.sha256` record and resumes it only if the length and SHA-256 still match.
+- Quake II HTTP downloads are restricted to asset extensions and size limits (128 MiB per
+  asset, 1 GiB per package, 2 GiB per session). HTTP download servers on private, loopback or
+  link-local hosts are refused unless the game server is itself private. Automatic downloads
+  are on by default in the Quake II client (`allow_download 1`, `cl_http_downloads 1`, as in
+  Q2PRO, with `allow_download_maps`, `_models`, `_sounds` and `_players` also 1), and downloaded
+  packages (`pak`, `pkz`, `pk3`) stay mounted in later sessions, where they can shadow assets.
+  HTTP packages have their own switch: set `cl_http_package_downloads 0` to refuse them while
+  keeping other downloads. A Quake II server serving files defaults `allow_download` to 0 for
+  the classic edition and 1 for the rerelease. The Quake III client's `cl_allowDownload`
+  defaults to 0. The Quake II native client keeps an interrupted download as `<name>.part` with
+  a `<name>.part.sha256` record and resumes it only if the length and SHA-256 still match.
 - Quake III key authorization is off unless `cl_authorizeKey` is set.
 - `--bind` selects the listen address; the default is `0.0.0.0`.
 
@@ -116,21 +122,24 @@ Things to know before you host:
   line values after `password`, `secret`, `token` and `apikey` flags and password-like values in
   the recent-output tail are replaced with `<redacted>`. Review a crash log before sharing it.
 - LLM requests start only from direct local console input. `llm_exec` validates the whole
-  returned batch first and rejects commands that run scripts, rebind keys, quit, connect, change
-  maps, send chat, write files or set command-valued cvars. See
+  returned batch first (at most 32 commands and 4096 ASCII characters, no comments or Markdown)
+  and rejects commands that run scripts, rebind keys, quit, connect, change maps, send chat,
+  write files or set command-valued cvars. See
   [console-and-llm.md](docs/console-and-llm.md).
 - `save` writes only inside the save directory. id's engines accept no `load` path outside
   their save directory; this program accepts one from the local console (typed commands,
   bound keys, the server console) to import original saves. A `load` of a path outside the
   save directory (and outside the installed add-on save folders) that comes from a script
   (`exec`, `autoexec.cfg`), a game or client module, or a remote client is refused with an
-  error. Start with `--allow-load-paths` to allow those sources too (audit DOCS2-003). A save
-  file is parsed, not executed. Test: `tests/app/load-path-policy.test.ts`.
+  error. Start with `--allow-load-paths` to allow those sources too. A save file is parsed, not
+  executed, except that a save holding a native game module's memory is only as trustworthy as
+  that module (see the mod trust model).
 
 ## Supply chain
 
 `package.json` declares no runtime npm dependencies, only development dependencies
-(`@types/bun`, `typescript`); the program runs on Bun and the native libraries above. Third-party code and its licenses are listed in
+(`@biomejs/biome`, `@types/bun`, `typescript`); the program runs on Bun and the native libraries
+above. Third-party code and its licenses are listed in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Release archives list a SHA-256 in
 `RELEASE.json` and in a `.sha256` file next to the archive; see
 [the release process](docs/release-process.md).

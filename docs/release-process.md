@@ -1,7 +1,9 @@
 # Release process
 
-This describes what the repository tooling does today. There is no CI configuration in the
-repository (no `.github/`); every step runs on the maintainer's machine.
+This describes what the repository tooling does today. CI (`.github/workflows/ci.yml`) runs
+the corpus-free checks (typecheck, format, SPDX, event codec, policy, `test:unit`) on pull
+requests and pushes to `main`; a weekly self-hosted job (`corpus.yml`) runs the corpus tier.
+Cutting a release is done by hand on the maintainer's machine.
 
 ## Versions
 
@@ -49,8 +51,7 @@ repository (no `.github/`); every step runs on the maintainer's machine.
 executable under `dist/`, and records `dist/runtime.json` (source hash, commit, dirty flag,
 Bun and TypeScript versions, executable SHA-256). Options: `--keep-snapshot`,
 `--keep-builds=N` (default 3 published builds kept). `bun run build:tools` builds the helper
-executables listed in `tools/build.ts` (`check-policy`, `source-camera`, `aas`). The entry for
-the deleted `docs/validate-plan.ts` was removed (audit DOCS-007).
+executables listed in `tools/build.ts` (`check-policy`, `source-camera`, `aas`).
 
 The compiled executable still needs the native libraries and your game data
 ([getting-started.md](getting-started.md)).
@@ -64,6 +65,7 @@ The compiled executable still needs the native libraries and your game data
 | `bun run test:unit` | Tests that need no game data or window |
 | `bun run test:corpus` | As above plus data-dependent tests; needs `QTS_TEST_CORPUS` |
 | `bun run test:gl` | Adds native-window and renderer tests |
-| `bun run check` | typecheck, policy and unit tier together |
+| `bun run format:check`, `bun run spdx`, `bun run codec:check` | Biome formatting, SPDX headers, and the generated event codec being current |
+| `bun run check` | typecheck, format, SPDX, codec, policy and the unit tier together |
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the test tiers.

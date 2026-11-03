@@ -565,8 +565,7 @@ export class ClassicQ2GuestHost {
       case "TagMalloc": {
         const requested = number(0),
           tag = number(1);
-        if (!Number.isInteger(requested) || requested < 0 || requested > 0x10000000)
-          throw new RangeError("TagMalloc size is outside the mapped-memory allocation limit");
+        if (!Number.isInteger(requested) || requested < 0) throw new RangeError("TagMalloc size must be a non-negative integer");
         // MSVC's word-at-a-time string routines access the allocator's rounded tail.
         const bytes = nativeAllocationBytes(requested);
         const address = allocateNativeMemory(memory, requested, `API 3 tag ${tag}`);

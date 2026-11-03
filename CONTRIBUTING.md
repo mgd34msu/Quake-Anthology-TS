@@ -71,12 +71,9 @@ Append `bun test` arguments to run one file, for example
 so a test run does not read or write your real `~/.local/share/quake-typescript/`. Keep new
 tests hermetic; do not read the real home directory.
 
-Native opt-in gates are environment variables that the `gl` tier turns on:
-`QUAKE_GL_SMOKE`, `QUAKE_UI_NATIVE_SMOKE`, `QUAKE_STARTUP_NATIVE_TEST`,
-`QUAKE_PLATFORM_NATIVE_TEST`, `QUAKE_MEDIA_NATIVE`, `QUAKE_FLARE_RENDER`,
-`QUAKE_DEBUG_SHAPES_NATIVE`, `QUAKE_Q2_NATIVE_APP`, `QUAKE_STARTUP_RETAIL_TEST`,
-`QUAKE_VIEWWEAPON_RENDER`, `QUAKE_WORLD_TEXT_APP`, `QUAKE_DOWNLOAD_WORKFLOW_TEST` and
-`QUAKE_DEATH_APPLICATION_TEST`. Without them those tests skip silently. Some tests need an
+Native opt-in gates are environment variables (for example `QUAKE_GL_SMOKE` and
+`QUAKE_Q2_NATIVE_APP`) that the `gl` tier turns on; the full list is `nativeGates` in
+`tools/test-tier.ts`. Without them those tests skip silently. Some tests need an
 optional add-on (for example Copper at `q1/rerelease/copper`) and skip with a notice.
 
 Add a focused regression test for each bug you fix. If a test asserted the old wrong
@@ -90,15 +87,15 @@ bun run policy        # slow; minutes
 bun run test:unit
 ```
 
-`bun run check` runs those three. Say in the change description which tiers you ran and which
+`bun run check` runs those three plus the format, SPDX and event-codec checks. CI runs the
+same checks on pull requests; `bun run format` fixes formatting. Say in the change description which tiers you ran and which
 you could not (for example "corpus tier not run, no game data"). Do not claim a test passes
 that you did not run.
 
 ## Where things go
 
 - Docs: user guides live in `docs/` and are linked from [docs/README.md](docs/README.md).
-  Dated reports are history; do not edit them to look current. Update
-  [docs/status.md](docs/status.md) when you change what the project can or cannot do, and add
+  Update [docs/status.md](docs/status.md) when you change what the project can or cannot do, and add
   a line to [CHANGELOG.md](CHANGELOG.md) under `Unreleased`.
 - Release notes: `docs/releases/<version>.md`, written at release time; see
   [docs/release-process.md](docs/release-process.md).
