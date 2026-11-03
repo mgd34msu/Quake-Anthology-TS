@@ -165,3 +165,5 @@ Fixes made while running the opt-in gates (each was a stale test or a real defec
 | `tests/render/commands/shadows.test.ts` | GL retains growing cone-axis casters and rejects a sphere outside the cone | `QUAKE_GL_SMOKE=1` | now runs and passes |
 | `tests/render/commands/shadows.test.ts` | GL model spotlight preserves point shadows, skin modulation and alpha | `QUAKE_GL_SMOKE=1` | now runs and passes |
 | `tests/network/q2/demo-header.test.ts` | installed CTF34 header selects recorded directory independent of current game | `existsSync(corpusFile(q2/ctf/demos/2014-01-07-2001-lfctf1.dm2))` | environment limit: that recording is absent; q2/ctf has no demos directory and the lmctf demos are different recordings the test's frame assertions do not describe |
+
+**Owner decision (2026-11-03):** the 40 remaining environment-limited skips listed here are accepted as skips for now.
