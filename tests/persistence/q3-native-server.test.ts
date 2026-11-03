@@ -12,10 +12,12 @@ import type { SaveImage } from "../../src/contracts/session.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
 import type { WireUserCommand } from "../../src/network/q3/message.ts";
 import { UserFileStore } from "../../src/core/files/writable.ts";
+import { SaveReader } from "../../src/core/save-value.ts";
+import { readGuest } from "../../src/persistence/execution.ts";
 import { readSaveImage, writeSaveImage } from "../../src/persistence/save-image.ts";
 import { EngineSession } from "../../src/world/session/session.ts";
 import { testCorpusRoot } from "../support/corpus.ts";
-import { Q3_ENTITY_STRIDE, authoredQ3Pe, syntheticQ3Elf } from "../support/q3-modules.ts";
+import { Q3_DATA, Q3_ENTITY_STRIDE, Q3_MODULE_BASE, authoredQ3Pe, syntheticQ3Elf } from "../support/q3-modules.ts";
 import { trackedTempDirectories } from "../support/temp-directories.ts";
 
 const tempDirectory = trackedTempDirectories();
@@ -34,7 +36,20 @@ const launchOptions = (userRoot: string, ...flags: string[]) => {
   return launch.options;
 };
 
-for (const [label, file, build, profile] of [["authored PE", "qagamex86.dll", authoredQ3Pe, "q3-pe"], ["synthetic ELF", "qagamei386.so", syntheticQ3Elf, "q3-elf"]] as const) {
+/** The module's heap chain: how many frames allocated, and the addresses and contents of the blocks, newest first. */
+function heapChain(engine: Q3NativeGuestSource): { readonly count: number; readonly blocks: readonly { readonly address: number; readonly next: number }[] } {
+  const { memory } = engine, word = (offset: number): number => memory.readUint32(memory.pointer(BigInt(Q3_MODULE_BASE + 0x3000 + offset)) ?? (() => { throw new Error("Unmapped module data"); })());
+  const blocks: { address: number; next: number }[] = [];
+  for (let address = word(Q3_DATA.heapHead); address !== 0 && blocks.length < 1000;) {
+    const next = memory.readUint32(memory.pointer(BigInt(address)) ?? (() => { throw new Error("Unmapped heap block"); })());
+    blocks.push({ address, next }); address = next;
+  }
+  return { count: word(Q3_DATA.heapCount), blocks };
+}
+
+const heapPe = (): Uint8Array => authoredQ3Pe({ heap: true });
+for (const [label, file, build, profile] of [["authored PE", "qagamex86.dll", authoredQ3Pe, "q3-pe"], ["synthetic ELF", "qagamei386.so", syntheticQ3Elf, "q3-elf"],
+  ["authored PE that allocates heap every frame", "qagamex86.dll", heapPe, "q3-pe"]] as const) {
   test(`a mod that ships a native ${label} qagame runs spawn, connect, frames and a save through the server entry point`, async () => {
     const userRoot = await userRootWith(file, build());
     const options = launchOptions(userRoot, "--vm-game", "0");
@@ -117,6 +132,7 @@ for (const [label, file, build, profile] of [["authored PE", "qagamex86.dll", au
       expect(() => validateSimulationSave({ ...image, guests: [{ ...saved, module: { ...saved.module, revision: "other-revision" } }] })).toThrow("differs from the selected artifact");
       const path = join(userRoot, "native.sav"); await writeSaveImage(path, image);
       const continuous = await active.frames(12);
+      const continuousChain = build === heapPe ? heapChain(engine) : { count: 0, blocks: [] };
       await active.close(); active = null;
       active = await open(await readSaveImage(path));
       expect(active.guest.engine.kind).toBe("native");
@@ -127,6 +143,30 @@ for (const [label, file, build, profile] of [["authored PE", "qagamex86.dll", au
       // The restored process continues exactly as the original did.
       expect(await active.frames(12)).toEqual(continuous);
       expect(Q3_ENTITY_STRIDE).toBe(active.guest.engine.data.entityStrideBytes);
+      if (build !== heapPe) {
+        // An image written before the heap image existed has neither field; it reads as version 2 with no heap and restores to the same continuation.
+        const { version: _version, heap: _heap, ...legacy } = saved;
+        const migrated = readGuest(new SaveReader(legacy));
+        expect(migrated).toMatchObject({ kind: "native-guest", version: 2, heap: null });
+        await active.close(); active = null;
+        active = await open({ ...image, guests: [migrated] });
+        expect(await active.frames(12)).toEqual(continuous);
+      }
+      if (build === heapPe) {
+        const restoredEngine = active.guest.engine;
+        if (!(restoredEngine instanceof Q3NativeGuestSource)) throw new Error("Expected a native engine");
+        // Blocks allocated after startup, before and after the save, are all live and identical to the uninterrupted run's.
+        const chain = heapChain(restoredEngine);
+        expect(chain.count).toBe(24);
+        expect(chain.blocks.length).toBe(24);
+        expect(chain).toEqual(continuousChain);
+        const heapSaved = saved.heap;
+        expect(saved.version).toBe(2);
+        expect(heapSaved?.blocks.length).toBe(12);
+        // The runtime's heap table came back with them: the module frees its newest block by address and the runtime knows it.
+        await restoredEngine.shutdownAsync(false);
+        expect(restoredEngine.memory.readUint32(restoredEngine.memory.pointer(BigInt(Q3_MODULE_BASE + 0x3000 + Q3_DATA.heapFreed)) ?? (() => { throw new Error("Unmapped module data"); })())).toBe(1);
+      }
     } finally { await active?.close(); }
   }, 120000);
 }

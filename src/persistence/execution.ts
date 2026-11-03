@@ -1,4 +1,4 @@
-import type { GameApiIdentity, GuestCheckpoint, GuestLayout, GuestPrivateState, GuestValueLayout, ModuleIdentity, NativeAbi, NativeCallAbi, SavedGuestCallbackBinding, SavedGuestCallbackReference } from "../contracts/execution.ts";
+import type { GameApiIdentity, GuestCheckpoint, GuestLayout, GuestPrivateState, GuestRegionPermissions, GuestValueLayout, ModuleIdentity, NativeAbi, NativeCallAbi, NativeGuestHeapImage, SavedGuestCallbackBinding, SavedGuestCallbackReference } from "../contracts/execution.ts";
 import { namespaced, SaveReader } from "./value.ts";
 import { readDigest, readRandom } from "./shared.ts";
 
@@ -67,9 +67,9 @@ function readNativeHeap(reader: SaveReader): NativeGuestHeapImage | null {
       slabs: heap.field("allocator").field("slabs").list(slab => ({ base: slab.field("base").bigint(), used: slab.field("used").bytes(), next: slab.field("next").integer(0) })),
       freePages: heap.field("allocator").field("freePages").list(page => page.integer(0)) },
     blocks: heap.field("blocks").list(block => ({ base: block.field("base").bigint(), size: block.field("size").integer(0), heap: block.field("heap").bigint() })),
-    windows: heap.field("windows").value === null ? null : { heaps: heap.field("windows").field("heaps").list(value => value.bigint()),
-      reservations: heap.field("windows").field("reservations").list(entry => ({ base: entry.field("base").bigint(), size: entry.field("size").integer(1) })),
-      tls: heap.field("windows").field("tls").list(value => value.integer(0)), lastError: heap.field("windows").field("lastError").integer(0) } };
+    windows: heap.field("windows").nullable(windows => ({ heaps: windows.field("heaps").list(value => value.bigint()),
+      reservations: windows.field("reservations").list(entry => ({ base: entry.field("base").bigint(), size: entry.field("size").integer(1) })),
+      tls: windows.field("tls").list(value => value.integer(0)), lastError: windows.field("lastError").integer(0) })) };
 }
 export function readGuest(reader: SaveReader): GuestCheckpoint {
   const common = { module: readModule(reader.field("module")), random: reader.field("random").list(readRandom), callbacks: reader.field("callbacks").list(readCallback) };

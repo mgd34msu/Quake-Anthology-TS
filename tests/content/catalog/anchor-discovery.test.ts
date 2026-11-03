@@ -52,11 +52,11 @@ describe("anchor content discovery", () => {
         ["Quake/Id1/PAK1.PAK", pakWith(["progs.dat"])],
         ["Quake/hipnotic/pak0.pak", pakWith(["progs.dat"])],
         ["Quake/rerelease/id1/pak0.pak", pakWith(["progs.dat"])],
-        ["Quake 2/baseq2/pak0.pak", pakWith(["maps/base1.bsp"])],
-        ["Quake 2/xatrix/pak0.pak", pakWith(["maps/xswamp.bsp"])],
-        ["Quake 2/rerelease/baseq2/pak0.pak", pakWith(["maps/base1.bsp", "maps/xswamp.bsp", "maps/rmine1.bsp", "maps/q2ctf1.bsp", "maps/mguhub.bsp", "maps/q64/rtest.bsp"])],
-        ["Quake 3 Arena/baseq3/pak0.pk3", zip([["vm/qagame.qvm", "x"]])],
-        ["Quake 3 Arena/missionpack/pak0.pk3", zip([["vm/qagame.qvm", "x"]])],
+        ["Quake 2/baseq2/pak0.pak", pakWith(["maps/base1.bsp", "gamex86.dll"])],
+        ["Quake 2/xatrix/pak0.pak", pakWith(["maps/xswamp.bsp", "gamex86.dll"])],
+        ["Quake 2/rerelease/baseq2/pak0.pak", pakWith(["maps/base1.bsp", "maps/xswamp.bsp", "maps/rmine1.bsp", "maps/q2ctf1.bsp", "maps/mguhub.bsp", "maps/q64/rtest.bsp", "game_x64.dll"])],
+        ["Quake 3 Arena/baseq3/pak0.pk3", zip([["vm/qagame.qvm", "x"], ["vm/cgame.qvm", "x"], ["vm/ui.qvm", "x"]])],
+        ["Quake 3 Arena/missionpack/pak0.pk3", zip([["vm/qagame.qvm", "x"], ["vm/cgame.qvm", "x"], ["vm/ui.qvm", "x"]])],
       ];
       for (const [path, bytes] of files) {
         await mkdir(join(root, path, ".."), { recursive: true });

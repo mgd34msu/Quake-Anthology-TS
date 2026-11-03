@@ -11,7 +11,7 @@ export const Q3_MODULE_BASE = 0x10000000;
 export const Q3_ENTITIES = 64, Q3_ENTITY_STRIDE = 560, Q3_CLIENTS = 8, Q3_CLIENT_STRIDE = 480;
 /** Offsets from the start of the module's data area. */
 export const Q3_DATA = { syscall: 0, frameTime: 4, levelTime: 8, cvar: 0x10, usercmd: 0x120, cvarName: 0x200, cvarDefault: 0x220, hello: 0x230, denied: 0x260, config: 0x2a0,
-  bye: 0x2c0, argv: 0x300, entities: 0x400, clients: 0x400 + Q3_ENTITIES * Q3_ENTITY_STRIDE, end: 0x400 + Q3_ENTITIES * Q3_ENTITY_STRIDE + Q3_CLIENTS * Q3_CLIENT_STRIDE } as const;
+  bye: 0x2c0, heapHead: 0x2e0, heapCount: 0x2e4, heapFreed: 0x2e8, argv: 0x300, entities: 0x400, clients: 0x400 + Q3_ENTITIES * Q3_ENTITY_STRIDE, end: 0x400 + Q3_ENTITIES * Q3_ENTITY_STRIDE + Q3_CLIENTS * Q3_CLIENT_STRIDE } as const;
 export const Q3_STRINGS: Readonly<Record<number, string>> = { [Q3_DATA.cvarName]: "g_synthetic", [Q3_DATA.cvarDefault]: "42", [Q3_DATA.hello]: "hello from the Q3 test module\n",
   [Q3_DATA.denied]: "denied by the Q3 test module", [Q3_DATA.config]: "synthetic", [Q3_DATA.bye]: "bye\n" };
 /** sharedEntity_t and playerState_t field offsets the module writes. */
@@ -61,8 +61,13 @@ class Asm {
   }
 }
 
+/** Absolute addresses of the kernel32 import slots a heap-using module calls through. */
+interface HeapImports { readonly getProcessHeap: number; readonly heapAlloc: number; readonly heapFree: number }
+const PE_IMPORTS = { table: 0x2100, lookup: 0x2140, address: 0x2150, library: 0x2170, names: [0x2180, 0x2190, 0x21a0] } as const;
+const peImportSlots: HeapImports = { getProcessHeap: Q3_MODULE_BASE + PE_IMPORTS.address, heapAlloc: Q3_MODULE_BASE + PE_IMPORTS.address + 4, heapFree: Q3_MODULE_BASE + PE_IMPORTS.address + 8 };
+
 /** dllEntry stores the engine's syscall; vmMain dispatches GAME_* commands. */
-function q3Code(codeAt: number, dataAt: number): { readonly code: number[]; readonly dllEntry: number; readonly vmMain: number } {
+function q3Code(codeAt: number, dataAt: number, heap?: HeapImports): { readonly code: number[]; readonly dllEntry: number; readonly vmMain: number } {
   const a = new Asm(codeAt, dataAt), at = (offset: number): number => a.at(offset);
   a.mark("dllEntry").raw(0x8b, 0x44, 0x24, 0x04).storeEax(at(Q3_DATA.syscall)).raw(0xc3);
   while (a.length < 0x10) a.raw(0xcc);
@@ -79,7 +84,10 @@ function q3Code(codeAt: number, dataAt: number): { readonly code: number[]; read
     .trap(QvmGameImport.G_LOCATE_GAME_DATA, at(Q3_DATA.entities), Q3_ENTITIES, Q3_ENTITY_STRIDE, at(Q3_DATA.clients), Q3_CLIENT_STRIDE)
     .trap(QvmGameImport.G_SET_CONFIGSTRING, 3, at(Q3_DATA.config))
     .loadArg("eax", 1).storeEax(at(Q3_DATA.levelTime)); done();
-  a.mark("shutdown").trap(QvmGameImport.G_PRINT, at(Q3_DATA.bye)); done();
+  a.mark("shutdown").trap(QvmGameImport.G_PRINT, at(Q3_DATA.bye));
+  // A heap module frees the block it allocated last, through the heap table the runtime keeps, and records the result.
+  if (heap !== undefined) a.raw(0xff, 0x15).u32(heap.getProcessHeap).raw(0xff, 0x35).u32(at(Q3_DATA.heapHead)).raw(0x6a, 0x00, 0x50, 0xff, 0x15).u32(heap.heapFree).storeEax(at(Q3_DATA.heapFreed));
+  done();
   // GAME_CLIENT_CONNECT(client, firstTime, isBot): refuse client 3 with a message pointer, record the client number in its playerState otherwise.
   a.mark("connect").raw(0x83, 0x7d, 0x0c, 0x03).jump(0x85, "allow").raw(0xb8).u32(at(Q3_DATA.denied)).raw(0x5d, 0xc3);
   a.mark("allow").loadArg("eax", 1).loadArg("ecx", 1).record(at(Q3_DATA.clients), Q3_CLIENT_STRIDE).setFieldFromEcx(Q3_FIELDS.clientNumber); done();
@@ -98,7 +106,11 @@ function q3Code(codeAt: number, dataAt: number): { readonly code: number[]; read
     .ecxFromMemory(at(Q3_DATA.usercmd)).setFieldFromEcx(Q3_FIELDS.commandTime); done();
   a.mark("disconnect").loadArg("eax", 1).record(at(Q3_DATA.entities), Q3_ENTITY_STRIDE).trap(QvmGameImport.G_UNLINKENTITY, "eax"); done();
   // GAME_RUN_FRAME(time): record it and stamp it on entity 0.
-  a.mark("frame").loadArg("eax", 1).storeEax(at(Q3_DATA.frameTime)).loadArg("ecx", 1).raw(0xb8).u32(at(Q3_DATA.entities)).setFieldFromEcx(Q3_FIELDS.entityTime); done();
+  a.mark("frame").loadArg("eax", 1).storeEax(at(Q3_DATA.frameTime)).loadArg("ecx", 1).raw(0xb8).u32(at(Q3_DATA.entities)).setFieldFromEcx(Q3_FIELDS.entityTime);
+  // A heap module also allocates a 16-byte block every frame, after startup, and links it to the previous one.
+  if (heap !== undefined) a.raw(0xff, 0x15).u32(heap.getProcessHeap).raw(0x6a, 0x10, 0x6a, 0x00, 0x50, 0xff, 0x15).u32(heap.heapAlloc)
+    .ecxFromMemory(at(Q3_DATA.heapHead)).raw(0x89, 0x08).storeEax(at(Q3_DATA.heapHead)).raw(0xff, 0x05).u32(at(Q3_DATA.heapCount));
+  done();
   // GAME_CONSOLE_COMMAND: print argv[1] and return argc == 2.
   a.mark("console").trap(QvmGameImport.G_ARGC).raw(0x50).trap(QvmGameImport.G_ARGV, 1, at(Q3_DATA.argv), 64).trap(QvmGameImport.G_PRINT, at(Q3_DATA.argv))
     .raw(0x58, 0x83, 0xf8, 0x02, 0x0f, 0x94, 0xc0, 0x0f, 0xb6, 0xc0, 0x5d, 0xc3);
@@ -107,9 +119,9 @@ function q3Code(codeAt: number, dataAt: number): { readonly code: number[]; read
 }
 
 /** PE32 with .text (code), .rdata (export directory for dllEntry and vmMain) and .data (strings, tables), loaded at its preferred base. */
-export function authoredQ3Pe(): Uint8Array {
+export function authoredQ3Pe(options: { readonly heap?: boolean } = {}): Uint8Array {
   const bytes = new Uint8Array(0x1200), view = new DataView(bytes.buffer);
-  const { code, dllEntry, vmMain } = q3Code(Q3_MODULE_BASE + 0x1000, Q3_MODULE_BASE + 0x3000);
+  const { code, dllEntry, vmMain } = q3Code(Q3_MODULE_BASE + 0x1000, Q3_MODULE_BASE + 0x3000, options.heap === true ? peImportSlots : undefined);
   const u16 = (offset: number, value: number): void => { view.setUint16(offset, value, true); };
   const u32 = (offset: number, value: number): void => { view.setUint32(offset, value, true); };
   const optional = 0x98, directories = optional + 96, sections = optional + 224;
@@ -131,6 +143,17 @@ export function authoredQ3Pe(): Uint8Array {
   u32(0xc40, 0x1000 + dllEntry); u32(0xc44, 0x1000 + vmMain); u32(0xc50, 0x2070); u32(0xc54, 0x2080); u16(0xc60, 0); u16(0xc62, 1);
   text(0xc70, "dllEntry"); text(0xc80, "vmMain"); text(0xc90, "q3synthetic.dll");
   for (const [offset, value] of Object.entries(Q3_STRINGS)) text(0xe00 + Number(offset), value);
+  if (options.heap === true) {
+    // Import directory in .rdata: kernel32 GetProcessHeap, HeapAlloc and HeapFree, bound by name through the lookup and address tables.
+    const file = (rva: number): number => rva - 0x2000 + 0xc00;
+    u32(directories + 8, PE_IMPORTS.table); u32(directories + 12, 0x28);
+    u32(file(PE_IMPORTS.table), PE_IMPORTS.lookup); u32(file(PE_IMPORTS.table) + 12, PE_IMPORTS.library); u32(file(PE_IMPORTS.table) + 16, PE_IMPORTS.address);
+    ["GetProcessHeap", "HeapAlloc", "HeapFree"].forEach((name, index) => {
+      u32(file(PE_IMPORTS.lookup) + index * 4, PE_IMPORTS.names[index] ?? 0); u32(file(PE_IMPORTS.address) + index * 4, PE_IMPORTS.names[index] ?? 0);
+      text(file(PE_IMPORTS.names[index] ?? 0) + 2, name);
+    });
+    text(file(PE_IMPORTS.library), "kernel32.dll");
+  }
   return bytes;
 }
 

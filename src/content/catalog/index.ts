@@ -643,14 +643,33 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
   }
   // An unreadable base remains a requirement even when its filenames are present.
   const byProduct = new Map(products.map(product => [product.expectation.id, product]));
-  const programNames = new Map<CatalogProduct, Set<string>>();
-  const programsOf = async (product: CatalogProduct): Promise<Set<string>> => {
-    const existing = programNames.get(product);
+  const archivePrograms = new Map<CatalogProduct, Set<string>>();
+  const directories = new Map<string, Map<string, string>>();
+  // Directory entries by lowercase name: program paths such as vm/qagame.qvm match case-insensitively through nested directories.
+  const listing = async (directory: string): Promise<Map<string, string>> => {
+    const existing = directories.get(directory);
     if (existing !== undefined) return existing;
-    const names = new Set<string>(product.archives.flatMap(archive => archive.entries.map(entry => entry.path.toLowerCase())));
-    if (product.looseRoot !== null) for (const entry of await readdir(product.looseRoot, { withFileTypes: true })) if (entry.isFile()) names.add(entry.name.toLowerCase());
-    programNames.set(product, names);
+    const names = new Map<string, string>();
+    for (const entry of await readdir(directory, { withFileTypes: true })) names.set(entry.name.toLowerCase(), entry.name);
+    directories.set(directory, names);
     return names;
+  };
+  const looseHas = async (root: string, program: string): Promise<boolean> => {
+    let directory = root;
+    const parts = program.toLowerCase().split("/");
+    for (const [index, part] of parts.entries()) {
+      const name = (await listing(directory)).get(part);
+      if (name === undefined) return false;
+      const path = resolve(directory, name);
+      if (index === parts.length - 1) return (await stat(path)).isFile();
+      directory = path;
+    }
+    return false;
+  };
+  const hasProgram = async (product: CatalogProduct, program: string): Promise<boolean> => {
+    let names = archivePrograms.get(product);
+    if (names === undefined) { names = new Set(product.archives.flatMap(archive => archive.entries.map(entry => entry.path.toLowerCase()))); archivePrograms.set(product, names); }
+    return names.has(program.toLowerCase()) || product.looseRoot !== null && await looseHas(product.looseRoot, program);
   };
   // A program is found in the product's own directory or archives, or anywhere along its base chain.
   const missingPrograms = async (product: CatalogProduct): Promise<string[]> => {
@@ -660,7 +679,7 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
     const missing: string[] = [];
     for (const program of product.expectation.requiredPrograms) {
       let found = false;
-      for (const link of chain) if ((await programsOf(link)).has(program.toLowerCase())) { found = true; break; }
+      for (const link of chain) if (await hasProgram(link, program)) { found = true; break; }
       if (!found) missing.push(program);
     }
     return missing;
