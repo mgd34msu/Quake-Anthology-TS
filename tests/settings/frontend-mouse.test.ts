@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { writeCapture } from "../support/capture.ts";
 import { expect, spyOn } from "bun:test";
-import { testCorpusRoot, corpusTest } from "../support/corpus.ts";
+import { corpusTest, testCorpusRoot } from "../support/corpus.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -169,6 +169,7 @@ test("startup reads the first product profile, keeps the shared mouse tuning acr
     root,
   ]);
   if (parsed.kind !== "run") throw new Error("Missing startup options");
+  const options = { ...parsed.options, nativeConfigRoot: join(root, "native") };
   const observed: { controller: NativeUiController | null } = { controller: null },
     register = NativeUiController.prototype.register;
   const registration = spyOn(NativeUiController.prototype, "register").mockImplementation(function (this: NativeUiController, id, factory) {
@@ -181,7 +182,7 @@ test("startup reads the first product profile, keeps the shared mouse tuning acr
   let app: StartupApplication | null = null;
   try {
     app = await StartupApplication.open(
-      parsed.options,
+      options,
       {
         print: text => {
           prints.push(text);

@@ -131,7 +131,7 @@ for (const backend of rendererBackends)
     });
     let app: ApplicationInstance | null = null;
     try {
-      app = await Application.open({ ...parsed.options, userContentRoot: root }, { print: () => undefined });
+      app = await Application.open({ ...parsed.options, userContentRoot: root, nativeConfigRoot: join(root, "native") }, { print: () => undefined });
       const application = app,
         local = application.localPlayers[0],
         audio = owners.at(-1);
@@ -186,7 +186,7 @@ for (const backend of rendererBackends)
         musicShuffle: false,
         outputFormat: audio.outputFormat,
       });
-      app = await Application.open({ ...parsed.options, userContentRoot: root }, { print: () => undefined });
+      app = await Application.open({ ...parsed.options, userContentRoot: root, nativeConfigRoot: join(root, "native") }, { print: () => undefined });
       const restored = owners.at(-1);
       if (restored === undefined) throw Error("Missing restored audio");
       expect({ deviceName: restored.selectedOutput, effectsVolume: restored.effectsVolume, musicVolume: restored.musicVolume }).toEqual(expected);
@@ -271,7 +271,7 @@ test("native remote named audio output and volumes survive travel and close", as
     ]);
     if (parsed.kind !== "run") throw Error("Missing client options");
     remote = await RemoteApplication.open(
-      { ...parsed.options, userContentRoot: join(root, "client") },
+      { ...parsed.options, userContentRoot: join(root, "client"), nativeConfigRoot: join(root, "client-native") },
       {
         print: text => {
           messages.push(text);

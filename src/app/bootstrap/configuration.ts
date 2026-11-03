@@ -42,6 +42,8 @@ import { initializeQ3ClientCvars, q3ClientModel } from "./q3-client/userinfo.ts"
 import { MouseSettings } from "../../input/mouse-settings.ts";
 import { ConsoleScriptFiles, consoleConfigRoot, sourceScriptReader } from "./config-scripts.ts";
 import { createStartupScriptReader } from "./startup-config.ts";
+import { loadSeatProfile } from "./seat-profile.ts";
+import { stockNativeConfig } from "./native-settings.ts";
 import { TeamArenaLaunchOverrides } from "./team-arena-skirmish.ts";
 
 export interface ConfigurationCommandRequest {
@@ -98,6 +100,7 @@ export async function prepareProfileConfiguration(args: {
   readonly nextFrame: () => Promise<void>;
 }): Promise<PreparedProfileConfiguration> {
   const { prepared, content, settings, shared, host } = args;
+  const inputStore = movementConfigurationStore(args.options, content, settings);
   const options = content.q3Product === undefined ? args.options : { ...args.options, q3Product: content.q3Product };
   const dialect = configurationDialect(content),
     movementDialect = configurationMovementDialect(content);
@@ -134,20 +137,20 @@ export async function prepareProfileConfiguration(args: {
       const mouse = new MouseSettings(new CvarRegistry({ dialect, context, print: host.print }));
       registerRunCvar(mouse.cvars, movementDialect);
       const [profile, archive, mouseArchive] = await Promise.all([
-        settings.loadSeat(`input/seat-${seat.id.index + 1}.json`),
+        loadSeatProfile(inputStore, options.userContentRoot, seat.id.index),
         loadCvarArchive(
           configurationStore(options, content, content.selection.engineBehavior.content),
           ["client", content.selection.engineBehavior.content, content.selection.engineBehavior.provider, String(seat.id.index)],
           dialect,
         ),
-        loadCvarArchive(settings, ["input", dialect, String(seat.id.index)], dialect),
+        loadCvarArchive(inputStore, ["input", dialect, String(seat.id.index)], dialect),
       ]);
       return { id: seat.id, context, cvars, mouse, input, profile, archive, mouseArchive };
     }),
   );
   const [movementArchive, fallbackArchive] = await Promise.all([
-    loadCvarArchive(settings, ["movement", movementDialect], movementDialect),
-    loadCvarArchive(settings, ["fallback", dialect], dialect),
+    loadCvarArchive(inputStore, ["movement", movementDialect], movementDialect),
+    loadCvarArchive(inputStore, ["fallback", dialect], dialect),
   ]);
   const sharedArchive = [
     ...shared.archiveEntries(),
@@ -164,7 +167,7 @@ export async function prepareProfileConfiguration(args: {
   });
   const scripts = new ConsoleScriptFiles(
     {
-      ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
+      ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content, selectionComponents(content.selection)),
       consoleRoot: consoleConfigRoot(options.userContentRoot),
       settings,
       mountedScript: sourceScriptReader(content.catalog, content.mounts, content.selection.engineBehavior.content),
@@ -340,32 +343,39 @@ export async function prepareProfileConfiguration(args: {
             publishChoices(seat.id);
           },
           applyArchive: () => {
+            const native = scripts.native;
+            const owned = <T extends { readonly name: string }>(entries: readonly T[]): readonly T[] => native?.filterArchive(entries) ?? entries;
             if (index === 0) {
-              if (args.clientSource === undefined) (published?.source ?? source).applyArchive(args.sourceArchive);
-              (published?.movement ?? movement).applyArchive(movementArchive);
-              (published?.fallback ?? fallback).applyArchive(fallbackArchive);
+              if (args.clientSource === undefined) (published?.source ?? source).applyArchive(owned(args.sourceArchive));
+              (published?.movement ?? movement).applyArchive(owned(movementArchive));
+              (published?.fallback ?? fallback).applyArchive(owned(fallbackArchive));
               (published === undefined ? shared : published.sharedCvars)?.applyArchive(sharedArchive);
             }
-            currentSeat(seat.id).cvars.applyArchive(seat.archive);
-            currentSeat(seat.id).mouse.cvars.applyArchive(seat.mouseArchive);
+            currentSeat(seat.id).cvars.applyArchive(owned(seat.archive));
+            currentSeat(seat.id).mouse.cvars.applyArchive(owned(seat.mouseArchive));
             if (args.clientSource !== undefined)
-              currentSeat(seat.id).cvars.applyArchive(args.clientSource.seatArchives?.get(seat.id) ?? (index === 0 ? args.sourceArchive : []));
-            if (retained !== undefined) {
-              bindings().unbindAll();
-              for (const binding of retained.bindings) bindings().bind(binding);
+              currentSeat(seat.id).cvars.applyArchive(owned(args.clientSource.seatArchives?.get(seat.id) ?? (index === 0 ? args.sourceArchive : [])));
+            // A stock game's own files hold its bindings; a product's saved profile outranks bindings carried over from another product's front end.
+            const nativeBindings = index === 0 && native?.suppressesProfileBindings() === true;
+            const carried = retained !== undefined && (seat.profile === null || nativeBindings);
+            if (retained !== undefined && carried) {
+              if (!nativeBindings) {
+                bindings().unbindAll();
+                for (const binding of retained.bindings) bindings().bind(binding);
+              }
               choices.all = retained.allBindingsChosen;
               for (const key of retained.overriddenKeys) choices.overridden.add(key);
               const expected = new Map(retained.selectedBindings.map(binding => [physicalInputKey(binding.input), binding.target]));
               const current = new Map(retained.bindings.map(binding => [physicalInputKey(binding.input), binding.target]));
               for (const key of new Set([...expected.keys(), ...current.keys()]))
                 if (JSON.stringify(expected.get(key)) !== JSON.stringify(current.get(key))) choices.overridden.add(key);
-              currentSeat(seat.id).mouse.write(retained.mouse);
-              if (retained.run !== undefined) currentSeat(seat.id).mouse.cvars.setCommandFlags("cl_run", retained.run, "archive");
-            } else if (seat.profile !== null) {
+              if (!nativeBindings) currentSeat(seat.id).mouse.write(retained.mouse);
+              if (retained.run !== undefined && !nativeBindings) currentSeat(seat.id).mouse.cvars.setCommandFlags("cl_run", retained.run, "archive");
+            } else if (seat.profile !== null && !nativeBindings) {
               bindings().unbindAll();
               for (const binding of seat.profile.bindings) bindings().bind(binding);
               choices.all = true;
-              currentSeat(seat.id).mouse.write(seat.profile.mouse);
+              currentSeat(seat.id).mouse.write(retained?.mouse ?? seat.profile.mouse);
               if (seat.profile.alwaysRun !== undefined)
                 currentSeat(seat.id).mouse.cvars.setCommandFlags("cl_run", seat.profile.alwaysRun ? "1" : "0", "archive");
             }
@@ -500,6 +510,10 @@ export async function openInitialConfigurationContent(
   return openApplicationConfigurationContent(catalog, { kind: "launch", preset, choice: presetChoice(preset.id) }, options.q3Product);
 }
 
+function selectionComponents(selection: ApplicationConfigurationContent["selection"]): readonly ContentId[] {
+  return [selection.source, selection.engineBehavior, selection.match, selection.combat, selection.movement].map(reference => reference.content);
+}
+
 export function configurationDialect(content: ApplicationConfigurationContent): CommandDialect {
   const source = content.catalog.product(content.selection.engineBehavior.content).expectation;
   return source.family === "q1"
@@ -523,6 +537,16 @@ export function legacyConfigurationOptions(
   options: ApplicationOptions,
   catalog: InstalledCatalog,
   reference: ContentId,
+  components: readonly ContentId[] = [reference],
+): Pick<ConstructorParameters<typeof ConsoleScriptFiles>[0], "legacyConfig" | "native"> {
+  const native = stockNativeConfig(catalog, reference, components, options.nativeConfigRoot);
+  return { ...(native === null ? {} : { native }), ...legacyOnly(options, catalog, reference) };
+}
+
+function legacyOnly(
+  options: ApplicationOptions,
+  catalog: InstalledCatalog,
+  reference: ContentId,
 ): Pick<ConstructorParameters<typeof ConsoleScriptFiles>[0], "legacyConfig"> {
   const selected = catalog.product(reference);
   if (selected.expectation.family !== "q1" || selected.expectation.edition === "quakeworld") return {};
@@ -542,7 +566,13 @@ export function sourceConsoleScripts(
     release = content.retainMainMounts();
   return new ConsoleScriptFiles(
     {
-      ...legacyConfigurationOptions(options, content.catalog, content.recipe.engineBehavior.content),
+      ...legacyConfigurationOptions(options, content.catalog, content.recipe.engineBehavior.content, [
+        content.recipe.map.entities.content,
+        content.recipe.engineBehavior.content,
+        content.recipe.match.content,
+        content.recipe.combat.content,
+        content.recipe.movement.content,
+      ]),
       consoleRoot: consoleConfigRoot(options.userContentRoot),
       settings,
       mountedScript: sourceScriptReader(content.catalog, mounts, content.recipe.engineBehavior.content),
@@ -553,6 +583,20 @@ export function sourceConsoleScripts(
     async () => {
       release();
     },
+  );
+}
+
+/**
+ * Movement, input and fallback settings belong to the movement provider's product, so a mixed combination shares
+ * them with that product played stock. Files saved earlier in the engine-behavior product's folder are still read.
+ */
+export function movementConfigurationStore(options: ApplicationOptions, content: ApplicationConfigurationContent, settings: ConfigStore): ConfigStore {
+  const owner = content.selection.movement.content;
+  if (owner === content.selection.engineBehavior.content) return settings;
+  const product = content.catalog.product(owner);
+  return new ConfigStore(
+    product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory),
+    settings,
   );
 }
 
@@ -609,6 +653,7 @@ export async function prepareInitialConfiguration(
   readonly scripts: ConsoleScriptFiles;
 }> {
   if (content.q3Product !== undefined) options = { ...options, q3Product: content.q3Product };
+  const inputStore = movementConfigurationStore(options, content, settings);
   const dialect = configurationDialect(content),
     movement = configurationMovementDialect(content);
   const context: CommandContext = { session: session.session, origin: { kind: "server-console" } };
@@ -638,7 +683,7 @@ export async function prepareInitialConfiguration(
   });
   const scripts = new ConsoleScriptFiles(
     {
-      ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
+      ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content, selectionComponents(content.selection)),
       consoleRoot: consoleConfigRoot(options.userContentRoot),
       settings,
       mountedScript: sourceScriptReader(content.catalog, content.mounts, content.selection.engineBehavior.content),
@@ -686,7 +731,7 @@ export async function prepareInitialConfiguration(
         id,
         cvars,
         mouse,
-        profile: options.dedicated ? null : await settings.loadSeat(`input/seat-${index + 1}.json`),
+        profile: options.dedicated ? null : await loadSeatProfile(inputStore, options.userContentRoot, index),
         archive: options.dedicated
           ? []
           : await loadCvarArchive(
@@ -694,7 +739,7 @@ export async function prepareInitialConfiguration(
               ["client", content.selection.engineBehavior.content, content.selection.engineBehavior.provider, String(index)],
               dialect,
             ),
-        mouseArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["input", dialect, String(index)], dialect),
+        mouseArchive: options.dedicated ? [] : await loadCvarArchive(inputStore, ["input", dialect, String(index)], dialect),
       });
     }
     const requests: ConfigurationCommandRequest[] = [];
@@ -727,8 +772,8 @@ export async function prepareInitialConfiguration(
       read: configurationScriptReader(content, options, scripts),
       sourceArchive,
       sharedArchive,
-      movementArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["movement", movement], movement),
-      fallbackArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["fallback", dialect], dialect),
+      movementArchive: await loadCvarArchive(inputStore, ["movement", movement], movement),
+      fallbackArchive: await loadCvarArchive(inputStore, ["fallback", dialect], dialect),
       applyLaunchOptions: () => {
         teamArenaLaunch?.apply(prepared.source, prepared.seats);
         if (options.q3MapLaunch !== undefined) applyQ3MapLaunch(prepared.source, options.q3MapLaunch);

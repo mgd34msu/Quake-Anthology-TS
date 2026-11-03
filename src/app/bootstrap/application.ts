@@ -1022,7 +1022,7 @@ export class Application {
   }
 
   private enableStartupPersistence(): void {
-    if (this.options.dedicated || this.preparedStartup?.pending) return;
+    if (this.preparedStartup?.pending) return;
     this.archivePersistence = true;
     this.graphical?.input.enableArchivePersistence();
     this.imageSettings?.enablePersistence();
@@ -1042,6 +1042,14 @@ export class Application {
         cvars,
         teamArenaArchiveEntries(cvars, overrides),
       );
+  }
+
+  /** A dedicated server has no input owner, so the movement and fallback archives it loaded are saved here. */
+  private async saveHeadlessArchives(): Promise<void> {
+    const prepared = this.preparedStartup;
+    if (prepared === null) return;
+    await saveCvarArchive(this.inputConfig, ["movement", prepared.movement.dialect], prepared.movement);
+    if (prepared.fallback !== prepared.movement) await saveCvarArchive(this.inputConfig, ["fallback", prepared.fallback.dialect], prepared.fallback);
   }
 
   private async saveClientArchives(
@@ -1416,7 +1424,7 @@ export class Application {
           }
         }
         const sourceArchive =
-          initialSave !== undefined || options.dedicated
+          initialSave !== undefined
             ? []
             : preparation.kind !== "restored"
               ? await loadCvarArchive(
@@ -4742,7 +4750,24 @@ export class Application {
     const serverProfile = this.simulation.serverProfile();
     const previousQ1Cvars = this.simulation.q1Source()?.cvars;
     const q1CvarsSource = save === undefined && content.world.kind === "q1-bsp" && content.preparedQuakeC === null ? previousQ1Cvars : undefined;
-    const sourceArchive = this.sourceCvars()?.archiveEntries() ?? [];
+    let sourceArchive: readonly CvarArchiveEntry[];
+    try {
+      sourceArchive =
+        sameSourceOwner || save !== undefined
+          ? (this.sourceCvars()?.archiveEntries() ?? [])
+          : await loadCvarArchive(
+              Application.sourceConfig(options, content),
+              ["source", content.recipe.map.entities.content, content.recipe.map.entities.provider],
+              this.sourceDialect(content),
+            );
+    } catch (error) {
+      try {
+        await content.close();
+      } catch (closeError) {
+        throw new AggregateError([error, closeError], "World preparation failed");
+      }
+      throw error;
+    }
     const q2Cvars = this.simulation
       .q2ServerCvars()
       ?.snapshots()
@@ -8407,6 +8432,11 @@ export class Application {
       }
       try {
         await this.saveClientArchives(this.options, this.content, this.clientCvars, this.teamArenaOverrides);
+      } catch (error) {
+        errors.push(error);
+      }
+      try {
+        if (this.options.dedicated) await this.saveHeadlessArchives();
       } catch (error) {
         errors.push(error);
       }

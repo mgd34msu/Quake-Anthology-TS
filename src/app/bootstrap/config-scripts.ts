@@ -11,6 +11,7 @@ import type { OpenedResource } from "../../content/mounts/index.ts";
 import { findContentPath, normalizeResourcePath } from "../../content/mounts/paths.ts";
 import { defaultUserContentRoot } from "../../content/user-data.ts";
 import { ConfigStore } from "../../settings/config.ts";
+import type { NativeConfig } from "../../settings/native-config.ts";
 
 /** Configuration follows the selected source and its bases, independently of mixed assets. */
 export function sourceScriptReader(catalog: InstalledCatalog, mounts: MountedContent, source: ContentId): (name: string) => Promise<Uint8Array | undefined> {
@@ -90,11 +91,17 @@ export async function readConsoleScript(options: {
   readonly mountedFiles?: (directory: string, extension: string) => Promise<readonly string[]>;
   readonly mountedResource?: (path: string) => Promise<OpenedResource | null>;
   readonly legacyConfig?: LegacyConsoleConfigSources;
+  /** A stock game's own configuration files, which answer the saved-configuration script before any user-store copy. */
+  readonly native?: NativeConfig;
 }): Promise<string | undefined> {
   const name = normalizeResourcePath(options.name);
   let origin = options.source.origin;
   while (origin.kind === "script") origin = origin.caller;
   if (origin.kind === "remote-client") throw new Error("Remote clients cannot read local configuration scripts");
+  if (options.native !== undefined && name.toLowerCase() === options.native.layout.script) {
+    const native = await options.native.readScript();
+    if (native !== null) return native;
+  }
   const seat = origin.kind === "local-seat" ? origin.seat : null;
   if (seat !== null) {
     const path = await findContentPath(options.consoleRoot, `settings/seat-${seat.index}/${name}`);
@@ -122,6 +129,9 @@ export class ConsoleScriptFiles {
   ) {}
   get root(): string {
     return this.options.settings.root;
+  }
+  get native(): NativeConfig | null {
+    return this.options.native ?? null;
   }
   async list(source: CommandContext): Promise<readonly ConsoleScriptEntry[]> {
     this.acquireRead();

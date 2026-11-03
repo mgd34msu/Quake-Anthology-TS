@@ -2,7 +2,7 @@
 import { parseWeaponBehaviorTool, type WeaponBehaviorToolCommand } from "./weapon-behavior-tool-options.ts";
 import { readStartupCommand, startupRequestsWorld } from "./startup-commands.ts";
 import { resolve } from "node:path";
-import { resolveDefaultContentRoot, type ContentRootSearch } from "../../content/roots.ts";
+import { isInstallRoot, resolveDefaultContentRoot, type ContentRootSearch } from "../../content/roots.ts";
 import type { GameFamily } from "../../contracts/content.ts";
 import { readModSelection, type ModSelection } from "../../contracts/mods.ts";
 import type { Q1ProtocolIdentity, Q2ProtocolIdentity } from "../../contracts/protocol.ts";
@@ -27,6 +27,8 @@ export interface ApplicationOptions {
   readonly serverProfilePath?: string;
   readonly corpusRoot: string;
   readonly userContentRoot?: string;
+  /** Redirects a stock game's own configuration files (normally in its game folder or Saved Games) beneath this folder; for sandboxes and tests whose game data is read-only. */
+  readonly nativeConfigRoot?: string;
   readonly addonContentRoots?: readonly import("../../content/roots.ts").NightdiveAddonRoot[];
   readonly product: string;
   readonly mapProduct?: string;
@@ -431,6 +433,8 @@ export function parseApplicationCommand(argv: readonly string[], search: Content
   )
     options = { ...options, mode: "deathmatch" };
   options = { ...options, corpusRoot: contentRoot.kind === "explicit" ? contentRoot.path : resolveDefaultContentRoot(search, contentRoot.kind === "steam") };
+  if (options.userContentRoot !== undefined && isInstallRoot(options.userContentRoot, options.corpusRoot))
+    throw new Error(`--user-content-root ${options.userContentRoot} is a game install; choose a separate writable folder`);
   if (startupCommands.length > 0) options = { ...options, startupCommands };
   explicitLaunch ||= startupRequestsWorld(startupCommands);
   if (list) return { kind: "list-content", corpusRoot: options.corpusRoot };

@@ -49,8 +49,13 @@ What is isolated:
   source.
 - **QVM bytecode and QuakeC** run in interpreters (`src/compat/qvm`, `src/compat/qc`) that
   expose only the engine's system-call surface.
-- **Content roots are read-only.** Installed game folders are never written; saves, settings,
-  downloads and the crash log go under `~/.local/share/quake-typescript/`.
+- **Game folders are written only for stock-game configuration.** A stock game (all components
+  from one product or mod) reads and writes its own `config.cfg` or `q3config.cfg` in its game
+  folder, or the rerelease files under Saved Games, as the original does. Nothing else is
+  written into an install: saves, other settings, downloads and the crash log go under
+  `~/.local/share/quake-typescript/`. `--user-content-root` may not be a game install. Because
+  those config files run as scripts at startup, treat write access to a game folder as
+  code-execution-adjacent, as with the originals.
 
 What is **not** isolated:
 

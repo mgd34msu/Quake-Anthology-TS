@@ -204,7 +204,11 @@ export function parseGlobalInputTuning(value: unknown): GlobalInputTuning {
 }
 export { settingsPath, writeAtomic };
 export class ConfigStore {
-  constructor(readonly root: string) {}
+  /** `legacy` is the store a document lived in before it moved here; reads fall back to it so nothing saved earlier is lost, writes only go to `root`. */
+  constructor(
+    readonly root: string,
+    private readonly legacy: ConfigStore | null = null,
+  ) {}
   // A saved document that is not JSON at all behaves like the absent one
   // every loader already admits; parsed values still face validation.
   private static parsed(text: string): unknown {
@@ -268,7 +272,7 @@ export class ConfigStore {
   }
   async loadSeat(name: string): Promise<SeatSettings | null> {
     const file = Bun.file(settingsPath(this.root, name));
-    if (!(await file.exists())) return null;
+    if (!(await file.exists())) return this.legacy?.loadSeat(name) ?? null;
     return this.decoded(name, await file.text(), parseSeatSettings);
   }
   async saveCvars(name: string, cvars: CvarRegistry, bindings: readonly string[] = []): Promise<void> {
@@ -280,7 +284,7 @@ export class ConfigStore {
   }
   async loadText(name: string): Promise<string | null> {
     const file = Bun.file(settingsPath(this.root, name));
-    return (await file.exists()) ? file.text() : null;
+    return (await file.exists()) ? file.text() : (this.legacy?.loadText(name) ?? null);
   }
   async dump(name: string, contents: string): Promise<void> {
     await writeAtomic(settingsPath(this.root, name), contents);

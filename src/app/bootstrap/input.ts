@@ -9,6 +9,7 @@ import type { PreparedProfileConfiguration } from "./configuration.ts";
 import { Q3ClientCvars } from "./q3-client/cvars.ts";
 import type { QvmClientInput } from "./q3-client/qvm-scalars.ts";
 import { loadCvarArchive, saveCvarArchive } from "./cvar-archives.ts";
+import { loadSeatProfile, saveSharedTuning } from "./seat-profile.ts";
 import { bindRunCvar } from "./shared-setting-cvars.ts";
 import { registerQ1ClientCommands } from "./q1-client-commands.ts";
 import type { CvarArchiveEntry } from "../../core/cvars/index.ts";
@@ -26,7 +27,7 @@ import type { InputBinding, SeatInputEvent, SeatInputFocus } from "../../contrac
 import { CommandBuffer, type CommandCvarRouting } from "../../core/commands/index.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
 import { SeatConsole } from "../../console/session.ts";
-import { defaultBindings, registerBindingCommands, registerWheelCommands } from "../../input/bindings.ts";
+import { archivedBindingPairs, defaultBindings, registerBindingCommands, registerWheelCommands } from "../../input/bindings.ts";
 import type { WeaponBindingItem } from "../../input/weapon-bindings.ts";
 import { InputRouter } from "../../input/router.ts";
 import { SeatInput, registerInputCommands } from "../../input/seat.ts";
@@ -392,7 +393,16 @@ export class ApplicationInput {
     prepared?: PreparedStartup,
     client?: ClientBootstrap,
   ): Promise<ApplicationInput> {
-    const { saved, routing, archives } = await ApplicationInput.readSettings(players, dialect, actions, settings, owner, previous, prepared);
+    const { saved, routing, archives } = await ApplicationInput.readSettings(
+      players,
+      dialect,
+      actions,
+      settings,
+      options.userContentRoot,
+      owner,
+      previous,
+      prepared,
+    );
     const input = new ApplicationInput(
       staging,
       window,
@@ -429,21 +439,24 @@ export class ApplicationInput {
     dialect: CommandDialect,
     actions: ApplicationInputCommands,
     settings: ConfigStore,
+    userContentRoot: string | undefined,
     owner?: ApplicationInputCommandOwner,
     previous?: ApplicationInput,
     prepared?: PreparedStartup,
   ) {
-    const saved = await Promise.all(players.map(player => settings.loadSeat(`input/seat-${player.seat.id.index + 1}.json`)));
+    const saved = await Promise.all(players.map(player => loadSeatProfile(settings, userContentRoot, player.seat.id.index)));
     const routing = await settings.loadInputRouting("input/routing.json");
     const sourceDialect = actions.console?.dialect() ?? owner?.cvars.dialect ?? previous?.consoleCvars.dialect ?? dialect;
-    const hasOwners = owner !== undefined || previous !== undefined || prepared !== undefined;
+    // Carried registries keep their values only while the dialect stays; a travel into another dialect loads that dialect's stores.
+    const retainsMovement = owner !== undefined || prepared !== undefined || (previous !== undefined && previous.cvars.dialect === dialect);
+    const retainsFallback = owner !== undefined || prepared !== undefined || (previous !== undefined && previous.consoleCvars.dialect === sourceDialect);
     const archives = {
-      movement: hasOwners ? [] : await loadCvarArchive(settings, ["movement", dialect], dialect),
-      fallback: hasOwners ? [] : await loadCvarArchive(settings, ["fallback", sourceDialect], sourceDialect),
+      movement: retainsMovement ? [] : await loadCvarArchive(settings, ["movement", dialect], dialect),
+      fallback: retainsFallback ? [] : await loadCvarArchive(settings, ["fallback", sourceDialect], sourceDialect),
       input: await Promise.all(
         players.map(player =>
           owner?.inputSettings !== undefined ||
-          previous?.locals.some(local => local.player.seat.id.equals(player.seat.id)) ||
+          (previous?.inputCvars(player.seat.id)?.dialect === sourceDialect && previous.locals.some(local => local.player.seat.id.equals(player.seat.id))) ||
           prepared?.seats.some(seat => seat.id.equals(player.seat.id))
             ? []
             : loadCvarArchive(settings, ["input", sourceDialect, String(player.seat.id.index)], sourceDialect),
@@ -526,6 +539,7 @@ export class ApplicationInput {
       this.dialect,
       this.actions,
       this.settings,
+      this.options.userContentRoot,
       undefined,
       this,
       this.startup,
@@ -1535,6 +1549,19 @@ export class ApplicationInput {
       });
       await this.controllerSettings.save(local.player.seat.id);
     }
+    const first = this.locals[0];
+    if (first !== undefined && first.player.seat.id.index === 0)
+      await saveSharedTuning(this.options.userContentRoot, {
+        version: 1,
+        bindings: [],
+        alwaysRun: first.builder.tuning.alwaysRun,
+        gamepad: first.input.gamepad.tuning,
+        mouse: { ...first.builder.mouse.tuning },
+        history: [],
+        rumble: first.haptics.enabled,
+        rumbleStrength: first.haptics.strength,
+        controller: { kind: "automatic" },
+      });
     const keyboard = this.router.keyboardSeat(),
       index = keyboard?.index ?? -1;
     await this.settings.saveInputRouting("input/routing.json", index < 0 ? null : index);
@@ -1542,7 +1569,18 @@ export class ApplicationInput {
       await saveCvarArchive(this.settings, ["movement", this.cvars.dialect], this.cvars);
       if (this.consoleCvars !== this.cvars) await saveCvarArchive(this.settings, ["fallback", this.consoleCvars.dialect], this.consoleCvars);
       for (const [seat, mouse] of this.mouseSettings) await saveCvarArchive(this.settings, ["input", mouse.cvars.dialect, String(seat.index)], mouse.cvars);
+      await this.saveNativeConfig();
     }
+  }
+
+  /** A stock game writes its own configuration file the way the original does at quit. */
+  private async saveNativeConfig(): Promise<void> {
+    const native = this.scripts.native,
+      primary = this.locals[0];
+    if (native === null || primary === undefined) return;
+    const seat = primary.player.seat;
+    const source: CommandContext = { session: seat.id.session, origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } };
+    await this.scripts.write(() => native.write(archivedBindingPairs(primary.input), this.commands.archiveCommands(source)));
   }
 
   close(): undefined {

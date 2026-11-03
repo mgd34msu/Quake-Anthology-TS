@@ -45,7 +45,7 @@ test("normal native application shares per-seat mouse values across console, men
     return await result.value;
   };
   try {
-    app = await Application.open(parsed.options, { print: () => undefined });
+    app = await Application.open({ ...parsed.options, nativeConfigRoot: join(root, "native") }, { print: () => undefined });
     const input = await controls(),
       one = input.locals[0],
       two = input.locals[1];
@@ -63,7 +63,12 @@ test("normal native application shares per-seat mouse values across console, men
     sensitivity.write(6);
     expect(input.inputCvars(one.player.seat.id)?.variableValue("sensitivity")).toBe(6);
     await app.close();
-    app = await Application.open(parsed.options, { print: () => undefined }, undefined, { pitch: 0.011, acceleration: 0.5, filter: true, freeLook: false });
+    app = await Application.open({ ...parsed.options, nativeConfigRoot: join(root, "native") }, { print: () => undefined }, undefined, {
+      pitch: 0.011,
+      acceleration: 0.5,
+      filter: true,
+      freeLook: false,
+    });
     const reopened = await controls();
     expect(reopened.locals[0]?.builder.mouse.tuning.sensitivity).toBe(6);
     expect(reopened.locals[0]?.builder.mouse.tuning.invertPitch).toBe(true);
@@ -118,7 +123,7 @@ test("remote startup cfg overrides its saved seat before admission and retains t
     client: RemoteApplication | null = null;
   const host = { print: (): undefined => undefined };
   try {
-    server = await Application.open(serverOptions.options, host);
+    server = await Application.open({ ...serverOptions.options, nativeConfigRoot: join(root, "native") }, host);
     const address = server.networkAddress;
     if (address === null) throw new Error("Missing loopback address");
     const parsed = parseApplicationCommand([
@@ -134,7 +139,7 @@ test("remote startup cfg overrides its saved seat before admission and retains t
       "--hidden",
     ]);
     if (parsed.kind !== "run") throw new Error("Missing remote options");
-    client = await RemoteApplication.open(parsed.options, host);
+    client = await RemoteApplication.open({ ...parsed.options, nativeConfigRoot: join(root, "native") }, host);
     const early = client.clientCommands?.inputSettings;
     if (early === undefined) throw new Error("Missing early mouse owner");
     expect(early.read().sensitivity).toBe(3);
@@ -169,7 +174,7 @@ test("remote startup cfg overrides its saved seat before admission and retains t
     await client.close();
     client = null;
     expect((await config.loadSeat("input/seat-1.json"))?.mouse.sensitivity).toBe(4);
-    client = await RemoteApplication.open(parsed.options, host);
+    client = await RemoteApplication.open({ ...parsed.options, nativeConfigRoot: join(root, "native") }, host);
     expect(client.clientCommands?.inputSettings?.read().sensitivity).toBe(4);
   } finally {
     await client?.close();

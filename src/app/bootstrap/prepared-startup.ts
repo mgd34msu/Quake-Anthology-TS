@@ -503,16 +503,18 @@ export class PreparedStartup {
           seat.collectingBindings = true;
         },
         applyArchive: () => {
+          const native = this.scripts.native;
+          const owned = <T extends { readonly name: string }>(entries: readonly T[]): readonly T[] => native?.filterArchive(entries) ?? entries;
           if (index === 0) {
-            this.source.applyArchive(options.sourceArchive);
-            this.movement.applyArchive(options.movementArchive);
-            this.fallback.applyArchive(options.fallbackArchive);
+            this.source.applyArchive(owned(options.sourceArchive));
+            this.movement.applyArchive(owned(options.movementArchive));
+            this.fallback.applyArchive(owned(options.fallbackArchive));
             this.options.shared?.applyArchive(options.sharedArchive);
           }
           if (seat === undefined || saved === undefined) return;
-          seat.cvars.applyArchive(saved.archive);
-          seat.mouse.cvars.applyArchive(saved.mouseArchive);
-          if (saved.profile !== null) {
+          seat.cvars.applyArchive(owned(saved.archive));
+          seat.mouse.cvars.applyArchive(owned(saved.mouseArchive));
+          if (saved.profile !== null && !(index === 0 && native?.suppressesProfileBindings() === true)) {
             seat.input.unbindAll();
             for (const binding of saved.profile.bindings) seat.input.bind(binding);
             seat.allBindingsChosen = true;

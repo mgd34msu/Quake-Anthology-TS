@@ -108,8 +108,11 @@ function quoted(value: string): string {
   return `"${value}"`;
 }
 /** Dedicated profiles include named device-zero controls; graphical profiles retain controllers in seat settings. */
-export function archivedBindings(input: Pick<BindingStore, "bindings">, includeControllerBindings = false): readonly string[] {
-  const commands: string[] = ["unbindall"];
+export function archivedBindingPairs(
+  input: Pick<BindingStore, "bindings">,
+  includeControllerBindings = false,
+): readonly (readonly [key: string, command: string])[] {
+  const pairs: [string, string][] = [];
   for (const binding of input.bindings) {
     if (binding.target.kind !== "command") continue;
     const physical = binding.input;
@@ -119,9 +122,16 @@ export function archivedBindings(input: Pick<BindingStore, "bindings">, includeC
       else if (physical.direction === "positive" && (physical.axis === "left-trigger" || physical.axis === "right-trigger"))
         name = physical.axis === "left-trigger" ? "GAMEPAD_LEFT_TRIGGER" : "GAMEPAD_RIGHT_TRIGGER";
     }
-    if (name !== null) commands.push(`bind ${quoted(name)} ${quoted(binding.target.text)}`);
+    if (name !== null) {
+      quoted(name);
+      quoted(binding.target.text);
+      pairs.push([name, binding.target.text]);
+    }
   }
-  return commands;
+  return pairs;
+}
+export function archivedBindings(input: Pick<BindingStore, "bindings">, includeControllerBindings = false): readonly string[] {
+  return ["unbindall", ...archivedBindingPairs(input, includeControllerBindings).map(([key, command]) => `bind ${quoted(key)} ${quoted(command)}`)];
 }
 export type BindingCommandSeat = Pick<BindingStore, "bindings" | "binding" | "bind" | "unbind" | "unbindAll">;
 

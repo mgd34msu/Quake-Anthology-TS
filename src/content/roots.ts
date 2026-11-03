@@ -88,6 +88,18 @@ export function hasGameAnchor(root: string): boolean {
   return FAMILIES.some(family => anchoredGameRoot(root, family) !== null);
 }
 
+/**
+ * True when a path is a game install rather than a writable user-content tree:
+ * it is the content root in use, or it holds a game's base directory (`id1`,
+ * `baseq2`, `baseq3`) directly. User trees keep games under canonical family
+ * folders (`q1/id1`), so they never match.
+ */
+export function isInstallRoot(path: string, contentRoot: string): boolean {
+  const absolute = resolve(path);
+  if (absolute === resolve(contentRoot)) return true;
+  return FAMILIES.some(family => childDirectory(absolute, ANCHORS[family]) !== null);
+}
+
 function steamRootDirectories(home: string): string[] {
   return [resolve(home, ".local/share/Steam"), resolve(home, ".steam/steam"), resolve(home, ".var/app/com.valvesoftware.Steam/.local/share/Steam")];
 }

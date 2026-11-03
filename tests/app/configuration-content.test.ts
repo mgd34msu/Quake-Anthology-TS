@@ -612,6 +612,90 @@ test("fresh owned remote seed retains selected defaults and saved input settings
   }
 });
 
+const q3Rules: { readonly movement: GameFamily; readonly character: GameFamily } = { movement: "q3", character: "q3" };
+test("retained front-end bindings give way to the product's saved profile, and a stock game's own config file outranks both", async () => {
+  for (const native of [false, true]) {
+    const { root, catalog } = await fixture();
+    try {
+      const selected = { ...options("q3-baseq3"), ...q3Rules, userContentRoot: join(root, "user") };
+      const directory = join(root, catalog.require(selected.product).expectation.contentDirectory);
+      await writeFile(join(directory, "default.cfg"), "bind w +forward\n");
+      await writeFile(join(directory, "q3config.cfg"), native ? "bind k +zoom\n" : "");
+      await writeFile(join(directory, "autoexec.cfg"), "");
+      const identity = createIdentityOwner(`retained-profile-${native}`),
+        session = new EngineSession(identity, { kind: "local" });
+      const actual = session.createSeat(0, session.createClient(0));
+      const context = {
+        session: session.session,
+        origin: { kind: "local-seat", seat: actual.id, client: actual.client.id },
+      } satisfies import("../../src/contracts/common.ts").CommandContext;
+      const sourceContext = { session: session.session, origin: { kind: "local-console" } } satisfies import("../../src/contracts/common.ts").CommandContext;
+      const settings = new ConfigStore(join(root, "settings"));
+      const scripts = new ConsoleScriptFiles({ consoleRoot: join(root, "console"), settings, mounted: undefined });
+      const mouse = new MouseSettings(new CvarRegistry({ dialect: "q3", context }));
+      await settings.saveSeat("input/seat-1.json", {
+        version: 1,
+        bindings: [{ input: { kind: "key", code: 101 }, target: { kind: "command", text: "+use" } }],
+        gamepad: defaultGamepadTuning,
+        mouse: { ...mouse.read(), sensitivity: 11 },
+        history: [],
+        rumble: false,
+        controller: { kind: "none" },
+      });
+      const seed = new CvarRegistry({ dialect: "q3", context: sourceContext });
+      const prepared = new PreparedStartup(seed, seed, scripts, {
+        dialect: "q3",
+        movementDialect: "q3",
+        seats: [{ id: actual.id, context, cvars: new CvarRegistry({ dialect: "q3", context }), mouse, profile: null, archive: [], mouseArchive: [] }],
+        shared: null,
+        sharedNames: [],
+        print() {},
+        forward: () => undefined,
+      });
+      const input = prepared.seats[0]?.input;
+      if (input === undefined) throw new Error("Owned seed did not allocate its input");
+      input.bind({ input: { kind: "key", code: 99 }, target: { kind: "command", text: "+attack" } });
+      const preset = applicationConfigurationPreset(catalog, selected);
+      const content = await openApplicationConfigurationContent(catalog, { kind: "launch", preset, choice: presetChoice(preset.id) });
+      const client = new CvarRegistry({ dialect: "q3", context });
+      try {
+        const profile = await prepareProfileConfiguration({
+          prepared,
+          clientSource: { inputState: "retained", cvars: client, archive: null, route: routing => routing },
+          seats: [{ seat: actual, input }],
+          options: selected,
+          content,
+          settings,
+          shared: new CvarRegistry({ dialect: "q3", context: sourceContext }),
+          host: { print() {} },
+          sourceArchive: [],
+          defaultCapacity: 1,
+          nextFrame: async () => {},
+        });
+        try {
+          const bindings = profile.program.input(actual.id);
+          expect(bindings?.binding({ kind: "key", code: 99 })).toBeNull();
+          if (native) {
+            expect(bindings?.binding({ kind: "key", code: 107 })).toEqual({ kind: "command", text: "+zoom" });
+            expect(bindings?.binding({ kind: "key", code: 101 })).toBeNull();
+          } else {
+            expect(bindings?.binding({ kind: "key", code: 101 })).toEqual({ kind: "command", text: "+use" });
+          }
+        } finally {
+          profile.routing.close();
+          await profile.scripts.close();
+        }
+      } finally {
+        await content.close();
+        await scripts.close();
+        session.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("configuration and world discovery follow selected products rather than movement or character", () => {
   const movements: readonly GameFamily[] = ["q1", "q2", "q3"];
   for (const product of ["q1-classic-custom-source", "q2-classic-custom-source", "q3-custom-source", "q1:classic:custom-source:installed"]) {

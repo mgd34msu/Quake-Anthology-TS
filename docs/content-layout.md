@@ -1,14 +1,42 @@
 # Organize game data, mods, maps, and music
 
-Point `--content-root` at one directory containing your game installations, or
-omit it: the executable searches its own folder, then the folder above it, then
-the default Steam library locations (`--steam` searches only Steam), stopping at
-the first folder holding a game. Each game is located by its base directory —
-`id1`, `baseq2`, or `baseq3` — so an unmodified Steam layout (`Quake/Id1`,
-`Quake 2/baseq2`, `Quake 3 Arena/baseq3`) works, and expansions, rerelease
-trees, and mods resolve as siblings of the base directory. The curated layout
-below also works. Install only products you own; missing products
-remain unavailable. Preserve the original archive names and loose companion files.
+## How game data is found
+
+The catalog looks for game data in this order and stops at the first root that
+holds a game (`src/content/roots.ts`):
+
+1. `--content-root PATH`, when given. Nothing else is searched.
+2. Otherwise the folder of the executable (the working directory when run from
+   source), then the folder above it.
+3. Otherwise the default Steam libraries: `~/.local/share/Steam`, `~/.steam/steam`
+   and the Flatpak Steam folder, plus every library listed in each
+   `steamapps/libraryfolders.vdf`, each searched under `steamapps/common`.
+   `--steam` skips steps 1 and 2 and searches only these.
+
+A game is recognized by its base directory (`id1`, `baseq2`, `baseq3`, matched
+case-insensitively). The directory holding it is that game's root, whatever it is
+called, so `Quake/Id1`, `Quake 2/baseq2` and `Quake 3 Arena/baseq3` work as
+installed, and the curated `q1/`, `q2/`, `q3a/` layout below works too. Expansions,
+rerelease trees and mods are siblings of the base directory.
+
+### Products, mods and add-ons
+
+- **Products** are the rows in `src/content/catalog/products.ts` (classic,
+  rerelease, QuakeWorld and demo editions of each game, and the official
+  expansions). A product is installed when its required archives and programs are
+  found; otherwise it stays listed as unavailable.
+- **Mods** are discovered, unless disabled, in every child directory of a game's
+  root (and of the writable content tree) that is not a known product or
+  `rerelease`. A folder counts when it holds a PAK/PK3/PKZ archive, a `maps`,
+  `models` or `vm` folder, `progs.dat`/`qwprogs.dat`, or a native game library.
+  Folder names must be simple (letters, digits, `._+-`).
+- **Nightdive add-ons** are the game folders the rereleases download. They live
+  in `Saved Games/Nightdive Studios/Quake` or `Quake II`, under Proton in
+  `steamapps/compatdata/2310` (Quake) and `2320` (Quake II), or in the profile's
+  `Saved Games` for a native install. They are read-only, rank below the install
+  and the writable tree, and their titles come from `addons.json`. A game
+  folder installed in the classic tree also satisfies the same rerelease product,
+  and the reverse.
 
 ## Installed content
 
@@ -59,15 +87,56 @@ Q2 rerelease expansions use the rerelease `baseq2` content. They do not use the
 classic `xatrix` and `rogue` directories. Keep classic and rerelease files separate
 even when their filenames match.
 
-## Writable content
+## Where files are read and written
 
-Add-ons and overrides can live separately from the installed base data.
-Unlike installed games, this writable tree is addressed with the engine's
-canonical family names (`q1`, `q2`, `q3a`):
+Stock games write where the original game does; nothing is redirected into a
+separate area. Only combinations the originals could never run, and data with no
+original equivalent, use the engine's own folders.
+
+**Stock games.** A stock game takes every selected component from one product or
+mod (the product the rules come from and the products it extends). It reads and
+writes its own configuration with the original name, format and location:
+
+| Game | Native configuration |
+| --- | --- |
+| Quake (WinQuake/GLQuake), mods | `<gamedir>/config.cfg` (`Id1`, `hipnotic`, ...) |
+| QuakeWorld | `qw/config.cfg` (assumed from the client's `com_gamedir`; not confirmed) |
+| Quake II, mods | `<gamedir>/config.cfg` (`baseq2`, `xatrix`, ...) |
+| Quake III, Team Arena, mods | `<gamedir>/q3config.cfg` (`baseq3`, `missionpack`, ...) |
+| Quake rerelease | `Saved Games/Nightdive Studios/Quake/kexengine.cfg` |
+| Quake II rerelease | `Saved Games/.../Quake II/kexengine.cfg` and `system.cfg`, and `<gamedir>/settings.cfg` and `keybinds.cfg` |
+
+At startup these files are executed where the original executes them
+(`config.cfg` after `default.cfg`; `q3config.cfg` before `autoexec.cfg`), and
+they win over the engine's JSON copies of the same bindings and variables. At
+quit the file is rewritten the way the original does: bindings, then archived
+variables, with the original's header and quoting. The rerelease files hold many
+engine variables this port does not own, so they are updated in place: existing
+lines change, other lines (including the engine's own menu bindings) stay, and
+variables the files do not name remain in the user store. A file that holds only
+the id header or comments does not override anything. Saved Games folders under
+Proton or a native profile are located as described above. These game folders
+are therefore written; install them where your account can write.
+
+**Mixed combinations** (components from different products, such as a Quake II
+map with Quake movement) keep to the user store, keyed by the component that owns
+each setting: movement and input settings and bindings by the movement provider's
+product, map and rules variables by the map product, character and client
+variables by the engine-behavior product. A mixed game that uses Quake movement
+therefore reads and writes the same movement, input and binding files that Quake
+played stock keeps in its user folder. Stock games also save those JSON copies
+beside their native file, so a mixed game starts from the latest stock values; the
+reverse does not hold, because a stock game reads its native file first. Files
+saved earlier under the engine-behavior product's folder are still read when the
+movement product's folder has none.
+
+**Writable content and engine-wide data** live under
+`~/.local/share/quake-typescript/` (or `--user-content-root X`, which must not be a
+game install):
 
 ```text
 ~/.local/share/quake-typescript/
-  content/
+  content/                        # add-ons and overrides; engine family names
     q1/id1/maps/example.bsp
     q1/mymod/
     q1/rerelease/mymod/
@@ -75,21 +144,23 @@ canonical family names (`q1`, `q2`, `q3a`):
     q2/rerelease/mymod/
     q3a/baseq3/
     q3a/mymod/
-  saves/                          # application-managed saved games
-  settings/                       # application-managed settings
+  saves/                          # saved games (this engine's shared format)
+  settings/                       # engine-wide settings, per-product JSON
 ```
 
-The `content/` tree mirrors the installed layout. Use
-`--user-content-root /path/to/writable-content` to change the writable content root.
-With the default root, `saves/` and `settings/` sit beside `content/`; with
-`--user-content-root X` they are `X/saves` and `X/settings`. LLM credentials
-stay in the default `settings` folder regardless (see below).
-
-Startup scripts such as `config.cfg` and `autoexec.cfg` load from selected
-content. Existing personal configs can therefore affect a launch. LLM credentials
-and preferences live in `~/.local/share/quake-typescript/settings/`, even when
-`--user-content-root` is set; see
+`saves/`, `settings/` and `content/` sit side by side; with
+`--user-content-root X` they are `X/saves`, `X/settings` and `X`. Per-product
+JSON (`input/seat-N.json`, `cvars/...`, audio) lives in the product's folder
+under the content tree. Engine-wide data with no original equivalent (crash log,
+renderer choice, server profiles, server-browser cache, gamepad and gyro profiles,
+global input tuning, image settings, LLM credentials) stays under the default
+`settings` folder; see
 [credential and preference files](console-and-llm.md#credential-and-preference-files).
+
+Saved games, demos, screenshots, downloads and logs are still written to the
+engine's own folders, not to each game's folders: the shared save format differs
+from id's `.sav` and `.ssv` files, so it is kept apart rather than written under
+the original names.
 
 QVM components write to `.mods/PRODUCT/COMPONENT_ID/` under the user-content root.
 Each name is URL-encoded. Their reads, scripts, and file lists see that component's

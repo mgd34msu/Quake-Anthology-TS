@@ -90,6 +90,7 @@ import { ApplicationImageSettings } from "./image-settings.ts";
 import { bindNativeVideoSettings, bindRendererSettings } from "../../ui/settings/services.ts";
 import { sharedBindingActions } from "../../ui/settings/action-catalog.ts";
 import { StartupInputProfile } from "./startup-input-profile.ts";
+import { stockNativeConfig } from "./native-settings.ts";
 import { ClientSourcePublicationError, type ClientBootstrap, type ClientSourceLifetime } from "./client-bootstrap.ts";
 import {
   configurationDialect,
@@ -334,6 +335,7 @@ export class StartupApplication {
     const options = this.model.options;
     const inputKey = `${movementDialect(options)}|${this.model.bindingItemsKey()}`;
     if (!force && this.baselineProduct === options.product && this.baselineInput === inputKey) return;
+    const previousProduct = this.baselineProduct;
     // Never persist before the first baseline load: writing the (default)
     // global tuning first would clobber the per-product seat profile being read.
     if (this.baselineProduct !== null) await this.persistPreferencesOrWarn();
@@ -345,7 +347,15 @@ export class StartupApplication {
     this.preferenceStore = settings;
     this.baselineProduct = options.product;
     this.baselineInput = inputKey;
-    if (this.graphics !== null) this.graphics.inputProfile = StartupInputProfile.retained(settings, this.graphics.inputProfile.input);
+    if (this.graphics !== null) {
+      const input = this.graphics.inputProfile.input,
+        native = stockNativeConfig(this.model.catalog, product.id, [product.id], options.nativeConfigRoot);
+      // Another product has its own bindings; keeping the previous product's would save them over it.
+      this.graphics.inputProfile =
+        previousProduct !== null && previousProduct !== options.product
+          ? await StartupInputProfile.open(settings, input, movementDialect(options), this.model.bindingItems(), native)
+          : StartupInputProfile.retained(settings, input, native);
+    }
   }
 
   private async openGraphics(): Promise<StartupGraphics> {

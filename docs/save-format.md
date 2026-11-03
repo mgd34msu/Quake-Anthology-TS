@@ -11,6 +11,11 @@ extension. A relative name resolves inside that directory. The reserved name `cu
 for internal level-transition state and cannot be a user slot. Autosaves are written on level
 entry only ([playing.md](playing.md#save-and-load)).
 
+Saves stay in this directory even for stock games. The shared format is not id's `.sav` or
+`.ssv`, so it is not written under the original names in a game folder; use `save NAME v5` or
+`v6` to export a Quake save the original reads. A stock game's configuration, by contrast, is
+written to its native file ([content-layout.md](content-layout.md#where-files-are-read-and-written)).
+
 ## Commands
 
 - `save NAME [shared|v5|v6]` writes the shared format by default. `v5` and `v6` export the

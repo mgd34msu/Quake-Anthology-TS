@@ -97,6 +97,21 @@ Declarations bind original source behavior for weapons, items, actors, rules,
 presentation, and other supported operations. General mod interoperability remains
 unfinished. See [component declarations and limits](mod-compatibility.md#independent-components).
 
+## Settings and key bindings
+
+A stock game (every component from one product or mod) keeps its settings where the
+original does: `config.cfg` in the game folder for Quake, QuakeWorld and Quake II,
+`q3config.cfg` for Quake III, and the Saved Games files for the rereleases (see
+[where files are read and written](content-layout.md#where-files-are-read-and-written)).
+Those files are read at startup and rewritten at quit, and they take precedence over
+the engine's JSON copies, so binds you set in the original game carry over and the
+original sees binds you set here. Settings the original format cannot hold (gamepad
+mappings, audio device, gyro) stay in the user store. A mixed combination keeps its
+settings in the user store, keyed by the component that owns them, so a Quake II map
+with Quake movement shares the movement and binding settings Quake uses. Each product
+has its own bindings in the menu: changing the game reloads that product's bindings.
+`writeconfig` without a name writes the seat's exported `config.cfg` as before.
+
 ## Configure equipment
 
 Under **Custom game → Kit**:

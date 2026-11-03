@@ -21,6 +21,8 @@ mkdirSync(home);
 mkdirSync(temporary);
 process.env["HOME"] = home;
 process.env["TMPDIR"] = temporary;
+// Stock games write their own config beside the game data; tests send those writes here instead of the read-only install.
+process.env["QTS_TEST_GAME_WRITE_ROOT"] = join(runRoot, "game-writes");
 process.env["XDG_DATA_HOME"] = join(home, ".local", "share");
 process.env["XDG_CONFIG_HOME"] = join(home, ".config");
 process.env["XDG_STATE_HOME"] = join(home, ".local", "state");
