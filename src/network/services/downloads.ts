@@ -282,8 +282,11 @@ export class DownloadSink {
     } finally {
       try {
         if (!this.suspended) {
-          unlinkIfPresent(`/proc/self/fd/${this.parent}/${this.temporary}`);
-          if (this.resumable) unlinkIfPresent(`/proc/self/fd/${this.parent}/${this.temporary}.sha256`);
+          // A one-shot staged name must still exist: a missing one means something else removed it, which callers report as a cleanup failure.
+          if (this.resumable) {
+            unlinkIfPresent(`/proc/self/fd/${this.parent}/${this.temporary}`);
+            unlinkIfPresent(`/proc/self/fd/${this.parent}/${this.temporary}.sha256`);
+          } else unlinkSync(`/proc/self/fd/${this.parent}/${this.temporary}`);
         }
       } finally {
         closeSync(this.parent);

@@ -48,9 +48,10 @@ test("Q2 cancellation drains the outstanding native block before retry and repor
     expect(await receiver.prepare(state)).toBe("canceled");
     receiver.receive({ kind: "download", percent: 100, bytes: new Uint8Array([9]) });
     expect(await receiver.prepare(state)).toBe("waiting");
-    expect(commands).toEqual(["download sound/t08-missing.wav", "nextdl", "download sound/t08-missing.wav"]);
+    // SRC4Q2-016: the verified staged bytes survive a cancel, so the retry resumes at their offset as Quake II does.
+    expect(commands).toEqual(["download sound/t08-missing.wav", "nextdl", "download sound/t08-missing.wav 2"]);
     receiver.receive({ kind: "download", percent: 100, bytes: new Uint8Array([3, 4]) });
-    expect(await Bun.file(join(content.writeRoot, "sound/t08-missing.wav")).bytes()).toEqual(new Uint8Array([3, 4]));
+    expect(await Bun.file(join(content.writeRoot, "sound/t08-missing.wav")).bytes()).toEqual(new Uint8Array([1, 2, 3, 4]));
   } finally {
     receiver.close();
     await content.mounts.close();

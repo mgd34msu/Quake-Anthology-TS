@@ -79,10 +79,10 @@ at HEAD and worked on by audit DOCS3-001 to DOCS3-006:
   rerelease DLL the same harness kills the player but no respawn was reached with a held mouse
   button and jump for two seconds, so the rerelease corpse path is unverified (cause unknown).
 - DOCS3-005: `q2-native-foreign-dual-run.test.ts` compares the TypeScript lane with the native
-  DLL for Quake 1 (8 frames, 1 unit) and Quake III (4 frames). The earlier "8 unit Quake 1
+  DLL for Quake 1 and Quake III (8 frames, 1 unit each) on a virtual `performance.now`. The earlier "8 unit Quake 1
   divergence" was a stair climbed a frame earlier by one lane because the lanes start the run
   at different phases (fixed-fraction versus wall-clock key sampling), not a movement error.
-  Quake III lanes drift about 2 units from the fifth frame on; not investigated.
+  The Quake III drift (about 2 units) was wall-clock key fractions too and is gone with the virtual clock.
 - `q2-native-foreign-movement.test.ts` and `q2-native-foreign-character.test.ts` need game data
   and skip without it.
 - Quake III authoring roles (map compiler, QVM assembler, SDK/archive tools) are not part of

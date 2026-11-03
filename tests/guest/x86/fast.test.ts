@@ -158,7 +158,7 @@ test("predecoded i386 steps match the generic interpreter on 20,000 random singl
     const next = random(seed * 7919);
     same(seed, instruction(next), 1);
   }
-});
+}, 300_000); // about 35 s alone: every seed runs the generic and the predecoded interpreter
 
 test("predecoded i386 steps match the generic interpreter across random instruction sequences", () => {
   for (let seed = 1; seed <= 2_000; seed++) {
@@ -167,7 +167,7 @@ test("predecoded i386 steps match the generic interpreter across random instruct
     for (let count = 0; count < 6; count++) code.push(...instruction(next));
     same(seed, code, 6);
   }
-});
+}, 300_000);
 
 test("REP string instructions iterate one budget unit at a time and honor the direction flag and ECX", () => {
   const repCases: readonly (readonly [number[], boolean])[] = [

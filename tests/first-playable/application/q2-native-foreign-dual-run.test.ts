@@ -22,6 +22,15 @@ interface Sample {
 async function trajectory(game: string, library: string | null, movement: string, script: readonly ("idle" | "forward" | "jump")[]): Promise<Sample[]> {
   const root = await mkdtemp(join(tmpdir(), "quake-dual-run-"));
   let app: Application | null = null;
+  // Held-key fractions divide wall-clock time between samples by the step length, so a real clock makes them
+  // depend on how fast the host renders; a virtual clock that advances one step per frame makes every held frame full.
+  const realNow = performance.now.bind(performance);
+  let virtualNow = realNow();
+  performance.now = () => virtualNow;
+  const step = async (application: Application): Promise<void> => {
+    virtualNow += 100;
+    await application.step(100);
+  };
   try {
     const parsed = parseApplicationCommand([
       "--content-root",
@@ -56,7 +65,7 @@ async function trajectory(game: string, library: string | null, movement: string
     // A native Q2 seat runs by default and a TypeScript seat in the selected dialect walks,
     // so the TypeScript lane holds the run key to issue the same effective command.
     if (library === null) key(138, true);
-    for (let i = 0; i < 20; i++) await app.step(100);
+    for (let i = 0; i < 20; i++) await step(app);
     const samples: Sample[] = [];
     let held: "idle" | "forward" | "jump" = "idle";
     for (const action of script) {
@@ -67,12 +76,13 @@ async function trajectory(game: string, library: string | null, movement: string
         if (action === "jump") key(32, true);
         held = action;
       }
-      await app.step(100);
+      await step(app);
       const origin = app.simulation.playerView(local.actor).origin;
       samples.push({ x: origin.x, y: origin.y, z: origin.z });
     }
     return samples;
   } finally {
+    performance.now = realNow;
     try {
       await app?.close();
     } finally {
@@ -98,9 +108,9 @@ const script: readonly ScriptStep[] = [...repeatStep("idle", 5), ...repeatStep("
 // down depends on wall-clock sampling. Quake 1 used to be listed as diverging by about 8 units; that
 // was a stair one lane climbed a frame before the other, not movement. Displacement is therefore
 // compared frame by frame from each lane's alignment while both are still on the floor they stood on.
-// Quake III lanes diverge from the fifth frame on (steps of 19 and 16 units against 22 in the native lane at
-// z unchanged, probably a wall slide met at different absolute positions; not investigated, see docs/status.md).
-const comparedFrames: Readonly<Record<"q1" | "q3", number>> = { q1: 8, q3: 4 };
+// The Quake III drift once attributed to a wall slide was the wall clock: the TypeScript lane's held-key fractions fell
+// below one on fast hosts. With the virtual clock above, both lanes agree for eight frames.
+const comparedFrames: Readonly<Record<"q1" | "q3", number>> = { q1: 8, q3: 8 };
 const movements: readonly ("q1" | "q3")[] = ["q1", "q3"];
 function settled(path: readonly Sample[]): number {
   const steps = path.map((sample, index) => {
