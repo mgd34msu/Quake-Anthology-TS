@@ -90,6 +90,7 @@ Usage: bun run src/main.ts [options]
   --map NAME                 Map name or maps/path.bsp
   --progs MOUNTED_PATH       Validated mounted QuakeC .dat artifact
   --q2-game MOUNTED_PATH     Explicit Quake II game DLL (classic i386 / rerelease x64)
+  --vm-game 0|1|2            id's vm_game: 0 runs a mod's native Quake III qagame (qagamex86.dll / qagamei386.so) when it ships one
   --weapon-behavior PRODUCT/ID  Overlay a declared projectile trajectory
   --mod PRODUCT/ID           Enable a declared mod component (repeat to combine)
   --movement q1|q2|q3|qw|PRODUCT  Movement family or exact installed product

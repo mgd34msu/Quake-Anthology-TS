@@ -36,6 +36,15 @@ What is isolated:
   and the file services refuse writes to names such as `.cfg .rc .dll .so .exe .pak .pk3 .qvm
   .bsp`, cap one file at 64 MiB, a session at 512 MiB and 256 written files.
   Private cvars are hidden from the guest and protected from guest writes.
+- **Native Quake III game modules are emulated too, and only on request.** A mod's
+  `qagamex86.dll` or `qagamei386.so` runs in the same software x86 CPU and System V / Windows
+  runtime as the Quake II DLLs, with the same instruction budget and memory cap, and reaches the
+  engine through the same system-call table as bytecode (`src/app/bootstrap/simulation/q3/server-traps.ts`).
+  It is selected only with `--vm-game 0`, as in id's engine; the default (`vm_game 2`) runs the mod's
+  `vm/qagame.qvm`, and a mod without one falls back to its base game's. The risk is the one the
+  next section describes for any game module: it can issue console commands through the engine.
+  A native module's save image holds its writable memory, so a save is only as trustworthy as its
+  source.
 - **QVM bytecode and QuakeC** run in interpreters (`src/compat/qvm`, `src/compat/qc`) that
   expose only the engine's system-call surface.
 - **Content roots are read-only.** Installed game folders are never written; saves, settings,
