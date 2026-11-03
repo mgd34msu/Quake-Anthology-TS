@@ -18,7 +18,8 @@ export type QvmHostCall = QvmSyscall & { readonly guest: QvmMemory; readonly abi
   | { readonly kind: "extension"; readonly role: QvmRole; readonly code: number }
 );
 export type QvmHostResult = QvmSystemCallResult;
-type SharedCall<T> = T extends unknown ? Omit<T, keyof QvmSyscall | "guest"> & { readonly words: DataView; readonly guest: Q3GameMemory } : never;
+type SharedCall<T> = T extends unknown ? Omit<T, keyof QvmSyscall | "guest"> & { readonly words: DataView; readonly guest: Q3GameMemory }
+  & Partial<Pick<QvmSyscall, "memory" | "invoke" | "invokeAsync" | "cancelFunction">> : never;
 /** A trap as the shared server-game handlers see it: pointer arguments resolve through {@link Q3GameMemory}, so interpreted and native modules reach one implementation. */
 export type SharedHostCall = SharedCall<QvmHostCall>;
 export type QvmHost = (call: QvmHostCall) => QvmHostResult;

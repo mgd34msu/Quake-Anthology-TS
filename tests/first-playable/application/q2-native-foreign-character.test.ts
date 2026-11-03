@@ -21,7 +21,7 @@ async function runLane(game: string, library: string, character: string): Promis
       "--movement", "q2", "--character", character, "--renderer", "cpu", "--hidden",
       "--width", "320", "--height", "240", "--user-content-root", root]);
     if (parsed.kind !== "run") throw new Error("Missing launch options");
-    app = await Application.open(parsed.options, { saveDirectory: join(root, "saves"), print: (t: string) => { if (process.env.SRR) require("node:fs").appendFileSync(process.env.SRR, t); } });
+    app = await Application.open(parsed.options, { saveDirectory: join(root, "saves"), print: () => undefined });
     const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
     if (app.simulation.q2Native() === null) throw new Error("Native source was not admitted");
     for (let i = 0; i < 20; i++) await app.step(50);
@@ -63,7 +63,7 @@ corpusTest("q2/baseq2/pak0.pak", "q2/baseq2/gamex86.dll")("foreign movement and 
       "--movement", "q1", "--character", "q1", "--renderer", "cpu", "--hidden",
       "--width", "320", "--height", "240", "--user-content-root", root]);
     if (parsed.kind !== "run") throw new Error("Missing launch options");
-    app = await Application.open(parsed.options, { saveDirectory: join(root, "saves"), print: (t: string) => { if (process.env.SRR) require("node:fs").appendFileSync(process.env.SRR, t); } });
+    app = await Application.open(parsed.options, { saveDirectory: join(root, "saves"), print: () => undefined });
     const first = app.localPlayers[0]; if (first === undefined) throw new Error("Missing local player");
     let local: Exclude<typeof first, undefined> = first;
     const bodies = (): string[] => app?.simulation.presentations().filter(p => p.actor.equals(local.actor) && !p.viewWeapon).map(p => p.path) ?? [];
@@ -106,7 +106,7 @@ corpusTest("q2/baseq2/pak0.pak", "q2/baseq2/gamex86.dll")("classic native DLL dr
 // DOCS3-006: in coop the guest respawns a dead client through CopyToBodyQue, which leaves a corpse edict with the guest
 // player model. With a Quake 1 character selected that corpse must be drawn as the selected character, never as the
 // guest's male/female model. Single player respawn loads a save instead, so the lane runs coop.
-async function corpseLane(game: string, library: string, squadRespawn: boolean): Promise<{ respawned: boolean; corpses: readonly string[]; guestCorpses: readonly string[] }> {
+async function corpseLane(game: string, library: string, squadRespawn: boolean): Promise<{ respawned: boolean; corpses: readonly string[]; guestCorpses: readonly string[]; heads: number }> {
   const root = await mkdtemp(join(tmpdir(), "quake-native-corpse-"));
   let app: Application | null = null;
   try {
@@ -115,7 +115,7 @@ async function corpseLane(game: string, library: string, squadRespawn: boolean):
     if (parsed.kind !== "run") throw new Error("Missing launch options");
     // The rerelease game defaults to squad respawn: a lone dead player waits for a teammate and the level restarts, so nothing respawns in place.
     const profile = squadRespawn ? undefined : { version: 1 as const, overrides: [{ id: "server:q2.squad-respawn" as const, value: "0" }] };
-    app = await Application.open(profile === undefined ? parsed.options : { ...parsed.options, serverProfile: profile }, { saveDirectory: join(root, "saves"), print: (t: string) => { if (process.env.SRR) require("node:fs").appendFileSync(process.env.SRR, t); } });
+    app = await Application.open(profile === undefined ? parsed.options : { ...parsed.options, serverProfile: profile }, { saveDirectory: join(root, "saves"), print: () => undefined });
     const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
     // Cmd_Kill_f ignores the command within five seconds of a respawn.
     for (let i = 0; i < 120; i++) await app.step(50);
@@ -132,10 +132,10 @@ async function corpseLane(game: string, library: string, squadRespawn: boolean):
     input(false);
     for (let i = 0; i < 20; i++) await app.step(50);
     const others = app.simulation.presentations().filter(p => !p.actor.equals(local.actor) && !p.viewWeapon);
-    if (process.env.SRR) require('node:fs').appendFileSync(process.env.SRR, 'PRES ' + JSON.stringify(app.simulation.presentations().map(p => [String(p.actor), p.family, p.path, p.frame, p.viewWeapon])) + '\n');
     return { respawned: app.simulation.playerUi(local.actor).health > 0,
       corpses: others.filter(p => p.path === "progs/player.mdl").map(p => `${p.family}#${p.frame}`),
-      guestCorpses: others.filter(p => p.path.startsWith("players/") && !p.path.includes("deadbods")).map(p => p.path) };
+      guestCorpses: others.filter(p => p.path.startsWith("players/") && !p.path.includes("deadbods")).map(p => p.path),
+      heads: others.filter(p => p.path === "models/objects/gibs/skull/tris.md2").length };
   } finally { try { await app?.close(); } finally { await rm(root, { recursive: true, force: true }); } }
 }
 
@@ -147,10 +147,12 @@ corpusTest("q2/baseq2/pak0.pak", "q2/baseq2/gamex86.dll")("classic native DLL dr
 }, 400_000);
 
 // The rerelease DLL does not respawn a lone coop player in place while g_coop_squad_respawn is on (its default): the player waits for
-// a teammate and the level restarts. With the option off the DLL respawns through CopyToBodyQue like the classic one.
-corpusTest("q2/baseq2/pak0.pak", "q2/rerelease/baseq2/game_x64.dll")("rerelease native DLL draws a coop respawn corpse as the Quake 1 character", async () => {
+// a teammate and the level restarts. With the option off the DLL respawns through CopyToBodyQueue like the classic one, but its body
+// queue entry leaves the old body as a thrown head gib, so the guest player model never reaches the draw list.
+corpusTest("q2/baseq2/pak0.pak", "q2/rerelease/baseq2/game_x64.dll")("rerelease native DLL respawns a coop player in place and fills the body queue", async () => {
   const lane = await corpseLane("q2-rerelease-baseq2", "game_x64.dll", false);
   expect(lane.respawned).toBe(true);
-  expect(lane.corpses).toEqual(["q1#60"]);
+  expect(lane.heads).toBe(1);
+  expect(lane.corpses).toEqual([]);
   expect(lane.guestCorpses).toEqual([]);
 }, 400_000);

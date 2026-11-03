@@ -1,3 +1,4 @@
+import { qvmCheckpoint } from "../../support/q3-checkpoint.ts";
 import { CommonError } from '../../../src/core/common-error.ts';
 import { Q3ClientNetwork } from '../../../src/app/bootstrap/network/q3-client.ts';
 import { UdpTransport } from '../../../src/network/common/transport.ts';
@@ -61,7 +62,7 @@ test('selected LRCTF application executes actual qagame on the shared scene and 
       expect(guest.state.cvars.variableValue('bot_enable')).toBe(1);
       expect(guest.records.host.scene).toBe(app.simulation.scene);
       expect(guest.records.host.bodies).toBe(app.simulation.bodies);
-      expect(guest.game.data.numEntities).toBeGreaterThan(64);
+      expect(guest.engine.data.numEntities).toBeGreaterThan(64);
       const output = await app.step(50);
       expect(output.snapshot.frame.time).toEqual({ kind: 'milliseconds', value: 50 });
       expect(output.snapshot.bodies.length).toBeGreaterThan(0);
@@ -274,7 +275,7 @@ test('dedicated offline LRCTF Application restores guest bytes and human identit
     for (let frame = first; frame < first + count; frame++) {
       await guest.think(player, { serverTime: (frame + 1) * 50, angles: [0, 0, 0], forwardmove: 127, rightmove: frame % 2 ? 32 : 0, upmove: 0, buttons: 1, weapon: 2 });
       await app.step(50);
-      trace.push({ memory: new Bun.CryptoHasher('sha256').update(guest.checkpoint().data).digest('hex'), server: structuredClone(guest.state.captureSaveState()) });
+      trace.push({ memory: new Bun.CryptoHasher('sha256').update(qvmCheckpoint(guest.checkpoint()).data).digest('hex'), server: structuredClone(guest.state.captureSaveState()) });
     }
     return trace;
   }
@@ -421,7 +422,7 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
     try {
       await app.step(50);
       const path = join(root, 'local.sav');
-      const saved = new Bun.CryptoHasher('sha256').update(guest.checkpoint().data).digest('hex'), savedServer = structuredClone(guest.state.captureSaveState());
+      const saved = new Bun.CryptoHasher('sha256').update(qvmCheckpoint(guest.checkpoint()).data).digest('hex'), savedServer = structuredClone(guest.state.captureSaveState());
       await app.saveGame(path);
       if (artifactDirectory !== undefined) await Bun.write(join(artifactDirectory, 'two-human-qvm.sav'), Bun.file(path));
       const saves = new StartupSaves(app.content.catalog, root);
@@ -440,7 +441,7 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
           if (index === 0 || index === 4) application.input({ kind: 'key', seat: moving.seat.id, code: 119,
             down: index === 0, repeat: false, timeMilliseconds: now });
           await application.step(50);
-          trace.push({ memory: new Bun.CryptoHasher('sha256').update(source.checkpoint().data).digest('hex'),
+          trace.push({ memory: new Bun.CryptoHasher('sha256').update(qvmCheckpoint(source.checkpoint()).data).digest('hex'),
             server: structuredClone(source.state.captureSaveState()) });
         }
         expect(source.state.getUserCommand(idle.seat.client.id.slot)?.forwardmove).toBe(0);
@@ -468,7 +469,7 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
       });
       for (const presentation of previousPresentations) expect(presentation.q3Client?.capturesInput).toBe(false);
       const previousGuest = previous.q3Guest(); if (previousGuest === null) throw new Error('Missing previous guest');
-      const previousBytes = new Bun.CryptoHasher('sha256').update(previousGuest.checkpoint().data).digest('hex');
+      const previousBytes = new Bun.CryptoHasher('sha256').update(qvmCheckpoint(previousGuest.checkpoint()).data).digest('hex');
       const initialize = spyOn(QvmGame.prototype, 'initializeAsync'), connect = spyOn(QvmGame.prototype, 'clientConnectAsync');
       const begin = spyOn(QvmGame.prototype, 'clientBeginAsync'), userinfo = spyOn(QvmGame.prototype, 'clientUserinfoChangedAsync');
       try {
@@ -481,7 +482,7 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
         try { await expect(app.loadGame(path)).rejects.toThrow('injected restore UI preparation failure'); }
         finally { failure.mockRestore(); }
         expect(app.simulation).toBe(previous); expect(app.window).toBe(previousWindow);
-        expect(new Bun.CryptoHasher('sha256').update(previousGuest.checkpoint().data).digest('hex')).toBe(previousBytes);
+        expect(new Bun.CryptoHasher('sha256').update(qvmCheckpoint(previousGuest.checkpoint()).data).digest('hex')).toBe(previousBytes);
         expect(app.localPlayers.map(player => player.seat.client)).toEqual(previousPlayers.map(player => player.seat.client));
         for (const presentation of previousPresentations) expect(() => presentation.q3Client?.source.current()).not.toThrow();
         for (const module of uiModules) await expect(module.keyEvent(27, true)).rejects.toThrow('retired');
@@ -497,7 +498,7 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
         expect(initialize).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled(); expect(begin).not.toHaveBeenCalled();
         expect(userinfo).not.toHaveBeenCalled();
         const restored = app.simulation.q3Guest(); if (restored === null) throw new Error('Missing restored guest');
-        expect(new Bun.CryptoHasher('sha256').update(restored.checkpoint().data).digest('hex')).toBe(saved);
+        expect(new Bun.CryptoHasher('sha256').update(qvmCheckpoint(restored.checkpoint()).data).digest('hex')).toBe(saved);
         expect(restored.state.captureSaveState()).toEqual(savedServer);
         expect(app.localPlayers.map(player => player.seat.client)).toEqual(previousPlayers.map(player => player.seat.client));
         for (const player of app.localPlayers) expect(restored.player(player.seat.client.id)?.actor).toBe(player.actor);
@@ -547,7 +548,7 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
         expect(app.localPlayers.map(player => player.seat.client)).toEqual(nativeClients);
         const restored = app.simulation.q3Guest(); if (restored === null) throw new Error('Native entry did not restore QVM');
         expect(app.options.mode).toBe('deathmatch'); expect(app.options.botSkill).toBeUndefined();
-        expect(new Bun.CryptoHasher('sha256').update(restored.checkpoint().data).digest('hex')).toBe(saved);
+        expect(new Bun.CryptoHasher('sha256').update(qvmCheckpoint(restored.checkpoint()).data).digest('hex')).toBe(saved);
         expect(restored.state.captureSaveState()).toEqual(savedServer);
         for (const player of app.localPlayers) {
           const presentation = player.seat.presentation;
@@ -580,7 +581,7 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
         for (const module of initialUis) await expect(module.keyEvent(27, true)).rejects.toThrow('retired');
         app = await Application.open(native.options, { print: () => undefined }, undefined, undefined, initialImage);
         const restored = app.simulation.q3Guest(); if (restored === null) throw new Error('Missing initially restored guest');
-        expect(new Bun.CryptoHasher('sha256').update(restored.checkpoint().data).digest('hex')).toBe(saved);
+        expect(new Bun.CryptoHasher('sha256').update(qvmCheckpoint(restored.checkpoint()).data).digest('hex')).toBe(saved);
         expect(restored.state.captureSaveState()).toEqual(savedServer);
         expect(app.localPlayers).toHaveLength(2);
         for (const player of app.localPlayers) expect(restored.player(player.seat.client.id)?.actor).toBe(player.actor);
@@ -638,13 +639,13 @@ test('offline LRCTF Application changes maps and restarts with retained source c
     await initial.command(admission.player, ['team', 'red']);
     await app.step(50);
     connects.mockClear();
-    expect(initial.game.data.copyPlayerState(0).persistent[3]).toBe(1);
+    expect(initial.engine.data.copyPlayerState(0).persistent[3]).toBe(1);
     await app.changeLevel('q3ctf2');
     const destination = app.simulation.q3Guest(); if (destination === null) throw new Error('Missing destination qagame');
     expect(initial.isRetired).toBe(true);
     expect(destination.state.cvars.variableString('mapname')).toBe('q3ctf2');
     expect(destination.player(client.id)?.client).toBe(client.id);
-    expect(destination.game.data.copyPlayerState(0).persistent[3]).toBe(1);
+    expect(destination.engine.data.copyPlayerState(0).persistent[3]).toBe(1);
     expect(connects.mock.calls).toEqual([[0, false, false]]);
     expect(shutdown.mock.calls).toEqual([[false]]);
     expect(initialize.mock.calls[0]?.[2]).toBe(false);
@@ -655,7 +656,7 @@ test('offline LRCTF Application changes maps and restarts with retained source c
     expect(destination.isRetired).toBe(true);
     expect(restarted.player(client.id)?.client).toBe(client.id);
     expect(restarted.state.cvars.variableString('mapname')).toBe('q3ctf2');
-    expect(restarted.game.data.copyPlayerState(0).persistent[3]).toBe(1);
+    expect(restarted.engine.data.copyPlayerState(0).persistent[3]).toBe(1);
     expect(shutdown.mock.calls).toEqual([[false], [true]]);
     expect(initialize.mock.calls.map(call => call[2])).toEqual([false, true]);
     expect(connects.mock.calls).toEqual([[0, false, false], [0, false, false]]);
@@ -696,7 +697,7 @@ test('network LRCTF map replacement retains the peer and begins once per new gam
     if (previous === null || client === undefined) throw new Error('Peer admission missing');
     for (let count = 0; count < 22; count++) await exchange();
     peer.command('team red'); for (let count = 0; count < 4; count++) await exchange();
-    expect(previous.game.data.copyPlayerState(client.slot).persistent[3]).toBe(1);
+    expect(previous.engine.data.copyPlayerState(client.slot).persistent[3]).toBe(1);
     begin.mockClear(); connect.mockClear();
     await app.changeLevel('q3ctf2');
     expect(previous.isRetired).toBe(true); expect(begin).not.toHaveBeenCalled();
@@ -706,7 +707,7 @@ test('network LRCTF map replacement retains the peer and begins once per new gam
     expect(gameStates).toBe(2); expect(begin.mock.calls).toEqual([[client.slot]]);
     expect(connect.mock.calls).toEqual([[client.slot, false, false]]);
     expect(app.networkClients[0]?.client).toBe(client);
-    expect(destination.game.data.copyPlayerState(client.slot).persistent[3]).toBe(1);
+    expect(destination.engine.data.copyPlayerState(client.slot).persistent[3]).toBe(1);
     expect(q3InfoValue(peer.native?.gameState.get(0) ?? '', 'mapname')).toBe('q3ctf2');
     let refusedSnapshots = 0;
     const refusalReasons: string[] = [];
@@ -738,7 +739,7 @@ test('network LRCTF map replacement retains the peer and begins once per new gam
       catch (error) { if (!(error instanceof CommonError) || error.code !== 'server-disconnect') throw error; refusalReasons.push(error.message); }
     }
     expect(refusalReasons.join(' ')).toContain('Invalid password');
-    expect(finalGuest.game.data.copyPlayerState(client.slot).persistent[3]).toBe(1);
+    expect(finalGuest.engine.data.copyPlayerState(client.slot).persistent[3]).toBe(1);
 
   } finally { refusedPeer?.close(); peer.close(); try { await app.close(); } finally { begin.mockRestore(); connect.mockRestore(); disconnected.mockRestore(); await rm(root, { recursive: true, force: true }); } }
 }, 60000);

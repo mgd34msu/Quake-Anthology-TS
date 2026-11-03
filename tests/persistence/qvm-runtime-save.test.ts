@@ -1,3 +1,4 @@
+import { qvmCheckpoint } from "../support/q3-checkpoint.ts";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5,7 +6,7 @@ import { join } from "node:path";
 import { loadApplicationContent } from "../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { createSimulation, savedSimulationSettings } from "../../src/app/bootstrap/simulation/index.ts";
-import { simulationQvmCheckpoint, validateSimulationSave } from "../../src/app/bootstrap/simulation/save.ts";
+import { simulationQ3GuestCheckpoint, validateSimulationSave } from "../../src/app/bootstrap/simulation/save.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { Q3PlayerState } from "../../src/contracts/protocol.ts";
 import type { SaveImage } from "../../src/contracts/session.ts";
@@ -70,7 +71,7 @@ test("actual LRCTF shared guest restores disk state into fresh clients without g
         await activeGuest.think(player, userCommand());
         const completed = await session.stepAsync({ elapsedMilliseconds: 50, commands: [] });
         commands().execute(); simulation.drainPresentationEvents(); simulation.events.take();
-        trace.push({ frame: completed.snapshot.frame, player: activeGuest.game.data.copyPlayerState(player.sourceEntity), output: output.splice(0) });
+        trace.push({ frame: completed.snapshot.frame, player: activeGuest.engine.data.copyPlayerState(player.sourceEntity), output: output.splice(0) });
       }
       expect(commands().pendingText).toBe("");
       return trace;
@@ -80,19 +81,20 @@ test("actual LRCTF shared guest restores disk state into fresh clients without g
   let active: Awaited<ReturnType<typeof open>> | null = null;
   try {
     active = await open();
-    const start = active.guest.game.data.copyPlayerState(0).origin;
+    const start = active.guest.engine.data.copyPlayerState(0).origin;
     await active.frames(12);
-    const moved = active.guest.game.data.copyPlayerState(0).origin;
+    const moved = active.guest.engine.data.copyPlayerState(0).origin;
     expect(Math.hypot(moved.x - start.x, moved.y - start.y, moved.z - start.z)).toBeGreaterThan(1);
     const actors = active.simulation.actors.checkpoint(), image = active.simulation.checkpoint();
     expect(active.simulation.actors.checkpoint()).toEqual(actors);
     expect(savedSimulationSettings(image).clientSlots).toEqual([0]);
-    const guest = simulationQvmCheckpoint(image); if (guest === null) throw new Error("Missing saved qagame bytes");
+    const saved = simulationQ3GuestCheckpoint(image); if (saved === null) throw new Error("Missing saved qagame bytes");
+    const guest = qvmCheckpoint(saved);
     expect(() => validateSimulationSave({ ...image, guests: [] })).toThrow("exactly one");
     expect(() => validateSimulationSave({ ...image, guests: [guest, guest] })).toThrow("exactly one");
     expect(() => validateSimulationSave({ ...image, guests: [{ ...guest, module: { ...guest.module, revision: "other-revision" } }] })).toThrow("artifact and API");
     const path = join(directory, "world.sav"); await writeSaveImage(path, image);
-    const continuous = await active.frames(12), data = active.guest.checkpoint().data, random = active.simulation.random.checkpoint();
+    const continuous = await active.frames(12), data = qvmCheckpoint(active.guest.checkpoint()).data, random = active.simulation.random.checkpoint();
     const oldClient = active.clients[0]?.id;
     if (oldClient === undefined) throw new Error("Missing original client");
     await active.close(); active = null;
@@ -100,7 +102,7 @@ test("actual LRCTF shared guest restores disk state into fresh clients without g
     expect(active.simulation.clientIdentities()).toEqual(active.clients.map(client => client.id));
     expect(active.clients[0]?.id.equals(oldClient)).toBe(false);
     expect(active.clients[0]?.id.generation).not.toBe(oldClient.generation);
-    const restoredGuest = active.guest.checkpoint();
+    const restoredGuest = qvmCheckpoint(active.guest.checkpoint());
     expect(restoredGuest.data).toEqual(guest.data);
     expect(restoredGuest.instructionIndex).toBe(guest.instructionIndex);
     expect(restoredGuest.programStack).toBe(guest.programStack);
@@ -109,7 +111,7 @@ test("actual LRCTF shared guest restores disk state into fresh clients without g
       linked: body.linked === null ? null : { bounds: body.linked.absoluteBounds, origin: body.linked.state.origin, angles: body.linked.state.angles } }));
     expect(links(active.simulation.checkpoint())).toEqual(links(image));
     expect(await active.frames(12)).toEqual(continuous);
-    expect(active.guest.checkpoint().data).toEqual(data);
+    expect(qvmCheckpoint(active.guest.checkpoint()).data).toEqual(data);
     expect(active.simulation.random.checkpoint()).toEqual(random);
   } finally { await active?.close(); await rm(directory, { recursive: true, force: true }); }
 }, 120000);

@@ -173,6 +173,8 @@ import { Q1_Q2_SUPPLY_PROFILE, q1Q2PickupSelect, q1Q2SupplyLoadout } from "../..
 import { Q2Lmctf } from "../../../content/q2/multiplayer/lmctf/runtime.ts";
 import { emitQ2ShadowLights } from "../../../content/q2/foundation/shadow-lights.ts";
 import { SimulationBotServices } from "./bots.ts";
+import { readForeignQ1WorldCheckpoint, readForeignQ2WorldCheckpoint, readSelectedMonstersCheckpoint, type ForeignQ1WorldCheckpoint, type ForeignQ2WorldCheckpoint } from "./monster-checkpoint.ts";
+import type { SelectedMonstersCheckpoint } from "./monster-checkpoint.ts";
 import { MonsterAdmission } from "./monster-admission.ts";
 import { ForeignMatchRules } from "./foreign-match-rules.ts";
 import type { ForeignMatchHost } from "./foreign-match-host.ts";
@@ -5099,6 +5101,402 @@ export class SharedSimulation implements Simulation {
     } finally { this.stepping = false; }
   }
 
+  /** Timing for one host step: pause state, fixed frame length, which sources run, and the ordered clock boundaries inside it. */
+  private planStep(input: InputBatch, settlement: SourceRoundSettlement): StepPlan {
+    const lmctf = this.source.kind === "q2" && this.source.product.match.source instanceof Q2Lmctf ? this.source.product.match.source : null;
+    const paused = lmctf?.match.paused === true;
+    const previousSelectedMilliseconds = this.selectedMilliseconds;
+    if (!paused) this.selectedMilliseconds += input.elapsedMilliseconds;
+    if (!paused) this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
+    const profile = providerTiming(this.recipe, this.recipe.map.entities.provider).clock;
+    const fixed = profile.kind === "q2-classic" ? 100 : profile.kind === "q2-rerelease" ? profile.frameMilliseconds : profile.kind === "q3" ? profile.serverFrameMilliseconds : null;
+    // Frame clocks accumulate fractional seconds; deadline math is integral.
+    const nowMilliseconds = Math.round(this.timeSeconds * 1000);
+    const mapRun = settlement.kind === "active" || !paused && input.elapsedMilliseconds > 0 && (fixed === null || this.sourceSchedulingMilliseconds >= nowMilliseconds + (profile.kind === "q3" ? profile.serverFrameMilliseconds : 0));
+    const elapsed = settlement.kind === "active" ? 0.1 : fixed === null ? Math.min(0.1, Math.max(0.001, input.elapsedMilliseconds / 1000)) : fixed / 1000;
+    const selectedQ2 = this.selectedWeaponSource?.kind === "q2" ? this.selectedWeaponSource : null;
+    const mapStartMilliseconds = selectedQ2?.mapMilliseconds ?? nowMilliseconds;
+    const mapDeadlines = new Set<number>();
+    if (settlement.kind === "active") mapDeadlines.add(mapStartMilliseconds);
+    else if (mapRun && profile.kind === "q3") {
+      for (let due = nowMilliseconds + profile.serverFrameMilliseconds; due <= this.sourceSchedulingMilliseconds; due += profile.serverFrameMilliseconds) mapDeadlines.add(due);
+    } else if (mapRun && fixed !== null) {
+      // Q2 runs when the current tick is due, one interval ahead of its host clock.
+      // Bound shared-host work, not elapsed time: outstanding debt survives this bundle.
+      const maximumQ2CatchupMilliseconds = 200;
+      for (let due = mapStartMilliseconds; due <= this.sourceSchedulingMilliseconds && due - mapStartMilliseconds < maximumQ2CatchupMilliseconds; due += fixed) mapDeadlines.add(due + fixed);
+    } else if (mapRun) mapDeadlines.add(mapStartMilliseconds + elapsed * 1000);
+    const mapEndMilliseconds = mapDeadlines.size === 0 ? mapStartMilliseconds : Math.max(...mapDeadlines);
+    const deadlines = new Set<number>(mapDeadlines.size === 0 ? [mapEndMilliseconds] : mapDeadlines);
+    const selectedQ3Clock = this.selectedQ3Source === null ? null : providerTiming(this.recipe, this.weaponProvider.provider).clock;
+    if (selectedQ3Clock !== null && selectedQ3Clock.kind !== "q3") throw new Error("Selected Q3 source clock changed");
+    const q3Deadlines = new Set<number>();
+    if (!paused && selectedQ3Clock !== null) for (let due = this.selectedQ3Next; due <= this.selectedMilliseconds; due += selectedQ3Clock.serverFrameMilliseconds) { deadlines.add(due); q3Deadlines.add(due); }
+    const weaponDeadlines = new Set<number>();
+    if (mapRun) {
+      if (selectedQ2 !== null) for (let due = selectedQ2.nextMilliseconds; due <= mapEndMilliseconds; due += selectedQ2.intervalMilliseconds) {
+        deadlines.add(due); weaponDeadlines.add(due);
+      }
+      for (const source of this.monsterSources.values()) if (source.kind === "q2") {
+        const interval = source.game.options.edition === "classic" ? 100 : 25;
+        for (let due = Math.round(seconds(source.clock.frame.time) * 1000) + interval; due <= mapEndMilliseconds; due += interval) deadlines.add(due);
+      }
+      if (this.foreignWorld !== null) {
+        const interval = this.foreignWorld.edition === "classic" ? 100 : 25;
+        for (let due = Math.round(seconds(this.foreignWorld.clock.frame.time) * 1000) + interval; due <= mapEndMilliseconds; due += interval) deadlines.add(due);
+      }
+    }
+    const boundaries = [...deadlines].sort((a, b) => a - b).map(milliseconds => ({
+      map: mapDeadlines.has(milliseconds), q2: weaponDeadlines.has(milliseconds), q3: q3Deadlines.has(milliseconds), milliseconds,
+    }));
+    return { paused, previousSelectedMilliseconds, profile, fixed, nowMilliseconds, mapRun, elapsed, selectedQ2, mapStartMilliseconds, mapEndMilliseconds, selectedQ3Clock, boundaries, lmctf };
+  }
+
+  /** Align the selected sources and monster clocks with one boundary and decide whether it runs the map and takes commands. */
+  private beginStepBoundary(_input: InputBatch, _settlement: SourceRoundSettlement, plan: StepPlan, boundary: StepBoundary, turn: { commandsPending: boolean }): StepBoundaryState {
+    const { mapRun, selectedQ2, selectedQ3Clock } = plan;
+    if (mapRun) this.capturePresentationSnapshot();
+    const previousQ3Time = this.selectedQ3Time;
+    if (boundary.q3 && selectedQ3Clock !== null) { this.selectedQ3Time = boundary.milliseconds; this.selectedQ3Next = boundary.milliseconds + selectedQ3Clock.serverFrameMilliseconds; }
+    this.selectedQ3Source?.synchronize();
+    const run = boundary.map, commandTurn = turn.commandsPending && (run || !mapRun);
+    if (commandTurn) turn.commandsPending = false;
+    if (run && selectedQ2 !== null) selectedQ2.mapMilliseconds = boundary.milliseconds;
+    if (boundary.q2 && selectedQ2 !== null) {
+      const milliseconds = selectedQ2.frame.time.kind === "milliseconds";
+      selectedQ2.frame = { frame: selectedQ2.frame.frame + 1, phase: "frame-entry",
+        time: { kind: milliseconds ? "milliseconds" : "seconds", value: milliseconds ? boundary.milliseconds : boundary.milliseconds / 1000 },
+        elapsed: { kind: milliseconds ? "milliseconds" : "seconds", value: milliseconds ? selectedQ2.intervalMilliseconds : selectedQ2.intervalMilliseconds / 1000 } };
+      selectedQ2.nextMilliseconds = boundary.milliseconds + selectedQ2.intervalMilliseconds;
+    }
+    if (mapRun && !run) { this.beginMonsterFrames(boundary.milliseconds, false); this.beginForeignWorldFrame(boundary.milliseconds, false); this.beginForeignQ1WorldFrame(false); }
+    const pendingNetQuake = this.modClientApplications.active ? new Map<ActorId, ActorCommand>() : null;
+    const pendingQ1PreThink = this.modClientApplications.active ? new Map<MovementPlayer, number>() : null;
+    const preparesQ1Clients = this.source.kind === "q1" || this.source.kind === "quakec" && this.source.game.kind === "netquake";
+    return { boundary, run, commandTurn, previousQ3Time, botCommands: [], pendingNetQuake, pendingQ1PreThink, preparesQ1Clients };
+  }
+
+  /** Prepare Q1 clients, then queue bot commands for a map boundary. */
+  private admitBoundaryInputs(input: InputBatch, settlement: SourceRoundSettlement, plan: StepPlan, b: StepBoundaryState): "go" | "next" | "break" {
+    const { paused, profile, fixed, elapsed } = plan;
+    const { boundary, run, pendingNetQuake, pendingQ1PreThink, preparesQ1Clients } = b;
+    if (run) {
+      if (settlement.kind === "active") this.sourceFrame = { ...this.clock.frame, frame: this.clock.frame.frame + 1,
+        elapsed: { kind: "milliseconds", value: 100 }, phase: "frame-entry" };
+      else if (fixed === null) this.sourceFrame = { ...this.clock.frame, elapsed: { kind: "seconds", value: elapsed }, phase: "frame-entry" };
+      else this.sourceFrame = this.clock.advance({ kind: this.clock.frame.time.kind, value: this.clock.frame.time.kind === "seconds" ? elapsed : fixed });
+      this.beginMonsterFrames(boundary.milliseconds, true);
+      this.beginForeignWorldFrame(boundary.milliseconds, true);
+      this.beginForeignQ1WorldFrame(true);
+      if (this.selectedArsenal?.family === "q1") {
+        const frame = this.selectedQ1Frame();
+        this.selectedArsenal.game.beginFrame(seconds(frame.time), seconds(frame.elapsed));
+        if (this.selectedWeaponSource?.kind === "q1") this.selectedWeaponSource.missionWeapons.frame(seconds(frame.elapsed));
+        this.selectedArsenal.frame(seconds(frame.time));
+      }
+      if (!paused) this.advanceQ1Punch();
+      if (this.handGrenades !== null) this.equipmentFrame = providerFrame(this.sourceFrame, profile, providerTiming(this.recipe, this.handGrenades.selection.source.provider).clock);
+      if (this.grapple !== null) {
+        this.grappleFrame = providerFrame(this.sourceFrame, profile, providerTiming(this.recipe, this.grapple.selection.source.provider).clock);
+        if (this.grapple.source.kind === "q1-threewave") this.grapple.source.game.beginFrame(seconds(this.grappleFrame.time), seconds(this.grappleFrame.elapsed));
+        else if (this.grapple.source.kind === "q3-qvm") {
+          this.grapple.source.game.beginFrame(Math.round(seconds(this.grappleFrame.time) * 1000), this.grappleFrame.frame);
+          for (const player of this.playerStates.values()) this.grapple.source.game.pull(player.actor.id);
+        }
+      }
+      if (this.source.kind === "q2" && this.source.product.rerelease?.players.intermissionFadeUntil != null) {
+        this.checkingQ2Rules = true;
+        try { this.source.product.rerelease.players.fadeFrame(this.source.game); } finally { this.checkingQ2Rules = false; }
+        this.sourceFrame = this.clock.enter("frame-exit");
+        if (this.transitions.pending(this.transitionsCursor) !== 0) return "break";
+        return "next";
+      }
+      if (this.source.kind === "q1") this.source.game.beginFrame(this.timeSeconds, elapsed);
+      if (preparesQ1Clients) b.botCommands = this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000);
+      if (preparesQ1Clients) {
+        for (const command of [...input.commands, ...b.botCommands]) {
+          const player = this.requirePlayer(command.actor);
+          if (player.profile.kind !== "q1-netquake" || command.sequence <= player.lastSequence) continue;
+          this.observeClientCommand(command);
+          if (this.modClientApplications.active) { player.receiveNetQuake(command); pendingNetQuake?.set(player.actor.id, command); }
+          else {
+            player.receiveNetQuake(this.prepareArsenalCommand(player, command, false));
+            this.grapple?.setJump(player.actor.id, (command.command.buttons & 2) !== 0);
+          }
+          if (this.source.kind === "q1" && this.source.game.intermission !== null)
+            this.source.composition.requestIntermissionExit(player.buttons !== 0, { actor: player.actor.id, attack: (player.buttons & 1) !== 0 });
+        }
+        for (const player of this.playerStates.values()) if (player.profile.kind === "q1-netquake" && player.cutscene === null && !player.intermission) {
+          const gravityMultiplier = player.gravityMultiplier;
+          player.gravityMultiplier *= this.grapple?.gravityScale(player.actor.id) ?? 1;
+          try { player.prepareNetQuake({ ...this.sourceFrame, phase: "client-command" }, this.modClientApplications.active ? (effective, arsenal) => {
+            const received = pendingNetQuake?.get(player.actor.id);
+            this.grapple?.setJump(player.actor.id, (effective.buttons & 2) !== 0);
+            return received === undefined ? arsenal : this.prepareArsenalCommand(player, { ...received, command: effective,
+              ...(arsenal === undefined ? {} : { arsenal }) }, false).arsenal;
+          } : undefined); }
+          finally { player.gravityMultiplier = gravityMultiplier; }
+        }
+      }
+      if (this.source.kind === "quakec") this.source.game.beginFrame(this.sourceFrame);
+      if (this.source.kind === "q1") {
+        this.setWorldGravity(this.source.cvars.variableValue("sv_gravity"));
+        this.source.composition.preFrame(elapsed);
+        for (const player of this.playerStates.values()) {
+          if (player.profile.kind === "q1-netquake") continue;
+          const received = [...input.commands].reverse().find(value => sameActor(value.actor, player.actor.id) && value.sequence > player.lastSequence);
+          if (this.modClientApplications.active && received !== undefined && player.cutscene === null && !player.intermission) { pendingQ1PreThink?.set(player, received.sequence); continue; }
+          const command = received?.command;
+          const jump = command === undefined ? (player.buttons & 2) !== 0 : command.kind === "q1-netquake" ? (command.buttons & 2) !== 0
+            : command.kind === "q2-rerelease" ? (command.buttons & 8) !== 0 : command.upMove > 0;
+          this.source.composition.input(player.actor.id, { attack: player.cutscene === null && ((command?.buttons ?? player.buttons) & 1) !== 0, jump: player.cutscene === null && jump,
+            use: ((command?.buttons ?? player.buttons) & 4) !== 0, impulse: command !== undefined && "impulse" in command ? command.impulse : received?.arsenal?.impulse ?? 0 });
+          this.source.composition.playerPreThink(player.actor.id);
+          this.source.game.playerFrame(player.actor, this.timeSeconds, player.waterLevel);
+        }
+      }
+    }
+    if (this.source.kind === "q2" && this.source.product.rerelease?.players.intermissionFadeUntil != null) {
+      return "next";
+    }
+    if (run && settlement.kind !== "active") { this.foreignMatch.tick(); }
+    if (run && !preparesQ1Clients && settlement.kind !== "active") b.botCommands = this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000);
+    return "go";
+  }
+
+  /** Apply the human and bot commands that fall on this boundary. */
+  private applyBoundaryCommands(input: InputBatch, _settlement: SourceRoundSettlement, plan: StepPlan, b: StepBoundaryState): void {
+    const { paused, lmctf } = plan;
+    const { commandTurn, pendingQ1PreThink } = b;
+    for (const received of [...(commandTurn ? input.commands : []), ...b.botCommands]) {
+      let command = paused ? { ...received, command: { ...received.command, buttons: received.command.buttons & ~1 } } : received;
+      const player = this.player(command.actor);
+      if (player === null) continue;
+      if (command.sequence <= player.lastSequence) continue;
+      this.observeClientCommand(command);
+      const execute = (effective: UserCommand, arsenal: ArsenalIntent | undefined): undefined => {
+        command = { ...command, command: effective, ...(arsenal === undefined ? {} : { arsenal }) };
+        if (this.source.kind === "q1" && pendingQ1PreThink?.get(player) === command.sequence) {
+          pendingQ1PreThink?.delete(player);
+          const effective = command.command;
+          const jump = effective.kind === "q1-netquake" || effective.kind === "q1-quakeworld" ? (effective.buttons & 2) !== 0
+            : effective.kind === "q2-rerelease" ? (effective.buttons & 8) !== 0 : effective.upMove > 0;
+          this.source.composition.input(player.actor.id, { attack: (effective.buttons & 1) !== 0, jump,
+            use: (effective.buttons & 4) !== 0, impulse: command.arsenal?.impulse ?? ("impulse" in effective ? effective.impulse : 0) });
+          this.source.composition.playerPreThink(player.actor.id);
+          this.source.game.playerFrame(player.actor, this.timeSeconds, player.waterLevel);
+          if (!this.actors.isLive(player.actor.id)) return undefined;
+        }
+        command = this.prepareArsenalCommand(player, command, paused);
+        if (paused && lmctf !== null && !lmctf.canMove(player.actor.id)) {
+          player.lastSequence = command.sequence;
+          return undefined;
+        }
+        if (player.cutscene !== null) {
+          player.previousButtons = player.buttons; player.buttons = command.command.buttons; player.lastSequence = command.sequence;
+          return undefined;
+        }
+        if (this.source.kind === "q1" && this.source.game.intermission !== null) {
+          player.previousButtons = player.buttons; player.buttons = command.command.buttons; player.lastSequence = command.sequence;
+          this.source.composition.requestIntermissionExit(player.buttons !== 0, { actor: player.actor.id, attack: (player.buttons & 1) !== 0 });
+          return undefined;
+        }
+        const movementCommand = command.command;
+        this.grapple?.setJump(player.actor.id, movementCommand.kind === "q1-netquake" || movementCommand.kind === "q1-quakeworld" ? (movementCommand.buttons & 2) !== 0
+          : movementCommand.kind === "q2-rerelease" ? (movementCommand.buttons & 8) !== 0 : movementCommand.upMove > 0);
+        if (this.source.kind === "q3") {
+          this.q3Commands.set(player.actor, command);
+          try { this.source.game.playerThink(command); } finally { this.q3Commands.delete(player.actor); }
+          this.syncQ3Player(player);
+        } else {
+          const gravityMultiplier = player.gravityMultiplier;
+          const matchGravity = this.source.kind === "q2" ? this.source.product.match.gravityScale(player.actor.id) : 1;
+          const flightGravity = this.source.kind === "q2" && this.source.product.items.playerPowerups(player.actor.id).flightUntil > this.timeSeconds ? 0.1 : 1;
+          player.gravityMultiplier *= matchGravity * flightGravity * (this.grapple?.gravityScale(player.actor.id) ?? 1);
+          if ((this.source.kind === "q2" || this.grapple !== null) && (player.state.kind === "q2-classic" || player.state.kind === "q2-rerelease" || player.state.kind === "q3"))
+            player.state = { ...player.state, gravity: Math.trunc(this.physics.gravity * player.gravityMultiplier) };
+          try { const relative = relativeMovementCommand(command, player.readState());
+          const movementFrame = { ...this.sourceFrame, phase: "client-command", elapsed: { kind: "milliseconds", value: player.profile.kind === "q1-netquake" ? Math.min(100, Math.max(1, input.elapsedMilliseconds)) : input.elapsedMilliseconds } } satisfies FrameContext;
+          const moved = this.modClientApplications.active ? player.moveCommand(relative, movementFrame) : player.move(relative, movementFrame);
+          if (this.source.kind === "q2" && moved.kind === "q2-rerelease" && moved.status === "active") this.source.product.movementImpact(player.actor.id, moved.impactDelta, (moved.state.flags & 128) !== 0);
+          } finally { player.gravityMultiplier = gravityMultiplier; }
+        }
+        if (!this.actors.isLive(player.actor.id)) return undefined;
+        if (player.state.kind === "q1-netquake") player.state = { ...player.state, punchAngles: this.q1Punch.read(player.actor.id) };
+        if (!paused && this.selectedArsenal !== null && (player.profile.kind === "q2-classic" || player.profile.kind === "q2-rerelease") && this.actors.isLive(player.actor.id)) {
+          const combat = this.combat.read(player.actor.id);
+          if (combat === null) throw new Error("Selected arsenal owner has no combat state");
+          const milliseconds = "milliseconds" in command.command ? command.command.milliseconds : Math.min(100, Math.max(1, input.elapsedMilliseconds));
+          const result = this.weaponStep({ actor: player.actor, command: command.command,
+            frame: { ...this.sourceFrame, phase: "client-command", elapsed: { kind: "milliseconds", value: milliseconds } },
+            arsenal: this.arsenal(player), animation: player.animation, environment: playerMovementEnvironment(player, combat), gauntletHit: false });
+          player.arsenal = result.arsenal; player.animation = result.animation;
+        }
+        if (this.source.kind === "q1" && this.actors.isLive(player.actor.id)) { this.source.game.playerAfterPhysics(player.actor, this.timeSeconds); this.source.composition.playerPostThink(player.actor.id); }
+        if (this.source.kind === "quakec" && this.source.game.kind === "quakeworld" && player.profile.kind === "q1-quakeworld" && this.actors.isLive(player.actor.id)) {
+          const quakeWorld = this.source.game, before = quakeWorld.clientArsenal(player.actor.id);
+          quakeWorld.clientPostThink(player.actor); this.projectQuakeCAttack(player.actor, before);
+          if (!quakeWorld.isSpectatorClient(player.actor.id)) this.runQuakeWorldNewMissile();
+          player.arsenal = this.arsenal(player); if (player.character === "q1") player.animation = quakeWorld.clientAnimation(player.actor.id);
+          player.state = player.readState(); this.syncQuakeCClientView(player);
+        }
+        if (!paused && this.source.kind === "q2" && this.actors.isLive(player.actor.id)) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) {
+          if (!player.intermission) entity.viewHeight = player.character === "q2" && (this.combat.read(player.actor.id)?.health ?? 0) <= 0
+            ? this.source.players.states.get(player.actor.id)?.gibbed === true ? 8 : -2 : player.viewHeight;
+          this.source.players.afterClientThink(entity, this.source.game);
+        } }
+        this.q2Characters.get(player.actor)?.afterClientThink();
+        const q1Character = this.q1Characters.get(player.actor); if (q1Character !== undefined) q1Character.postMove();
+        if (!paused) this.physics.commitAttachments();
+        return undefined;
+      };
+      if (this.modClientApplications.active) {
+        command = relativeMovementCommand(command, player.readState());
+        player.withInputCommand(command.command, { ...this.sourceFrame, phase: "client-command", elapsed: { kind: "milliseconds", value: input.elapsedMilliseconds } },
+          execute, () => undefined, command.arsenal);
+      } else execute(command.command, command.arsenal);
+    }
+  }
+
+  /** Advance executions, sources and characters through one unpaused boundary. */
+  private advanceBoundaryActors(_input: InputBatch, _settlement: SourceRoundSettlement, plan: StepPlan, b: StepBoundaryState): void {
+    const { paused, previousSelectedMilliseconds, mapRun, elapsed, selectedQ2 } = plan;
+    const { boundary, run, commandTurn, previousQ3Time, preparesQ1Clients } = b;
+    if (!paused) {
+      if (run && this.source.kind === "q2") this.source.monsters.beginFrame(this.source.game);
+      if (run && this.source.kind === "q3") this.source.game.beginFrame(this.sourceFrame);
+      const visited = new Set<OwnedActor>();
+      for (const actor of orderedActorTurns(this.actors, actor => this.sourcePosition(actor.id), visited)) {
+        if (this.grapple?.source.kind === "q3-qvm" && actor.owner === this.grapple.selection.source.provider) continue;
+        if (this.modOwner?.owns(actor.owner) === true) continue;
+        const execution = this.actorExecutions.get(actor.id), clientPlayer = this.playerStates.get(actor);
+        if (run && clientPlayer?.profile.kind === "q1-netquake" && preparesQ1Clients) {
+          if (this.source.kind === "quakec") this.source.game.beforeActor(actor);
+          else if (this.source.kind === "q1" && this.source.game.forceRetouch > 0) { this.bodies.link(actor); this.physics.touchTriggers(actor); }
+          if (this.actors.isLive(actor.id) && clientPlayer.cutscene === null && !clientPlayer.intermission) {
+            const gravityMultiplier = clientPlayer.gravityMultiplier;
+            clientPlayer.gravityMultiplier *= this.grapple?.gravityScale(actor.id) ?? 1;
+            try { clientPlayer.physicsNetQuake({ ...this.sourceFrame, phase: "entity-physics" }); }
+            finally { clientPlayer.gravityMultiplier = gravityMultiplier; }
+            if (!this.actors.isLive(actor.id)) continue;
+            if (clientPlayer.state.kind === "q1-netquake") clientPlayer.state = { ...clientPlayer.state, punchAngles: this.q1Punch.read(actor.id) };
+            this.syncQuakeCClientView(clientPlayer);
+          } else clientPlayer.finishNetQuakeInput();
+          if (boundary.q2) this.frameSelectedQ2Weapon(actor);
+          if (this.actors.isLive(actor.id)) {
+            this.q2Characters.get(actor)?.beginFrame();
+            this.stepHandGrenade(clientPlayer.actor.id, (this.combat.read(actor.id)?.health ?? 0) > 0 ? "alive" : "dead");
+            this.grapple?.step(actor.id, (this.combat.read(actor.id)?.health ?? 0) > 0 && !clientPlayer.intermission && clientPlayer.cutscene === null);
+            this.playerWeapon(clientPlayer);
+          }
+          this.physics.commitAttachments(); continue;
+        }
+        if (execution?.kind === "quakec") {
+          if (!run) continue;
+          execution.source.beforeActor(actor);
+          if (this.actors.isLive(actor.id)) executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
+            frame: this.sourceFrame, timeSeconds: this.timeSeconds, elapsed, visited });
+          this.runQuakeWorldNewMissile();
+          if (boundary.q2 && clientPlayer !== undefined) this.frameSelectedQ2Weapon(actor);
+          this.physics.commitAttachments(); continue;
+        }
+        if (execution?.kind === "q3-source") {
+          if (boundary.q3) execution.step(previousQ3Time, this.selectedQ3Time);
+          this.physics.commitAttachments(); continue;
+        }
+        if (execution?.kind === "q3") {
+          if (!commandTurn) continue;
+          execution.step(previousSelectedMilliseconds, this.selectedMilliseconds);
+          this.physics.commitAttachments(); continue;
+        }
+        const selectedActor = selectedQ2 !== null && execution?.kind === "q2" && execution.services === selectedQ2.game;
+        if (selectedActor) {
+          if (boundary.q2) {
+            executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
+              frame: selectedQ2.frame, timeSeconds: seconds(selectedQ2.frame.time), elapsed: selectedQ2.intervalMilliseconds / 1000, visited });
+            this.physics.commitAttachments();
+          }
+          continue;
+        }
+        if (boundary.q2) this.frameSelectedQ2Weapon(actor);
+        const monsterSource = execution?.kind === "q2" ? this.monsterSources.get(execution.services.options.provider) : undefined;
+        if (execution?.kind === "q2" && monsterSource?.kind === "q2" && execution.services === monsterSource.game) {
+          const active = run ? this.selectedMonsters?.beforeTurn(actor.id) !== false : this.selectedMonsters?.active(actor.id) !== false;
+          if (run && active && this.source.kind === "q1" && this.source.game.forceRetouch > 0) {
+            this.bodies.link(actor); this.physics.touchTriggers(actor);
+          }
+          if (mapRun && active && monsterSource.clock.advanced && this.actors.isLive(actor.id)) {
+            const frame = monsterSource.clock.frame;
+            executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
+              frame, timeSeconds: seconds(frame.time), elapsed: seconds(frame.elapsed), visited });
+            this.physics.commitAttachments();
+          }
+          continue;
+        }
+        if (execution?.kind === "q2" && this.foreignWorld !== null && execution.services === this.foreignWorld.modules.game) {
+          if (mapRun && run && this.foreignWorld.clock.advanced && this.actors.isLive(actor.id)) {
+            const frame = this.foreignWorld.clock.frame;
+            executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
+              frame, timeSeconds: seconds(frame.time), elapsed: seconds(frame.elapsed), visited });
+            this.physics.commitAttachments();
+          }
+          continue;
+        }
+        if (execution?.kind === "q1" && this.foreignQ1World !== null && execution.services === this.foreignQ1World.modules.game) {
+          if (mapRun && run && this.foreignQ1World.clock.advanced && this.actors.isLive(actor.id)) {
+            const frame = this.foreignQ1World.clock.frame;
+            executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
+              frame, timeSeconds: seconds(frame.time), elapsed: seconds(frame.elapsed), visited });
+            this.physics.commitAttachments();
+          }
+          continue;
+        }
+        if (!run || this.selectedMonsters?.beforeTurn(actor.id) === false) continue;
+        const equipmentPlayer = this.playerStates.get(actor);
+        if (equipmentPlayer !== undefined) {
+          this.stepHandGrenade(equipmentPlayer.actor.id);
+          this.grapple?.step(actor.id, (this.combat.read(actor.id)?.health ?? 0) > 0 && !equipmentPlayer.intermission && equipmentPlayer.cutscene === null
+            && !(equipmentPlayer.state.kind === "q3" && equipmentPlayer.state.movementType === MoveType.PM_SPECTATOR)
+            && !(this.source.kind === "q2" && this.source.players.states.get(actor.id)?.spectator === true));
+        }
+        if (!this.actors.isLive(actor.id)) continue;
+        if (this.source.kind === "q1" && this.source.game.forceRetouch > 0) {
+          this.bodies.link(actor); this.physics.touchTriggers(actor);
+          if (!this.actors.isLive(actor.id)) continue;
+        }
+        if (execution !== undefined && !this.playerStates.has(actor)) {
+          const sourceProvider = execution.kind === "q1" ? execution.services.provider : execution.services.options.provider;
+          const monsterSource = this.monsterSources.get(sourceProvider);
+          const frame = monsterSource?.clock.frame ?? (this.selectedArsenal?.family === "q1" && execution.services === this.selectedArsenal.game ? this.selectedQ1Frame() : execution.services === this.grapple?.source.game ? this.grappleFrame : execution.services === this.handGrenades?.independent?.game ? this.equipmentFrame : this.sourceFrame);
+          executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
+            frame, timeSeconds: seconds(frame.time), elapsed, visited });
+          this.physics.commitAttachments();
+          continue;
+        }
+        if (this.source.kind === "q3" && (this.playerStates.has(actor) || this.source.game.records.byActor(actor.id) !== null)) { this.source.game.runActor(actor); this.physics.commitAttachments(); const player = this.playerStates.get(actor); if (player !== undefined) this.syncQ3Player(player); continue; }
+        if (this.playerStates.has(actor)) {
+          this.q2Characters.get(actor)?.beginFrame();
+          this.playerWeapon(this.playerStates.get(actor) ?? this.requirePlayer(actor.id)); this.physics.commitAttachments(); continue;
+        }
+        this.scheduler.run(actor.id, { ...this.sourceFrame, phase: "entity-think" }, "during-physics");
+        if (this.actors.isLive(actor.id)) this.physics.step(actor, elapsed);
+        this.physics.commitAttachments();
+      }
+    }
+  }
+
+  /** Close monster frames, reconcile weapon slots and conclude the source frame; true when a level change ends the step. */
+  private closeStepBoundary(_input: InputBatch, settlement: SourceRoundSettlement, plan: StepPlan, b: StepBoundaryState): boolean {
+    const { paused, fixed, mapRun, elapsed } = plan;
+    const { run } = b;
+    if (mapRun) for (const source of this.monsterSources.values()) if (source.kind === "q2" && source.clock.advanced) source.monsters.endFrame(source.game);
+    if (mapRun && this.foreignWorld !== null && this.foreignWorld.clock.advanced) this.foreignWorld.modules.monsters.endFrame(this.foreignWorld.modules.game);
+    if (run) for (const slot of this.weaponSlots.values()) slot.reconcile();
+    if (run || paused) this.finishFrameState(run, paused);
+    if (run) this.concludeSourceFrame(settlement, fixed, elapsed);
+    return this.source.kind === "q2" && this.transitions.pending(this.transitionsCursor) !== 0;
+  }
+
   step(input: InputBatch): SimulationOutput {
     this.pendingSharedRestore?.assertComplete();
     this.assertOpen();
@@ -5129,371 +5527,18 @@ export class SharedSimulation implements Simulation {
       }
       this.hostMilliseconds += input.elapsedMilliseconds;
       if (this.q1PauseState) return { snapshot: this.snapshot(), events: this.events.take() };
-      const lmctf = this.source.kind === "q2" && this.source.product.match.source instanceof Q2Lmctf ? this.source.product.match.source : null;
-      const paused = lmctf?.match.paused === true;
-      const previousSelectedMilliseconds = this.selectedMilliseconds;
-      if (!paused) this.selectedMilliseconds += input.elapsedMilliseconds;
-      if (!paused) this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
-      const profile = providerTiming(this.recipe, this.recipe.map.entities.provider).clock;
-      const fixed = profile.kind === "q2-classic" ? 100 : profile.kind === "q2-rerelease" ? profile.frameMilliseconds : profile.kind === "q3" ? profile.serverFrameMilliseconds : null;
-      // Frame clocks accumulate fractional seconds; deadline math is integral.
-      const nowMilliseconds = Math.round(this.timeSeconds * 1000);
-      const mapRun = settlement.kind === "active" || !paused && input.elapsedMilliseconds > 0 && (fixed === null || this.sourceSchedulingMilliseconds >= nowMilliseconds + (profile.kind === "q3" ? profile.serverFrameMilliseconds : 0));
-      const elapsed = settlement.kind === "active" ? 0.1 : fixed === null ? Math.min(0.1, Math.max(0.001, input.elapsedMilliseconds / 1000)) : fixed / 1000;
-      const selectedQ2 = this.selectedWeaponSource?.kind === "q2" ? this.selectedWeaponSource : null;
-      const mapStartMilliseconds = selectedQ2?.mapMilliseconds ?? nowMilliseconds;
-      const mapDeadlines = new Set<number>();
-      if (settlement.kind === "active") mapDeadlines.add(mapStartMilliseconds);
-      else if (mapRun && profile.kind === "q3") {
-        for (let due = nowMilliseconds + profile.serverFrameMilliseconds; due <= this.sourceSchedulingMilliseconds; due += profile.serverFrameMilliseconds) mapDeadlines.add(due);
-      } else if (mapRun && fixed !== null) {
-        // Q2 runs when the current tick is due, one interval ahead of its host clock.
-        // Bound shared-host work, not elapsed time: outstanding debt survives this bundle.
-        const maximumQ2CatchupMilliseconds = 200;
-        for (let due = mapStartMilliseconds; due <= this.sourceSchedulingMilliseconds && due - mapStartMilliseconds < maximumQ2CatchupMilliseconds; due += fixed) mapDeadlines.add(due + fixed);
-      } else if (mapRun) mapDeadlines.add(mapStartMilliseconds + elapsed * 1000);
-      const mapEndMilliseconds = mapDeadlines.size === 0 ? mapStartMilliseconds : Math.max(...mapDeadlines);
-      const deadlines = new Set<number>(mapDeadlines.size === 0 ? [mapEndMilliseconds] : mapDeadlines);
-      const selectedQ3Clock = this.selectedQ3Source === null ? null : providerTiming(this.recipe, this.weaponProvider.provider).clock;
-      if (selectedQ3Clock !== null && selectedQ3Clock.kind !== "q3") throw new Error("Selected Q3 source clock changed");
-      const q3Deadlines = new Set<number>();
-      if (!paused && selectedQ3Clock !== null) for (let due = this.selectedQ3Next; due <= this.selectedMilliseconds; due += selectedQ3Clock.serverFrameMilliseconds) { deadlines.add(due); q3Deadlines.add(due); }
-      const weaponDeadlines = new Set<number>();
-      if (mapRun) {
-        if (selectedQ2 !== null) for (let due = selectedQ2.nextMilliseconds; due <= mapEndMilliseconds; due += selectedQ2.intervalMilliseconds) {
-          deadlines.add(due); weaponDeadlines.add(due);
-        }
-        for (const source of this.monsterSources.values()) if (source.kind === "q2") {
-          const interval = source.game.options.edition === "classic" ? 100 : 25;
-          for (let due = Math.round(seconds(source.clock.frame.time) * 1000) + interval; due <= mapEndMilliseconds; due += interval) deadlines.add(due);
-        }
-        if (this.foreignWorld !== null) {
-          const interval = this.foreignWorld.edition === "classic" ? 100 : 25;
-          for (let due = Math.round(seconds(this.foreignWorld.clock.frame.time) * 1000) + interval; due <= mapEndMilliseconds; due += interval) deadlines.add(due);
-        }
-      }
-      const boundaries = [...deadlines].sort((a, b) => a - b).map(milliseconds => ({
-        map: mapDeadlines.has(milliseconds), q2: weaponDeadlines.has(milliseconds), q3: q3Deadlines.has(milliseconds), milliseconds,
-      }));
-      this.presentationTickMilliseconds = fixed;
+      const plan = this.planStep(input, settlement);
+      this.presentationTickMilliseconds = plan.fixed;
       this.presentationAhead = true;
-      let commandsPending = true;
-      for (const boundary of boundaries) {
-      if (mapRun) this.capturePresentationSnapshot();
-      const previousQ3Time = this.selectedQ3Time;
-      if (boundary.q3 && selectedQ3Clock !== null) { this.selectedQ3Time = boundary.milliseconds; this.selectedQ3Next = boundary.milliseconds + selectedQ3Clock.serverFrameMilliseconds; }
-      this.selectedQ3Source?.synchronize();
-      const run = boundary.map, commandTurn = commandsPending && (run || !mapRun);
-      if (commandTurn) commandsPending = false;
-      if (run && selectedQ2 !== null) selectedQ2.mapMilliseconds = boundary.milliseconds;
-      if (boundary.q2 && selectedQ2 !== null) {
-        const milliseconds = selectedQ2.frame.time.kind === "milliseconds";
-        selectedQ2.frame = { frame: selectedQ2.frame.frame + 1, phase: "frame-entry",
-          time: { kind: milliseconds ? "milliseconds" : "seconds", value: milliseconds ? boundary.milliseconds : boundary.milliseconds / 1000 },
-          elapsed: { kind: milliseconds ? "milliseconds" : "seconds", value: milliseconds ? selectedQ2.intervalMilliseconds : selectedQ2.intervalMilliseconds / 1000 } };
-        selectedQ2.nextMilliseconds = boundary.milliseconds + selectedQ2.intervalMilliseconds;
-      }
-      if (mapRun && !run) { this.beginMonsterFrames(boundary.milliseconds, false); this.beginForeignWorldFrame(boundary.milliseconds, false); this.beginForeignQ1WorldFrame(false); }
-      let botCommands: readonly ActorCommand[] = [];
-      const pendingNetQuake = this.modClientApplications.active ? new Map<ActorId, ActorCommand>() : null;
-      const pendingQ1PreThink = this.modClientApplications.active ? new Map<MovementPlayer, number>() : null;
-      const preparesQ1Clients = this.source.kind === "q1" || this.source.kind === "quakec" && this.source.game.kind === "netquake";
-      if (run) {
-        if (settlement.kind === "active") this.sourceFrame = { ...this.clock.frame, frame: this.clock.frame.frame + 1,
-          elapsed: { kind: "milliseconds", value: 100 }, phase: "frame-entry" };
-        else if (fixed === null) this.sourceFrame = { ...this.clock.frame, elapsed: { kind: "seconds", value: elapsed }, phase: "frame-entry" };
-        else this.sourceFrame = this.clock.advance({ kind: this.clock.frame.time.kind, value: this.clock.frame.time.kind === "seconds" ? elapsed : fixed });
-        this.beginMonsterFrames(boundary.milliseconds, true);
-        this.beginForeignWorldFrame(boundary.milliseconds, true);
-        this.beginForeignQ1WorldFrame(true);
-        if (this.selectedArsenal?.family === "q1") {
-          const frame = this.selectedQ1Frame();
-          this.selectedArsenal.game.beginFrame(seconds(frame.time), seconds(frame.elapsed));
-          if (this.selectedWeaponSource?.kind === "q1") this.selectedWeaponSource.missionWeapons.frame(seconds(frame.elapsed));
-          this.selectedArsenal.frame(seconds(frame.time));
-        }
-        if (!paused) this.advanceQ1Punch();
-        if (this.handGrenades !== null) this.equipmentFrame = providerFrame(this.sourceFrame, profile, providerTiming(this.recipe, this.handGrenades.selection.source.provider).clock);
-        if (this.grapple !== null) {
-          this.grappleFrame = providerFrame(this.sourceFrame, profile, providerTiming(this.recipe, this.grapple.selection.source.provider).clock);
-          if (this.grapple.source.kind === "q1-threewave") this.grapple.source.game.beginFrame(seconds(this.grappleFrame.time), seconds(this.grappleFrame.elapsed));
-          else if (this.grapple.source.kind === "q3-qvm") {
-            this.grapple.source.game.beginFrame(Math.round(seconds(this.grappleFrame.time) * 1000), this.grappleFrame.frame);
-            for (const player of this.playerStates.values()) this.grapple.source.game.pull(player.actor.id);
-          }
-        }
-        if (this.source.kind === "q2" && this.source.product.rerelease?.players.intermissionFadeUntil != null) {
-          this.checkingQ2Rules = true;
-          try { this.source.product.rerelease.players.fadeFrame(this.source.game); } finally { this.checkingQ2Rules = false; }
-          this.sourceFrame = this.clock.enter("frame-exit");
-          if (this.transitions.pending(this.transitionsCursor) !== 0) break;
-          continue;
-        }
-        if (this.source.kind === "q1") this.source.game.beginFrame(this.timeSeconds, elapsed);
-        if (preparesQ1Clients) botCommands = this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000);
-        if (preparesQ1Clients) {
-          for (const command of [...input.commands, ...botCommands]) {
-            const player = this.requirePlayer(command.actor);
-            if (player.profile.kind !== "q1-netquake" || command.sequence <= player.lastSequence) continue;
-            this.observeClientCommand(command);
-            if (this.modClientApplications.active) { player.receiveNetQuake(command); pendingNetQuake?.set(player.actor.id, command); }
-            else {
-              player.receiveNetQuake(this.prepareArsenalCommand(player, command, false));
-              this.grapple?.setJump(player.actor.id, (command.command.buttons & 2) !== 0);
-            }
-            if (this.source.kind === "q1" && this.source.game.intermission !== null)
-              this.source.composition.requestIntermissionExit(player.buttons !== 0, { actor: player.actor.id, attack: (player.buttons & 1) !== 0 });
-          }
-          for (const player of this.playerStates.values()) if (player.profile.kind === "q1-netquake" && player.cutscene === null && !player.intermission) {
-            const gravityMultiplier = player.gravityMultiplier;
-            player.gravityMultiplier *= this.grapple?.gravityScale(player.actor.id) ?? 1;
-            try { player.prepareNetQuake({ ...this.sourceFrame, phase: "client-command" }, this.modClientApplications.active ? (effective, arsenal) => {
-              const received = pendingNetQuake?.get(player.actor.id);
-              this.grapple?.setJump(player.actor.id, (effective.buttons & 2) !== 0);
-              return received === undefined ? arsenal : this.prepareArsenalCommand(player, { ...received, command: effective,
-                ...(arsenal === undefined ? {} : { arsenal }) }, false).arsenal;
-            } : undefined); }
-            finally { player.gravityMultiplier = gravityMultiplier; }
-          }
-        }
-        if (this.source.kind === "quakec") this.source.game.beginFrame(this.sourceFrame);
-        if (this.source.kind === "q1") {
-          this.setWorldGravity(this.source.cvars.variableValue("sv_gravity"));
-          this.source.composition.preFrame(elapsed);
-          for (const player of this.playerStates.values()) {
-            if (player.profile.kind === "q1-netquake") continue;
-            const received = [...input.commands].reverse().find(value => sameActor(value.actor, player.actor.id) && value.sequence > player.lastSequence);
-            if (this.modClientApplications.active && received !== undefined && player.cutscene === null && !player.intermission) { pendingQ1PreThink?.set(player, received.sequence); continue; }
-            const command = received?.command;
-            const jump = command === undefined ? (player.buttons & 2) !== 0 : command.kind === "q1-netquake" ? (command.buttons & 2) !== 0
-              : command.kind === "q2-rerelease" ? (command.buttons & 8) !== 0 : command.upMove > 0;
-            this.source.composition.input(player.actor.id, { attack: player.cutscene === null && ((command?.buttons ?? player.buttons) & 1) !== 0, jump: player.cutscene === null && jump,
-              use: ((command?.buttons ?? player.buttons) & 4) !== 0, impulse: command !== undefined && "impulse" in command ? command.impulse : received?.arsenal?.impulse ?? 0 });
-            this.source.composition.playerPreThink(player.actor.id);
-            this.source.game.playerFrame(player.actor, this.timeSeconds, player.waterLevel);
-          }
-        }
-      }
-      if (this.source.kind === "q2" && this.source.product.rerelease?.players.intermissionFadeUntil != null) {
-        continue;
-      }
-      if (run && settlement.kind !== "active") { this.foreignMatch.tick(); }
-      if (run && !preparesQ1Clients && settlement.kind !== "active") botCommands = this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000);
-      for (const received of [...(commandTurn ? input.commands : []), ...botCommands]) {
-        let command = paused ? { ...received, command: { ...received.command, buttons: received.command.buttons & ~1 } } : received;
-        const player = this.player(command.actor);
-        if (player === null) continue;
-        if (command.sequence <= player.lastSequence) continue;
-        this.observeClientCommand(command);
-        const execute = (effective: UserCommand, arsenal: ArsenalIntent | undefined): undefined => {
-          command = { ...command, command: effective, ...(arsenal === undefined ? {} : { arsenal }) };
-          if (this.source.kind === "q1" && pendingQ1PreThink?.get(player) === command.sequence) {
-            pendingQ1PreThink?.delete(player);
-            const effective = command.command;
-            const jump = effective.kind === "q1-netquake" || effective.kind === "q1-quakeworld" ? (effective.buttons & 2) !== 0
-              : effective.kind === "q2-rerelease" ? (effective.buttons & 8) !== 0 : effective.upMove > 0;
-            this.source.composition.input(player.actor.id, { attack: (effective.buttons & 1) !== 0, jump,
-              use: (effective.buttons & 4) !== 0, impulse: command.arsenal?.impulse ?? ("impulse" in effective ? effective.impulse : 0) });
-            this.source.composition.playerPreThink(player.actor.id);
-            this.source.game.playerFrame(player.actor, this.timeSeconds, player.waterLevel);
-            if (!this.actors.isLive(player.actor.id)) return undefined;
-          }
-          command = this.prepareArsenalCommand(player, command, paused);
-          if (paused && lmctf !== null && !lmctf.canMove(player.actor.id)) {
-            player.lastSequence = command.sequence;
-            return undefined;
-          }
-          if (player.cutscene !== null) {
-            player.previousButtons = player.buttons; player.buttons = command.command.buttons; player.lastSequence = command.sequence;
-            return undefined;
-          }
-          if (this.source.kind === "q1" && this.source.game.intermission !== null) {
-            player.previousButtons = player.buttons; player.buttons = command.command.buttons; player.lastSequence = command.sequence;
-            this.source.composition.requestIntermissionExit(player.buttons !== 0, { actor: player.actor.id, attack: (player.buttons & 1) !== 0 });
-            return undefined;
-          }
-          const movementCommand = command.command;
-          this.grapple?.setJump(player.actor.id, movementCommand.kind === "q1-netquake" || movementCommand.kind === "q1-quakeworld" ? (movementCommand.buttons & 2) !== 0
-            : movementCommand.kind === "q2-rerelease" ? (movementCommand.buttons & 8) !== 0 : movementCommand.upMove > 0);
-          if (this.source.kind === "q3") {
-            this.q3Commands.set(player.actor, command);
-            try { this.source.game.playerThink(command); } finally { this.q3Commands.delete(player.actor); }
-            this.syncQ3Player(player);
-          } else {
-            const gravityMultiplier = player.gravityMultiplier;
-            const matchGravity = this.source.kind === "q2" ? this.source.product.match.gravityScale(player.actor.id) : 1;
-            const flightGravity = this.source.kind === "q2" && this.source.product.items.playerPowerups(player.actor.id).flightUntil > this.timeSeconds ? 0.1 : 1;
-            player.gravityMultiplier *= matchGravity * flightGravity * (this.grapple?.gravityScale(player.actor.id) ?? 1);
-            if ((this.source.kind === "q2" || this.grapple !== null) && (player.state.kind === "q2-classic" || player.state.kind === "q2-rerelease" || player.state.kind === "q3"))
-              player.state = { ...player.state, gravity: Math.trunc(this.physics.gravity * player.gravityMultiplier) };
-            try { const relative = relativeMovementCommand(command, player.readState());
-            const movementFrame = { ...this.sourceFrame, phase: "client-command", elapsed: { kind: "milliseconds", value: player.profile.kind === "q1-netquake" ? Math.min(100, Math.max(1, input.elapsedMilliseconds)) : input.elapsedMilliseconds } } satisfies FrameContext;
-            const moved = this.modClientApplications.active ? player.moveCommand(relative, movementFrame) : player.move(relative, movementFrame);
-            if (this.source.kind === "q2" && moved.kind === "q2-rerelease" && moved.status === "active") this.source.product.movementImpact(player.actor.id, moved.impactDelta, (moved.state.flags & 128) !== 0);
-            } finally { player.gravityMultiplier = gravityMultiplier; }
-          }
-          if (!this.actors.isLive(player.actor.id)) return undefined;
-          if (player.state.kind === "q1-netquake") player.state = { ...player.state, punchAngles: this.q1Punch.read(player.actor.id) };
-          if (!paused && this.selectedArsenal !== null && (player.profile.kind === "q2-classic" || player.profile.kind === "q2-rerelease") && this.actors.isLive(player.actor.id)) {
-            const combat = this.combat.read(player.actor.id);
-            if (combat === null) throw new Error("Selected arsenal owner has no combat state");
-            const milliseconds = "milliseconds" in command.command ? command.command.milliseconds : Math.min(100, Math.max(1, input.elapsedMilliseconds));
-            const result = this.weaponStep({ actor: player.actor, command: command.command,
-              frame: { ...this.sourceFrame, phase: "client-command", elapsed: { kind: "milliseconds", value: milliseconds } },
-              arsenal: this.arsenal(player), animation: player.animation, environment: playerMovementEnvironment(player, combat), gauntletHit: false });
-            player.arsenal = result.arsenal; player.animation = result.animation;
-          }
-          if (this.source.kind === "q1" && this.actors.isLive(player.actor.id)) { this.source.game.playerAfterPhysics(player.actor, this.timeSeconds); this.source.composition.playerPostThink(player.actor.id); }
-          if (this.source.kind === "quakec" && this.source.game.kind === "quakeworld" && player.profile.kind === "q1-quakeworld" && this.actors.isLive(player.actor.id)) {
-            const quakeWorld = this.source.game, before = quakeWorld.clientArsenal(player.actor.id);
-            quakeWorld.clientPostThink(player.actor); this.projectQuakeCAttack(player.actor, before);
-            if (!quakeWorld.isSpectatorClient(player.actor.id)) this.runQuakeWorldNewMissile();
-            player.arsenal = this.arsenal(player); if (player.character === "q1") player.animation = quakeWorld.clientAnimation(player.actor.id);
-            player.state = player.readState(); this.syncQuakeCClientView(player);
-          }
-          if (!paused && this.source.kind === "q2" && this.actors.isLive(player.actor.id)) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) {
-            if (!player.intermission) entity.viewHeight = player.character === "q2" && (this.combat.read(player.actor.id)?.health ?? 0) <= 0
-              ? this.source.players.states.get(player.actor.id)?.gibbed === true ? 8 : -2 : player.viewHeight;
-            this.source.players.afterClientThink(entity, this.source.game);
-          } }
-          this.q2Characters.get(player.actor)?.afterClientThink();
-          const q1Character = this.q1Characters.get(player.actor); if (q1Character !== undefined) q1Character.postMove();
-          if (!paused) this.physics.commitAttachments();
-          return undefined;
-        };
-        if (this.modClientApplications.active) {
-          command = relativeMovementCommand(command, player.readState());
-          player.withInputCommand(command.command, { ...this.sourceFrame, phase: "client-command", elapsed: { kind: "milliseconds", value: input.elapsedMilliseconds } },
-            execute, () => undefined, command.arsenal);
-        } else execute(command.command, command.arsenal);
-      }
-      if (!paused) {
-        if (run && this.source.kind === "q2") this.source.monsters.beginFrame(this.source.game);
-        if (run && this.source.kind === "q3") this.source.game.beginFrame(this.sourceFrame);
-        const visited = new Set<OwnedActor>();
-        for (const actor of orderedActorTurns(this.actors, actor => this.sourcePosition(actor.id), visited)) {
-          if (this.grapple?.source.kind === "q3-qvm" && actor.owner === this.grapple.selection.source.provider) continue;
-          if (this.modOwner?.owns(actor.owner) === true) continue;
-          const execution = this.actorExecutions.get(actor.id), clientPlayer = this.playerStates.get(actor);
-          if (run && clientPlayer?.profile.kind === "q1-netquake" && preparesQ1Clients) {
-            if (this.source.kind === "quakec") this.source.game.beforeActor(actor);
-            else if (this.source.kind === "q1" && this.source.game.forceRetouch > 0) { this.bodies.link(actor); this.physics.touchTriggers(actor); }
-            if (this.actors.isLive(actor.id) && clientPlayer.cutscene === null && !clientPlayer.intermission) {
-              const gravityMultiplier = clientPlayer.gravityMultiplier;
-              clientPlayer.gravityMultiplier *= this.grapple?.gravityScale(actor.id) ?? 1;
-              try { clientPlayer.physicsNetQuake({ ...this.sourceFrame, phase: "entity-physics" }); }
-              finally { clientPlayer.gravityMultiplier = gravityMultiplier; }
-              if (!this.actors.isLive(actor.id)) continue;
-              if (clientPlayer.state.kind === "q1-netquake") clientPlayer.state = { ...clientPlayer.state, punchAngles: this.q1Punch.read(actor.id) };
-              this.syncQuakeCClientView(clientPlayer);
-            } else clientPlayer.finishNetQuakeInput();
-            if (boundary.q2) this.frameSelectedQ2Weapon(actor);
-            if (this.actors.isLive(actor.id)) {
-              this.q2Characters.get(actor)?.beginFrame();
-              this.stepHandGrenade(clientPlayer.actor.id, (this.combat.read(actor.id)?.health ?? 0) > 0 ? "alive" : "dead");
-              this.grapple?.step(actor.id, (this.combat.read(actor.id)?.health ?? 0) > 0 && !clientPlayer.intermission && clientPlayer.cutscene === null);
-              this.playerWeapon(clientPlayer);
-            }
-            this.physics.commitAttachments(); continue;
-          }
-          if (execution?.kind === "quakec") {
-            if (!run) continue;
-            execution.source.beforeActor(actor);
-            if (this.actors.isLive(actor.id)) executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
-              frame: this.sourceFrame, timeSeconds: this.timeSeconds, elapsed, visited });
-            this.runQuakeWorldNewMissile();
-            if (boundary.q2 && clientPlayer !== undefined) this.frameSelectedQ2Weapon(actor);
-            this.physics.commitAttachments(); continue;
-          }
-          if (execution?.kind === "q3-source") {
-            if (boundary.q3) execution.step(previousQ3Time, this.selectedQ3Time);
-            this.physics.commitAttachments(); continue;
-          }
-          if (execution?.kind === "q3") {
-            if (!commandTurn) continue;
-            execution.step(previousSelectedMilliseconds, this.selectedMilliseconds);
-            this.physics.commitAttachments(); continue;
-          }
-          const selectedActor = selectedQ2 !== null && execution?.kind === "q2" && execution.services === selectedQ2.game;
-          if (selectedActor) {
-            if (boundary.q2) {
-              executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
-                frame: selectedQ2.frame, timeSeconds: seconds(selectedQ2.frame.time), elapsed: selectedQ2.intervalMilliseconds / 1000, visited });
-              this.physics.commitAttachments();
-            }
-            continue;
-          }
-          if (boundary.q2) this.frameSelectedQ2Weapon(actor);
-          const monsterSource = execution?.kind === "q2" ? this.monsterSources.get(execution.services.options.provider) : undefined;
-          if (execution?.kind === "q2" && monsterSource?.kind === "q2" && execution.services === monsterSource.game) {
-            const active = run ? this.selectedMonsters?.beforeTurn(actor.id) !== false : this.selectedMonsters?.active(actor.id) !== false;
-            if (run && active && this.source.kind === "q1" && this.source.game.forceRetouch > 0) {
-              this.bodies.link(actor); this.physics.touchTriggers(actor);
-            }
-            if (mapRun && active && monsterSource.clock.advanced && this.actors.isLive(actor.id)) {
-              const frame = monsterSource.clock.frame;
-              executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
-                frame, timeSeconds: seconds(frame.time), elapsed: seconds(frame.elapsed), visited });
-              this.physics.commitAttachments();
-            }
-            continue;
-          }
-          if (execution?.kind === "q2" && this.foreignWorld !== null && execution.services === this.foreignWorld.modules.game) {
-            if (mapRun && run && this.foreignWorld.clock.advanced && this.actors.isLive(actor.id)) {
-              const frame = this.foreignWorld.clock.frame;
-              executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
-                frame, timeSeconds: seconds(frame.time), elapsed: seconds(frame.elapsed), visited });
-              this.physics.commitAttachments();
-            }
-            continue;
-          }
-          if (execution?.kind === "q1" && this.foreignQ1World !== null && execution.services === this.foreignQ1World.modules.game) {
-            if (mapRun && run && this.foreignQ1World.clock.advanced && this.actors.isLive(actor.id)) {
-              const frame = this.foreignQ1World.clock.frame;
-              executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
-                frame, timeSeconds: seconds(frame.time), elapsed: seconds(frame.elapsed), visited });
-              this.physics.commitAttachments();
-            }
-            continue;
-          }
-          if (!run || this.selectedMonsters?.beforeTurn(actor.id) === false) continue;
-          const equipmentPlayer = this.playerStates.get(actor);
-          if (equipmentPlayer !== undefined) {
-            this.stepHandGrenade(equipmentPlayer.actor.id);
-            this.grapple?.step(actor.id, (this.combat.read(actor.id)?.health ?? 0) > 0 && !equipmentPlayer.intermission && equipmentPlayer.cutscene === null
-              && !(equipmentPlayer.state.kind === "q3" && equipmentPlayer.state.movementType === MoveType.PM_SPECTATOR)
-              && !(this.source.kind === "q2" && this.source.players.states.get(actor.id)?.spectator === true));
-          }
-          if (!this.actors.isLive(actor.id)) continue;
-          if (this.source.kind === "q1" && this.source.game.forceRetouch > 0) {
-            this.bodies.link(actor); this.physics.touchTriggers(actor);
-            if (!this.actors.isLive(actor.id)) continue;
-          }
-          if (execution !== undefined && !this.playerStates.has(actor)) {
-            const sourceProvider = execution.kind === "q1" ? execution.services.provider : execution.services.options.provider;
-            const monsterSource = this.monsterSources.get(sourceProvider);
-            const frame = monsterSource?.clock.frame ?? (this.selectedArsenal?.family === "q1" && execution.services === this.selectedArsenal.game ? this.selectedQ1Frame() : execution.services === this.grapple?.source.game ? this.grappleFrame : execution.services === this.handGrenades?.independent?.game ? this.equipmentFrame : this.sourceFrame);
-            executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
-              frame, timeSeconds: seconds(frame.time), elapsed, visited });
-            this.physics.commitAttachments();
-            continue;
-          }
-          if (this.source.kind === "q3" && (this.playerStates.has(actor) || this.source.game.records.byActor(actor.id) !== null)) { this.source.game.runActor(actor); this.physics.commitAttachments(); const player = this.playerStates.get(actor); if (player !== undefined) this.syncQ3Player(player); continue; }
-          if (this.playerStates.has(actor)) {
-            this.q2Characters.get(actor)?.beginFrame();
-            this.playerWeapon(this.playerStates.get(actor) ?? this.requirePlayer(actor.id)); this.physics.commitAttachments(); continue;
-          }
-          this.scheduler.run(actor.id, { ...this.sourceFrame, phase: "entity-think" }, "during-physics");
-          if (this.actors.isLive(actor.id)) this.physics.step(actor, elapsed);
-          this.physics.commitAttachments();
-        }
-      }
-      if (mapRun) for (const source of this.monsterSources.values()) if (source.kind === "q2" && source.clock.advanced) source.monsters.endFrame(source.game);
-      if (mapRun && this.foreignWorld !== null && this.foreignWorld.clock.advanced) this.foreignWorld.modules.monsters.endFrame(this.foreignWorld.modules.game);
-      if (run) for (const slot of this.weaponSlots.values()) slot.reconcile();
-      if (run || paused) this.finishFrameState(run, paused);
-      if (run) this.concludeSourceFrame(settlement, fixed, elapsed);
-      if (this.source.kind === "q2" && this.transitions.pending(this.transitionsCursor) !== 0) break;
+      const turn = { commandsPending: true };
+      for (const boundary of plan.boundaries) {
+        const b = this.beginStepBoundary(input, settlement, plan, boundary, turn);
+        const flow = this.admitBoundaryInputs(input, settlement, plan, b);
+        if (flow === "break") break;
+        if (flow === "next") continue;
+        this.applyBoundaryCommands(input, settlement, plan, b);
+        this.advanceBoundaryActors(input, settlement, plan, b);
+        if (this.closeStepBoundary(input, settlement, plan, b)) break;
       }
       if (this.source.kind === "q2") emitQ2ShadowLights(this.source.game);
       return { snapshot: this.snapshot(), events: this.events.take() };
@@ -6936,10 +6981,8 @@ export class SharedSimulation implements Simulation {
     const { fraction, backLerp } = this.presentationFraction();
     if (this.source.kind === "q2-native") {
       const source = this.source, content = this.recipe.map.entities.content;
-      if (process.env.SRRDBG) { let t = ""; for (let i = 1; i < 26; i++) { const q = source.game.entityInfo(i); if (q.active) t += ` ${i}:${q.serverFlags}/${q.actor !== null ? this.classname(q.actor) : "-"}/${source.game.entityState(i).modelIndexes[0]}/${source.game.modelAppearance(i).path}`; } require("node:fs").appendFileSync(process.env.SRRDBG, `ALL${t}\n`); } // SRRTEMP
       for (const state of source.game.entityStates()) {
         const info = source.game.entityInfo(state.number);
-        if (process.env.SRRDBG && state.number >= 1 && state.number <= 10) require("node:fs").appendFileSync(process.env.SRRDBG, `E${state.number} actor=${info.actor !== null} active=${info.active} sv=${info.serverFlags} mi=${JSON.stringify(state.modelIndexes)} fr=${state.frame}\n`); // SRRTEMP
         if (state.number === 0 || info.actor === null || !info.active || (info.serverFlags & 1) !== 0) continue;
         // A foreign selected character replaces the guest player model;
         // the selected-character presentation below draws this actor.
@@ -7667,32 +7710,41 @@ export class SharedSimulation implements Simulation {
         due: pending.timing.due, boundary: pending.timing.boundary, provider: pending.timing.order.provider, sequence: pending.timing.order.sequence }]; }), providers, guests };
   }
 
+  /** Checks and request shared by the synchronous and the frame-by-frame restore of an original native save. */
+  private nativeRestorePrelude<O extends { readonly server: { readonly configstrings: readonly { readonly index: number; readonly value: string }[]; readonly portals: readonly { readonly portal: number; readonly open: boolean }[] } }>(
+    source: Extract<SourceRuntime, { readonly kind: "q2-native" }>, original: O | null, visit: (original: O) => void) {
+    const label = source.edition === "rerelease" ? "Native rerelease save" : "Native original save";
+    const registry = this.q2ServerRegistry;
+    if (original === null || registry === null || registry.variableValue("deathmatch") !== 0) throw new Error(`${label} requires a matching non-deathmatch source`);
+    visit(original);
+    return {
+      original,
+      afterInit: (): void => { if (registry.variableValue("deathmatch") !== 0) throw new Error("Selected DLL does not support non-deathmatch original saves"); },
+      request: { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
+        entities: this.guestMonsterEntities(prepareNativeQ2Map(this.options.world, source.edition, this.options.mode), source.edition), spawnPoint: this.initialSpawnPoint },
+      applyServerState: (): void => {
+        source.game.restoreConfigstrings(new Map(original.server.configstrings.map(entry => [entry.index, entry.value])));
+        for (const { portal, open } of original.server.portals) { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); }
+      },
+    };
+  }
+
   private async restoreNativeLoading(save: SaveImage, nextFrame: () => Promise<void>): Promise<void> {
     const source = this.source;
     if (source.kind !== "q2-native") throw new Error("Native original loading requires its source provider");
     if (source.edition === "rerelease") {
-      const original = nativeQ2RereleaseSave(save, source.game.module);
-      if (original === null || this.q2ServerRegistry === null || this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Native rerelease save requires a matching non-deathmatch source");
-      for (const level of original.visitedLevels) source.visited.set(level.map, level);
+      const plan = this.nativeRestorePrelude(source, nativeQ2RereleaseSave(save, source.game.module), original => { for (const level of original.visitedLevels) source.visited.set(level.map, level); });
       await source.game.initLoading(nextFrame);
-      if (this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Selected DLL does not support non-deathmatch original saves");
-      await source.game.readSaveLoading(original, { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: this.guestMonsterEntities(prepareNativeQ2Map(this.options.world, source.edition, this.options.mode), source.edition), spawnPoint: this.initialSpawnPoint }, () => {
-        source.game.restoreConfigstrings(new Map(original.server.configstrings.map(entry => [entry.index, entry.value])));
-        for (const { portal, open } of original.server.portals) { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); }
-      }, nextFrame);
+      plan.afterInit();
+      await source.game.readSaveLoading(plan.original, plan.request, plan.applyServerState, nextFrame);
       return;
     }
-      const original = nativeQ2OriginalSave(save, source.game.module);
-      if (original === null || this.q2ServerRegistry === null || this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Native original save requires a matching non-deathmatch source");
-      for (const level of original.visitedLevels) source.visited.set(level.map, level);
-      await source.game.initLoading(nextFrame);
-      if (this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Selected DLL does not support non-deathmatch original saves");
-      await source.files.restoreLoading(original, { module: source.game.module, map: this.recipe.map.geometry.requestedPath }, async (game, level) => {
-        await source.game.restoreOriginalLoading(game, level, { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: this.guestMonsterEntities(prepareNativeQ2Map(this.options.world, source.edition, this.options.mode), source.edition), spawnPoint: this.initialSpawnPoint }, () => {
-          source.game.restoreConfigstrings(new Map(original.server.configstrings.map(entry => [entry.index, entry.value])));
-          for (const { portal, open } of original.server.portals) { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); }
-        }, nextFrame);
-      });
+    const plan = this.nativeRestorePrelude(source, nativeQ2OriginalSave(save, source.game.module), original => { for (const level of original.visitedLevels) source.visited.set(level.map, level); });
+    await source.game.initLoading(nextFrame);
+    plan.afterInit();
+    await source.files.restoreLoading(plan.original, { module: source.game.module, map: this.recipe.map.geometry.requestedPath }, async (game, level) => {
+      await source.game.restoreOriginalLoading(game, level, plan.request, plan.applyServerState, nextFrame);
+    });
   }
 
   private restore(save: SaveImage, nativeRestored = false): undefined {
@@ -7701,28 +7753,18 @@ export class SharedSimulation implements Simulation {
     if (source.kind === "loading") throw new Error("The selected source world does not expose a complete saved-game restore");
     if (source.kind === "q2-native") {
       if (!nativeRestored && source.edition === "rerelease") {
-      const original = nativeQ2RereleaseSave(save, source.game.module);
-      if (original === null || this.q2ServerRegistry === null || this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Native rerelease save requires a matching non-deathmatch source");
-      for (const level of original.visitedLevels) source.visited.set(level.map, level);
-      source.game.init();
-      if (this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Selected DLL does not support non-deathmatch original saves");
-      source.game.readSave(original, { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: this.guestMonsterEntities(prepareNativeQ2Map(this.options.world, source.edition, this.options.mode), source.edition), spawnPoint: this.initialSpawnPoint }, () => {
-        source.game.restoreConfigstrings(new Map(original.server.configstrings.map(entry => [entry.index, entry.value])));
-        for (const { portal, open } of original.server.portals) { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); }
-      });
+        const plan = this.nativeRestorePrelude(source, nativeQ2RereleaseSave(save, source.game.module), original => { for (const level of original.visitedLevels) source.visited.set(level.map, level); });
+        source.game.init();
+        plan.afterInit();
+        source.game.readSave(plan.original, plan.request, plan.applyServerState);
       }
       if (!nativeRestored && source.edition === "classic") {
-      const original = nativeQ2OriginalSave(save, source.game.module);
-      if (original === null || this.q2ServerRegistry === null || this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Native original save requires a matching non-deathmatch source");
-      for (const level of original.visitedLevels) source.visited.set(level.map, level);
-      source.game.init();
-      if (this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Selected DLL does not support non-deathmatch original saves");
-      source.files.restore(original, { module: source.game.module, map: this.recipe.map.geometry.requestedPath }, (game, level) => {
-        source.game.restoreOriginal(game, level, { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: this.guestMonsterEntities(prepareNativeQ2Map(this.options.world, source.edition, this.options.mode), source.edition), spawnPoint: this.initialSpawnPoint }, () => {
-          source.game.restoreConfigstrings(new Map(original.server.configstrings.map(entry => [entry.index, entry.value])));
-          for (const { portal, open } of original.server.portals) { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); }
+        const plan = this.nativeRestorePrelude(source, nativeQ2OriginalSave(save, source.game.module), original => { for (const level of original.visitedLevels) source.visited.set(level.map, level); });
+        source.game.init();
+        plan.afterInit();
+        source.files.restore(plan.original, { module: source.game.module, map: this.recipe.map.geometry.requestedPath }, (game, level) => {
+          source.game.restoreOriginal(game, level, plan.request, plan.applyServerState);
         });
-      });
       }
       for (const saved of nativeQ2SavedClients(save)) {
         const client = this.options.restoredClients?.find(client => client.slot === saved.clientSlot);
@@ -8104,9 +8146,39 @@ export class SharedSimulation implements Simulation {
   private assertOpen(): undefined { if (this.closed) throw new Error("Simulation is closed"); return undefined; }
 }
 
+/** One clock boundary inside a host step: which sources reach their deadline at this millisecond. */
+interface StepBoundary { readonly map: boolean; readonly q2: boolean; readonly q3: boolean; readonly milliseconds: number }
+
+/** Timing decided once per host step. */
+interface StepPlan {
+  readonly paused: boolean;
+  readonly previousSelectedMilliseconds: number;
+  readonly profile: ReturnType<typeof providerTiming>["clock"];
+  readonly fixed: number | null;
+  readonly nowMilliseconds: number;
+  readonly mapRun: boolean;
+  readonly elapsed: number;
+  readonly selectedQ2: Extract<SelectedWeaponSource, { readonly kind: "q2" }> | null;
+  readonly mapStartMilliseconds: number;
+  readonly mapEndMilliseconds: number;
+  readonly selectedQ3Clock: Extract<ReturnType<typeof providerTiming>["clock"], { readonly kind: "q3" }> | null;
+  readonly boundaries: readonly StepBoundary[];
+  readonly lmctf: Q2Lmctf | null;
+}
+
+/** What the phases of one boundary hand to each other. */
+interface StepBoundaryState {
+  readonly boundary: StepBoundary;
+  readonly run: boolean;
+  readonly commandTurn: boolean;
+  readonly previousQ3Time: number;
+  botCommands: readonly ActorCommand[];
+  readonly pendingNetQuake: Map<ActorId, ActorCommand> | null;
+  readonly pendingQ1PreThink: Map<MovementPlayer, number> | null;
+  readonly preparesQ1Clients: boolean;
+}
+
 export function createSimulation(options: SimulationOptions): SharedSimulation { return new SharedSimulation(options); }
-import { readForeignQ1WorldCheckpoint, readForeignQ2WorldCheckpoint, readSelectedMonstersCheckpoint, type ForeignQ1WorldCheckpoint, type ForeignQ2WorldCheckpoint } from "./monster-checkpoint.ts";
-import type { SelectedMonstersCheckpoint } from "./monster-checkpoint.ts";
 
 
 /** Source callbacks may add or release actors while the source-slot cursor advances. */

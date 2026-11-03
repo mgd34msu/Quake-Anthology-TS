@@ -13,6 +13,8 @@ export interface SyntheticElfOptions {
   readonly exports: readonly SyntheticElfFunction[];
   /** Image-relative locations of pointer-sized words that receive the load bias plus the stored addend (R_*_RELATIVE). */
   readonly relative?: readonly { readonly at: number; readonly addend: number }[];
+  /** Zero-filled bytes mapped after the image (a .bss). */
+  readonly bss?: number;
 }
 
 export const SYNTHETIC_ELF = { code: 0x600, data: 0xc00, size: 0x1000 } as const;
@@ -45,7 +47,7 @@ export function syntheticElfModule(options: SyntheticElfOptions): Uint8Array {
       : [[17, relocationsAt], [18, relative.length * relocationEntry], [19, relocationEntry]] as const),
     [0, 0],
   ];
-  segment(0, 1, 0, SYNTHETIC_ELF.size, SYNTHETIC_ELF.size, 4096);
+  segment(0, 1, 0, SYNTHETIC_ELF.size, SYNTHETIC_ELF.size + (options.bss ?? 0), 4096);
   segment(1, 2, dynamicAt, tags.length * width * 2, tags.length * width * 2, width);
   tags.forEach(([tag, value], index) => { word(dynamicAt + index * width * 2, BigInt(tag)); word(dynamicAt + index * width * 2 + width, BigInt(value)); });
   // Symbol 0 is the mandatory null symbol; every export is a global function defined in section index 1.

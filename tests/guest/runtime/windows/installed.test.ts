@@ -54,10 +54,10 @@ for (const relativePath of ["q2/ctf/gamex86.dll", "q2/lmctf/gamex86.dll", "q2/re
         const lookup = runtime.resolveAddress("kernel32.dll", "RtlLookupFunctionEntry"), guard = runtime.resolveAddress("quake-runtime.dll", "guard-dispatch-check");
         if (lookup === null || guard === null) throw new Error("Missing Windows unwind/CFG services");
         const imageBaseOutput = memory.allocate({ byteLength: 8 });
-        const result = callbacks.invoke(lookup, context, [{ kind: "uint64", value: image.base.byteOffset + 0x1000n }, { kind: "pointer", value: imageBaseOutput }, { kind: "pointer", value: null }]);
+        const result = callbacks.invokeSync(lookup, context, [{ kind: "uint64", value: image.base.byteOffset + 0x1000n }, { kind: "pointer", value: imageBaseOutput }, { kind: "pointer", value: null }]);
         expect(result.kind === "pointer" ? result.value?.byteOffset : null).toBe(image.base.byteOffset + 0x299000n);
         expect(memory.readUint64(imageBaseOutput)).toBe(image.base.byteOffset);
-        expect(() => callbacks.invoke(guard, context, [{ kind: "pointer", value: image.base }])).toThrow(UnsupportedWindowsImport);
+        expect(() => callbacks.invokeSync(guard, context, [{ kind: "pointer", value: image.base }])).toThrow(UnsupportedWindowsImport);
       }
     } catch (error) {
       if (error instanceof GuestCallStopped) console.error(relativePath, error.stop);

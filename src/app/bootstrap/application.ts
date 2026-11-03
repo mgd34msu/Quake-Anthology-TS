@@ -2242,7 +2242,8 @@ export class Application {
       this.capture = client?.capture ?? this.createApplicationCapture(input, renderer);
       if (client === null) {
         this.capture.activate();
-        this.ownedVideoRestart = this.createVideoRestart(renderer, input);
+        const video = this.createVideoRestart(renderer);
+        video.register(input.commands); this.ownedVideoRestart = video;
       }
       if (q3.size === 0) await audio.startWorldMusic();
     } catch (error) {
@@ -3416,7 +3417,7 @@ export class Application {
     return new ApplicationCapture(inputCaptureServices(input, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, this.hostPrinter()), renderer);
   }
 
-  private createVideoRestart(renderer: NativeRenderer, input: ApplicationInput): ApplicationVideoRestart {
+  private createVideoRestart(renderer: NativeRenderer): ApplicationVideoRestart {
     const video = new ApplicationVideoRestart(renderer, {
       renderWorker: () => (this.imageSettings?.cvars.variableValue("r_smp") ?? 0) !== 0,
       capture: () => this.capture, prepare: () => this.prepareVideoRestart(),
@@ -3424,7 +3425,6 @@ export class Application {
       published: renderer => { this.launchOptions = { ...this.launchOptions, renderer }; },
       settled: () => {}, print: (text, source) => { if (this.graphical === null) this.host.print(text); else this.graphical.input.print(text, source); }, failed: error => this.closeFailedWorld(error),
     });
-    video.register(input.commands);
     return video;
   }
 

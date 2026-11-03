@@ -6,7 +6,7 @@
  *
  *   bun tools/check-guest-module.ts path/to/gamex86_64.so
  *
- * With --run the module (a Quake III Windows i386 DLL or a Quake Live ELF) is instead booted through the Q3 native game host: GAME_INIT runs
+ * With --run the module (a Quake III Windows i386 DLL, a Quake III Linux i386 ELF or a Quake Live ELF) is instead booted through the Q3 native game host: GAME_INIT runs
  * against recording engine services, the traps it reaches are reported, and the first unbound or failing service ends the run:
  *
  *   bun tools/check-guest-module.ts --run path/to/qagamex86.dll
@@ -19,6 +19,10 @@ import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from
 import { nativeQ3Export } from "../src/compat/q3/native/index.ts";
 import { SystemVGuestRuntime } from "../src/guest/runtime/system-v/index.ts";
 import { q3NativeProfile, Q3NativeGuestSource } from "../src/app/bootstrap/simulation/q3/native-guest-source.ts";
+import type { Q3NativeProfile } from "../src/app/bootstrap/simulation/q3/native-guest-source.ts";
+import { qvmCommonSyscall } from "../src/compat/qvm/common-syscalls.ts";
+import { qvmServerInformationSyscall } from "../src/compat/qvm/server-info-syscalls.ts";
+import { rejectQvmSyscall } from "../src/compat/qvm/syscalls.ts";
 import { CvarRegistry } from "../src/core/cvars/index.ts";
 import { createIdentityOwner } from "../src/contracts/identity.ts";
 import type { NativeQ3GameServices } from "../src/compat/q3/native/index.ts";
@@ -64,7 +68,7 @@ export function checkGuestModule(bytes: Uint8Array, name: string, instructionBud
 }
 
 export interface GuestRunReport {
-  readonly profile: "q3-pe" | "quake-live-elf" | null;
+  readonly profile: Q3NativeProfile | null;
   readonly outcome: "ok" | "failed";
   /** Engine output the module produced while initializing and shutting down. */
   readonly output: readonly string[];
@@ -72,9 +76,9 @@ export interface GuestRunReport {
 }
 
 /** Boots a native Q3 module through the game host with recording services and runs GAME_INIT and GAME_SHUTDOWN. Failures are reported, not thrown. */
-export function runGuestModule(bytes: Uint8Array, name: string, instructionBudget = 5_000_000): GuestRunReport {
+export async function runGuestModule(bytes: Uint8Array, name: string, instructionBudget = 5_000_000): Promise<GuestRunReport> {
   const output: string[] = [];
-  let profile: GuestRunReport["profile"] = null;
+  let profile: Q3NativeProfile | null = null;
   try {
     profile = q3NativeProfile(bytes);
     const module: ModuleIdentity = { id: `q3:check-${name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`, artifactPath: name, revision: "1", digest: createContentDigest(createHash("sha256").update(bytes).digest("hex")) };
@@ -84,8 +88,13 @@ export function runGuestModule(bytes: Uint8Array, name: string, instructionBudge
       configstrings: { get: index => configstrings.get(index) ?? "", set: (index, value) => { configstrings.set(index, value); } },
       engine: { print: text => output.push(text), log: text => output.push(text), appendConsoleCommand: text => output.push(`append: ${text}`), executeConsoleNow: text => output.push(`now: ${text}`),
         sendServerCommand: (client, text) => output.push(`${client}: ${text}`), dropClient: refuse("clients"), getUserinfo: refuse("clients"), setUserinfo: refuse("clients"), getUserCommand: refuse("clients") } };
-    const source = Q3NativeGuestSource.create({ prepared: { bytes, profile, module }, services, instructionBudget });
-    try { source.initialize(0, 1); } finally { source.close(); }
+    // The check host serves the traps that need no map or clients; any other trap ends the run as an unbound service.
+    const common = { role: "qagame" as const, cvars, print: (text: string) => output.push(text), milliseconds: () => 0, arguments: () => [] as readonly string[], realTime: () => 0,
+      commands: { executeNow: (text: string | null) => { output.push(`now: ${text ?? ""}`); }, insert: (text: string) => { output.push(`insert: ${text}`); }, append: (text: string) => { output.push(`append: ${text}`); } } };
+    const info = { cvars, configstrings: { get: (index: number) => configstrings.get(index) ?? "", set: (index: number, value: string) => { configstrings.set(index, value); } } };
+    const source = Q3NativeGuestSource.create({ prepared: { bytes, profile, module }, services, instructionBudget,
+      traps: call => qvmCommonSyscall(call, common) ?? qvmServerInformationSyscall(call, { abiProfile: "q3-modern", ...info }) ?? rejectQvmSyscall(call) });
+    try { await source.initializeAsync(0, 1); await source.shutdownAsync(false); } finally { source.retire(); }
     return { profile, outcome: "ok", output, detail: null };
   } catch (error) {
     return { profile, outcome: "failed", output, detail: error instanceof Error ? error.message : String(error) };
@@ -95,7 +104,7 @@ export function runGuestModule(bytes: Uint8Array, name: string, instructionBudge
 if (import.meta.main && Bun.argv[2] === "--run") {
   const path = Bun.argv[3];
   if (path === undefined) { console.error("usage: bun tools/check-guest-module.ts --run <qagame module>"); process.exit(2); }
-  const report = runGuestModule(new Uint8Array(await Bun.file(path).arrayBuffer()), path);
+  const report = await runGuestModule(new Uint8Array(await Bun.file(path).arrayBuffer()), path);
   console.log(JSON.stringify(report, null, 2));
   process.exit(report.outcome === "ok" ? 0 : 1);
 }

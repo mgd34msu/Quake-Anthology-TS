@@ -39,7 +39,7 @@ test("actual LRCTF full map lifecycle writes connected sessions before retiremen
     buffer = new CommandBuffer({ dialect: "q3", cvars: guest.state.cvars,
       context: { session: identity.session, origin: { kind: "server-console" } }, print: () => undefined });
     const output: string[] = [];
-    const init = spyOn(guest.game, "initializeAsync"), connects = spyOn(guest.game, "clientConnectAsync"), disconnects = spyOn(guest.game, "clientDisconnectAsync"), shutdown = spyOn(guest.game, "shutdownAsync");
+    const init = spyOn(guest.qvmGame(), "initializeAsync"), connects = spyOn(guest.qvmGame(), "clientConnectAsync"), disconnects = spyOn(guest.qvmGame(), "clientDisconnectAsync"), shutdown = spyOn(guest.qvmGame(), "shutdownAsync");
     guest.state.cvars.set("bot_enable", "0", true);
     await guest.initialize({ configstring: (slot, value) => { output.push(`cs:${slot}:${value}`); }, sendServerCommand: (slot, text) => { output.push(`cmd:${slot}:${text}`); }, dropClient: async slot => { throw new Error(`Unexpected drop ${slot}`); } },
       transition === undefined ? { kind: "new" } : { kind: "map-change", clients: transition.clients });
@@ -60,7 +60,7 @@ test("actual LRCTF full map lifecycle writes connected sessions before retiremen
       if (admission.kind !== "accepted") throw new Error(admission.reason);
       await active.guest.begin(admission.player, command);
       await active.guest.command(admission.player, ["team", client.id.slot === 0 ? "red" : "blue"]);
-      expect(active.guest.game.data.copyPlayerState(client.id.slot).persistent[3]).toBe(client.id.slot + 1);
+      expect(active.guest.engine.data.copyPlayerState(client.id.slot).persistent[3]).toBe(client.id.slot + 1);
       expect(active.connects).toHaveBeenCalledWith(client.id.slot, true, false);
     }
     const previous = active;
@@ -89,7 +89,7 @@ test("actual LRCTF full map lifecycle writes connected sessions before retiremen
       expect(admission.player.client.equals(client.id)).toBe(true);
       expect(active.connects).toHaveBeenCalledWith(client.id.slot, false, false);
       await active.guest.begin(admission.player, command);
-      expect(active.guest.game.data.copyPlayerState(client.id.slot).persistent[3]).toBe(client.id.slot + 1);
+      expect(active.guest.engine.data.copyPlayerState(client.id.slot).persistent[3]).toBe(client.id.slot + 1);
     }
     expect(active.guest.checkpoint().kind).toBe("qvm");
     await active.guest.shutdown();

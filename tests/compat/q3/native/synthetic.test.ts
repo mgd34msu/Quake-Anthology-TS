@@ -3,7 +3,6 @@ import { expect, test } from "bun:test";
 import { createContentDigest } from "../../../../src/contracts/content.ts";
 import type { ModuleIdentity } from "../../../../src/contracts/execution.ts";
 import { inspectElf } from "../../../../src/guest/elf/index.ts";
-import { integer } from "../../../../src/guest/runtime/common/memory.ts";
 import { NativeQ3Syscalls, Quake3VmModule } from "../../../../src/compat/q3/native/index.ts";
 import { CodeBuilder, SYNTHETIC_ELF, syntheticElfModule } from "../../../support/elf-modules.ts";
 import { nativeGameFixtureFrom, nativeGuestProcess } from "./fixture.ts";
@@ -119,25 +118,46 @@ function quake3I386(): Uint8Array {
   return syntheticElfModule({ width: 4, code: c.finish(), exports: [{ name: "dllEntry", offset: table["dllEntry"] ?? 0 }, { name: "vmMain", offset: table["vmMain"] ?? 0 }] });
 }
 
-test("a synthetic Q3 1.32 i386 module enters the engine through the variadic syscall with only the declared arguments", () => {
+test("a synthetic Q3 1.32 i386 module enters the engine through the variadic syscall with the sixteen words id's engine reads", () => {
   const bytes = quake3I386(), fixture = fixtureOf("q3-i386", bytes);
   let syscalls: NativeQ3Syscalls | null = null;
   const process = nativeGuestProcess(fixture, (callback, fixed) => syscalls?.variadicLayouts(callback, fixed) ?? []);
   const seen: number[][] = [];
-  syscalls = new NativeQ3Syscalls(process.callbacks, process.abi, [{ code: 21, name: "trap_Add", parameters: ["int32", "int32"],
-    invoke: (_context, args) => { const values = [Number(integer(args, 0)), Number(integer(args, 1))]; seen.push(values); return (values[0] ?? 0) + (values[1] ?? 0); } }]);
+  syscalls = new NativeQ3Syscalls(process.callbacks, process.abi, words => {
+    if (words.getInt32(0, true) !== 21) throw new Error(`Unbound Q3 native syscall ${words.getInt32(0, true)}`);
+    const values = [words.getInt32(4, true), words.getInt32(8, true)]; seen.push(values); return (values[0] ?? 0) + (values[1] ?? 0);
+  });
   const module = new Quake3VmModule({ image: process.image, runner: process.runner, context: process.context, instructionBudget: 100000 }, syscalls.address);
   expect(module.call(21, [40, 2])).toBe(42);
   expect(module.call(21, [-5, 3])).toBe(-2);
   expect(seen).toEqual([[40, 2], [-5, 3]]);
-  // A code with no binding traps instead of reading guessed arguments.
+  // A code the table does not handle traps instead of returning success.
   expect(() => module.call(22, [1, 2])).toThrow("Unbound Q3 native syscall 22");
+});
+
+test("a Q3 1.32 module's trap may complete asynchronously and may enter the module again", async () => {
+  const bytes = quake3I386(), fixture = fixtureOf("q3-i386-async", bytes);
+  let syscalls: NativeQ3Syscalls | null = null;
+  const process = nativeGuestProcess(fixture, (callback, fixed) => syscalls?.variadicLayouts(callback, fixed) ?? []);
+  let module: Quake3VmModule | null = null;
+  syscalls = new NativeQ3Syscalls(process.callbacks, process.abi, words => {
+    const code = words.getInt32(0, true), argument = words.getInt32(4, true);
+    if (code === 30) return Promise.resolve(argument + 1);
+    // A trap that re-enters the module while the outer call waits, as SV_DropClient re-enters GAME_CLIENT_DISCONNECT.
+    if (code === 31) return (async () => { await Promise.resolve(); return (await module?.callAsync(30, [argument])) ?? -1; })();
+    throw new Error(`Unbound Q3 native syscall ${code}`);
+  });
+  module = new Quake3VmModule({ image: process.image, runner: process.runner, context: process.context, instructionBudget: 100000 }, syscalls.address);
+  expect(await module.callAsync(30, [41])).toBe(42);
+  expect(await module.callAsync(31, [9])).toBe(10);
+  expect(() => module.call(30, [1])).toThrow("asynchronous host operation");
+  expect(process.runner.depth).toBe(0);
 });
 
 test("a synthetic Q3 module without vmMain is refused by the Q3 1.32 wrapper", () => {
   const c = new CodeBuilder(); c.raw(0xc3);
   const bytes = syntheticElfModule({ width: 4, code: c.finish(), exports: [{ name: "dllEntry", offset: 0 }] });
   const process = nativeGuestProcess(fixtureOf("q3-no-vmmain", bytes));
-  const syscalls = new NativeQ3Syscalls(process.callbacks, process.abi, []);
+  const syscalls = new NativeQ3Syscalls(process.callbacks, process.abi, () => 0);
   expect(() => new Quake3VmModule({ image: process.image, runner: process.runner, context: process.context, instructionBudget: 1000 }, syscalls.address)).toThrow("requires dllEntry and vmMain");
 });

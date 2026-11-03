@@ -30,7 +30,7 @@ test("Windows heap, TLS and file services expose mutations in authoritative gues
   const runtime = new WindowsGuestRuntime({ memory, callbacks, capabilities: { openFile: path => path === "save.sav" ? file : null } });
   const context: GuestCallContext = { module, callback: { kind: "typescript", provider: "test:windows-services", callback: "test:entry" }, self: null, other: null, parent: null };
   const call = (name: string, args: readonly GuestCallValue[]): GuestCallResult => {
-    const address = runtime.resolveAddress("kernel32.dll", name); if (address === null) throw new Error(`Missing service ${name}`); return callbacks.invoke(address, context, args);
+    const address = runtime.resolveAddress("kernel32.dll", name); if (address === null) throw new Error(`Missing service ${name}`); return callbacks.invokeSync(address, context, args);
   };
   const encodedNull = call("EncodePointer", [p(null)]);
   expect(resultPointer(encodedNull).byteOffset).not.toBe(0n);
@@ -72,7 +72,7 @@ test("CRT memory and floating services preserve overlap, sign and adjacent binar
   const runtime = new WindowsGuestRuntime({ memory, callbacks, capabilities: { nowMilliseconds: () => 1700000000123 } });
   const context: GuestCallContext = { module, callback: { kind: "typescript", provider: "test:windows-services", callback: "test:entry" }, self: null, other: null, parent: null };
   const call = (name: string, args: readonly GuestCallValue[]): GuestCallResult => {
-    const address = runtime.resolveAddress("ucrtbase.dll", name); if (address === null) throw new Error(`Missing CRT ${name}`); return callbacks.invoke(address, context, args);
+    const address = runtime.resolveAddress("ucrtbase.dll", name); if (address === null) throw new Error(`Missing CRT ${name}`); return callbacks.invokeSync(address, context, args);
   };
   const buffer = memory.allocate({ byteLength: 32 }); memory.write(buffer, new Uint8Array([1, 2, 3, 4, 5, 6]));
   call("memmove", [p(memory.offset(buffer, 1n)), p(buffer), { kind: "uint64", value: 5n }]);
@@ -83,7 +83,7 @@ test("CRT memory and floating services preserve overlap, sign and adjacent binar
   expect(fraction.kind === "float64" && Object.is(fraction.value, -0)).toBe(true); expect(memory.readFloat64(buffer)).toBe(-2);
   expect(call("_dsign", [{ kind: "float64", value: -0 }])).toEqual({ kind: "int32", value: -32768 });
   const ticks = runtime.resolveAddress("msvcp140.dll", "_Xtime_get_ticks"); if (ticks === null) throw new Error("MSVC clock binding missing");
-  expect(callbacks.invoke(ticks, context, [])).toEqual({ kind: "int64", value: 17000000001230000n });
+  expect(callbacks.invokeSync(ticks, context, [])).toEqual({ kind: "int64", value: 17000000001230000n });
   const text = memory.allocate({ byteLength: 32 }), end = memory.allocate({ byteLength: 8 }); memory.write(text, new TextEncoder().encode("-0x10!\0"));
   expect(call("strtoul", [p(text), p(end), s(0)])).toEqual({ kind: "uint32", value: 0xfffffff0 }); expect(memory.readPointer(end)?.byteOffset).toBe(text.byteOffset + 5n);
   memory.write(text, new TextEncoder().encode("4294967296x\0")); expect(call("strtoul", [p(text), p(end), s(10)])).toEqual({ kind: "uint32", value: 0xffffffff });
@@ -108,7 +108,7 @@ test("unimplemented imports retain an explicit reached failure rather than retur
   const import_ = { library: "unavailable.dll", symbol: { kind: "name", name: "Missing", version: null }, slot: image.base, weak: false } satisfies Parameters<WindowsGuestRuntime["resolve"]>[0];
   const resolution = runtime.resolve(import_, image); if (resolution.kind !== "host") throw new Error("Expected explicit unsupported host trap");
   const context: GuestCallContext = { module, callback: { kind: "typescript", provider: "test:windows-services", callback: "test:entry" }, self: null, other: null, parent: null };
-  expect(() => callbacks.invoke(resolution.address, context, [])).toThrow(UnsupportedWindowsImport);
+  expect(() => callbacks.invokeSync(resolution.address, context, [])).toThrow(UnsupportedWindowsImport);
   expect(runtime.coverage.find(entry => entry.name === "Missing")).toMatchObject({ supported: false, reached: 1, failed: 1 });
 });
 
@@ -116,7 +116,7 @@ test("Windows dynamic library references, spin locks and fiber slots retain real
   const memory = new SparseGuestMemory({ module, pointerBytes: 8 }), callbacks = new GuestCallbackTable(memory);
   const runtime = new WindowsGuestRuntime({ memory, callbacks });
   const context: GuestCallContext = { module, callback: { kind: "typescript", provider: "test:windows-services", callback: "test:entry" }, self: null, other: null, parent: null };
-  const call = (name: string, args: readonly GuestCallValue[]): GuestCallResult => { const address = runtime.resolveAddress("kernel32.dll", name); if (address === null) throw new Error(`Missing service ${name}`); return callbacks.invoke(address, context, args); };
+  const call = (name: string, args: readonly GuestCallValue[]): GuestCallResult => { const address = runtime.resolveAddress("kernel32.dll", name); if (address === null) throw new Error(`Missing service ${name}`); return callbacks.invokeSync(address, context, args); };
   const wide = memory.allocate({ byteLength: 64 }); [..."kernel32.dll"].forEach((letter, index) => memory.writeUint16(memory.offset(wide, BigInt(index * 2)), letter.charCodeAt(0)));
   const library = resultPointer(call("LoadLibraryExW", [p(wide), p(null), u(0x800)]));
   expect(call("GetModuleHandleW", [p(wide)])).toEqual(p(library));

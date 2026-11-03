@@ -60,14 +60,14 @@ test("actual local LRCTF uses shared admission and delivers each local command b
     const frame = spyOn(guest, "runFrame").mockImplementation(async time => { calls.push("frame"); await originalFrame(time); });
     try {
       const input = (): ActorCommand => ({ actor: player.actor, source: { kind: "local-seat", seat: seat.id, client: client.id }, sequence: milliseconds, command: toQ3UserCommand(wire()) });
-      const start = guest.game.data.copyPlayerState(0).origin;
+      const start = guest.engine.data.copyPlayerState(0).origin;
       for (let index = 0; index < 12; index++) {
         milliseconds += 50;
         await session.stepAsync({ elapsedMilliseconds: 50, commands: [input()] });
         commands().execute();
       }
       expect(calls).toEqual(Array.from({ length: 12 }, () => ["think", "frame"]).flat());
-      const state = guest.game.data.copyPlayerState(0);
+      const state = guest.engine.data.copyPlayerState(0);
       expect(Math.hypot(state.origin.x - start.x, state.origin.y - start.y, state.origin.z - start.z)).toBeGreaterThan(1);
       expect(simulation.playerView(player.actor)).toEqual({ origin: state.origin, angles: state.viewAngles, viewHeight: state.viewHeight, kickAngles: { x: 0, y: 0, z: 0 } });
       expect(simulation.movementPlayer(player.actor)).toBeNull();

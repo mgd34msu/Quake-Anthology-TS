@@ -36,6 +36,7 @@ export class GuestCallbackTable {
       hasBoundTrap: { value: table.hasBoundTrap },
       resolve: { value: table.resolve },
       invoke: { value: table.invoke },
+      invokeSync: { value: table.invokeSync },
       checkpoint: { value: table.checkpoint },
     });
     Object.freeze(table);
@@ -128,6 +129,13 @@ export class GuestCallbackTable {
     const callback = this.resolve(address);
     if (callback === null) throw new Error(`No host callback at guest address 0x${address.byteOffset.toString(16)}`);
     return callback.invoke(context, arguments_);
+  }
+
+  /** For callers that cannot await: a host callback that completes asynchronously is an error here. */
+  invokeSync(address: GuestAddress, context: GuestCallContext, arguments_: readonly GuestCallValue[]): GuestCallResult {
+    const result = this.invoke(address, context, arguments_);
+    if (result instanceof Promise) { void result.catch(() => undefined); throw new Error("Host callback completed asynchronously"); }
+    return result;
   }
 
   checkpoint(): readonly SavedHostCallbackAddress[] {
