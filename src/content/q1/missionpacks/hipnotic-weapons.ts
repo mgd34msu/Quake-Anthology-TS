@@ -6,7 +6,6 @@ import type { Q1Actor } from "../foundation/entity.ts";
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import { spriteExplosion } from "../base/projectiles.ts";
 import type { Q1PlayerState, Q1Weapon } from "../foundation/types.ts";
-import { mg3Pickups } from "../foundation/pickups.ts";
 import { POINT, ZERO, dot, length, normalize, vadd, vscale, vsub } from "../foundation/types.ts";
 import { aim } from "../foundation/weapons.ts";
 import { grenadeVelocity, missionReference, moveMissile, setMissionNumber, setMissionReference, velocityAngles } from "./types.ts";
@@ -139,7 +138,7 @@ function hammerDamage(game: Q1EntityServices, from: ActorId, start: Vec3, end: V
     const trace = game.host.trace({ start: vadd(start, offset), end: vadd(end, offset), bounds: POINT, ignore: from, monsters: true });
     const target = trace.actor;
     // MG3 HIP_HammerDamage returns when the first trace hits no entity, because trace_ent is then the player's owner, world.
-    if (target === null && offset === ZERO && mg3Pickups.has(game)) return undefined;
+    if (target === null && offset === ZERO && game.sourceMg3Pickups) return undefined;
     if (target === null || hit.some(actor => sameActor(actor, target))) continue;
     hit.push(target);
     if (game.host.combat.read(target)?.canTakeDamage && (game.player(target)?.powerups.get("hipnotic:wetsuit") ?? 0) === 0) {

@@ -39,7 +39,7 @@ export interface SimulationDiagnostics {
   q1Services(): Q1EntityServices | null;
   /** Grants a selected arsenal's weapons or ammunition to a player; false when no arsenal applies. */
   grantArsenal(actor: ActorId, category: "weapons" | "ammo"): boolean;
-  selectArsenalWeapon(actor: ActorId, item: string): boolean;
+  selectArsenalWeapon(actor: ActorId, item: `${string}:${string}`): boolean;
   matchPlayer(actor: ActorId): SourceMatchPlayer | null;
   /** Applies a movement change to a player, as the Q2 teleport and noclip commands do. */
   movePlayer(actor: ActorId, change: Q2PlayerMovementChange): undefined;

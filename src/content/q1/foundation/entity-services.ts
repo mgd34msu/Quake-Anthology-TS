@@ -18,7 +18,7 @@ import { foreignShamblerDamage } from "./shambler-damage.ts";
 import { Q1PrecacheRegistry } from "./precache.ts";
 import { Q1Actor, sourceAngles, targetnameEpoch } from "./entity.ts";
 import type { Q1FoundationHost, Q1FoundationOptions, Q1PlayerState, Q1Powerup, Q1Presentation, Q1Weapon, Q1SoundChannel, Q1Basis } from "./types.ts";
-import { Q1_PROVIDER, ZERO, POINT, vadd, vsub, vscale, dot, length, normalize, WEAPONS, weaponItem, isQ1BaseWeapon, vectors } from "./types.ts";
+import { Q1_PROVIDER, createPlayerCues, powerupCue, powerupWarning, resetPowerupCue, ZERO, POINT, vadd, vsub, vscale, dot, length, normalize, WEAPONS, weaponItem, isQ1BaseWeapon, vectors } from "./types.ts";
 import { spawnMapActor } from "./spawns.ts";
 import { fireWeapon, bestWeapon, weaponModel, projectileTouch } from "./weapons.ts";
 import { spawnPickup, registerPickupCallbacks } from "./pickups.ts";
@@ -100,6 +100,12 @@ export class Q1EntityServices {
   killedMonsters = 0;
   worldType = 0;
   /** Set by the MG1 and MG3 programs, whose doors and buttons read the map's movedir key. */
+  /** MG3 pickups and obituary rules. */
+  sourceMg3Pickups = false;
+  /** Programs (ThreeWave CTF) whose rerelease source never rots mega health. */
+  sourceNoMegaRot = false;
+  /** MG1 and MG3 StartItem, installed by the add-on context: null when the item is removed, else the place and use callbacks. */
+  sourceItemStart: ((entity: Q1Actor) => { readonly place: string; readonly use: string | null } | null) | null = null;
   sourceDoorKeys = false;
   /** Extra precaches a program declares while its worldspawn spawns. */
   readonly worldPrecaches: (() => void)[] = [];
@@ -375,7 +381,7 @@ export class Q1EntityServices {
     const state: Q1PlayerState = { actor, alpha: 0, scale: 0, weapon: options.weapon ?? "shotgun", primaryHolstered: false, attackFinished: 0, attackHeld: false, jumpHeld: false, teleportUntil: 0, weaponFrame: 0, weaponAnimationAt: -1, weaponAnimationBase: 1,
       continuousFiring: false, nextWeaponFrame: 0, lightningSoundAt: 0, punchAngles: ZERO, nailSide: 1,
       maxHealth: options.maxHealth ?? (this.options.edition === "rerelease" && this.options.skill === 3 && this.options.deathmatch === 0 ? 50 : 100), megaRotAt: -1, hostileUntil: 0, viewAngles: this.host.bodies.read(actor.id)?.angles ?? ZERO,
-      waterLevel: 0, airFinished: this.time + 12, drownDamage: 2, drownAt: 0, hazardAt: 0, autoSwitch: "always", powerups: new Map<Q1Powerup, number>() };
+      waterLevel: 0, airFinished: this.time + 12, drownDamage: 2, drownAt: 0, hazardAt: 0, autoSwitch: "always", powerups: new Map<Q1Powerup, number>(), cues: createPlayerCues() };
     this.players.set(actor, state);
     for (const extension of this.playerExtensions.values()) extension.attach?.(this, state);
     this.host.emit({ kind: "weapon", player: actor.id, weapon: state.weapon, viewModel: this.weaponModel(state.weapon, state), frame: state.weaponFrame, punch: 0 });
@@ -459,8 +465,8 @@ export class Q1EntityServices {
   damage(target: ActorId, inflictor: ActorId, attacker: ActorId | null, amount: number, weapon: Q1Weapon | null = null, delivery: "direct" | "radius" = "direct", deathType = "", armorEffect?: "bypass" | "half-effectiveness"): DamageOutcome {
     const targetBody = this.host.bodies.read(target); const source = this.host.bodies.read(inflictor);
     const protectedPlayer = this.player(target);
-    if (protectedPlayer !== null && (protectedPlayer.powerups.get("invulnerability") ?? 0) >= this.time && (this.protectSound.get(protectedPlayer) ?? 0) < this.time) {
-      this.protectSound.set(protectedPlayer, this.time + 2); this.sound(protectedPlayer.actor, "items/protect3.wav", "item");
+    if (protectedPlayer !== null && (protectedPlayer.powerups.get("invulnerability") ?? 0) >= this.time && protectedPlayer.cues.protectSoundAt < this.time) {
+      protectedPlayer.cues.protectSoundAt = this.time + 2; this.sound(protectedPlayer.actor, "items/protect3.wav", "item");
     }
     const point = targetBody?.origin ?? ZERO;
     const direction = normalize(vsub(point, source?.origin ?? point));
@@ -562,19 +568,10 @@ export class Q1EntityServices {
   }
 
   /** Weapon/powerup/environment state; jumping belongs to the independently selected movement provider. */
-  /** invisible_time, invisible_sound and the matching per-powerup timers of CheckPowerups; they only drive cues, so they are not saved. */
-  private readonly powerupCues = new WeakMap<Q1PlayerState, Map<Q1Powerup, { warned: boolean; flashAt: number; hum: number }>>();
   private powerupWarnings(actor: OwnedActor, player: Q1PlayerState, seconds: number): undefined {
-    const warnings: ReadonlyMap<Q1Powerup, readonly [string, string]> = new Map([
-      ["invisibility", ["$qc_ring_fade", "items/inv2.wav"]], ["invulnerability", ["$qc_protection_fade", "items/protect2.wav"]],
-      ["quad", ["$qc_quad_fade", "items/damage2.wav"]], ["suit", ["$qc_biosuit_fade", "items/suit2.wav"]],
-    ]);
-    let cues = this.powerupCues.get(player);
-    if (cues === undefined) { cues = new Map(); this.powerupCues.set(player, cues); }
     for (const [powerup, expires] of player.powerups) {
-      const warning = warnings.get(powerup); if (warning === undefined || expires <= seconds) continue;
-      let cue = cues.get(powerup);
-      if (cue === undefined) { cue = { warned: false, flashAt: 0, hum: 0 }; cues.set(powerup, cue); }
+      const warning = powerupWarning(powerup), cue = powerupCue(player.cues, powerup);
+      if (warning === null || cue === null || expires <= seconds) continue;
       if (powerup === "invisibility" && cue.hum < seconds) { this.sound(actor, "items/inv3.wav", "auto", 3, 0.5); cue.hum = seconds + (this.host.random() * 3 + 1); }
       if (expires >= seconds + 3) { cue.warned = false; continue; }
       const origin = this.host.bodies.read(actor.id)?.origin;
@@ -589,7 +586,6 @@ export class Q1EntityServices {
     }
     return undefined;
   }
-  private readonly protectSound = new WeakMap<Q1PlayerState, number>();
   /** FL_INWATER, rebuilt from the first frame after a restore. */
   private readonly waterborne = new WeakSet<Q1PlayerState>();
   playerFrame(actor: OwnedActor, seconds: number, waterLevel?: number): undefined {
@@ -605,7 +601,7 @@ export class Q1EntityServices {
     }
     this.powerupWarnings(actor, player, seconds);
     for (const [powerup, expires] of player.powerups) if (expires <= seconds) {
-      player.powerups.delete(powerup); this.host.powerup(actor, powerup, 0); this.powerupCues.get(player)?.delete(powerup);
+      player.powerups.delete(powerup); this.host.powerup(actor, powerup, 0); resetPowerupCue(player.cues, powerup);
       if (powerup === "q3:flight" && this.host.setGravity !== undefined) this.setGravity(actor.id, 1);
     }
     // Foreign Q3 powerups granted by Q3-authored items on this primary.

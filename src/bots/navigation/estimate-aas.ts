@@ -3,7 +3,7 @@
 import type { Vec3 } from "../../contracts/math.ts";
 import type { AasAsset } from "./aas.ts";
 import { aasAreaTravelFlags, aasTravelFlag } from "./graph.ts";
-import { type EstimateStore, estimateStore, sharedEstimateStore } from "./estimate-store.ts";
+import { type AasEstimateCache, EstimateStore, graphEstimateIndex } from "./estimate-store.ts";
 import type { NavigationEdge, NavigationEstimateQuery, NavigationEstimateResult, NavigationGraph } from "./types.ts";
 
 function at<T>(values: ArrayLike<T>, index: number): T {
@@ -52,16 +52,7 @@ function topology(asset: AasAsset): Topology {
   const result = { incoming, crossings, portalMaxima };
   topologies.set(asset, result); return result;
 }
-const sharedCaches = new WeakMap<object, EstimateStore<Cache>>();
-const edgeIndexes = new WeakMap<readonly NavigationEdge[], ReadonlyMap<number, NavigationEdge>>();
-function edgesById(edges: readonly NavigationEdge[]): ReadonlyMap<number, NavigationEdge> {
-  const existing = edgeIndexes.get(edges);
-  if (existing !== undefined) return existing;
-  const index = new Map(edges.map(edge => [edge.id, edge]));
-  edgeIndexes.set(edges, index);
-  return index;
-}
-interface Cache { readonly times: Uint16Array; readonly reaches: Uint8Array; }
+type Cache = AasEstimateCache;
 interface Update { area: number; cluster: number; time: number; row: Uint16Array; queued: boolean; }
 function update(): Update { return { area: 0, cluster: 0, time: 0, row: new Uint16Array(0), queued: false }; }
 
@@ -74,26 +65,17 @@ export class AasNavigationEstimates {
   constructor(readonly graph: NavigationGraph, readonly asset: AasAsset,
     private readonly allowed: (edge: NavigationEdge, flags: number | undefined) => boolean, private readonly scope: (() => string) | null = null) {
     this.topology = topology(asset);
-    this.edges = edgesById(graph.edges);
-    this.store = scope === null ? estimateStore() : sharedEstimateStore(sharedCaches, graph.edges);
+    const index = graphEstimateIndex(graph);
+    this.edges = index.edgesById;
+    this.store = scope === null ? new EstimateStore() : index.aas;
   }
   invalidate(): void {
     if (this.scope !== null) return;
-    this.store.entries.clear(); this.store.used = 0;
+    this.store.clear();
   }
-  private remember(key: string, cache: Cache): Cache {
-    const caches = this.store.entries;
-    caches.set(key, cache); this.store.used += cache.times.byteLength + cache.reaches.byteLength;
-    while (this.store.used > 16 * 1024 * 1024 && caches.size > 1) {
-      const oldest = caches.entries().next();
-      if (oldest.done) break;
-      caches.delete(oldest.value[0]); this.store.used -= oldest.value[1].times.byteLength + oldest.value[1].reaches.byteLength;
-    }
-    return cache;
-  }
-  private cached(key: string): Cache | undefined {
-    const caches = this.store.entries, cache = caches.get(key);
-    if (cache !== undefined) { caches.delete(key); caches.set(key, cache); }
+  private remember(scope: string, a: number, b: number, tag: number, cache: Cache): Cache {
+    this.store.put(scope, a, b, tag, cache, cache.times.byteLength + cache.reaches.byteLength);
+    while (this.store.used > 16 * 1024 * 1024 && this.store.size > 1) this.store.evictOldest();
     return cache;
   }
   private clusterArea(cluster: number, area: number): number {
@@ -103,12 +85,12 @@ export class AasNavigationEstimates {
     return portal.clusterAreas[portal.frontCluster === cluster ? 0 : 1];
   }
   private areaCache(cluster: number, goal: number, flags: number): Cache {
-    const key = `${this.scope?.() ?? ""}|a:${cluster}:${goal}:${flags}`, cached = this.cached(key);
+    const scope = this.scope?.() ?? "", tag = cluster * 2, cached = this.store.find(scope, goal, flags, tag);
     if (cached !== undefined) return cached;
     const count = at(this.asset.clusters, cluster).reachabilityAreaCount;
     const cache = { times: new Uint16Array(count), reaches: new Uint8Array(count) };
     const goalIndex = this.clusterArea(cluster, goal);
-    if (goalIndex >= count) return this.remember(key, cache);
+    if (goalIndex >= count) return this.remember(scope, goal, flags, tag, cache);
     const updates = Array.from({ length: count }, update), first = at(updates, goalIndex);
     first.area = goal; first.time = 1; first.row = new Uint16Array(at(this.topology.incoming, goal).length);
     cache.times[goalIndex] = 1;
@@ -133,10 +115,10 @@ export class AasNavigationEstimates {
         if (!next.queued) { next.queued = true; queue.push(next); }
       }
     }
-    return this.remember(key, cache);
+    return this.remember(scope, goal, flags, tag, cache);
   }
   private portalCache(cluster: number, goal: number, flags: number): Cache {
-    const key = `${this.scope?.() ?? ""}|p:${goal}:${flags}`, cached = this.cached(key);
+    const scope = this.scope?.() ?? "", cached = this.store.find(scope, goal, flags, 1);
     if (cached !== undefined) return cached;
     const count = this.asset.portals.length, cache = { times: new Uint16Array(count), reaches: new Uint8Array(count) };
     const updates = Array.from({ length: count + 1 }, update), first = at(updates, count);
@@ -163,7 +145,7 @@ export class AasNavigationEstimates {
         if (!next.queued) { next.queued = true; queue.push(next); }
       }
     }
-    return this.remember(key, cache);
+    return this.remember(scope, goal, flags, 1, cache);
   }
   estimate(query: NavigationEstimateQuery): NavigationEstimateResult {
     const area = query.startNode, goal = query.goalNode;

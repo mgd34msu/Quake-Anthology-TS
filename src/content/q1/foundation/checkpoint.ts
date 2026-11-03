@@ -4,6 +4,7 @@ import type { SavedActorId } from "../../../contracts/session.ts";
 import { Q1Actor } from "./entity.ts";
 import type { Q1Monster } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
+import { createPlayerCues } from "./types.ts";
 import type { Q1PlayerState, Q1Powerup, Q1PrecacheTables } from "./types.ts";
 import { callbackName } from "./callbacks.ts";
 
@@ -35,7 +36,7 @@ export interface Q1SavedEntity {
 export interface Q1SavedPlayer {
   readonly actorProvider: ProviderId;
   readonly actor: SavedActorId;
-  readonly state: Omit<Q1PlayerState, "actor" | "powerups" | "alpha" | "scale"> & { readonly alpha?: number; readonly scale?: number };
+  readonly state: Omit<Q1PlayerState, "actor" | "powerups" | "cues" | "alpha" | "scale"> & { readonly alpha?: number; readonly scale?: number };
   readonly powerups: readonly { readonly kind: Q1Powerup; readonly expires: number }[];
 }
 /** Where a version 5 grunt or dog was in its frame sequence; version 6 saves the animation in the base controller. */
@@ -109,7 +110,7 @@ export function captureFoundation(game: Q1EntityServices, sequence: number, next
     intermission: game.intermission === null ? null : { ...game.intermission, cause: saveQ1Actor(game.intermission.cause) },
     entities: [...game.entities.values()].map(entity => saveEntity(game, entity)),
     players: [...game.players.values()].map(player => {
-      const { actor, powerups, ...state } = player;
+      const { actor, powerups, cues: _cues, ...state } = player;
       return { actor: savedOwned(actor), actorProvider: actor.owner, state: { ...state, punchAngles: { ...state.punchAngles }, viewAngles: { ...state.viewAngles } }, powerups: [...powerups].map(([kind, expires]) => ({ kind, expires })) };
     }),
     extensions: [...game.stateExtensions.values()].map(extension => ({ id: extension.id, bytes: extension.capture().slice() })),
@@ -162,7 +163,7 @@ export function restoreFoundation(game: Q1EntityServices, checkpoint: Q1Foundati
     if (game.players.has(actor)) throw new Error("Duplicate saved Q1 player");
     const powerups = new Map<Q1Powerup, number>();
     for (const powerup of saved.powerups) powerups.set(powerup.kind, powerup.expires);
-    game.players.set(actor, { ...saved.state, alpha: saved.state.alpha ?? 0, scale: saved.state.scale ?? 0, viewAngles: { ...saved.state.viewAngles }, actor, powerups });
+    game.players.set(actor, { ...saved.state, alpha: saved.state.alpha ?? 0, scale: saved.state.scale ?? 0, viewAngles: { ...saved.state.viewAngles }, actor, powerups, cues: createPlayerCues() });
   }
   game.time = checkpoint.time; game.frameSeconds = checkpoint.frameSeconds; game.forceRetouch = checkpoint.forceRetouch;
   game.basis = { forward: { ...checkpoint.basis.forward }, right: { ...checkpoint.basis.right }, up: { ...checkpoint.basis.up } }; game.totalSecrets = checkpoint.totalSecrets; game.foundSecrets = checkpoint.foundSecrets;

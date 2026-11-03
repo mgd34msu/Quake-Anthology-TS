@@ -1,4 +1,4 @@
-import { Glob } from "bun";
+import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export const spdxLine = "// SPDX-License-Identifier: GPL-2.0-or-later";
@@ -23,8 +23,9 @@ export function hasSpdx(text: string): boolean {
 export async function missingSpdx(directory: string): Promise<string[]> {
   const missing: string[] = [];
   for (const root of roots) {
-    for await (const file of new Glob(`${root}/**/*.ts`).scan({ cwd: directory })) {
-      if (file.includes("node_modules/")) continue;
+    for (const entry of readdirSync(join(directory, root), { recursive: true, encoding: "utf8" })) {
+      if (!entry.endsWith(".ts") || entry.includes("node_modules")) continue;
+      const file = `${root}/${entry}`;
       if (!hasSpdx(await Bun.file(join(directory, file)).text())) missing.push(file);
     }
   }

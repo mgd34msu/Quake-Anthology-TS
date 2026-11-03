@@ -161,6 +161,37 @@ export interface Q1Presentation {
   readonly targetname: string;
   readonly sourceOrdinal: number | null;
 }
+/** invisible_time, invisible_sound and the matching per-powerup timers of CheckPowerups. */
+export interface Q1PowerupCue { warned: boolean; flashAt: number; hum: number }
+/** Presentation gates that only drive cues and sounds; they are rebuilt, not saved. */
+export interface Q1PlayerCues {
+  protectSoundAt: number;
+  windFlySoundAt: number;
+  quadSoundAt: number;
+  readonly invisibility: Q1PowerupCue;
+  readonly invulnerability: Q1PowerupCue;
+  readonly quad: Q1PowerupCue;
+  readonly suit: Q1PowerupCue;
+}
+export function createPlayerCues(): Q1PlayerCues {
+  const cue = (): Q1PowerupCue => ({ warned: false, flashAt: 0, hum: 0 });
+  return { protectSoundAt: 0, windFlySoundAt: 0, quadSoundAt: 0, invisibility: cue(), invulnerability: cue(), quad: cue(), suit: cue() };
+}
+const POWERUP_WARNINGS = {
+  invisibility: ["$qc_ring_fade", "items/inv2.wav"], invulnerability: ["$qc_protection_fade", "items/protect2.wav"],
+  quad: ["$qc_quad_fade", "items/damage2.wav"], suit: ["$qc_biosuit_fade", "items/suit2.wav"],
+} as const;
+/** Fade message and sound of the four powerups CheckPowerups warns about, or null. */
+export function powerupWarning(powerup: Q1Powerup): readonly [string, string] | null {
+  return powerup === "invisibility" || powerup === "invulnerability" || powerup === "quad" || powerup === "suit" ? POWERUP_WARNINGS[powerup] : null;
+}
+export function powerupCue(cues: Q1PlayerCues, powerup: Q1Powerup): Q1PowerupCue | null {
+  return powerup === "invisibility" || powerup === "invulnerability" || powerup === "quad" || powerup === "suit" ? cues[powerup] : null;
+}
+export function resetPowerupCue(cues: Q1PlayerCues, powerup: Q1Powerup): void {
+  const cue = powerupCue(cues, powerup);
+  if (cue !== null) { cue.warned = false; cue.flashAt = 0; cue.hum = 0; }
+}
 export interface Q1PlayerState {
   alpha: number;
   scale: number;
@@ -190,6 +221,7 @@ export interface Q1PlayerState {
   hazardAt: number;
   autoSwitch: "always" | "new" | "never";
   readonly powerups: Map<Q1Powerup, number>;
+  readonly cues: Q1PlayerCues;
 }
 export const Q1_PROVIDER: ProviderId = "q1:official";
 export const ZERO: Vec3 = { x: 0, y: 0, z: 0 };

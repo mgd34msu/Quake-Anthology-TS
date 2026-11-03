@@ -3,7 +3,6 @@
 import { sameActor } from "../../../contracts/identity.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import { POINT, length, normalize, vadd, vscale, vsub } from "../foundation/types.ts";
-import { sourceItemStart } from "../foundation/pickups.ts";
 import { fireBullets } from "../foundation/weapons.ts";
 import type { BaseMonster } from "./monsters.ts";
 import { dropBackpack } from "./projectiles.ts";
@@ -101,7 +100,7 @@ export function dogPain(monster: BaseMonster): undefined {
 /** Dog_JumpTouch: a hard hit while airborne, then land running or leap again from a ledge edge. */
 export function dogJumpTouch(monster: BaseMonster, other: ActorId): undefined {
   const { game, entity } = monster; if (game.health(entity.actor.id) <= 0) return undefined;
-  const gated = monster.source?.jumpAttackGate === true || sourceItemStart.has(game);
+  const gated = monster.source?.jumpAttackGate === true || game.sourceItemStart !== null;
   if (game.host.combat.read(other)?.canTakeDamage && (!gated || monster.state.attackFinished < game.time) && length(game.body(entity).velocity) > 300) {
     game.damage(other, entity.actor.id, entity.actor.id, 10 + 10 * game.host.random());
     if (gated) monster.state.attackFinished = game.time + 0.5;

@@ -174,6 +174,8 @@ import { Q1_Q2_SUPPLY_PROFILE, q1Q2PickupSelect, q1Q2SupplyLoadout } from "../..
 import { Q2Lmctf } from "../../../content/q2/multiplayer/lmctf/runtime.ts";
 import { emitQ2ShadowLights } from "../../../content/q2/foundation/shadow-lights.ts";
 import { SimulationBotServices } from "./bots.ts";
+import { ForeignMatchRules } from "./foreign-match-rules.ts";
+import type { ForeignMatchHost } from "./foreign-match-host.ts";
 import { readQ1FoundationCheckpoint } from "../../../persistence/q1-foundation.ts";
 import { Q1SelectedArsenal } from "./arsenal/q1.ts";
 import { readQ2FoundationCheckpoint } from "../../../persistence/q2-foundation.ts";
@@ -193,8 +195,6 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { Plane, Vec3 } from "../../../contracts/math.ts";
 import type { ArsenalIntent } from "../../../contracts/gameplay.ts";
 import type { AnimationStepInput, AnimationStepResult, ArsenalState, MovementContinuation, MovementState, MovementTouchContact, WeaponStepInput, WeaponStepResult } from "../../../contracts/movement.ts";
-import type { TouchContact } from "../../../contracts/world.ts";
-import { parseEntities } from "../../../formats/q3-map/index.ts";
 import type { ActorCommand, InputBatch, SaveImage, SelectionConsumptionEntry, Simulation, SimulationOutput, SimulationProgress, WorldSnapshot } from "../../../contracts/session.ts";
 import type { ModSessionCheckpoint, ModTravelCheckpoint } from "../../../contracts/mods.ts";
 import { SessionMods } from "../../../world/session/mods.ts";
@@ -319,45 +319,7 @@ export class SharedSimulation implements Simulation {
   readonly scheduler: FrameScheduler;
   readonly random: SourceRandom;
   readonly botServices = new SimulationBotServices();
-  /** Q3 horde wave state (match provider q3:horde): bots are admitted per
-   * wave and retired when every wave bot has been fragged once. */
-  private hordeWave = 0;
-  private hordePendingWave = 1;
-  private hordeFragged = new Map<ActorId, { deaths: number; fragged: boolean }>();
-  private hordeNextWaveAt = 0;
-  private hordeAdmissionAt = -Infinity;
-  private hordeAdmissionPlayers = -1;
-  /** Runtime Tag state (match provider q2:tag on a foreign world; Q2 worlds
-   * keep the native composition module). Mirrors Rogue dm_tag over unified
-   * actors: one token, owner frags score 3, killing the owner scores 5 and
-   * takes the token, damage between non-owners is reduced to 3/4. */
-  private tagToken: OwnedActor | null = null;
-  private tagOwner: ActorId | null = null;
-  private tagCount = 0;
-  private tagDroppedAt: number | null = null;
-  private tagHealth = new Map<ActorId, number>();
-  private tagSpawns: readonly Vec3[] | null = null;
-  /** Runtime LMCTF state (match provider q2:lmctf on a foreign world; Q2
-   * worlds keep the native composition module). Mirrors Loki's Minions CTF
-   * over unified actors like foreign Tag: two flags, auto-balanced teams,
-   * captures, dropped-flag return, and the five runes. Haste reaches each
-   * arsenal through its own haste input (Q3 weapon environment, Q2 weapon
-   * input, Q1 halved weapon delays); original QC/QVM binaries keep their
-   * own internal timing. */
-  private lmctfTeams = new Map<ActorId, 1 | 2>();
-  private lmctfFlags = new Map<1 | 2, { actor: OwnedActor | null; home: Vec3; carrier: ActorId | null; droppedAt: number | null }>();
-  private lmctfRunes = new Map<string, { actor: OwnedActor | null; holder: ActorId | null }>();
-  private lmctfHealth = new Map<ActorId, number>();
-  private lmctfRegenAt = new Map<ActorId, number>();
-  private lmctfSpots: { readonly flags: ReadonlyMap<string, Vec3>; readonly health: readonly Vec3[] } | null = null;
-  private lmctfPrepared = false;
-  /** Runtime DeathBall state (match provider q2:deathball on a foreign
-   * world; Q2 worlds keep the native composition module). */
-  private deathball: OwnedActor | null = null;
-  private deathballTeams = new Map<ActorId, 1 | 2>();
-  private deathballSpots: { readonly ball: Vec3 | null; readonly goals: ReadonlyMap<1 | 2, Vec3> } | null = null;
-  private deathballPrepared = false;
-  private deathballResetAt: number | null = null;
+  private readonly foreignMatch = new ForeignMatchRules(this.foreignMatchHost());
   readonly clock: SourceClock;
   readonly events: SimulationEvents;
   private readonly actorExecutions = new Map<ActorId, ActorExecution>();
@@ -788,8 +750,7 @@ export class SharedSimulation implements Simulation {
       this.events.retire(actor.id);
       this.actorExecutions.delete(actor.id);
       this.monsterMissions.delete(actor.id);
-      this.lmctfTeams.delete(actor.id); this.lmctfHealth.delete(actor.id); this.lmctfRegenAt.delete(actor.id);
-      this.deathballTeams.delete(actor.id); this.tagHealth.delete(actor.id);
+      this.foreignMatch.release(actor.id);
       this.nativeEquipmentPlayers.delete(actor.id); this.nativeEquipmentAlive.delete(actor.id); this.nativeEquipmentVelocity.delete(actor.id); this.nativeWeaponRequests.delete(actor.id);
       this.selectedPickupBindings.get(actor.id)?.(); this.selectedPickupBindings.delete(actor.id);
       this.selectedArsenal?.remove(actor.id);
@@ -816,7 +777,7 @@ export class SharedSimulation implements Simulation {
       native: (entry, nextFrame) => this.createNativeWeaponBehavior(entry, nextFrame) });
     try {
     this.source = this.createSource(loading);
-    if (this.foreignLmctf && this.source.kind === "q1") this.source.game.registerWeaponRules(this.lmctfQ1HasteRules());
+    if (this.foreignMatch.flags.lmctf && this.source.kind === "q1") this.source.game.registerWeaponRules(this.foreignMatch.flags.q1HasteRules());
     if (this.source.kind === "q2-native") this.source.game.services.setPlayerVelocityWriter((actor, velocity) => {
       if (this.playerClient(actor.id) === null) throw new Error("Native movement write requires an admitted player");
       this.nativeEquipmentVelocity.set(actor.id, velocity); return undefined;
@@ -2230,14 +2191,14 @@ export class SharedSimulation implements Simulation {
         if (client == null) throw new Error("Primary Q3 equipment lost its client");
         return q3WeaponDamageFactor(client, this.source.game.quadDamageFactor(), client.ps.product);
       }, firingDelay: (actor, milliseconds, persistent) => {
-        if (this.source.kind === "quakec") return q3WeaponDelay(milliseconds, persistent, this.lmctfHaste(actor));
+        if (this.source.kind === "quakec") return q3WeaponDelay(milliseconds, persistent, this.foreignMatch.flags.haste(actor));
         if (this.source.kind === "q2-native") return q3WeaponDelay(this.selectedWeaponDelay(actor, milliseconds / 1000) * 1000, persistent, false);
         if (this.source.kind === "q3-qvm") return persistent === Powerup.PW_SCOUT || persistent === Powerup.PW_AMMOREGEN
           ? q3WeaponDelay(milliseconds, persistent, false) : this.requireQvmWeapons().weaponDelay(actor, milliseconds);
         if (this.source.kind !== "q3") throw new Error("Primary Q3 equipment lost its source");
         const client = this.source.game.records.nativeByActor(actor)?.client;
         if (client == null) throw new Error("Primary Q3 equipment lost its client");
-        return q3WeaponDelay(milliseconds, client.persistantPowerup?.item?.tag ?? 0, client.ps.powerups.get(Powerup.PW_HASTE) !== 0 || this.lmctfHaste(actor));
+        return q3WeaponDelay(milliseconds, client.persistantPowerup?.item?.tag ?? 0, client.ps.powerups.get(Powerup.PW_HASTE) !== 0 || this.foreignMatch.flags.haste(actor));
       } } : undefined;
     const source = new Q3SelectedSource({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
       ...(this.source.kind === "quakec" ? { sourceDamageModifier: this.qcDamageModifier() } : {}),
@@ -2702,7 +2663,7 @@ export class SharedSimulation implements Simulation {
     if (this.source.kind === "q3" || this.source.kind === "q3-qvm") game.registerWeaponRules({ id: "composition:q3-cadence",
       attackDelay: (_game, player, delay) => this.selectedWeaponDelay(player.actor.id, delay),
       frameDelay: (_game, player, delay) => this.selectedWeaponDelay(player.actor.id, delay) });
-    if (this.foreignLmctf) game.registerWeaponRules(this.lmctfQ1HasteRules());
+    if (this.foreignMatch.flags.lmctf) game.registerWeaponRules(this.foreignMatch.flags.q1HasteRules());
     if (product === "mg3") this.q1CharacterAdjuncts.add(game);
     this.selectedWeaponSource = { kind: "q1", game, random, missionWeapons };
     const baseProfile: PickupSupplyProfile = product === "hipnotic"
@@ -3030,7 +2991,7 @@ export class SharedSimulation implements Simulation {
       return { attack: this.grapple?.held(actor) ?? false, latchedAttack: false, holster: false, angles: view.angles,
         ducked: (this.bodies.read(actor)?.bounds.max.z ?? 32) < 32, spectator: !this.equipmentPlayerAvailable(actor), notarget: false, hand: "right", animatePlayer: false,
         quadUntil: (q3?.powerups[Powerup.PW_QUAD] ?? 0) / 1000, doubleUntil: 0, quadFireUntil: 0,
-        haste: (q3?.powerups[Powerup.PW_HASTE] ?? 0) > this.timeSeconds * 1000 || this.lmctfHaste(actor), noStackDouble: false,
+        haste: (q3?.powerups[Powerup.PW_HASTE] ?? 0) > this.timeSeconds * 1000 || this.foreignMatch.flags.haste(actor), noStackDouble: false,
         instantSwitch: false, quickSwitch: false, infiniteAmmo: false, playersCollide: true, gravity: this.physics.gravity, weaponThunk: false } satisfies import("../../../content/q2/foundation/weapons/types.ts").Q2WeaponInput;
     }
     const player = this.requirePlayer(actor), native = this.q2WeaponInput(player), input = source.kind === "q2" ? source.product.weaponInput(actor, native) : native;
@@ -3900,28 +3861,7 @@ export class SharedSimulation implements Simulation {
   private registerCombat(): undefined {
     const id = this.recipe.combat.provider;
     const armor = nativeVictimArmor(request => this.victimArmorContext(request));
-    if (this.foreignTag) this.combat.damageOperation.register({ provider: "q2:tag", id: "q2:tag/damage", order: 0, kind: "transform",
-      transform: request => this.tagOwner === null || request.target.equals(this.tagOwner) || request.attack.attacker?.equals(this.tagOwner) === true
-        ? request : { ...request, amount: Math.trunc(request.amount * 3 / 4) } });
-    if (this.foreignLmctf) this.combat.damageOperation.register({ provider: "q2:lmctf", id: "q2:lmctf/runes", order: 0, kind: "transform",
-      transform: request => {
-        let amount = request.amount;
-        const attacker = request.attack.attacker ?? null;
-        // Native g_runes: Damage multiplies outgoing by 1.75, Resist divides
-        // incoming by 1.75, Vampire returns half the health damage dealt.
-        if (attacker !== null && this.lmctfRuneHeld(attacker) === "damage") amount = Math.trunc(Math.fround(amount * 1.75));
-        if (this.lmctfRuneHeld(request.target) === "resist") amount = Math.trunc(Math.fround(amount / 1.75));
-        if (attacker !== null && !attacker.equals(request.target) && amount > 0 && this.lmctfRuneHeld(attacker) === "vampire") {
-          const owned = this.actors.resolveOwned(attacker), health = this.combat.read(attacker)?.health;
-          if (owned !== null && health !== undefined) this.combat.setHealth(owned, Math.min(250, health + (amount >> 1)));
-        }
-        return amount === request.amount ? request : { ...request, amount };
-      } });
-    if (this.foreignDeathball) this.combat.damageOperation.register({ provider: "q2:deathball", id: "q2:deathball/ball", order: 0, kind: "transform",
-      // Native DeathBall: the ball takes 1 damage from every hit; shared
-      // combat knockback against its 50 mass does the pushing.
-      transform: request => this.deathball !== null && request.target.equals(this.deathball.id) && request.amount !== 1
-        ? { ...request, amount: 1 } : request });
+    this.foreignMatch.registerCombat();
     if (providerFamily(id) === "q1") this.combat.register(createQ1CombatPolicy({ id, armor, sourceEffects: {
       beforeQuad: (request, amount, target, attacker) => {
         const game = this.q1CombatSource();
@@ -4746,7 +4686,7 @@ export class SharedSimulation implements Simulation {
     if (player === undefined) throw new Error("Weapon input has no admitted player");
     // Foreign LMCTF haste marks the weapon-stage environment only; movement
     // keeps its own environment, so the rune never speeds locomotion.
-    if (!input.environment.haste && this.lmctfHaste(input.actor.id)) input = { ...input, environment: { ...input.environment, haste: true } };
+    if (!input.environment.haste && this.foreignMatch.flags.haste(input.actor.id)) input = { ...input, environment: { ...input.environment, haste: true } };
     if (this.selectedArsenal !== null) {
       if (this.selectedArsenal.family === "q1") {
         const client = this.source.kind === "q1" ? this.source.composition.clients.require(player.actor.id) : null;
@@ -4834,7 +4774,7 @@ export class SharedSimulation implements Simulation {
       quadUntil: this.source.kind === "q2" ? this.source.items.playerPowerups(player.actor.id).quadUntil : this.source.kind === "q1"
         ? this.source.game.player(player.actor.id)?.powerups.get("quad") ?? 0 : this.source.kind === "quakec" ? this.source.game.clientPowerupExpires(player.actor.id, "quad") : this.source.kind === "q3"
           ? (this.source.game.records.nativeByActor(player.actor.id)?.client?.ps.powerups.get(Powerup.PW_QUAD) ?? 0) / 1000 : 0,
-      doubleUntil: 0, quadFireUntil: 0, haste: this.lmctfHaste(player.actor.id),
+      doubleUntil: 0, quadFireUntil: 0, haste: this.foreignMatch.flags.haste(player.actor.id),
       noStackDouble: this.q2ServerRegistry?.dialect === "q2-rerelease" && this.q2ServerRegistry.variableValue("g_dm_no_stack_double") !== 0,
       instantSwitch: this.q2ServerRegistry?.dialect === "q2-rerelease" && this.q2ServerRegistry.variableValue("g_instant_weapon_switch") !== 0,
       quickSwitch: false, infiniteAmmo: this.source.kind === "q2" && (this.source.game.options.deathmatchFlags & 8192) !== 0, playersCollide: true, gravity: this.physics.gravity, weaponThunk: false } satisfies import("../../../content/q2/foundation/weapons/types.ts").Q2WeaponInput;
@@ -5398,7 +5338,7 @@ export class SharedSimulation implements Simulation {
       if (this.source.kind === "q2" && this.source.product.rerelease?.players.intermissionFadeUntil != null) {
         continue;
       }
-      if (run && settlement.kind !== "active") { this.tickHordeWave(); this.tickTag(); this.tickLmctf(); this.tickDeathball(); }
+      if (run && settlement.kind !== "active") { this.foreignMatch.tick(); }
       if (run && !preparesQ1Clients && settlement.kind !== "active") botCommands = this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000);
       for (const received of [...(commandTurn ? input.commands : []), ...botCommands]) {
         let command = paused ? { ...received, command: { ...received.command, buttons: received.command.buttons & ~1 } } : received;
@@ -5869,554 +5809,6 @@ export class SharedSimulation implements Simulation {
     throw new Error("Actor has no native source UI");
   }
   playerUi(actor: ActorId): PlayerUi { return this.slotProjection(actor, null).ui; }
-
-  /** Q3 horde: admit escalating bot waves; a wave clears when every admitted
-   * bot has been fragged at least once, then survivors retire and the next
-   * wave arrives after a short intermission. Other families run horde in
-   * their source compositions; Q3 has no monsters, so bots are the horde. */
-  private tickHordeWave(): void {
-    const source = this.source;
-    if (this.recipe.match.provider !== "q3:horde" || source.kind !== "q3") return;
-    const players = this.players();
-    const bots = players.filter(actor => this.botServices.isBot(actor));
-    const native = (actor: ActorId) => source.game.records.nativeByActor(actor);
-    const humansAlive = players.some(actor => !this.botServices.isBot(actor)
-      && (native(actor)?.health ?? this.combat.read(actor)?.health ?? 0) > 0);
-    if (!humansAlive) return;
-    if (this.hordeWave === 0) {
-      if (this.timeSeconds >= this.hordeNextWaveAt) {
-        this.hordeWave = this.hordePendingWave;
-        this.hordeFragged.clear();
-        this.requestHordeBot(players.length);
-      }
-      return;
-    }
-    // Register wave bots with a death baseline; Q3's PERS_KILLED is the
-    // native per-client death counter, reliable across respawns.
-    for (const bot of bots) {
-      const deaths = native(bot)?.client?.ps.persistant.get(PersistentIndex.PERS_KILLED) ?? 0;
-      const entry = this.hordeFragged.get(bot);
-      if (entry === undefined) this.hordeFragged.set(bot, { deaths, fragged: false });
-      else if (deaths > entry.deaths) entry.fragged = true;
-    }
-    const admitted = [...this.hordeFragged.keys()].filter(actor => this.actors.isLive(actor));
-    const humans = players.length - bots.length;
-    const target = Math.min(1 + this.hordeWave, 8, Math.max(1, this.options.maxClients - humans));
-    if (admitted.length < target) { this.requestHordeBot(players.length); return; }
-    if (!admitted.every(actor => this.hordeFragged.get(actor)?.fragged === true)) return;
-    // Wave cleared: retire survivors through the bot transport (which frees
-    // their session client slots for the next wave) and schedule it.
-    for (const bot of admitted) if (!this.botServices.tryDisconnectBot(bot)) this.disconnectPlayer(bot);
-    this.hordeFragged.clear();
-    this.hordePendingWave = this.hordeWave >= 15 ? 1 : this.hordeWave + 1;
-    this.hordeWave = 0;
-    this.hordeNextWaveAt = this.timeSeconds + 5;
-  }
-
-  /** Bot admission is queued through the source console, so retry at most
-   * once per second until the player count shows the request landed. */
-  private requestHordeBot(playerCount: number): void {
-    if (playerCount === this.hordeAdmissionPlayers && this.timeSeconds - this.hordeAdmissionAt < 1) return;
-    if (this.botServices.tryAddBot()) {
-      this.hordeAdmissionAt = this.timeSeconds;
-      this.hordeAdmissionPlayers = playerCount;
-    }
-  }
-
-  /** Tag runs natively in the Q2 composition on Q2 worlds; on foreign
-   * worlds the shared runtime mirrors the Rogue rules over unified actors. */
-  private get foreignTag(): boolean {
-    return this.recipe.match.provider === "q2:tag" && this.options.mode === "deathmatch"
-      && providerFamily(this.recipe.map.entities.provider) !== "q2";
-  }
-
-  private tickTag(): void {
-    if (!this.foreignTag) return;
-    const players = this.players();
-    if (this.tagToken === null && this.tagOwner === null) this.spawnTagToken(null);
-    if (this.tagToken !== null && this.tagDroppedAt !== null && this.timeSeconds - this.tagDroppedAt >= 30) {
-      // An untouched token returns to the spawn farthest from every player.
-      const spot = this.farthestDeathmatchSpawn(), body = this.bodies.read(this.tagToken.id);
-      if (spot !== null && body !== null) { this.bodies.write(this.tagToken, { ...body, origin: { x: spot.x, y: spot.y, z: spot.z + 16 }, velocity: zero }); this.bodies.link(this.tagToken); }
-      this.tagDroppedAt = this.timeSeconds;
-    }
-    const tagOwner = this.tagOwner;
-    if (tagOwner !== null && !players.some(actor => actor.equals(tagOwner))) {
-      this.tagOwner = null; this.tagCount = 0; this.spawnTagToken(null);
-    }
-    for (const actor of players) {
-      const health = this.combat.read(actor)?.health ?? 0, previous = this.tagHealth.get(actor);
-      this.tagHealth.set(actor, health);
-      if (previous === undefined || previous <= 0 || health > 0) continue;
-      const owned = this.actors.resolveOwned(actor);
-      const attacker = owned === null ? null : this.lastAttack.get(owned)?.attacker ?? null;
-      const killer = attacker !== null && !attacker.equals(actor) && players.some(player => player.equals(attacker)) ? attacker : null;
-      if (this.tagOwner !== null && actor.equals(this.tagOwner)) {
-        this.takeTagInventory(actor);
-        if (killer !== null) this.addTagScore(killer, 4);
-        if (killer !== null && (this.combat.read(killer)?.health ?? 0) > 0) {
-          this.tagOwner = killer; this.tagCount = 0;
-          this.giveTagInventory(killer); this.tagBonus(killer);
-        } else {
-          this.tagOwner = null; this.tagCount = 0; this.spawnTagToken(actor);
-        }
-      } else if (killer !== null && this.tagOwner !== null && killer.equals(this.tagOwner)) {
-        this.addTagScore(killer, 2);
-        if (++this.tagCount === 5) { this.tagCount = 0; this.grantTagQuad(killer); }
-      }
-    }
-  }
-
-  private addTagScore(actor: ActorId, amount: number): void {
-    const match = this.primaryMatchPlayer(actor);
-    if (match !== null) match.setScore(match.score() + amount);
-  }
-
-  private giveTagInventory(actor: ActorId): void {
-    const owned = this.actors.resolveOwned(actor);
-    if (owned !== null) this.inventory.give(owned, "q2:dm_tag_token", 1);
-  }
-
-  private takeTagInventory(actor: ActorId): void {
-    const owned = this.actors.resolveOwned(actor);
-    if (owned !== null) this.inventory.consume(owned, "q2:dm_tag_token", 1);
-  }
-
-  /** Native Tag heals the new owner and touches a body-armor pickup. */
-  private tagBonus(actor: ActorId): void {
-    const owned = this.actors.resolveOwned(actor), combat = this.combat.read(actor);
-    if (owned === null || combat === null) return;
-    if (combat.health < 100) this.combat.setHealth(owned, Math.min(100, combat.health + 200));
-    const regular = combat.armor.regular;
-    if (regular.kind === "none") {
-      const family = providerFamily(this.recipe.map.entities.provider);
-      this.combat.setArmor(owned, { ...combat.armor, regular: family === "q1"
-        ? { kind: "q1", points: 100, absorption: 0.3, item: "q1:item_armor1" }
-        : { kind: "q3", points: 100, protection: Math.fround(0.66) } });
-    } else if (regular.points < 100) this.combat.setArmor(owned, { ...combat.armor, regular: { ...regular, points: 100 } });
-  }
-
-  private grantTagQuad(actor: ActorId): void {
-    const source = this.source;
-    if (source.kind === "q3") {
-      const client = source.game.records.nativeByActor(actor)?.client;
-      if (client != null) client.ps.powerups.set(Powerup.PW_QUAD, source.game.level.time + 30000);
-    } else if (source.kind === "q1") source.game.player(actor)?.powerups.set("quad", source.game.time + 30);
-  }
-
-  /** Deathmatch spawn origins come from the retained map entity lump:
-   * spawn entities are not shared actors in every family's world. */
-  private tagSpawnOrigins(): readonly Vec3[] {
-    if (this.tagSpawns !== null) return this.tagSpawns;
-    const origins: Vec3[] = [], fallback: Vec3[] = [];
-    for (const entity of parseEntities(this.options.world.entities)) {
-      const classname = entity.get("classname");
-      if (classname !== "info_player_deathmatch" && classname !== "info_player_start") continue;
-      const parts = (entity.get("origin") ?? "").split(/\s+/).map(Number);
-      const [x, y, z] = parts;
-      if (parts.length !== 3 || x === undefined || y === undefined || z === undefined || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
-      (classname === "info_player_deathmatch" ? origins : fallback).push({ x, y, z });
-    }
-    this.tagSpawns = origins.length !== 0 ? origins : fallback;
-    return this.tagSpawns;
-  }
-
-  private farthestDeathmatchSpawn(): Vec3 | null {
-    const playerBodies = this.players().flatMap(actor => { const body = this.bodies.read(actor); return body === null ? [] : [body.origin]; });
-    let best: Vec3 | null = null, bestDistance = -1;
-    for (const spot of this.tagSpawnOrigins()) {
-      let nearest = Infinity;
-      for (const origin of playerBodies) nearest = Math.min(nearest, Math.hypot(spot.x - origin.x, spot.y - origin.y, spot.z - origin.z));
-      if (nearest > bestDistance) { bestDistance = nearest; best = spot; }
-    }
-    return best === null ? null : { x: best.x, y: best.y, z: best.z + 24 };
-  }
-
-  private spawnTagToken(from: ActorId | null): void {
-    const origin = from !== null ? this.bodies.read(from)?.origin : this.farthestDeathmatchSpawn();
-    if (origin === null || origin === undefined) return;
-    const actor = this.actors.allocate(this.recipe.match.provider, "q2:dm_tag_token");
-    const bounds = { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 15 } };
-    this.bodies.create(actor, { origin: { x: origin.x, y: origin.y, z: origin.z + 16 }, velocity: zero, angles: zero, bounds, ground: null });
-    this.physics.setSolid(actor, "trigger", null, providerFamily(this.recipe.map.entities.provider));
-    this.callbacks.bind(actor, { think: null, touch: contact => this.tagTokenTouched(contact), use: null, pain: null, die: null });
-    this.detachedModels.set(actor, { content: this.recipe.match.content, path: "models/items/tagtoken/tris.md2" });
-    this.bodies.link(actor);
-    this.tagToken = actor;
-    this.tagDroppedAt = this.timeSeconds;
-  }
-
-  private tagTokenTouched(contact: TouchContact): undefined {
-    const token = this.tagToken;
-    if (token === null || !contact.self.id.equals(token.id)) return undefined;
-    // The native token is untouchable for a second after it drops.
-    if (this.timeSeconds - (this.tagDroppedAt ?? 0) < 1) return undefined;
-    const player = contact.other;
-    if (this.player(player) === null || (this.combat.read(player)?.health ?? 0) <= 0) return undefined;
-    this.tagToken = null; this.tagDroppedAt = null;
-    this.actors.release(token);
-    this.tagOwner = player; this.tagCount = 0;
-    this.giveTagInventory(player); this.tagBonus(player);
-    return undefined;
-  }
-
-  private get foreignLmctf(): boolean {
-    return this.recipe.match.provider === "q2:lmctf" && this.options.mode === "deathmatch"
-      && providerFamily(this.recipe.map.entities.provider) !== "q2";
-  }
-
-  /** Shared flag-CTF on any world whose own source does not already run it. */
-  private get foreignCtf(): boolean {
-    return this.recipe.match.provider === "q1:ctf" && this.options.mode === "deathmatch" && this.source.kind !== "q1";
-  }
-
-  private get flagMode(): "lmctf" | "ctf" | null { return this.foreignLmctf ? "lmctf" : this.foreignCtf ? "ctf" : null; }
-
-  private lmctfRuneHeld(actor: ActorId): string | null {
-    for (const [kind, rune] of this.lmctfRunes) if (rune.holder?.equals(actor) === true) return kind;
-    return null;
-  }
-
-  private lmctfHaste(actor: ActorId): boolean {
-    return this.foreignLmctf && this.lmctfRuneHeld(actor) === "haste";
-  }
-
-  /** Native LMCTF runs the weapon cycle twice per frame under haste; the Q1
-   * arsenal expresses the same doubling as halved attack/frame delays. */
-  private lmctfQ1HasteRules(): import("../../../content/q1/foundation/extensions.ts").Q1WeaponRules {
-    return { id: "q2:lmctf/haste",
-      attackDelay: (_game, player, delay) => this.lmctfHaste(player.actor.id) ? delay / 2 : delay,
-      frameDelay: (_game, player, delay) => this.lmctfHaste(player.actor.id) ? delay / 2 : delay };
-  }
-
-  /** Flag bases and rune spots come from the retained entity lump, like Tag spawns. */
-  private lmctfOrigins(): { readonly flags: ReadonlyMap<string, Vec3>; readonly health: readonly Vec3[] } {
-    if (this.lmctfSpots !== null) return this.lmctfSpots;
-    const flags = new Map<string, Vec3>(), health: Vec3[] = [];
-    for (const entity of parseEntities(this.options.world.entities)) {
-      const classname = entity.get("classname") ?? "";
-      const parts = (entity.get("origin") ?? "").split(/\s+/).map(Number);
-      const [x, y, z] = parts;
-      if (parts.length !== 3 || x === undefined || y === undefined || z === undefined || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
-      if ((classname === "info_flag_red" || classname === "info_flag_blue" || classname === "item_flag_team1" || classname === "item_flag_team2") && !flags.has(classname)) flags.set(classname, { x, y, z });
-      else if (classname.startsWith("item_health")) health.push({ x, y, z });
-    }
-    this.lmctfSpots = { flags, health };
-    return this.lmctfSpots;
-  }
-
-  private lmctfFlagHome(team: 1 | 2): Vec3 | null {
-    const authored = this.lmctfOrigins().flags.get(this.flagMode === "ctf" ? (team === 1 ? "item_flag_team1" : "item_flag_team2") : (team === 1 ? "info_flag_red" : "info_flag_blue"));
-    if (authored !== undefined) return authored;
-    // Native LMCTF synthesizes bases from the deathmatch spawns farthest apart.
-    const spots = this.tagSpawnOrigins();
-    const first = spots[0];
-    if (first === undefined) return null;
-    let farthest = first, farthestDistance = -1;
-    for (const spot of spots) {
-      const distance = Math.hypot(spot.x - first.x, spot.y - first.y, spot.z - first.z);
-      if (distance > farthestDistance) { farthestDistance = distance; farthest = spot; }
-    }
-    if (team === 1) return farthest;
-    let other = first, otherDistance = -1;
-    for (const spot of spots) {
-      const distance = Math.hypot(spot.x - farthest.x, spot.y - farthest.y, spot.z - farthest.z);
-      if (distance > otherDistance) { otherDistance = distance; other = spot; }
-    }
-    return other;
-  }
-
-  private spawnLmctfFlag(team: 1 | 2, origin: Vec3): void {
-    const state = this.lmctfFlags.get(team);
-    if (state === undefined) return;
-    const ctf = this.flagMode === "ctf";
-    const actor = this.actors.allocate(this.recipe.match.provider, ctf ? (team === 1 ? "q1:item_flag_team1" : "q1:item_flag_team2") : (team === 1 ? "q2:item_flag_team1" : "q2:item_flag_team2"));
-    const bounds = ctf ? { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 74 } } : { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 33 } };
-    this.bodies.create(actor, { origin: { x: origin.x, y: origin.y, z: origin.z }, velocity: zero, angles: zero, bounds, ground: null });
-    this.physics.setSolid(actor, "trigger", null, providerFamily(this.recipe.map.entities.provider));
-    this.callbacks.bind(actor, { think: null, touch: contact => this.lmctfFlagTouched(team, contact), use: null, pain: null, die: null });
-    this.detachedModels.set(actor, ctf ? { content: this.recipe.match.content, path: "progs/flag.mdl", family: "q1", skin: team - 1, effects: team === 1 ? 32 : 16 }
-      : { content: this.recipe.match.content, path: team === 1 ? "players/male/flag1.md2" : "players/male/flag2.md2" });
-    this.bodies.link(actor);
-    state.actor = actor;
-  }
-
-  private lmctfFlagTouched(team: 1 | 2, contact: TouchContact): undefined {
-    const state = this.lmctfFlags.get(team);
-    if (state === undefined || state.actor === null || !contact.self.id.equals(state.actor.id)) return undefined;
-    const player = contact.other;
-    if (this.player(player) === null || (this.combat.read(player)?.health ?? 0) <= 0) return undefined;
-    const playerTeam = this.lmctfTeams.get(player);
-    if (playerTeam === undefined) return undefined;
-    if (playerTeam === team) {
-      const carried = this.lmctfFlags.get(team === 1 ? 2 : 1);
-      if (carried?.carrier?.equals(player) === true) {
-        // Capture: carrier scores 5, every teammate scores the 10-point team bonus.
-        this.addTagScore(player, 5);
-        for (const [ally, allyTeam] of this.lmctfTeams) if (allyTeam === team) this.addTagScore(ally, 10);
-        this.lmctfTakeFlag(player);
-        carried.carrier = null; carried.droppedAt = null;
-        this.spawnLmctfFlag(team === 1 ? 2 : 1, carried.home);
-      } else if (state.droppedAt !== null) {
-        // Own dropped flag returns home on touch.
-        this.actors.release(state.actor); state.actor = null; state.droppedAt = null;
-        this.spawnLmctfFlag(team, state.home);
-        this.addTagScore(player, 1);
-      }
-      return undefined;
-    }
-    // Enemy pickup.
-    this.actors.release(state.actor); state.actor = null;
-    state.carrier = player; state.droppedAt = null;
-    const owned = this.actors.resolveOwned(player);
-    if (owned !== null && this.flagMode === "lmctf") this.inventory.give(owned, "q2:flag", 1);
-    return undefined;
-  }
-
-  private lmctfTakeFlag(actor: ActorId): void {
-    const owned = this.actors.resolveOwned(actor);
-    if (owned !== null && this.flagMode === "lmctf") this.inventory.consume(owned, "q2:flag", this.inventory.count(actor, "q2:flag"));
-  }
-
-  private spawnLmctfRune(kind: string, origin: Vec3): void {
-    const state = this.lmctfRunes.get(kind);
-    if (state === undefined) return;
-    const models: Readonly<Record<string, string>> = { damage: "models/ctf/damage/tris.md2", haste: "models/ctf/haste/tris.md2",
-      resist: "models/ctf/resist/tris.md2", regen: "models/ctf/regen/tris.md2", vampire: "models/ctf/resist/tris.md2" };
-    const actor = this.actors.allocate(this.recipe.match.provider, `q2:${kind}_rune`);
-    const bounds = { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 15 } };
-    this.bodies.create(actor, { origin: { x: origin.x, y: origin.y, z: origin.z + 16 }, velocity: zero, angles: zero, bounds, ground: null });
-    this.physics.setSolid(actor, "trigger", null, providerFamily(this.recipe.map.entities.provider));
-    this.callbacks.bind(actor, { think: null, touch: contact => this.lmctfRuneTouched(kind, contact), use: null, pain: null, die: null });
-    this.detachedModels.set(actor, { content: this.recipe.match.content, path: models[kind] ?? "models/ctf/resist/tris.md2" });
-    this.bodies.link(actor);
-    state.actor = actor;
-  }
-
-  private lmctfRuneTouched(kind: string, contact: TouchContact): undefined {
-    const state = this.lmctfRunes.get(kind);
-    if (state === undefined || state.actor === null || !contact.self.id.equals(state.actor.id)) return undefined;
-    const player = contact.other;
-    if (this.player(player) === null || (this.combat.read(player)?.health ?? 0) <= 0 || this.lmctfRuneHeld(player) !== null) return undefined;
-    this.actors.release(state.actor); state.actor = null; state.holder = player;
-    const owned = this.actors.resolveOwned(player);
-    if (owned !== null) this.inventory.give(owned, `q2:${kind}_rune`, 1);
-    return undefined;
-  }
-
-  private prepareLmctf(): void {
-    this.lmctfPrepared = true;
-    for (const team of [1, 2] satisfies readonly (1 | 2)[]) {
-      const home = this.lmctfFlagHome(team);
-      if (home !== null) { this.lmctfFlags.set(team, { actor: null, home, carrier: null, droppedAt: null }); this.spawnLmctfFlag(team, home); }
-    }
-    if (this.flagMode !== "lmctf") return;
-    // Runes scatter over health spots by farthest-point sampling (native
-    // Rune_Spawn uses health edicts); deathmatch spawns are the fallback.
-    const spots = [...this.lmctfOrigins().health];
-    const pool = spots.length !== 0 ? spots : [...this.tagSpawnOrigins()];
-    const chosen: Vec3[] = [];
-    for (const kind of ["damage", "haste", "resist", "regen", "vampire"]) {
-      this.lmctfRunes.set(kind, { actor: null, holder: null });
-      let best: Vec3 | null = null, bestDistance = -1;
-      for (const spot of pool) {
-        if (chosen.some(other => other.x === spot.x && other.y === spot.y && other.z === spot.z)) continue;
-        let nearest = Infinity;
-        for (const other of chosen) nearest = Math.min(nearest, Math.hypot(spot.x - other.x, spot.y - other.y, spot.z - other.z));
-        if (nearest > bestDistance) { bestDistance = nearest; best = spot; }
-      }
-      if (best !== null) { chosen.push(best); this.spawnLmctfRune(kind, best); }
-    }
-  }
-
-  private tickLmctf(): void {
-    if (this.flagMode === null) return;
-    if (!this.lmctfPrepared) this.prepareLmctf();
-    const players = this.players();
-    // Auto-balanced team assignment; the shared combat team drives friendly
-    // fire and team presentation on the foreign world.
-    for (const actor of players) {
-      if (this.lmctfTeams.has(actor)) continue;
-      let red = 0, blue = 0;
-      for (const team of this.lmctfTeams.values()) if (team === 1) red++; else blue++;
-      const team: 1 | 2 = blue < red ? 2 : 1;
-      this.lmctfTeams.set(actor, team);
-      const owned = this.actors.resolveOwned(actor);
-      if (owned !== null) this.combat.setTraits(owned, { team: team === 1 ? "red" : "blue" });
-    }
-    for (const [team, flag] of this.lmctfFlags) {
-      if (flag.droppedAt !== null && flag.actor !== null && this.timeSeconds - flag.droppedAt >= 30) {
-        this.actors.release(flag.actor); flag.actor = null; flag.droppedAt = null;
-        this.spawnLmctfFlag(team, flag.home);
-      }
-      const carrier = flag.carrier;
-      if (carrier !== null && !players.some(actor => actor.equals(carrier))) {
-        this.lmctfTakeFlag(carrier); flag.carrier = null;
-        this.spawnLmctfFlag(team, flag.home);
-      }
-    }
-    for (const [kind, rune] of this.lmctfRunes) {
-      const holder = rune.holder;
-      if (holder !== null && !players.some(actor => actor.equals(holder))) {
-        const owned = this.actors.resolveOwned(holder);
-        if (owned !== null) this.inventory.consume(owned, `q2:${kind}_rune`, 1);
-        rune.holder = null;
-        const spot = this.farthestDeathmatchSpawn();
-        if (spot !== null) this.spawnLmctfRune(kind, spot);
-      }
-    }
-    for (const actor of players) {
-      // Regen rune: native heart-rate cadence heals toward max health + 25.
-      if (this.lmctfRuneHeld(actor) === "regen") {
-        const combat = this.combat.read(actor), owned = this.actors.resolveOwned(actor);
-        if (combat !== null && owned !== null && combat.health > 0) {
-          const heartRate = Math.min(25, Math.max(5, Math.trunc(combat.health / 5))), frame = Math.round(this.timeSeconds * 10);
-          if (frame >= (this.lmctfRegenAt.get(actor) ?? 0) + heartRate) {
-            this.lmctfRegenAt.set(actor, frame);
-            if (combat.health < 125) this.combat.setHealth(owned, Math.min(125, Math.trunc(combat.health + Math.fround(heartRate / 3))));
-          }
-        }
-      }
-      const health = this.combat.read(actor)?.health ?? 0, previous = this.lmctfHealth.get(actor);
-      this.lmctfHealth.set(actor, health);
-      if (previous === undefined || previous <= 0 || health > 0) continue;
-      // Death drops the carried flag and held rune at the corpse.
-      const origin = this.bodies.read(actor)?.origin;
-      for (const [team, flag] of this.lmctfFlags) {
-        if (flag.carrier?.equals(actor) !== true) continue;
-        this.lmctfTakeFlag(actor); flag.carrier = null; flag.droppedAt = this.timeSeconds;
-        if (origin !== undefined && origin !== null) this.spawnLmctfFlag(team, origin); else this.spawnLmctfFlag(team, flag.home);
-      }
-      for (const [kind, rune] of this.lmctfRunes) {
-        if (rune.holder?.equals(actor) !== true) continue;
-        const owned = this.actors.resolveOwned(actor);
-        if (owned !== null) this.inventory.consume(owned, `q2:${kind}_rune`, 1);
-        rune.holder = null;
-        if (origin !== undefined && origin !== null) this.spawnLmctfRune(kind, origin);
-      }
-    }
-  }
-
-
-  private get foreignDeathball(): boolean {
-    return this.recipe.match.provider === "q2:deathball" && this.options.mode === "deathmatch"
-      && providerFamily(this.recipe.map.entities.provider) !== "q2";
-  }
-
-  /** DeathBall origins come from the retained entity lump; authored goals are
-   * brushes, so foreign play uses their origins with a proximity radius and
-   * synthesizes both from deathmatch spawns when a map has none. */
-  private deathballOrigins(): { readonly ball: Vec3 | null; readonly goals: ReadonlyMap<1 | 2, Vec3> } {
-    if (this.deathballSpots !== null) return this.deathballSpots;
-    let ball: Vec3 | null = null;
-    const goals: Vec3[] = [], teamStarts = new Map<string, Vec3>();
-    for (const entity of parseEntities(this.options.world.entities)) {
-      const classname = entity.get("classname") ?? "";
-      const parts = (entity.get("origin") ?? "").split(/\s+/).map(Number);
-      const [x, y, z] = parts;
-      if (parts.length !== 3 || x === undefined || y === undefined || z === undefined || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
-      if (classname === "dm_dball_ball_start" && ball === null) ball = { x, y, z };
-      else if (classname === "dm_dball_goal") goals.push({ x, y, z });
-      else if ((classname === "dm_dball_team1_start" || classname === "dm_dball_team2_start") && !teamStarts.has(classname)) teamStarts.set(classname, { x, y, z });
-    }
-    const spots = this.tagSpawnOrigins();
-    const assigned = new Map<1 | 2, Vec3>();
-    if (goals.length >= 2) {
-      const [first, second] = goals;
-      if (first !== undefined && second !== undefined) {
-        const team1Start = teamStarts.get("dm_dball_team1_start");
-        const firstIsTeam1 = team1Start === undefined ? first.x <= second.x
-          : Math.hypot(first.x - team1Start.x, first.y - team1Start.y, first.z - team1Start.z)
-            <= Math.hypot(second.x - team1Start.x, second.y - team1Start.y, second.z - team1Start.z);
-        assigned.set(1, firstIsTeam1 ? first : second); assigned.set(2, firstIsTeam1 ? second : first);
-      }
-    } else if (spots.length >= 2) {
-      let a = spots[0] ?? null, b: Vec3 | null = null, best = -1;
-      for (const spot of spots) {
-        if (a === null) break;
-        const distance = Math.hypot(spot.x - a.x, spot.y - a.y, spot.z - a.z);
-        if (distance > best) { best = distance; b = spot; }
-      }
-      if (a !== null && b !== null) {
-        let c: Vec3 | null = null; best = -1;
-        for (const spot of spots) {
-          const distance = Math.hypot(spot.x - b.x, spot.y - b.y, spot.z - b.z);
-          if (distance > best) { best = distance; c = spot; }
-        }
-        if (c !== null) { assigned.set(1, c); assigned.set(2, b); }
-      }
-    }
-    if (ball === null) {
-      // A synthesized ball start must clear both synthesized goals or the
-      // match would score itself at spawn.
-      // A ball spawned inside a player starts solid in that actor, and the Q1 trace rules then let it fall through the world.
-      const occupied = this.players().flatMap(actor => this.bodies.read(actor)?.origin ?? []);
-      let best: Vec3 | null = null, bestClearance = -1;
-      for (const spot of spots) {
-        if (occupied.some(origin => Math.hypot(spot.x - origin.x, spot.y - origin.y) < 64 && Math.abs(spot.z - origin.z) < 64)) continue;
-        let clearance = Infinity;
-        for (const goal of assigned.values()) clearance = Math.min(clearance, Math.hypot(spot.x - goal.x, spot.y - goal.y, spot.z - goal.z));
-        if (clearance > bestClearance) { bestClearance = clearance; best = spot; }
-      }
-      ball = best ?? this.farthestDeathmatchSpawn();
-    }
-    this.deathballSpots = { ball, goals: assigned };
-    return this.deathballSpots;
-  }
-
-  private spawnDeathball(origin: Vec3): void {
-    const actor = this.actors.allocate(this.recipe.match.provider, "q2:dm_dball_ball");
-    const bounds = { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 15 } };
-    this.bodies.create(actor, { origin: { x: origin.x, y: origin.y, z: origin.z + 16 }, velocity: zero, angles: zero, bounds, ground: null });
-    this.physics.setSolid(actor, "box", null, providerFamily(this.recipe.map.entities.provider));
-    this.physics.setMotion({ actor, velocity: zero, angularVelocity: zero, kind: "toss", gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 3, owner: null });
-    this.combat.create(actor, { health: 50000, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 50, canTakeDamage: true, invulnerable: false, team: null });
-    this.detachedModels.set(actor, { content: this.recipe.match.content, path: "models/objects/dball/tris.md2" });
-    this.bodies.link(actor);
-    this.deathball = actor;
-  }
-
-  private prepareDeathball(): void {
-    this.deathballPrepared = true;
-    const { ball } = this.deathballOrigins();
-    if (ball !== null) this.spawnDeathball(ball);
-  }
-
-  private tickDeathball(): void {
-    if (!this.foreignDeathball) return;
-    if (!this.deathballPrepared) this.prepareDeathball();
-    const players = this.players();
-    for (const actor of players) {
-      if (this.deathballTeams.has(actor)) continue;
-      let red = 0, blue = 0;
-      for (const team of this.deathballTeams.values()) if (team === 1) red++; else blue++;
-      const team: 1 | 2 = blue < red ? 2 : 1;
-      this.deathballTeams.set(actor, team);
-      const owned = this.actors.resolveOwned(actor);
-      if (owned !== null) this.combat.setTraits(owned, { team: team === 1 ? "red" : "blue" });
-    }
-    if (this.deathballResetAt !== null && this.timeSeconds >= this.deathballResetAt) {
-      this.deathballResetAt = null;
-      const { ball: home } = this.deathballOrigins();
-      const ball = this.deathball, body = ball === null ? null : this.bodies.read(ball.id);
-      if (ball !== null && body !== null && home !== null) { this.bodies.write(ball, { ...body, origin: { x: home.x, y: home.y, z: home.z + 16 }, velocity: zero }); this.bodies.link(ball); }
-    }
-    const ball = this.deathball;
-    if (ball === null || this.deathballResetAt !== null) return;
-    const body = this.bodies.read(ball.id);
-    if (body === null) return;
-    const floor = this.scene.geometry.models[0]?.bounds.min.z;
-    if (floor !== undefined && body.origin.z < floor - 256) { this.deathballResetAt = this.timeSeconds; return; }
-    for (const [team, goal] of this.deathballOrigins().goals) {
-      if (Math.hypot(body.origin.x - goal.x, body.origin.y - goal.y, body.origin.z - goal.z) > 64) continue;
-      // Native DeathBall: the whole scoring team gains a point, then the
-      // ball returns to its start after a two second pause.
-      const scoring: 1 | 2 = team === 1 ? 2 : 1;
-      for (const [actor, member] of this.deathballTeams) if (member === scoring) this.addTagScore(actor, 1);
-      this.deathballResetAt = this.timeSeconds + 2;
-      return;
-    }
-  }
 
   weaponSlot(actor: ActorId): WeaponSlotProjection {
     return this.slotProjection(actor, this.primaryPresentations().find(model => model.viewWeapon && sameActor(model.actor, actor)) ?? null);
@@ -7353,7 +6745,7 @@ export class SharedSimulation implements Simulation {
     this.assertOpen();
     if (this.source.kind !== "q3") return { kind: "replace-world", reason: "Selected provider has no same-map source reset" };
     if (this.selectedArsenal !== null || this.selectedWeaponSource !== null
-      || this.monsterSources.size !== 0 || this.grapple !== null || this.handGrenades !== null || this.foreignTag || this.foreignLmctf || this.foreignDeathball)
+      || this.monsterSources.size !== 0 || this.grapple !== null || this.handGrenades !== null || this.foreignMatch.blocksCheckpoint())
       return { kind: "replace-world", reason: "Selected adjunct providers and foreign match modes require full world replacement" };
     const compatibility = this.source.game.restartCompatibility();
     return compatibility === "compatible" ? { kind: "source-reset" } : { kind: "replace-world", reason: compatibility };
@@ -7423,17 +6815,49 @@ export class SharedSimulation implements Simulation {
     return match === "ctf" || match === "lmctf" || match === "deathball" || source.game.options.mode === "deathmatch" && (source.game.options.deathmatchFlags & (64 | 128)) !== 0;
   }
 
+  /** The services the foreign match rules run over: the simulation's own stores, read when a rule runs. */
+  private foreignMatchHost(): ForeignMatchHost {
+    const sim = this;
+    return {
+      get recipe() { return sim.recipe; }, get actors() { return sim.actors; }, get callbacks() { return sim.callbacks; },
+      get physics() { return sim.physics; }, get combat() { return sim.combat; }, get inventory() { return sim.inventory; },
+      get scene() { return sim.scene; }, get botServices() { return sim.botServices; },
+      get mode() { return sim.options.mode; }, get maxClients() { return sim.options.maxClients; },
+      get entityLump() { return sim.options.world.entities; }, get timeSeconds() { return sim.timeSeconds; },
+      get sourceKind() { return sim.source.kind; },
+      players: () => sim.players(),
+      isPlayer: actor => sim.player(actor) !== null,
+      lastAttacker: actor => sim.lastAttack.get(actor)?.attacker ?? null,
+      addScore: (actor, amount) => { const match = sim.primaryMatchPlayer(actor); if (match !== null) match.setScore(match.score() + amount); },
+      grantQuad: actor => {
+        const source = sim.source;
+        if (source.kind === "q3") {
+          const client = source.game.records.nativeByActor(actor)?.client;
+          if (client != null) client.ps.powerups.set(Powerup.PW_QUAD, source.game.level.time + 30000);
+        } else if (source.kind === "q1") source.game.player(actor)?.powerups.set("quad", source.game.time + 30);
+      },
+      bindModel: (actor, model) => { sim.detachedModels.set(actor, model); },
+      q3Native: actor => {
+        const source = sim.source;
+        if (source.kind !== "q3") return null;
+        const native = source.game.records.nativeByActor(actor);
+        return native == null ? null : { health: native.health, deaths: native.client?.ps.persistant.get(PersistentIndex.PERS_KILLED) ?? 0 };
+      },
+      disconnectPlayer: actor => { sim.disconnectPlayer(actor); },
+    };
+  }
+
   #diagnostics: SimulationDiagnostics | null = null;
   /** Typed read access to match-layer state (Tag, LMCTF, DeathBall, Horde) and the movement/attack mutations tests drive it with. */
   diagnostics(): SimulationDiagnostics {
     if (this.#diagnostics !== null) return this.#diagnostics;
     const sim = this;
     this.#diagnostics = {
-      modes: { get tag() { return sim.foreignTag; }, get lmctf() { return sim.foreignLmctf; }, get ctf() { return sim.foreignCtf; }, get deathball() { return sim.foreignDeathball; } },
-      tag: { token: () => sim.tagToken, owner: () => sim.tagOwner, count: () => sim.tagCount, trackedHealth: () => sim.tagHealth.size, tracksHealth: actor => sim.tagHealth.has(actor) },
-      lmctf: { flag: team => sim.lmctfFlags.get(team), rune: kind => sim.lmctfRunes.get(kind), team: actor => sim.lmctfTeams.get(actor) },
-      deathball: { ball: () => sim.deathball, team: actor => sim.deathballTeams.get(actor), goal: team => sim.deathballSpots?.goals.get(team) },
-      horde: { wave: () => sim.hordeWave, pendingWave: () => sim.hordePendingWave, fraggedCount: () => sim.hordeFragged.size },
+      modes: { get tag() { return sim.foreignMatch.tag.active(); }, get lmctf() { return sim.foreignMatch.flags.lmctf; }, get ctf() { return sim.foreignMatch.flags.ctf; }, get deathball() { return sim.foreignMatch.deathball.active(); } },
+      tag: { token: () => sim.foreignMatch.tag.token, owner: () => sim.foreignMatch.tag.owner, count: () => sim.foreignMatch.tag.count, trackedHealth: () => sim.foreignMatch.tag.trackedHealth, tracksHealth: actor => sim.foreignMatch.tag.tracksHealth(actor) },
+      lmctf: { flag: team => sim.foreignMatch.flags.flag(team), rune: kind => sim.foreignMatch.flags.rune(kind), team: actor => sim.foreignMatch.flags.team(actor) },
+      deathball: { ball: () => sim.foreignMatch.deathball.ball, team: actor => sim.foreignMatch.deathball.team(actor), goal: team => sim.foreignMatch.deathball.goal(team) },
+      horde: { wave: () => sim.foreignMatch.horde.wave, pendingWave: () => sim.foreignMatch.horde.pendingWave, fraggedCount: () => sim.foreignMatch.horde.fraggedCount },
       source: () => { const source = sim.source; return { kind: source.kind, q1: source.kind === "q1" ? { program: source.composition.selection.program, edition: source.game.options.edition } : null }; },
       q1Services: () => sim.q1CombatSource(),
       grantArsenal: (actor, category) => sim.grantSelectedArsenal(actor, category),
@@ -8154,7 +7578,7 @@ export class SharedSimulation implements Simulation {
     if (this.stepping || this.checkpointInProgress || this.transitions.pending(this.transitionsCursor) !== 0 || this.levelChange !== null) throw new Error("Save requires a completed frame without pending world travel");
     const source = this.source;
     if (source.kind === "loading") throw new Error("The selected source world does not yet expose a complete saved-game checkpoint");
-    if (this.foreignTag || this.foreignLmctf || this.foreignDeathball) throw new Error("Saved games do not yet carry the runtime Tag, LMCTF or DeathBall match state");
+    if (this.foreignMatch.blocksCheckpoint()) throw new Error("Saved games do not yet carry the runtime Tag, LMCTF or DeathBall match state");
     if (this.quakeWorldCommands.pending(this.quakeWorldCursor) !== 0 || this.q3Commands.size !== 0 || this.primaryCommandBlocks.size !== 0) throw new Error("Save requires completed source commands");
     this.events.assertLocalMediaConsumed();
     if (source.kind === "q3" || source.kind === "q3-qvm") this.events.assertOutputConsumed();

@@ -103,3 +103,61 @@ nativeTest("a native Q2 DLL map transition produces the match result with public
     expect(result).toMatchObject({ family: "q2", players: [{ score: 0, won: true, identity: expect.any(String) }] });
   } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
 }, 240000);
+
+const rereleaseTest = corpus("q2/rerelease/baseq2/pak0.pak", "q2/rerelease/baseq2/game_x64.dll");
+
+function nativeRun(edition: "classic" | "rerelease", root: string): string[] {
+  const game = edition === "classic" ? ["--game", "q2-classic-baseq2", "--q2-game", "gamex86.dll"] : ["--game", "q2-rerelease-baseq2", "--q2-game", "game_x64.dll"];
+  return ["--content-root", testCorpusRoot(), ...game, "--map", "q2dm1", "--movement", "q2", "--character", "q2", "--mode", "deathmatch",
+    "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", root];
+}
+
+nativeTest("a classic native Q2 DLL deathmatch reaches its own timelimit intermission and ranks the local account", async () => {
+  const root = await mkdtemp(join(tmpdir(), "native-dll-match-"));
+  const parsed = parseApplicationCommand(nativeRun("classic", root));
+  if (parsed.kind !== "run") throw new Error("Missing launch");
+  const rankings = new ApplicationMatchRankings(), printed: string[] = [];
+  const app = await Application.open(parsed.options, host(rankings, printed));
+  try {
+    expect(app.simulation.q2Native()?.edition).toBe("classic");
+    for (let index = 0; index < 10; index++) await app.step(50);
+    expect(printed.some(line => line.startsWith("Local standings"))).toBe(false);
+    const cvars = app.simulation.q2ServerCvars(); if (cvars === null) throw new Error("Missing Q2 server cvars");
+    cvars.set("timelimit", "0.05", true);
+    const seat = app.localPlayers[0]?.seat.id; if (seat === undefined) throw new Error("Missing local seat");
+    for (let index = 0; index < 1200 && !printed.some(line => line.startsWith("Local standings")); index++) {
+      await app.step(50);
+      // The DLL leaves its intermission only on a button press after its own delay.
+      if (printed.includes("Timelimit hit.\n") && index % 20 === 0) app.input({ kind: "mouse-button", seat, timeMilliseconds: performance.now(), button: 1, down: index % 40 === 0 });
+    }
+    expect(printed.filter(line => line.startsWith("Local standings"))).toHaveLength(1);
+    const standings = rankings.standings(app.simulation.recipe.match.provider);
+    expect(standings).toHaveLength(1);
+    expect(standings[0]).toMatchObject({ matches: 1, wins: 1 });
+  } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
+}, 240000);
+
+rereleaseTest("a rerelease native Q2 DLL deathmatch reaches its own timelimit intermission and ranks the local account", async () => {
+  const root = await mkdtemp(join(tmpdir(), "native-dll-match-"));
+  const parsed = parseApplicationCommand(nativeRun("rerelease", root));
+  if (parsed.kind !== "run") throw new Error("Missing launch");
+  const rankings = new ApplicationMatchRankings(), printed: string[] = [];
+  const app = await Application.open(parsed.options, host(rankings, printed));
+  try {
+    expect(app.simulation.q2Native()?.edition).toBe("rerelease");
+    for (let index = 0; index < 10; index++) await app.step(50);
+    expect(printed.some(line => line.startsWith("Local standings"))).toBe(false);
+    const cvars = app.simulation.q2ServerCvars(); if (cvars === null) throw new Error("Missing Q2 server cvars");
+    cvars.set("timelimit", "0.05", true);
+    const seat = app.localPlayers[0]?.seat.id; if (seat === undefined) throw new Error("Missing local seat");
+    for (let index = 0; index < 1200 && !printed.some(line => line.startsWith("Local standings")); index++) {
+      await app.step(50);
+      // The DLL leaves its intermission only on a button press after its own delay.
+      if (printed.includes("Timelimit hit.\n") && index % 20 === 0) app.input({ kind: "mouse-button", seat, timeMilliseconds: performance.now(), button: 1, down: index % 40 === 0 });
+    }
+    expect(printed.filter(line => line.startsWith("Local standings"))).toHaveLength(1);
+    const standings = rankings.standings(app.simulation.recipe.match.provider);
+    expect(standings).toHaveLength(1);
+    expect(standings[0]).toMatchObject({ matches: 1, wins: 1 });
+  } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
+}, 240000);

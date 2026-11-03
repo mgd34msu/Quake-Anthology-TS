@@ -12,7 +12,6 @@ import { spawnPickup } from "./pickups.ts";
 import { spawnButton, spawnDoor, spawnPlat, spawnSecretDoor } from "./movers.ts";
 
 /** push_touch's per-player fly_sound limiter; it only rate-limits a sound, so it is not saved. */
-const windFlySound = new WeakMap<Q1PlayerState, number>();
 export { linkDoors } from "./movers.ts";
 
 /** An authored classname with no Q1 spawn implementation. Foreign-world
@@ -376,7 +375,7 @@ export function registerSpawnCallbacks(game: Q1EntityServices): undefined {
     if (actor !== null && body !== null && (runtime.health(other) > 0 || runtime.entity(other)?.classname === "grenade")) {
       runtime.host.bodies.write(actor, { ...body, velocity: vscale(entity.movedir, entity.speed * 10) });
       const player = runtime.player(other);
-      if (player !== null && (windFlySound.get(player) ?? 0) < runtime.time) { windFlySound.set(player, runtime.time + 1.5); runtime.sound(actor, "ambience/windfly.wav"); }
+      if (player !== null && player.cues.windFlySoundAt < runtime.time) { player.cues.windFlySoundAt = runtime.time + 1.5; runtime.sound(actor, "ambience/windfly.wav"); }
     }
     if ((entity.spawnflags & 1) !== 0) runtime.remove(entity); return undefined;
   } });

@@ -69,7 +69,7 @@ export function upwardLayerEdges(rank: ReadonlyMap<string, number>, scanned: Rea
   const upward = new Map<string, Set<string>>();
   for (const [from, imported] of scanned) {
     for (const to of imported) {
-      if (layerEdgeAllowed({ rank, exceptions: new Map() }, from, to)) continue;
+      if (layerEdgeAllowed({ rank, exceptions: new Map<string, ReadonlySet<string>>() }, from, to)) continue;
       let list = upward.get(from);
       if (list === undefined) upward.set(from, list = new Set());
       list.add(to);

@@ -15,7 +15,6 @@ import { castLightning, throwGib, throwHead } from "./projectiles.ts";
 import { armyCheckAttack, armyPain, dogCheckAttack, dogPain } from "./grunt.ts";
 import type { SaveReader } from "../../../persistence/value.ts";
 import { monsterTargetEligible } from "../../monsters/target.ts";
-import { mg3Pickups } from "../foundation/pickups.ts";
 
 export interface BaseMonsterSource {
   readonly callbackPrefix: string;
@@ -89,7 +88,7 @@ export class BaseMonster {
         case "action": { const action = this.source?.actions?.get(op.name); if (action === undefined) monsterAction(this, op.name); else action(this); break; }
         case "sound": {
           const path = this.sfx(op.path);
-          if (op.path === "fish/idle.wav" && mg3Pickups.has(this.game)) {
+          if (op.path === "fish/idle.wav" && this.game.sourceMg3Pickups) {
             // MG3 fish.qc: a five to ten second quiet period follows each idle sound.
             if (this.entity.number("waitmin") > this.game.time) break;
             if (this.game.host.random() < 0.25) { this.game.sound(this.entity, path, op.channel, op.attenuation); this.entity.fields.set("waitmin", String(Math.fround(this.game.time + 5 + this.game.host.random() * 5))); }

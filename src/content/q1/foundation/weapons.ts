@@ -9,7 +9,6 @@ import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 import { ammoItem } from "./entity-services.ts";
-import { mg3Pickups } from "./pickups.ts";
 import type { Q1PlayerState, Q1Weapon } from "./types.ts";
 import { POINT, ZERO, vadd, vsub, vscale, normalize, isQ1BaseWeapon, yawFor, length, dot } from "./types.ts";
 
@@ -148,7 +147,7 @@ function lightning(game: Q1EntityServices, player: Q1PlayerState): undefined {
     const target = trace.actor;
     if (target !== null && !hit.some(actor => sameActor(actor, target)) && game.host.combat.read(target)?.canTakeDamage) {
       if (!trace.sky && (trace.actor === null || game.entity(trace.actor)?.solid !== "trigger")) game.host.weaponImpact?.(player.actor.id, trace.end);
-      hit.push(target); game.host.emit({ kind: "particles", origin: trace.end, direction: { x: 0, y: 0, z: 100 }, color: mg3Pickups.has(game) ? 246 : 225, count: 120 }); game.damage(target, player.actor.id, player.actor.id, 30, "lightning");
+      hit.push(target); game.host.emit({ kind: "particles", origin: trace.end, direction: { x: 0, y: 0, z: 100 }, color: game.sourceMg3Pickups ? 246 : 225, count: 120 }); game.damage(target, player.actor.id, player.actor.id, 30, "lightning");
     }
   }
   return undefined;
@@ -213,8 +212,8 @@ export function fireBaseWeapon(game: Q1EntityServices, player: Q1PlayerState): b
       lightning(game, player); if (!repeating) game.sound(player.actor, "weapons/lstart.wav", "auto", 1, volume); break;
   }
   // SuperDamageSound, limited by super_sound to once a second.
-  if (weapon !== "axe" && game.powerupExpires(player.actor.id, "quad") > game.time && (quadSoundAt.get(player) ?? 0) < game.time) {
-    quadSoundAt.set(player, game.time + 1); game.sound(player.actor, "items/damage3.wav", "body");
+  if (weapon !== "axe" && game.powerupExpires(player.actor.id, "quad") > game.time && player.cues.quadSoundAt < game.time) {
+    player.cues.quadSoundAt = game.time + 1; game.sound(player.actor, "items/damage3.wav", "body");
   }
   player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, delay));
   player.weaponFrame = player.continuousFiring ? player.weaponFrame % (weapon === "lightning" ? 4 : 8) + 1 : player.weaponAnimationBase;
@@ -223,7 +222,6 @@ export function fireBaseWeapon(game: Q1EntityServices, player: Q1PlayerState): b
   game.effect("muzzleflash", body.origin, player.actor.id); return true;
 }
 
-const quadSoundAt = new WeakMap<Q1PlayerState, number>();
 function axeStrike(game: Q1EntityServices, strike: Q1Actor): undefined {
         const player = strike.owner === null ? null : game.player(strike.owner); if (player === null) return game.remove(strike);
         // In QC the hit runs in a player frame that death and intermission replace.

@@ -24,7 +24,7 @@ export interface Pickup {
 function pickupDefinition(game: Q1EntityServices, entity: Q1Actor): Pickup | null {
   const name = entity.classname, big = (entity.spawnflags & (name === "item_weapon" ? 8 : 1)) !== 0;
   if (name === "item_health") {
-    const mega = !big && (entity.spawnflags & 2) !== 0, amount = big ? 15 : mega ? 100 : 25, megaCap = mg3Pickups.has(game) ? 500 : 250;
+    const mega = !big && (entity.spawnflags & 2) !== 0, amount = big ? 15 : mega ? 100 : 25, megaCap = game.sourceMg3Pickups ? 500 : 250;
     return { model: `maps/b_bh${big ? 10 : mega ? 100 : 25}.bsp`, sound: big ? "items/r_item1.wav" : mega ? "items/r_item2.wav" : "items/health1.wav", bounds: "box", skin: 0,
       respawn: mega ? 120 : 20, take: (runtime, _item, player) => {
         const health = runtime.health(player.actor.id); if (health <= 0 || health >= (mega ? megaCap : player.maxHealth)) return "refused";
@@ -58,7 +58,7 @@ function pickupDefinition(game: Q1EntityServices, entity: Q1Actor): Pickup | nul
     name === "item_shells" ? { item: "q1:ammo/shells", model: "shell", amount: big ? 40 : 20 } :
     name === "item_spikes" ? { item: "q1:ammo/nails", model: "nail", amount: big ? 50 : 25 } :
     name === "item_rockets" ? { item: "q1:ammo/rockets", model: "rock", amount: big ? 10 : 5 } :
-    name === "item_cells" ? { item: "q1:ammo/cells", model: "batt", amount: mg3Pickups.has(game) ? (big ? 20 : 10) : big ? 12 : 6 } : null;
+    name === "item_cells" ? { item: "q1:ammo/cells", model: "batt", amount: game.sourceMg3Pickups ? (big ? 20 : 10) : big ? 12 : 6 } : null;
   if (ammo !== null) {
     const offer = { item: ammo.item, amount: ammo.amount };
     return { supply: { kind: "ammo", offer }, model: `maps/b_${ammo.model}${big ? 1 : 0}.bsp`, sound: "weapons/lock4.wav", bounds: "box", skin: 0,
@@ -185,11 +185,6 @@ export function q1WeaponPickupSelection(game: Q1EntityServices, player: Q1Player
 function rank(weapon: Q1Weapon): number {
   return ["lightning", "rocketlauncher", "supernailgun", "grenadelauncher", "supershotgun", "nailgun", "shotgun", "axe"].indexOf(weapon);
 }
-/** MG1 and MG3 StartItem, installed by the add-on context: null when the item is removed, else the place and use callbacks. */
-export const mg3Pickups = new WeakSet<Q1EntityServices>();
-/** Programs (ThreeWave CTF) whose rerelease source never rots mega health. */
-export const sourceNoMegaRot = new WeakSet<Q1EntityServices>();
-export const sourceItemStart = new WeakMap<Q1EntityServices, (entity: Q1Actor) => { readonly place: string; readonly use: string | null } | null>();
 export function spawnPickup(game: Q1EntityServices, entity: Q1Actor): boolean {
   const definition = pickupDefinition(game, entity); if (definition === null) return false;
   if (game.usesId1Precaches) {
@@ -230,7 +225,7 @@ export function spawnPickup(game: Q1EntityServices, entity: Q1Actor): boolean {
     game.setBody(entity, { velocity: { x: -100 + game.host.random() * 200, y: -100 + game.host.random() * 200, z: 300 } }); game.link(entity); return true;
   }
   // StartItem: the MG programs remove coop- and rune-gated items and start SPAWNED ones hidden until used.
-  const start = sourceItemStart.get(game)?.(entity);
+  const start = game.sourceItemStart?.(entity);
   if (start === null) return true;
   if (start?.use != null) entity.use = game.named.use(entity, start.use);
   // PlaceItem waits until all brush entities exist, lifts six units, then drops 256 units.
@@ -287,7 +282,7 @@ function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): u
     let leave = false, originalRan = false;
     const live = () => game.live(entity) && game.host.actors.isLive(other);
     // COOP_RESPAWN_ITEMS_FOR_PLAYERS: one player cannot collect every respawn of a coop item.
-    const shared = sourceItemStart.has(game) && game.options.coop && !entity.classname.startsWith("weapon_") && !entity.classname.startsWith("item_key") && entity.classname !== "item_backpack";
+    const shared = game.sourceItemStart !== null && game.options.coop && !entity.classname.startsWith("weapon_") && !entity.classname.startsWith("item_key") && entity.classname !== "item_backpack";
     const previous = entity.references.get("enemy");
     if (shared && entity.wait <= 0 && previous != null && sameActor(previous, other)) return undefined;
     return touchQ1Pickup(game, entity, other, item, resource, {
@@ -301,7 +296,7 @@ function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): u
         if (!live()) return;
         sendPickupMessage(game, entity, other);
         if (!live()) return;
-        if (game.options.edition === "rerelease" && entity.classname === "item_health" && (entity.spawnflags & 3) === 2 && !sourceNoMegaRot.has(game)) player.megaRotAt = game.time + 5;
+        if (game.options.edition === "rerelease" && entity.classname === "item_health" && (entity.spawnflags & 3) === 2 && !game.sourceNoMegaRot) player.megaRotAt = game.time + 5;
         game.sound(player.actor, definition.sound, "item");
         if (!live()) return;
         game.effect("pickup", game.body(entity).origin, player.actor.id);
@@ -309,8 +304,8 @@ function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): u
         if (definition.cargo !== undefined) { game.remove(entity); return; }
         if (leave) {
           // MG weapon_touch fires the targets before the leave return, once.
-          if (!entity.classname.startsWith("weapon_")) { game.useTargets(entity, other); if (key !== null && sourceItemStart.has(game)) entity.target = ""; }
-          else if (sourceItemStart.has(game)) { game.useTargets(entity, other); entity.target = ""; }
+          if (!entity.classname.startsWith("weapon_")) { game.useTargets(entity, other); if (key !== null && game.sourceItemStart !== null) entity.target = ""; }
+          else if (game.sourceItemStart !== null) { game.useTargets(entity, other); entity.target = ""; }
           return;
         }
         entity.solid = "none"; entity.model = ""; game.link(entity);
@@ -318,10 +313,10 @@ function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): u
         const respawn = game.pickupRules?.respawn?.(game, entity, definition.respawn) ?? definition.respawn;
         if (!live()) return;
         const respawns = game.options.deathmatch !== 0 && respawn > 0 && (game.options.deathmatch !== 2 || entity.classname.startsWith("item_artifact_"));
-        if ((game.options.edition === "classic" || sourceItemStart.has(game)) && entity.classname === "item_health" && (entity.spawnflags & 3) === 2) {
+        if ((game.options.edition === "classic" || game.sourceItemStart !== null) && entity.classname === "item_health" && (entity.spawnflags & 3) === 2) {
           entity.owner = player.actor.id;
           game.schedule(entity, 5, game.named.action(entity, "health_rot"));
-        } else if (sourceItemStart.has(game) && game.options.coop && entity.classname === "item_artifact_envirosuit") {
+        } else if (game.sourceItemStart !== null && game.options.coop && entity.classname === "item_artifact_envirosuit") {
           if (live()) game.useTargets(entity, other);
           entity.target = ""; game.schedule(entity, 2.5, game.named.action(entity, "SUB_regen")); return;
         } else if (respawns) game.schedule(entity, respawn, game.named.action(entity, "SUB_regen"));
@@ -329,7 +324,7 @@ function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): u
           entity.count++;
           if (entity.count < game.host.players().length) game.schedule(entity, 1, game.named.action(entity, "SUB_regen"));
           else { entity.references.set("enemy", null); entity.count = 0; game.schedule(entity, 6 * 60, game.named.action(entity, "SUB_regen")); }
-        } else if (sourceItemStart.has(game) && entity.wait > 0) {
+        } else if (game.sourceItemStart !== null && entity.wait > 0) {
           entity.references.set("enemy", null); game.schedule(entity, entity.wait, game.named.action(entity, "SUB_regen"));
         } else game.cancel(entity);
         if (live()) game.useTargets(entity, other);
@@ -339,7 +334,7 @@ function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): u
 
 function placeItem(game: Q1EntityServices, entity: Q1Actor): undefined {
     const body = game.body(entity); const start = vadd(body.origin, { x: 0, y: 0, z: 6 });
-    if (sourceItemStart.has(game) && (entity.spawnflags & 65536) !== 0) {
+    if (game.sourceItemStart !== null && (entity.spawnflags & 65536) !== 0) {
       // DROPTOFLOOR_DISABLE: the item keeps its authored height plus the six-unit lift and never drops or falls out of the level.
       entity.solid = "trigger"; entity.movement = "none"; entity.movementFlags = 256;
       game.setBody(entity, { origin: start, velocity: ZERO }); game.link(entity); return undefined;
@@ -356,7 +351,7 @@ export function registerPickupCallbacks(game: Q1EntityServices): undefined {
   game.named.register("health_rot", { action: (runtime, entity) => {
     const player = entity.owner === null ? null : runtime.player(entity.owner);
     if (player !== null && runtime.health(player.actor.id) > player.maxHealth) { runtime.host.combat.setHealth(player.actor, runtime.health(player.actor.id) - 1); return runtime.schedule(entity, 1, runtime.named.action(entity, "health_rot")); }
-    const regenerates = sourceItemStart.has(runtime) ? runtime.options.deathmatch !== 0 && runtime.options.deathmatch !== 2 : runtime.options.deathmatch === 1;
+    const regenerates = runtime.sourceItemStart !== null ? runtime.options.deathmatch !== 0 && runtime.options.deathmatch !== 2 : runtime.options.deathmatch === 1;
     if (regenerates) return runtime.schedule(entity, 20, runtime.named.action(entity, "SUB_regen")); return undefined;
   } });
   return undefined;

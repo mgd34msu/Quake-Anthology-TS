@@ -1,5 +1,5 @@
 // Quake II g_svcmds.c address masks and Quake III sv_main.c rcon. GPL-2.0-or-later.
-import { addressKey } from "../common/endpoint.ts";
+import { PeerTable } from "../common/peer-table.ts";
 import { RconGuard, passwordMatches } from "../common/rcon-guard.ts";
 import type { Ipv4Address, NetworkAddress } from "../common/endpoint.ts";
 
@@ -45,23 +45,30 @@ export class IpFilterList {
 }
 
 export class FloodLimiter {
-  private readonly entries = new Map<string, { tokens: number; time: number }>();
+  private readonly peers: PeerTable;
+  private readonly tokens: Float64Array;
+  private readonly times: Float64Array;
   constructor(readonly burst: number, readonly intervalMilliseconds: number, readonly maxEntries = 8192) {
     if (burst <= 0 || intervalMilliseconds <= 0 || maxEntries < 1) throw new RangeError("Invalid flood limit");
+    this.peers = new PeerTable(maxEntries);
+    this.tokens = new Float64Array(maxEntries);
+    this.times = new Float64Array(maxEntries);
   }
   allow(address: NetworkAddress, now: number): boolean {
-    const key = addressKey(address, false);
-    let old = this.entries.get(key);
-    if (old === undefined && this.entries.size >= this.maxEntries) {
-      this.expire(now);
-      if (this.entries.size >= this.maxEntries) return false;
+    let slot = this.peers.find(address);
+    if (slot < 0) {
+      if (this.peers.count >= this.maxEntries) this.expire(now);
+      slot = this.peers.claim(address);
+      if (slot < 0) return false;
+      this.tokens[slot] = this.burst;
+      this.times[slot] = now;
     }
-    old = this.entries.get(key);
-    const tokens = old === undefined ? this.burst : Math.min(this.burst, old.tokens + Math.max(0, now - old.time) / this.intervalMilliseconds);
-    this.entries.set(key, { tokens: tokens >= 1 ? tokens - 1 : tokens, time: now });
+    const tokens = Math.min(this.burst, (this.tokens[slot] ?? 0) + Math.max(0, now - (this.times[slot] ?? 0)) / this.intervalMilliseconds);
+    this.tokens[slot] = tokens >= 1 ? tokens - 1 : tokens;
+    this.times[slot] = now;
     return tokens >= 1;
   }
-  expire(now: number): void { for (const [key, entry] of this.entries) if (now - entry.time > this.burst * this.intervalMilliseconds) this.entries.delete(key); }
+  expire(now: number): void { this.peers.retain(slot => now - (this.times[slot] ?? 0) <= this.burst * this.intervalMilliseconds); }
 }
 
 /** Per-source and global budgets for unauthenticated replies, in the manner of ioquake3 SVC_RateLimit. */
@@ -119,7 +126,8 @@ export function q3RconCommand(line: string): string {
 }
 export type RconResult = "throttled" | "disabled" | "denied" | "executed";
 export class RconService {
-  private readonly lastTimes = new Map<string, number>();
+  private readonly sources = new PeerTable(1024);
+  private readonly lastTimes = new Float64Array(1024);
   private readonly guard = new RconGuard();
   private tail: Promise<void> = Promise.resolve();
   constructor(readonly host: RconHost, readonly profile: "q3" | "unified" = "q3", readonly outputBytes = 1008) {
@@ -130,12 +138,12 @@ export class RconService {
     this.tail = operation.then(() => undefined, () => undefined); return operation;
   }
   private async run(from: NetworkAddress, suppliedPassword: string, command: string, milliseconds: number): Promise<RconResult> {
-    const time = this.profile === "q3" ? milliseconds >>> 0 : milliseconds, source = addressKey(from, false), last = this.lastTimes.get(source) ?? 0;
+    const time = this.profile === "q3" ? milliseconds >>> 0 : milliseconds, known = this.sources.find(from), last = known < 0 ? 0 : this.lastTimes[known] ?? 0;
     const next = this.profile === "q3" ? (last + 500) >>> 0 : last + 500;
     // The 500 ms slot is per source so that spoofed packets from other addresses cannot lock the administrator out.
-    if (this.lastTimes.has(source) && time < next || !this.guard.permitted(from, milliseconds)) return "throttled";
-    if (this.lastTimes.size >= 1024 && !this.lastTimes.has(source)) this.lastTimes.clear();
-    this.lastTimes.set(source, time);
+    if (known >= 0 && time < next || !this.guard.permitted(from, milliseconds)) return "throttled";
+    if (known < 0 && this.sources.count >= this.sources.capacity) this.sources.clear();
+    this.lastTimes[known >= 0 ? known : this.sources.claim(from)] = time;
     const password = this.host.password();
     if (password.length === 0) { this.host.reply(from, "No rconpassword set on the server.\n"); return "disabled"; }
     if (!passwordMatches(password, suppliedPassword)) { this.guard.failed(from, milliseconds); this.host.reply(from, "Bad rconpassword.\n"); return "denied"; }

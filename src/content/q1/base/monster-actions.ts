@@ -6,7 +6,6 @@ import type { Q1Actor } from "../foundation/entity.ts";
 import { q1Creatures } from "./creatures.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import { length, normalize, vadd, vscale, vsub, ZERO } from "../foundation/types.ts";
-import { sourceItemStart } from "../foundation/pickups.ts";
 import type { BaseMonster } from "./monsters.ts";
 import { dogJumpTouch, gruntAction } from "./grunt.ts";
 import { castLightning, createMissile, dropBackpack, launchLaser, launchLaserAlt, launchOgreGrenade, launchSpike, launchVoreBall, launchZombieGrenade, spawnMeatSpray } from "./projectiles.ts";
@@ -32,7 +31,7 @@ export function monsterJumpTouch(monster: BaseMonster, other: ActorId): undefine
     if (monster.spec.species === "dog") return dogJumpTouch(monster, other);
     const { game, entity } = monster, tar = monster.spec.species === "tarbaby";
     if (game.health(entity.actor.id) <= 0) return undefined;
-    const damageable = game.host.combat.read(other)?.canTakeDamage ?? false, gated = (monster.source?.jumpAttackGate === true || sourceItemStart.has(game)) && !tar;
+    const damageable = game.host.combat.read(other)?.canTakeDamage ?? false, gated = (monster.source?.jumpAttackGate === true || game.sourceItemStart !== null) && !tar;
     if (damageable && (!tar || game.host.classname(other) !== entity.classname) && (!gated || monster.state.attackFinished < game.time)) {
       if (length(game.body(entity).velocity) > 400) {
         game.damage(other, entity.actor.id, entity.actor.id, (tar ? 10 : 40) + 10 * game.host.random()); if (tar) game.sound(entity, "blob/hit1.wav", "weapon");

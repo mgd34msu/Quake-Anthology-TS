@@ -1,4 +1,6 @@
 import { BoundedQueue } from "../foundation/bounded-queue.ts";
+import { IdIndex } from "../foundation/id-index.ts";
+import { StampSet } from "../foundation/stamp.ts";
 import { StringTable } from "../foundation/strings.ts";
 import { audioOutputFormat, defaultAudioOutputFormat, encodeOutputPcm, resampleQueuedPcm, type AudioOutputFormat } from "./output.ts";
 import { sourceSoundChannel } from "./types.ts";
@@ -51,13 +53,9 @@ function add(output: Float64Array, input: Float64Array | Int16Array, gain: numbe
     }
 }
 /** One output device; each listener owns a shared voice core and acoustic state. */
-const actorSessionNumbers = new WeakMap<object, number>();
-let nextActorSessionNumber = 0;
-/** Remote seats can bring actors from different sessions, whose slots and generations overlap. */
-function actorEntityKey(actor: ActorId, owner: ProviderId | undefined): string {
-    let session = actorSessionNumbers.get(actor.session);
-    if (session === undefined) { session = nextActorSessionNumber++; actorSessionNumbers.set(actor.session, session); }
-    return `${session}:${actor.slot}:${actor.generation}:${owner === undefined ? "" : String(owner)}`;
+function loopsHold(loops: ReadonlyMap<number, LoopSound>, actor: ActorId): boolean {
+    for (const loop of loops.values()) if (loop.actor.equals(actor)) return true;
+    return false;
 }
 export class UnifiedAudio {
     readonly sampleRate: number;
@@ -84,7 +82,9 @@ export class UnifiedAudio {
     private readonly roundMixers: { readonly seat: SeatId; readonly mixer: AudioMixer }[] = [];
     /** Entity numbers are positions here plus one. A retired entry leaves a hole that the next new actor reuses. */
     private readonly actors: ({ readonly actor: ActorId; readonly owner: ProviderId | undefined } | null)[] = [];
-    private readonly actorEntities = new Map<string, number>();
+    /** (slot, generation) to entity number; ActorId.equals and the owner decide among sessions that overlap. */
+    private readonly actorEntities = new IdIndex();
+    private keptEntities = new StampSet(0);
     private readonly freeActorEntities: number[] = [];
     private readonly actorAliases = new Map<number, number[]>();
     private dopplerEnabled = true;
@@ -148,9 +148,18 @@ export class UnifiedAudio {
         }
         return key;
     }
+    /** Entity number of an admitted actor, or 0. */
+    private findEntity(actor: ActorId, owner: ProviderId | undefined): number {
+        const cursor = this.actorEntities.begin(actor.slot, actor.generation);
+        for (let entity = this.actorEntities.next(cursor); entity >= 0; entity = this.actorEntities.next(cursor)) {
+            const entry = this.actors[entity - 1];
+            if (entry !== null && entry !== undefined && entry.owner === owner && entry.actor.equals(actor)) return entity;
+        }
+        return 0;
+    }
     private entity(actor: ActorId, owner?: ProviderId): number {
-        const key = actorEntityKey(actor, owner), known = this.actorEntities.get(key);
-        if (known !== undefined)
+        const known = this.findEntity(actor, owner);
+        if (known > 0)
             return known;
         const original = owner === undefined ? null : this.entity(actor);
         const maximum = this.options.maxActors ?? 65536;
@@ -162,7 +171,8 @@ export class UnifiedAudio {
             entity = this.actors.length;
         }
         this.actors[entity - 1] = { actor, owner };
-        this.actorEntities.set(key, entity);
+        this.actorEntities.reserve(1);
+        this.actorEntities.insert(actor.slot, actor.generation, entity);
         if (original === null) this.actorAliases.set(entity, [entity]);
         if (original !== null) {
             const aliases = this.actorAliases.get(original) ?? [];
@@ -178,21 +188,26 @@ export class UnifiedAudio {
     /** Actors spawn with new generations for the whole life of a world, so entries leave once nothing can still hear them. */
     retireAbsentActors(live: readonly ActorId[]): void {
         this.check();
-        const kept = new Set(live.map(actor => actorEntityKey(actor, undefined)));
-        for (const state of this.seats) if (state.listener.actor !== null) kept.add(actorEntityKey(state.listener.actor, undefined));
+        if (this.keptEntities.capacity <= this.actors.length) this.keptEntities = new StampSet(Math.max(64, this.actors.length * 2));
+        const kept = this.keptEntities;
+        kept.begin();
+        for (const actor of live) { const entity = this.findEntity(actor, undefined); if (entity > 0) kept.mark(entity); }
+        for (const state of this.seats) if (state.listener.actor !== null) { const entity = this.findEntity(state.listener.actor, undefined); if (entity > 0) kept.mark(entity); }
+        let retiredAny = false;
         for (const [index, entry] of this.actors.entries()) {
-            if (entry === null || entry.owner !== undefined || kept.has(actorEntityKey(entry.actor, undefined))) continue;
+            if (entry === null || entry.owner !== undefined || kept.test(index + 1)) continue;
             const entities = this.actorAliases.get(index + 1) ?? [index + 1];
-            if (this.seats.some(state => [...state.loops.values()].some(loop => loop.actor.equals(entry.actor)) || entities.some(entity => state.mixer.entityActive(entity)))) continue;
+            if (this.seats.some(state => loopsHold(state.loops, entry.actor) || entities.some(entity => state.mixer.entityActive(entity)))) continue;
             for (const entity of entities) {
                 const retired = this.actors[entity - 1];
-                if (retired !== null && retired !== undefined) this.actorEntities.delete(actorEntityKey(retired.actor, retired.owner));
+                if (retired !== null && retired !== undefined) retiredAny = true;
                 this.actors[entity - 1] = null;
                 this.positions.delete(entity);
                 this.freeActorEntities.push(entity);
             }
             this.actorAliases.delete(index + 1);
         }
+        if (retiredAny) this.actorEntities.retain((_slot, _generation, entity) => this.actors[entity - 1] !== null);
     }
     private seat(id: SeatId): SeatAudio {
         const seat = this.seats.find(value => value.listener.seat.equals(id));
