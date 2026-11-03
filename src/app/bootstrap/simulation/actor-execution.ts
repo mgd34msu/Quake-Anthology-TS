@@ -39,7 +39,7 @@ export interface ActorExecutionFrame {
 
 const down: Vec3 = { x: 0, y: 0, z: -1 };
 function model(path: string): number | null { return /^\*[0-9]+$/.test(path) ? Number(path.slice(1)) : null; }
-function seconds(time: SourceTime): number { return time.kind === "seconds" ? time.value : time.value / 1000; }
+export function seconds(time: SourceTime): number { return time.kind === "seconds" ? time.value : time.value / 1000; }
 function add(a: Vec3, b: Vec3): Vec3 { return { x: Math.fround(a.x + b.x), y: Math.fround(a.y + b.y), z: Math.fround(a.z + b.z) }; }
 
 export function actorMotion(entry: ActorExecution, body: BodyState): Q2Motion {

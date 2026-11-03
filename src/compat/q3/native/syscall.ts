@@ -18,19 +18,30 @@ export type NativeQ3SyscallHandler = (words: DataView) => number | Promise<numbe
 export class NativeQ3Syscalls {
   readonly address: GuestAddress;
   private readonly callback: GuestHostCallback;
+  /** One word buffer per nesting level: a trap that waits on the host, or enters the module again, keeps its words while the inner traps use their own. */
+  private readonly buffers: DataView[] = [];
+  private depth = 0;
+  private readonly layouts = new Array<GuestValueLayout>(NATIVE_Q3_SYSCALL_WORDS - 1).fill({ kind: "scalar", storage: "int32" });
   constructor(callbacks: GuestCallbackTable, abi: NativeAbi, handler: NativeQ3SyscallHandler) {
     if (abi.pointerBytes !== 4) throw new Error("Q3 1.32 syscalls require the i386 source ABI");
+    const complete = (value: number): GuestCallResult => ({ kind: "int32", value: value | 0 });
     this.callback = { id: `q3-native-syscall:${callbacks.memory.module.id}`, signature: nativeQ3Signature(abi, ["int32"], "int32", true),
       invoke: (_context, args) => {
-        const words = new DataView(new ArrayBuffer(NATIVE_Q3_SYSCALL_WORDS * 4));
-        for (let index = 0; index < NATIVE_Q3_SYSCALL_WORDS; index++) words.setInt32(index * 4, Number(BigInt.asIntN(32, integer(args, index))), true);
-        const result = handler(words);
-        const complete = (value: number): GuestCallResult => ({ kind: "int32", value: value | 0 });
-        return typeof result === "number" ? complete(result) : result.then(complete);
+        const level = this.depth++;
+        let words = this.buffers[level];
+        if (words === undefined) { words = new DataView(new ArrayBuffer(NATIVE_Q3_SYSCALL_WORDS * 4)); this.buffers[level] = words; }
+        let pending = false;
+        try {
+          for (let index = 0; index < NATIVE_Q3_SYSCALL_WORDS; index++) words.setInt32(index * 4, Number(BigInt.asIntN(32, integer(args, index))), true);
+          const result = handler(words);
+          if (typeof result === "number") return complete(result);
+          pending = true;
+          return result.then(complete).finally(() => { this.depth--; });
+        } finally { if (!pending) this.depth--; }
       } };
     this.address = callbacks.bind(this.callback);
   }
   variadicLayouts(callback: GuestHostCallback, _fixed: readonly GuestCallValue[]): readonly GuestValueLayout[] | null {
-    return callback.id === this.callback.id ? new Array<GuestValueLayout>(NATIVE_Q3_SYSCALL_WORDS - 1).fill({ kind: "scalar", storage: "int32" }) : null;
+    return callback.id === this.callback.id ? this.layouts : null;
   }
 }

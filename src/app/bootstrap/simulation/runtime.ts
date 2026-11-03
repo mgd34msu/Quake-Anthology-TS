@@ -44,7 +44,7 @@ import { nativeProviderTiming } from "../../../content/catalog/timing.ts";
 import { loadServerLocalizationResources } from "../../../text/localization-resources.ts";
 import { q2LocalizedText } from "../q2-localization.ts";
 import type { WeaponBehaviorRuntimeCheckpoint } from "./weapon-behavior-runtime.ts";
-import { quakeCFreeMovement } from "./quakec-client-adapter.ts";
+import { seconds } from "./actor-execution.ts";
 import { quakeWorldCommandSlices } from "../../../movement/q1/quakeworld.ts";
 import { prepareNativeQ2Map } from "./native-q2-map.ts";
 import { planGuestMonsters, GuestMonsterPlans, type GuestMonsterPlan } from "./guest-monsters.ts";
@@ -274,7 +274,6 @@ import { q1PowerupTimers, q2PowerupTimers, q3PowerupTimers } from "./powerup-tim
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function add(a: Vec3, b: Vec3): Vec3 { return { x: Math.fround(a.x + b.x), y: Math.fround(a.y + b.y), z: Math.fround(a.z + b.z) }; }
 function subtract(a: Vec3, b: Vec3): Vec3 { return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }; }
-function seconds(time: SourceTime): number { return time.kind === "seconds" ? time.value : time.value / 1000; }
 function replacedSupplyItems(profile: PickupSupplyProfile): readonly ItemId[] {
   const mappings = [...profile.ammo, ...profile.weapons], retained = new Set(mappings.flatMap(mapping => mapping.destinations));
   return mappings.map(mapping => mapping.source).filter(source => !retained.has(source));
