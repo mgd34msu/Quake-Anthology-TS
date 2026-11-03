@@ -777,6 +777,7 @@ export class SharedSimulation implements Simulation {
   private disposeSourceCombat: (() => undefined) | null = null;
   private sourceFrame: FrameContext;
   private readonly settledQ3Sources = new WeakSet<Q3SourceRuntime>();
+  private admissionSettleMilliseconds = 0;
   private hostMilliseconds = 0;
   private q1PauseState = false;
   private sourceSchedulingMilliseconds = 0;
@@ -7089,6 +7090,7 @@ export class SharedSimulation implements Simulation {
     if (!this.settledQ3Sources.has(source) && source.level.frameNum === 0 && !this.stepping && this.sourceRoundSettlement.kind === "none") {
       this.settledQ3Sources.add(source);
       for (let frame = 0; frame < 3; frame++) this.step({ elapsedMilliseconds: 100, commands: [] });
+      this.admissionSettleMilliseconds += 300;
     }
     const actor = this.prepareQ3Client(client, source);
     source.admitPlayer(actor, client.slot);
@@ -7423,6 +7425,13 @@ export class SharedSimulation implements Simulation {
     if (existing !== null && source.game.isActiveClient(existing)) throw new Error("NetQuake client is already active");
     if (userinfo !== undefined) source.game.setClientInfo(client, userinfo);
     return source.game.reservedClient(client).id;
+  }
+
+  /** Source time that admission ran on its own; the host's clock must account for it so player commands stay on the level clock. */
+  takeAdmissionSettleMilliseconds(): number {
+    const settled = this.admissionSettleMilliseconds;
+    this.admissionSettleMilliseconds = 0;
+    return settled;
   }
 
   admitPlayer(client: ClientId, travel: SimulationTravel | undefined = this.options.travel, userinfo?: string): PlayerAdmission {

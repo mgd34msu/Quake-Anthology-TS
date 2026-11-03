@@ -1222,14 +1222,15 @@ test("authored Q1 platform pauses local time when blocked and restores its sourc
     const trigger = [...source.game.entities.values()].find(entity => entity.owner?.equals(platform.actor.id) && entity.touch !== null);
     if (trigger === undefined) throw new Error("Missing authored e1m1 platform and trigger");
     const initial = source.game.body(platform).origin;
-    // A synthetic tall rider deliberately intersects the authored ceiling; the brush stays authored.
+    // CORE-002: SV_HullForEntity picks the rider's hull by width, so this 32-wide rider uses the player hull;
+    // its top is placed so the platform's first step would push it into the authored ceiling.
     const blocker = source.game.create("info_notnull");
     blocker.movement = "step";
     blocker.solid = "bbox";
     blocker.movementFlags = 512;
     source.game.setBody(blocker, {
-      origin: { x: 792, y: 512, z: -296 },
-      bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 400 } },
+      origin: { x: 792, y: 512, z: 244 },
+      bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } },
       ground: platform.actor.id,
     });
     source.game.link(blocker);
@@ -1254,7 +1255,7 @@ test("authored Q1 platform pauses local time when blocked and restores its sourc
       if (samePlatform === null || sameBlocker === null || sameTrigger === null) throw new Error("Missing saved pusher actors");
       expect(samePlatform.number("ltime")).toBe(platform.number("ltime"));
       expect(samePlatform.nextThink).toBe(platform.nextThink);
-      expect(other.game.capture().version).toBe(5);
+      expect(other.game.capture().version).toBe(6);
       source.game.remove(blocker);
       other.game.remove(sameBlocker);
       simulation.step({ elapsedMilliseconds: 100, commands: [] });

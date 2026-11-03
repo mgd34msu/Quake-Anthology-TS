@@ -8075,6 +8075,7 @@ export class Application {
       const frameMilliseconds = captureFrame.milliseconds;
       if (captureFrame.capture) this.capture?.captureFrame();
       this.tools?.timer.stamp("frame begin");
+      this.elapsed += this.simulation.takeAdmissionSettleMilliseconds();
       if (!paused) this.elapsed += frameMilliseconds;
       if (this.closed) throw new Error("Application closed during step");
       const serverCvars = this.sourceCvars();

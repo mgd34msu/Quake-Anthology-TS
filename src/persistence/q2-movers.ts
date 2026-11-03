@@ -68,6 +68,8 @@ export function readQ2MoversCheckpoint(reader: SaveReader): Q2MoversCheckpoint {
       actor: readSavedActor(value.field("actor")),
       destination: value.field("destination").nullable(readSavedActor),
       debounce: value.field("debounce").number(),
+      // Saves from before the destination wait was recorded omit it; the mover restore then reads 0.
+      ...(value.field("wait").value === undefined ? {} : { wait: value.field("wait").number() }),
       ship: value.field("ship").boolean(),
     })),
     linear: readQ2LinearMotionCheckpoint(reader.field("linear")),

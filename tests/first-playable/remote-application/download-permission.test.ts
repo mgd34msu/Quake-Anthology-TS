@@ -41,7 +41,9 @@ for (const mode of ["disabled", "http-off"] satisfies readonly ("disabled" | "ht
       },
     });
     const native = spyOn(Q2PeerDownload.prototype, "begin"),
-      writes = spyOn(DownloadSink, "create"),
+      created = spyOn(DownloadSink, "create"),
+      // SRC4Q2-016: Q2 downloads stage through the resumable sink.
+      resumed = spyOn(DownloadSink, "resumable"),
       consolePrint = spyOn(SeatConsole.prototype, "print");
     let server: Application | null = null,
       client: RemoteApplication | null = null;
@@ -123,12 +125,12 @@ for (const mode of ["disabled", "http-off"] satisfies readonly ("disabled" | "ht
       expect(httpRequests).toEqual([]);
       if (mode === "disabled") {
         expect(native.mock.calls).toHaveLength(0);
-        expect(writes.mock.calls).toHaveLength(0);
+        expect(created.mock.calls.length + resumed.mock.calls.length).toBe(0);
         expect(await Bun.file(destination).exists()).toBe(false);
         expect((await readdir(join(clientUsers, "q2/baseq2"), { recursive: true })).some(path => path.includes(".download-"))).toBe(false);
       } else {
         expect(native.mock.calls.map(call => call[1])).toContain("sound/permission-fixture.wav");
-        expect(writes.mock.calls.length).toBeGreaterThan(0);
+        expect(created.mock.calls.length + resumed.mock.calls.length).toBeGreaterThan(0);
         expect(await Bun.file(destination).bytes()).toEqual(new Uint8Array(sound));
       }
       const local = remote.localPlayers[0];
@@ -149,7 +151,8 @@ for (const mode of ["disabled", "http-off"] satisfies readonly ("disabled" | "ht
       await server?.close();
       await http.stop(true);
       native.mockRestore();
-      writes.mockRestore();
+      created.mockRestore();
+      resumed.mockRestore();
       consolePrint.mockRestore();
       await rm(root, { recursive: true, force: true });
     }
