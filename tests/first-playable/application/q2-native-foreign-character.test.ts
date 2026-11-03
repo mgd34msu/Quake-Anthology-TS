@@ -253,7 +253,7 @@ async function corpseLane(
       respawned: app.simulation.playerUi(local.actor).health > 0,
       corpses: others.filter(p => p.path === "progs/player.mdl").map(p => `${p.family}#${p.frame}`),
       guestCorpses: others.filter(p => p.path.startsWith("players/") && !p.path.includes("deadbods")).map(p => p.path),
-      heads: others.filter(p => p.path === "models/objects/gibs/skull/tris.md2").length,
+      heads: others.filter(p => p.path === "models/objects/gibs/skull/tris.md2" || p.path === "models/objects/gibs/head2/tris.md2").length,
     };
   } finally {
     try {
@@ -277,7 +277,8 @@ corpusTest("q2/baseq2/pak0.pak", "q2/baseq2/gamex86.dll")(
 
 // The rerelease DLL does not respawn a lone coop player in place while g_coop_squad_respawn is on (its default): the player waits for
 // a teammate and the level restarts. With the option off the DLL respawns through CopyToBodyQueue like the classic one, but its body
-// queue entry leaves the old body as a thrown head gib, so the guest player model never reaches the draw list.
+// queue entry leaves the old body as a thrown head gib (the DLL picks the skull or head2 model), so the guest player model never reaches
+// the draw list. The DLL seeds its mt19937 from the system clock, so either model can appear on any run.
 corpusTest("q2/baseq2/pak0.pak", "q2/rerelease/baseq2/game_x64.dll")(
   "rerelease native DLL respawns a coop player in place and fills the body queue",
   async () => {
