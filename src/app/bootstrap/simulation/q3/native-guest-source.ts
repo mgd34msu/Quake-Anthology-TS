@@ -239,10 +239,10 @@ export class Q3NativeGuestSource implements Q3GameEngine {
   /** Engine services the loaded Quake Live module has called, by import slot. */
   get coverage(): readonly { readonly name: string; readonly reached: number }[] { return this.lifecycle.imports?.coverage.filter(call => call.reached > 0) ?? []; }
 
-  private live<T>(run: () => Promise<T>): Promise<T> {
-    if (this.phase === "closed") return Promise.reject(new Error("Native Q3 guest is closed"));
-    if (this.phase !== "running") return Promise.reject(new Error("Native Q3 guest has not run GAME_INIT"));
-    return run();
+  private async live<T>(run: () => Promise<T>): Promise<T> {
+    if (this.phase === "closed") throw new Error("Native Q3 guest is closed");
+    if (this.phase !== "running") throw new Error("Native Q3 guest has not run GAME_INIT");
+    return await run();
   }
   async initializeAsync(levelTime: number, randomSeed: number, restart = false): Promise<void> {
     if (this.phase === "closed") throw new Error("Native Q3 guest is closed");

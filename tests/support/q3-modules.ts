@@ -108,7 +108,7 @@ function q3Code(codeAt: number, dataAt: number): { readonly code: number[]; read
 
 /** PE32 with .text (code), .rdata (export directory for dllEntry and vmMain) and .data (strings, tables), loaded at its preferred base. */
 export function authoredQ3Pe(): Uint8Array {
-  const bytes = new Uint8Array(0x1000), view = new DataView(bytes.buffer);
+  const bytes = new Uint8Array(0xc00), view = new DataView(bytes.buffer);
   const { code, dllEntry, vmMain } = q3Code(Q3_MODULE_BASE + 0x1000, Q3_MODULE_BASE + 0x3000);
   const u16 = (offset: number, value: number): void => { view.setUint16(offset, value, true); };
   const u32 = (offset: number, value: number): void => { view.setUint32(offset, value, true); };
@@ -129,9 +129,8 @@ export function authoredQ3Pe(): Uint8Array {
   u32(0x600 + 12, 0x2090); u32(0x600 + 16, 1); u32(0x600 + 20, 2); u32(0x600 + 24, 2); u32(0x600 + 28, 0x2040); u32(0x600 + 32, 0x2050); u32(0x600 + 36, 0x2060);
   u32(0x640, 0x1000 + dllEntry); u32(0x644, 0x1000 + vmMain); u32(0x650, 0x2070); u32(0x654, 0x2080); u16(0x660, 0); u16(0x662, 1);
   text(0x670, "dllEntry"); text(0x680, "vmMain"); text(0x690, "q3synthetic.dll");
-  const out = new Uint8Array(0xc00); out.set(bytes);
-  for (const [offset, value] of Object.entries(Q3_STRINGS)) out.set(new TextEncoder().encode(`${value}\0`), 0x800 + Number(offset));
-  return out;
+  for (const [offset, value] of Object.entries(Q3_STRINGS)) text(0x800 + Number(offset), value);
+  return bytes;
 }
 
 /** The same module as a Linux i386 ELF shared object: dllEntry and vmMain exports, loaded at 0x10000000 by the System V runtime. */

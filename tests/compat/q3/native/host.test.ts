@@ -32,7 +32,7 @@ async function host(bytes: Uint8Array, name: string, profile: NativeExecution["p
   try {
     const artifact = await mounts.open(name);
     if (artifact === null) throw new Error("Synthetic Q3 module was not mounted");
-    const execution: NativeExecution = { kind: "native", owner: { provider: "q3:native-test", content: identity.content }, role: "server-game", api: { kind: "q3-qagame", version: 7 }, profile, artifact: artifact.reference };
+    const execution: NativeExecution = { kind: "native", owner: { provider: "q3:native-test", content: identity.content }, role: "server-game", api: { kind: "q3-qagame", version: 8 }, profile, artifact: artifact.reference };
     const prepared = await prepareQ3Native(execution, mounts);
     const events: string[] = [], configstrings = new Map<number, string>(), arguments_ = { current: [] as readonly string[] };
     const cvars = new CvarRegistry({ dialect: "q3", context: { session: createIdentityOwner("native-q3-host").session, origin: { kind: "server-console" } }, print: text => events.push(text) });
@@ -44,7 +44,7 @@ async function host(bytes: Uint8Array, name: string, profile: NativeExecution["p
     // The shared server trap table's handlers, over recording services: the module's traps decode exactly as an interpreted module's do.
     const common = { role: "qagame" as const, cvars, print: (text: string) => events.push(text), milliseconds: () => 12345, arguments: () => arguments_.current, realTime: () => 0,
       commands: { executeNow: (text: string | null) => { events.push(`now:${text ?? ""}`); }, insert: (text: string) => { events.push(`insert:${text}`); }, append: (text: string) => { events.push(`append:${text}`); } } };
-    const client = { abiProfile: "q3-modern" as const, maxClients: 4, getUserinfo: () => "", setUserinfo: () => undefined, getUserCommand: () => ({ serverTime: 0, angles: { x: 0, y: 0, z: 0 }, buttons: 0, weapon: 0, forwardmove: 0, rightmove: 0, upmove: 0 }),
+    const client = { abiProfile: "q3-modern" as const, maxClients: 4, getUserinfo: () => "", setUserinfo: () => undefined, getUserCommand: () => ({ serverTime: 0, angles: [0, 0, 0] as [number, number, number], buttons: 0, weapon: 0, forwardmove: 0, rightmove: 0, upmove: 0 }),
       dropClient: async () => undefined, sendServerCommand: (slot: number, text: string) => { events.push(`${slot}:${text}`); } };
     const traps: Parameters<typeof Q3NativeGuestSource.create>[0]["traps"] = call => qvmCommonSyscall(call, common) ?? qvmClientGameSyscall(call, client)
       ?? qvmServerInformationSyscall(call, { abiProfile: "q3-modern", cvars, configstrings: services.configstrings }) ?? rejectQvmSyscall(call);
