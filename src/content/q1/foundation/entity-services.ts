@@ -136,6 +136,7 @@ export class Q1EntityServices {
     this.configuredOptions = options;
     this.nextDynamicSlot = (options.maxClients ?? 0) + 1;
     this.named.register("SUB_Remove", { action: (game, entity) => game.remove(entity), touch: (game, entity) => game.remove(entity) });
+    this.named.register("base:explosion_frame", { action: (game, entity) => { entity.frame++; return entity.frame >= 6 ? game.remove(entity) : game.schedule(entity, 0.1, game.named.action(entity, "base:explosion_frame")); } });
     this.named.register("SUB_Null", { action: () => undefined });
     this.named.register("DelayThink", { action: (game, entity) => { game.useTargets(entity, entity.activator); return game.remove(entity); } });
     registerMoverCallbacks(this); registerSpawnCallbacks(this); registerPickupCallbacks(this); registerWeaponCallbacks(this);

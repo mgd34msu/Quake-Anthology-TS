@@ -245,8 +245,7 @@ export function registerProjectileCallbacks(game: Q1EntityServices): undefined {
   game.named.register("base:backpack_touch", { touch: backpackTouch }); game.named.register("base:laser_touch", { touch: laserTouch }); game.named.register("base:laser_alt_touch", { touch: laserAltTouch });
   game.named.register("base:ogre_grenade_touch", { touch: ogreGrenadeTouch }); game.named.register("base:ogre_grenade_explode", { action: ogreGrenadeExplode });
   game.named.register("base:zombie_grenade_touch", { touch: zombieGrenadeTouch }); game.named.register("base:remove_touch", { touch: (runtime, entity) => runtime.remove(entity) });
-  game.named.register("base:vore_touch", { touch: voreTouch }); game.named.register("base:vore_home", { action: voreHome });
-  game.named.register("base:explosion_frame", { action: (runtime, entity) => { entity.frame++; return entity.frame >= 6 ? runtime.remove(entity) : runtime.schedule(entity, 0.1, runtime.named.action(entity, "base:explosion_frame")); } }); return undefined;
+  game.named.register("base:vore_touch", { touch: voreTouch }); game.named.register("base:vore_home", { action: voreHome }); return undefined;
 }
 export function castLightning(monster: BaseMonster): undefined {
   const { game, entity } = monster, target = monster.target; if (target === null) return undefined;

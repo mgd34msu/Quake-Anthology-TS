@@ -13,7 +13,7 @@ import type { Q1TravelState } from "../../../content/q1/base/index.ts";
 import { Q2Lmctf } from "../../../content/q2/multiplayer/lmctf/runtime.ts";
 import type { Q3SourceRuntime } from "./q3/runtime.ts";
 import type { Q1Powerup } from "../../../content/q1/foundation/types.ts";
-import type { DamageDecision, ItemId, SourceDamageModifier } from "../../../contracts/gameplay.ts";
+import type { DamageDecision, InventoryEntry, ItemId, SourceDamageModifier } from "../../../contracts/gameplay.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
 import type { SharedPickupAdmission } from "../../../world/gameplay/pickups.ts";
@@ -90,10 +90,31 @@ import { quakeCCharacterAnimation } from "./quakec-character-animation.ts";
 import { decodeQ1FoundationCheckpoint, type SaveReader } from "../../../persistence/index.ts";
 import { restoreQ2Product } from "../../../content/composition/q2/index.ts";
 import { restoreQ2ServerCvars, savedQ2ServerCvarsHave } from "../../../settings/server/index.ts";
-import { simulationProviderCheckpoint, nativeQ3RuntimeReader, savedSourceCvars } from "./save.ts";
+import { simulationProviderCheckpoint, nativeQ3RuntimeReader, savedSourceCvars, nativeQ2RereleaseSave, nativeQ2OriginalSave, nativeQ2SavedClients } from "./save.ts";
+import { encodeQ2RereleaseNativeSave } from "./native-q2-rerelease-save.ts";
+import type { RereleaseGuestSave } from "./rerelease-guest-world.ts";
+import { encodeQ2ClassicOriginalSave } from "../../../persistence/q2-classic-guest.ts";
 import { restoreQ2Attack } from "../../../content/q2/foundation/checkpoint.ts";
 import type { AttackProvenance } from "../../../contracts/gameplay.ts";
 import type { SourceRuntime } from "./runtime.ts";
+
+export interface GuestMonsterProxy {
+  allocate(): number | null;
+  bind(slot: number, actor: OwnedActor): void;
+}
+
+/** The server state an original native save carries. */
+export interface NativeSavedServer {
+  readonly server: { readonly configstrings: readonly { readonly index: number; readonly value: string }[]; readonly portals: readonly { readonly portal: number; readonly open: boolean }[] };
+}
+
+/** The checks and request a restore of an original native save runs with. */
+export interface NativeRestorePlan<O> {
+  readonly original: O;
+  afterInit(): void;
+  readonly request: { readonly map: string; readonly entities: string; readonly spawnPoint: string };
+  applyServerState(): void;
+}
 
 type Of<K extends SourceRuntime["kind"]> = Extract<SourceRuntime, { readonly kind: K }>;
 
@@ -143,6 +164,10 @@ export interface SourceStrategyHost {
   body(actor: ActorId): { readonly origin: Vec3; readonly velocity: Vec3 } | null;
   sourceOf(actor: ActorId): { readonly provider: ProviderId; readonly slot: number } | null;
   readonly q2ServerRegistry: CvarRegistry | null;
+  readonly areaPortals: ReadonlyMap<number, boolean>;
+  registerQ2NativeClient(client: ClientId, mode: "live" | "restore"): OwnedActor;
+  bindEquipmentInventory(actor: OwnedActor, initial: readonly InventoryEntry[]): void;
+  nativeRestorePrelude<O extends NativeSavedServer>(source: Of<"q2-native">, original: O | null, visit: (original: O) => void): NativeRestorePlan<O>;
   readonly q1Campaign: Pick<Extract<SimulationTravel["source"], { readonly kind: "q1" }>, "flags" | "skill">;
   assertOutputConsumed(): void;
   q3ArsenalsComplete(): boolean;
@@ -522,6 +547,26 @@ export interface SourceStrategy {
   attackArsenal(actor: ActorId): ArsenalState | null;
   playerWeapon(player: MovementPlayer): void;
   /** Typed access to the source this strategy wraps; null for every other source. */
+  /** Whether the source hosts guest monsters projected onto the shared world. */
+  /** The kind of source this strategy wraps, for descriptors. */
+  readonly kind: SourceRuntime["kind"];
+  /** Gives the player a thirty second quad where the source has one. */
+  grantQuad(actor: ActorId): void;
+  admitsGuestMonsters(): boolean;
+  /** Refuses an original save the source cannot represent. */
+  assertSavable(): void;
+  /** The source's own save taken a frame at a time, when it has one. */
+  captureGuestSave(nextFrame: () => Promise<void>): Promise<RereleaseGuestSave | undefined>;
+  /** The source's own original save as a checkpoint provider; null when it keeps none. */
+  originalSave(guestSave?: RereleaseGuestSave): SaveProvider | null;
+  /** Restores the source's own original save a frame at a time. */
+  restoreLoading(save: SaveImage, nextFrame: () => Promise<void>): Promise<void>;
+  /** Restores the source's own original save and reconnects its saved clients. */
+  restoreGuest(save: SaveImage, nativeRestored: boolean): void;
+  /** The map edition a native guest declares itself; null defers to the map's own edition. */
+  guestEdition(): "classic" | "rerelease" | null;
+  /** The guest stand-in entities shared monsters need to be addressed by guest slot; null when the guest needs none. */
+  monsterProxy(): GuestMonsterProxy | null;
   asQ1(): Of<"q1"> | null;
   asQ2(): Of<"q2"> | null;
   asQuakeC(): Of<"quakec"> | null;
@@ -539,6 +584,8 @@ export interface SourceStrategy {
   finishFrame(run: boolean): void;
   concludeFrame(): void;
   q1Powerups(actor: ActorId): ReadonlyMap<Q1Powerup, number> | undefined;
+  /** The player's powerup expiry times as foreign monsters read them; guest worlds keep no public timers. */
+  foreignPowerups(actor: ActorId): { readonly quadUntil: number; readonly doubleUntil: number; readonly invulnerabilityUntil: number };
   q1CharacterFrame(actor: ActorId, frame: Parameters<Of<"q1">["composition"]["characterFrame"]>[1]): void;
   teamGame(): boolean;
   serverCvars(): ServerCvarRegistry | null;
@@ -613,6 +660,8 @@ function sameInfo(previous: ReadonlyMap<string, string>, values: ReadonlyMap<str
 }
 
 class LoadingStrategy implements SourceStrategy {
+  readonly kind: SourceRuntime["kind"] = "loading";
+  grantQuad(_actor: ActorId): void { /* the source has no quad */ }
   userinfo(_actor: ActorId): string | null { return null; }
   storeUserinfo(_actor: ActorId, _client: ClientId, _userinfo: string): void { throw new Error("Component userinfo requires an initialized source"); }
   updateUserinfo(_actor: ActorId, _userinfo: string, _previous: string | null): void | Promise<void> { /* no source yet: nothing stores userinfo */ }
@@ -794,6 +843,14 @@ class LoadingStrategy implements SourceStrategy {
   animation(_input: AnimationStepInput): AnimationStepResult | null { return null; }
   attackArsenal(_actor: ActorId): ArsenalState | null { return null; }
   playerWeapon(_player: MovementPlayer): void { /* only Q1 and Q2 sources run a client weapon frame */ }
+  admitsGuestMonsters(): boolean { return false; }
+  assertSavable(): void { /* the source has no original save restrictions */ }
+  captureGuestSave(_nextFrame: () => Promise<void>): Promise<RereleaseGuestSave | undefined> { return Promise.resolve(undefined); }
+  originalSave(_guestSave?: RereleaseGuestSave): SaveProvider | null { return null; }
+  restoreLoading(_save: SaveImage, _nextFrame: () => Promise<void>): Promise<void> { throw new Error("Native original loading requires its source provider"); }
+  restoreGuest(_save: SaveImage, _nativeRestored: boolean): void { /* only a native Q2 source restores its own original save */ }
+  guestEdition(): "classic" | "rerelease" | null { return null; }
+  monsterProxy(): GuestMonsterProxy | null { return null; }
   asQ1(): Of<"q1"> | null { return null; }
   asQ2(): Of<"q2"> | null { return null; }
   asQuakeC(): Of<"quakec"> | null { return null; }
@@ -807,6 +864,7 @@ class LoadingStrategy implements SourceStrategy {
   finishFrame(_run: boolean): void { /* the source has no end-of-frame work */ }
   concludeFrame(): void { /* the source has no frame conclusion */ }
   q1Powerups(_actor: ActorId): ReadonlyMap<Q1Powerup, number> | undefined { return undefined; }
+  foreignPowerups(_actor: ActorId): { readonly quadUntil: number; readonly doubleUntil: number; readonly invulnerabilityUntil: number } { return { quadUntil: 0, doubleUntil: 0, invulnerabilityUntil: 0 }; }
   q1CharacterFrame(_actor: ActorId, _frame: Parameters<Of<"q1">["composition"]["characterFrame"]>[1]): void { /* only a Q1 source records its character frames */ }
   teamGame(): boolean { throw new Error("Team match policy requires an initialized source"); }
   serverCvars(): ServerCvarRegistry | null { return null; }
@@ -847,6 +905,7 @@ class LoadedStrategy extends LoadingStrategy {
 
 class Q1Strategy extends LoadedStrategy {
   constructor(private readonly source: Of<"q1">, private readonly host: SourceStrategyHost) { super(); }
+  override readonly kind = "q1" as const;
   override restoreFoundation(save: SaveImage, reader: SaveReader): void {
     if (savedSourceCvars(save) === undefined) reader.field("sourceCvars").list(value => { this.source.cvars.set(value.field("name").string(), value.field("value").string(), true); return undefined; });
     this.source.game.restore(decodeQ1FoundationCheckpoint(simulationProviderCheckpoint(save, "q1:foundation").bytes), { scheduleThinks: false });
@@ -858,7 +917,12 @@ class Q1Strategy extends LoadedStrategy {
     return { quadUntil: this.source.game.player(actor)?.powerups.get("quad") ?? 0, hasteUntil: 0 };
   }
   override characterPose(actor: ActorId): ReturnType<Of<"q1">["composition"]["characterPose"]> { return this.source.composition.characterPose(actor); }
+  override grantQuad(actor: ActorId): void { this.source.game.player(actor)?.powerups.set("quad", this.source.game.time + 30); }
   override q1Powerups(actor: ActorId): ReadonlyMap<Q1Powerup, number> | undefined { return this.source.game.player(actor)?.powerups; }
+  override foreignPowerups(actor: ActorId): { readonly quadUntil: number; readonly doubleUntil: number; readonly invulnerabilityUntil: number } {
+    const powers = this.source.game.player(actor)?.powerups;
+    return { quadUntil: powers?.get("quad") ?? 0, doubleUntil: 0, invulnerabilityUntil: powers?.get("invulnerability") ?? 0 };
+  }
   override q1CharacterFrame(actor: ActorId, frame: Parameters<Of<"q1">["composition"]["characterFrame"]>[1]): void { this.source.composition.characterFrame(actor, frame); }
   override concludeFrame(): void { if (this.source.game.forceRetouch > 0) this.source.game.forceRetouch--; }
   override teamGame(): boolean { return this.source.composition.selection.program === "ctf" || this.source.cvars.variableValue("teamplay") !== 0; }
@@ -1119,6 +1183,7 @@ class Q1Strategy extends LoadedStrategy {
 
 class QuakeCStrategy extends LoadedStrategy {
   constructor(private readonly source: Of<"quakec">, private readonly host: SourceStrategyHost) { super(); }
+  override readonly kind = "quakec" as const;
   override damageCommitted(actor: OwnedActor, decision: DamageDecision): void {
     const player = this.host.playerStates.get(actor);
     if (player?.character === "q2" && decision.appliedDamage > 0)
@@ -1168,6 +1233,7 @@ class QuakeCStrategy extends LoadedStrategy {
     this.host.forgetPlayer(player);
     return "done";
   }
+  override admitsGuestMonsters(): boolean { return true; }
   override asQuakeC(): Of<"quakec"> { return this.source; }
   override baseArsenal(player: MovementPlayer): ArsenalState { return this.source.game.clientArsenal(player.actor.id); }
   override weaponFacts(actor: ActorId): WeaponFacts {
@@ -1317,6 +1383,7 @@ class QuakeCStrategy extends LoadedStrategy {
 
 class Q2Strategy extends LoadedStrategy {
   constructor(private readonly source: Of<"q2">, private readonly host: SourceStrategyHost) { super(); }
+  override readonly kind = "q2" as const;
   override restoreFoundation(save: SaveImage): void {
     restoreQ2Product(this.source.product, save.providers);
     const savedCvars = savedSourceCvars(save), registry = this.host.q2ServerRegistry;
@@ -1687,6 +1754,7 @@ class Q2Strategy extends LoadedStrategy {
 
 class Q2NativeStrategy extends LoadedStrategy {
   constructor(private readonly source: Of<"q2-native">, private readonly host: SourceStrategyHost) { super(); }
+  override readonly kind = "q2-native" as const;
   override checkOutputClaim(channels: readonly string[], movement: string | undefined): void {
     super.checkOutputClaim(channels, movement);
     if (channels.includes("body-shape") && this.source.edition === "rerelease" && this.source.game.source.host.module.requireWorldProfile().movement.body === undefined)
@@ -1732,6 +1800,82 @@ class Q2NativeStrategy extends LoadedStrategy {
     this.host.releaseGrapple(actor); this.host.removeHandGrenade(actor);
     this.source.game.disconnect(client.slot + 1); this.source.clients.delete(client);
     return "done";
+  }
+  override admitsGuestMonsters(): boolean { return true; }
+  override guestEdition(): "classic" | "rerelease" { return this.source.edition; }
+  override assertSavable(): void {
+    const registry = this.host.q2ServerRegistry;
+    if (this.source.edition === "rerelease" && (registry === null || registry.variableValue("deathmatch") !== 0))
+      throw new Error("Native Quake II original saves require a non-deathmatch source game");
+  }
+  override captureGuestSave(nextFrame: () => Promise<void>): Promise<RereleaseGuestSave | undefined> {
+    return this.source.edition === "rerelease" ? this.source.game.writeSaveLoading(false, nextFrame) : Promise.resolve(undefined);
+  }
+  override originalSave(rereleaseSave?: RereleaseGuestSave): SaveProvider | null {
+    const source = this.source, host = this.host, cvars = host.q2ServerRegistry, map = host.recipe.map.geometry.requestedPath;
+    if (cvars === null || cvars.variableValue("deathmatch") !== 0) throw new Error("Native Quake II original saves require a non-deathmatch source game");
+    const portals = [...host.areaPortals].map(([portal, open]) => ({ portal, open }));
+    if (source.edition === "rerelease") return encodeQ2RereleaseNativeSave({ module: source.game.module, map,
+      api: { kind: "q2-rerelease-game", version: 2023 }, abi: "windows-x86-64", autosave: false,
+      server: { configstrings: [...source.game.configstrings()].map(([index, value]) => ({ index, value })), portals, cvars: encodeCheckpointValue(cvars.captureSaveState()) },
+      ...(rereleaseSave ?? source.game.writeSave(false)), visitedLevels: [...source.visited.values()].filter(level => level.map !== map) });
+    const captured = source.files.capture({ module: source.game.module, map }, () => ({
+      configstrings: [...source.game.configstrings()].map(([index, value]) => ({ index, value })),
+      portals, cvars: encodeCheckpointValue(cvars.captureSaveState()),
+    }), (game, level, autosave) => source.game.writeOriginal(game, level, autosave));
+    return encodeQ2ClassicOriginalSave({ ...captured, visitedLevels: [...source.visited.values()].filter(level => level.map !== map) });
+  }
+  override async restoreLoading(save: SaveImage, nextFrame: () => Promise<void>): Promise<void> {
+    const source = this.source, host = this.host;
+    if (source.edition === "rerelease") {
+      const plan = host.nativeRestorePrelude(source, nativeQ2RereleaseSave(save, source.game.module), original => { for (const level of original.visitedLevels) source.visited.set(level.map, level); });
+      await source.game.initLoading(nextFrame);
+      plan.afterInit();
+      await source.game.readSaveLoading(plan.original, plan.request, plan.applyServerState, nextFrame);
+      return;
+    }
+    const plan = host.nativeRestorePrelude(source, nativeQ2OriginalSave(save, source.game.module), original => { for (const level of original.visitedLevels) source.visited.set(level.map, level); });
+    await source.game.initLoading(nextFrame);
+    plan.afterInit();
+    await source.files.restoreLoading(plan.original, { module: source.game.module, map: host.recipe.map.geometry.requestedPath }, async (game, level) => {
+      await source.game.restoreOriginalLoading(game, level, plan.request, plan.applyServerState, nextFrame);
+    });
+  }
+  override restoreGuest(save: SaveImage, nativeRestored: boolean): void {
+    const source = this.source, host = this.host;
+    if (!nativeRestored && source.edition === "rerelease") {
+      const plan = host.nativeRestorePrelude(source, nativeQ2RereleaseSave(save, source.game.module), original => { for (const level of original.visitedLevels) source.visited.set(level.map, level); });
+      source.game.init();
+      plan.afterInit();
+      source.game.readSave(plan.original, plan.request, plan.applyServerState);
+    }
+    if (!nativeRestored && source.edition === "classic") {
+      const plan = host.nativeRestorePrelude(source, nativeQ2OriginalSave(save, source.game.module), original => { for (const level of original.visitedLevels) source.visited.set(level.map, level); });
+      source.game.init();
+      plan.afterInit();
+      source.files.restore(plan.original, { module: source.game.module, map: host.recipe.map.geometry.requestedPath }, (game, level) => {
+        source.game.restoreOriginal(game, level, plan.request, plan.applyServerState);
+      });
+    }
+    for (const saved of nativeQ2SavedClients(save)) {
+      const client = host.options.restoredClients?.find(client => client.slot === saved.clientSlot);
+      if (client === undefined) throw new Error("Native saved client has no retained session identity");
+      const connected = source.game.connect(client.slot + 1, saved.userinfo);
+      if (!connected.allowed) throw new Error("Native source rejected restored client");
+      host.registerQ2NativeClient(client, "restore");
+      if (saved.phase === "active") source.game.begin(client.slot + 1);
+    }
+    host.actors.rebindRestoredSource(source.game.module.id);
+    if (source.game.services.hasSourceInventory) for (const actor of source.clients.values()) {
+      const saved = save.inventories.find(entry => host.actors.resolveSaved(entry.actor) === actor);
+      host.bindEquipmentInventory(actor, saved?.entries ?? []);
+    }
+  }
+  override monsterProxy(): GuestMonsterProxy | null {
+    const source = this.source;
+    if (source.edition !== "classic") return null;
+    const game = source.game;
+    return { allocate: () => game.allocateMonsterProxy(), bind: (slot, actor) => { game.bindMonsterProxy(slot, actor); } };
   }
   override asQ2Native(): Of<"q2-native"> { return this.source; }
   override primaryWeaponStep(_player: MovementPlayer, input: WeaponStepInput): WeaponStepResult { return { arsenal: input.arsenal, animation: input.animation, effects: [] }; }
@@ -1881,6 +2025,7 @@ class Q2NativeStrategy extends LoadedStrategy {
 
 class Q3Strategy extends LoadedStrategy {
   constructor(private readonly source: Of<"q3">, private readonly host: SourceStrategyHost) { super(); }
+  override readonly kind = "q3" as const;
   override ammoTimer(actor: ActorId, weapon: number): number | null {
     const client = this.source.game.records.nativeByActor(actor)?.client;
     return client == null ? null : client.ammoTimes.get(weapon);
@@ -1948,6 +2093,15 @@ class Q3Strategy extends LoadedStrategy {
     if (entity !== null) this.source.game.spawns.respawn(entity);
   }
   override keepsAngleDeltas(): boolean { return true; }
+  override admitsGuestMonsters(): boolean { return true; }
+  override grantQuad(actor: ActorId): void {
+    const client = this.source.game.records.nativeByActor(actor)?.client;
+    if (client != null) client.ps.powerups.set(Powerup.PW_QUAD, this.source.game.level.time + 30000);
+  }
+  override foreignPowerups(actor: ActorId): { readonly quadUntil: number; readonly doubleUntil: number; readonly invulnerabilityUntil: number } {
+    const powers = this.source.game.records.nativeByActor(actor)?.client?.ps.powerups;
+    return { quadUntil: (powers?.get(Powerup.PW_QUAD) ?? 0) / 1000, doubleUntil: 0, invulnerabilityUntil: (powers?.get(Powerup.PW_INVULNERABILITY) ?? 0) / 1000 };
+  }
   override asQ3(): Of<"q3"> { return this.source; }
   override baseArsenal(player: MovementPlayer): ArsenalState { return { ...player.arsenal, ammo: this.host.inventory.entries(player.actor.id) }; }
   override stepSelectedHoldable(player: MovementPlayer, input: WeaponStepInput): boolean {
@@ -2163,6 +2317,7 @@ class Q3Strategy extends LoadedStrategy {
 
 class Q3QvmStrategy extends LoadedStrategy {
   constructor(private readonly source: Of<"q3-qvm">, private readonly host: SourceStrategyHost) { super(); }
+  override readonly kind = "q3-qvm" as const;
   override checkOutputClaim(channels: readonly string[], movement: string | undefined): void {
     super.checkOutputClaim(channels, movement);
     const options = this.host.options.q3Guest?.prepared.primary;
@@ -2212,6 +2367,18 @@ class Q3QvmStrategy extends LoadedStrategy {
   override serverCvars(): ServerCvarRegistry { return this.source.game.state.cvars; }
   override clientOf(actor: ActorId): ClientId | null { return this.source.game.players().find(player => player.actor.equals(actor))?.client ?? null; }
   override keepsAngleDeltas(): boolean { return true; }
+  override admitsGuestMonsters(): boolean { return true; }
+  override monsterProxy(): GuestMonsterProxy {
+    const source = this.source;
+    return {
+      allocate: () => source.combat === null ? null : source.combat.spawnProxyEntity(),
+      bind: (slot, actor) => {
+        if (source.combat === null) return;
+        source.game.records.registerForeign(slot, actor);
+        source.combat.bindProxy(slot, actor);
+      },
+    };
+  }
   override asQ3Qvm(): Of<"q3-qvm"> { return this.source; }
   override angleDelta(_actor: ActorId, client: ClientId): readonly number[] { return this.source.game.records.player(client.slot).deltaAngleWords; }
   override guestGrantExclusions(): ReadonlySet<ItemId> {
