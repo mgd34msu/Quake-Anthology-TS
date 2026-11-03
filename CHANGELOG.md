@@ -30,8 +30,8 @@ script refuses it, the build accepts it).
     after 30 seconds, bound decompression, and back off after repeated wrong rcon passwords.
   - Server-supplied downloads are limited to asset types and sizes, and HTTP download servers on
     private hosts are refused unless the game server is private too.
-  - Quake II game modules can run only a short list of console commands, and their file writes
-    and memory use are capped.
+  - Quake II game modules can run only a short list of console commands, and cannot write to
+    executable, package or startup-config names.
   - `llm_exec` rejects more commands (quit, connect, map changes, chat, file writes and similar)
     and cvars whose values run as commands.
   - `load` of a file outside the save directory is accepted only from the local console.

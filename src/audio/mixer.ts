@@ -227,7 +227,6 @@ export function spatializeSoundOrigin(
   const left = Math.max(0, Math.trunc(Math.fround(volume * Math.fround((1 - distanceLoss) * leftScale))));
   return { left, right };
 }
-const MAXIMUM_VOICES = 128;
 /** PCM mixing with a borrowed allocation clock and no device ownership. */
 export class AudioMixer {
   readonly outputRate: number;
@@ -461,8 +460,7 @@ export class AudioMixer {
     const allowed = options.entity === this.listenerEntity ? 8 : 4;
     if (sameSoundCount > allowed) return false;
     this.replaceChannel(options.entity, channelCommand);
-    const acquired = this.acquireChannel(options.entity);
-    if (acquired === null) return false;
+    const acquired = this.acquireChannel();
     const channel = acquired.index;
     // Sample the allocation clock again when reusing a free slot.
     const allocatedAt = acquired.reused ? this.allocationTime() : time;
@@ -581,8 +579,7 @@ export class AudioMixer {
     if (scheduled === null) voice.stereoVolume = this.policySpatialize(voice);
     if (scheduled === null && policy.role === "effect" && voice.stereoVolume.left === 0 && voice.stereoVolume.right === 0) return false;
     if (scheduled === null) this.replaceChannel(options.entity, command);
-    const acquired = this.acquireChannel(voice.entity);
-    if (acquired === null) return false;
+    const acquired = this.acquireChannel();
     this.voices[acquired.index] = voice;
     this.voiceStarted(voice);
     return true;
@@ -1042,25 +1039,9 @@ export class AudioMixer {
     for (let index = 0; index < this.voices.length; index++) this.freeChannels.push(index);
     this.rawDebugPrint("Channel memory manager started\n");
   }
-  /** Source MAX_CHANNELS: a full mixer steals the oldest ordinary effect (the listener's own sounds only for the listener) or refuses the new sound. */
-  private acquireChannel(entity: number): { readonly index: number; readonly reused: boolean } | null {
+  private acquireChannel(): { readonly index: number; readonly reused: boolean } {
     const free = this.freeChannels.pop();
-    if (free !== undefined) return { index: free, reused: true };
-    if (this.voices.length < Math.max(MAXIMUM_VOICES, this.capacity)) return { index: this.voices.length, reused: false };
-    let victim = -1,
-      oldest = Infinity;
-    for (const [index, voice] of this.voices.entries()) {
-      if (voice === null || (voice.entity === this.listenerEntity && entity !== this.listenerEntity)) continue;
-      if (voice.policy !== null && voice.policy.role !== "effect") continue;
-      if (voice.allocatedAt < oldest) {
-        oldest = voice.allocatedAt;
-        victim = index;
-      }
-    }
-    if (victim < 0) return null;
-    this.freeChannel(victim, "replaced");
-    this.freeChannels.pop();
-    return { index: victim, reused: true };
+    return free === undefined ? { index: this.voices.length, reused: false } : { index: free, reused: true };
   }
   private freeChannel(index: number, reason: "ended" | "stopped" | "replaced" = "stopped"): void {
     const voice = this.voices[index];

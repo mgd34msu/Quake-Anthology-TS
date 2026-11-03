@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { afterAll, mock } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import * as realOs from "node:os";
 import { join } from "node:path";
 
@@ -10,16 +10,28 @@ import { join } from "node:path";
  * profile. Point HOME and `os.homedir()` at a throwaway directory so no test can
  * reach it. Set QTS_TEST_STRICT_HOME=1 to fail the run when anything lands there,
  * which finds launches that still lack an explicit user root.
+ * Temp directories go under the same per-run root, so a failed or timed-out test
+ * cannot leave anything behind in the system temp directory.
  */
 const realHome = realOs.homedir();
-const home = mkdtempSync(join(realOs.tmpdir(), "qts-test-home-"));
+const runRoot = mkdtempSync(join(realOs.tmpdir(), "qts-test-run-"));
+const home = join(runRoot, "home"),
+  temporary = join(runRoot, "tmp");
+mkdirSync(home);
+mkdirSync(temporary);
 process.env["HOME"] = home;
+process.env["TMPDIR"] = temporary;
 process.env["XDG_DATA_HOME"] = join(home, ".local", "share");
 process.env["XDG_CONFIG_HOME"] = join(home, ".config");
 process.env["XDG_STATE_HOME"] = join(home, ".local", "state");
 // Audio tests must never open the machine's output device.
 process.env["SDL_AUDIODRIVER"] ??= "dummy";
-mock.module("node:os", () => ({ ...realOs, default: { ...realOs, homedir: () => home }, homedir: () => home }));
+mock.module("node:os", () => ({
+  ...realOs,
+  default: { ...realOs, homedir: () => home, tmpdir: () => temporary },
+  homedir: () => home,
+  tmpdir: () => temporary,
+}));
 
 // mock.module patches the live module namespace, so the real functions are captured by value before it runs.
 const realRoots = { ...(await import("../../src/content/roots.ts")) };
@@ -45,7 +57,7 @@ function leaked(directory: string): string[] {
 }
 
 function finish(): void {
-  if (!existsSync(home)) return;
+  if (!existsSync(runRoot)) return;
   if (process.env["QTS_TEST_STRICT_HOME"] === "1") {
     const files = leaked(home);
     if (files.length > 0) {
@@ -53,7 +65,7 @@ function finish(): void {
       process.exitCode = 1;
     }
   }
-  rmSync(home, { recursive: true, force: true });
+  rmSync(runRoot, { recursive: true, force: true });
 }
 // Bun runs preload afterAll hooks once, after the last file; the exit listener covers runs that end another way.
 afterAll(finish);

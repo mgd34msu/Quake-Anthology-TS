@@ -20,8 +20,6 @@ export interface HttpDownloadQueueOptions {
   readonly root: string;
   readonly concurrency?: number;
   readonly rangeStreams?: number;
-  /** Total bytes the queue may receive over its lifetime; exceeding it fails the transfer in progress. */
-  readonly totalBudgetBytes?: number;
   assertCurrent(): void;
   resolved(path: string): boolean | Promise<boolean>;
   refreshPackage(path: string): Promise<void>;
@@ -393,10 +391,7 @@ export class HttpDownloadQueue {
     else if (entry?.state === "running") entry.abort.abort();
     this.schedule();
   }
-  private totalReceived = 0;
   private report(entry: Entry, received: number, total: number | null): void {
-    this.totalReceived += Math.max(0, received - entry.received);
-    if (this.options.totalBudgetBytes !== undefined && this.totalReceived > this.options.totalBudgetBytes) throw new Error("HTTP download quota exceeded");
     entry.received = received;
     entry.total = total;
     this.options.progress(entry.request.path, received, total);

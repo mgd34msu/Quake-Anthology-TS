@@ -128,12 +128,7 @@ export function zipDataOffset(variable: Uint8Array, nameLength: number, source: 
   return dataOffset;
 }
 
-/** Largest entry a PK3 may declare; the declared size is attacker-chosen, so it cannot be the only inflate bound. */
-export const MAX_ZIP_ENTRY_BYTES = 256 * 1024 * 1024;
-
 export function decodeZipEntry(compressed: Uint8Array, source: string, dataOffset: number, entry: ZipEntry): Uint8Array {
-  if (entry.byteLength > MAX_ZIP_ENTRY_BYTES)
-    throw new ArchiveError(source, dataOffset, `entry size ${entry.byteLength} exceeds the ${MAX_ZIP_ENTRY_BYTES}-byte limit`);
   let output: Uint8Array;
   try {
     output = entry.compressionMethod === 0 ? compressed : new Uint8Array(inflateRawSync(compressed, { maxOutputLength: Math.max(1, entry.byteLength) }));

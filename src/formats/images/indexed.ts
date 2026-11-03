@@ -3,7 +3,6 @@
  * Copyright (C) 1996-1997 Id Software, Inc. GPL-2.0-or-later. */
 import { BinaryError, BinaryReader, BinaryWriter } from "../../core/binary/index.ts";
 import type { ImageLevel } from "../../contracts/render.ts";
-import { imageSizeAllowed } from "./limits.ts";
 
 export interface IndexedImage {
   readonly width: number;
@@ -30,7 +29,7 @@ export interface WalImage {
 
 function dimensions(width: number, height: number, source: string): number {
   const count = width * height;
-  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0 || count > 0x7fffffff || !imageSizeAllowed(width, height))
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0 || count > 0x7fffffff)
     throw new BinaryError(source, 0, `Invalid image dimensions ${width}x${height}`);
   return count;
 }

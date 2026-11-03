@@ -11,6 +11,8 @@ export { ElfError, inspectElf, elfFileOffset } from "./parse.ts";
 export type { ElfInspection, ElfRelocation, ElfSegment, ElfSection, ElfSymbol, ElfVersion } from "./parse.ts";
 export type { ElfTlsBindings, ElfTlsModule, ElfTlsResolution } from "./relocate.ts";
 
+const MAXIMUM_IMAGE_BYTES = 256 * 1024 * 1024;
+
 export interface ElfLoadOptions {
   readonly bytes: Uint8Array;
   readonly module: ModuleIdentity;
@@ -97,6 +99,9 @@ export function loadElf(options: ElfLoadOptions): ElfGuestImage {
       label: `${module.artifactPath}:PT_LOAD`,
     });
   }
+  // The PE loader refuses images over 256 MiB for the same reason: the guest can size its own mappings.
+  if (planned.reduce((total, mapping) => total + mapping.byteLength, 0) > MAXIMUM_IMAGE_BYTES)
+    throw new ElfError("ELF image exceeds the supported mapped size");
   const mapped: GuestMapping[] = [];
   const priorUniqueNames = new Set(options.uniqueSymbols?.keys());
   try {

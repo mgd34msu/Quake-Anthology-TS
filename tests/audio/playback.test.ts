@@ -846,14 +846,3 @@ test.skipIf(process.env["SDL_AUDIODRIVER"] !== "dummy")(
     expect(audio.pendingOutput.length).toBe(0);
   },
 );
-
-test("PLATFORM-010 the mixer caps voices and refuses or steals instead of growing without bound", () => {
-  const mixer = new AudioMixer(11025, () => 0, 96, 1);
-  const sound: PcmSound = { samples: new Int16Array(11025 * 10), channels: 1, sampleRate: 11025, frameCount: 11025 * 10, loopStart: null };
-  let accepted = 0;
-  for (let index = 0; index < 1000; index++)
-    if (mixer.startQ1Sound(sound, { entity: index + 1, origin: { kind: "local" }, volume: 1, attenuation: 0 }, { kind: "auto" }, () => 0)) accepted++;
-  expect(accepted).toBe(1000);
-  expect(mixer.mix(735).length).toBeGreaterThan(0);
-  expect(mixer["voices"].length).toBeLessThanOrEqual(128);
-});

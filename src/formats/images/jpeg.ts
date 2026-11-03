@@ -11,7 +11,6 @@
  * profile. Grayscale expands to RGBA instead of LoadJPG's undersized buffer.
  */
 import { BinaryError } from "../../core/binary/index.ts";
-import { imageSizeAllowed } from "./limits.ts";
 
 export interface JpegImage {
   readonly width: number;
@@ -318,7 +317,6 @@ function prepareFrame(input: Input, header: FrameHeader, buffered: boolean): Fra
   const { width, height, precision, progressive, components: descriptors } = header;
   const count = descriptors.length;
   if (width > 65500 || height > 65500) input.sourceFail("Maximum supported image dimension is 65500 pixels");
-  if (!imageSizeAllowed(width, height)) input.sourceFail(`JPEG dimensions ${width}x${height} exceed the decoder limit`);
   if (precision !== 8) input.sourceFail(`Unsupported JPEG data precision ${precision}`);
   if (count > 10) input.sourceFail(`Too many color components: ${count}, max 10`);
   let maxH = 1;

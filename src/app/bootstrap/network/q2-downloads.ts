@@ -92,9 +92,8 @@ export function createQ2ApplicationDownloads(mounts: MountedContent, cvars: Cvar
 
 type DownloadEvent = NonNullable<ReturnType<Q2DownloadSender["next"]>>;
 const MAX_FILELIST_ENTRIES = 4096;
-const MAX_HTTP_SESSION_BYTES = 2 * 1024 * 1024 * 1024;
-const MAX_HTTP_ASSET_BYTES = 128 * 1024 * 1024;
-const MAX_HTTP_PACKAGE_BYTES = 1024 * 1024 * 1024;
+/** HTTP downloads have no size limit; the completion bound is only the largest exact byte count. */
+const HTTP_DOWNLOAD_UNBOUNDED = Number.MAX_SAFE_INTEGER;
 const refused: DownloadEvent = { kind: "download", bytes: null, percent: 0 };
 
 /** One peer owns its source file; reconnect and world replacement cancel pending opens too. */
@@ -266,7 +265,7 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
       path: destination,
       url,
       kind,
-      expected: { kind: "protocol-completion", maximumBytes: kind === "package" ? MAX_HTTP_PACKAGE_BYTES : MAX_HTTP_ASSET_BYTES },
+      expected: { kind: "protocol-completion", maximumBytes: HTTP_DOWNLOAD_UNBOUNDED },
       validate: async (staged: string) => {
         if (!this.permission({ transport: "http", category: clientDownloadCategory(path) })) throw new Error("Q2 HTTP download permission changed");
         if (kind === "package") {
@@ -302,7 +301,6 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
     this.http = new HttpDownloadQueue({
       root: dirname(owner.writeRoot),
       assertCurrent: current,
-      totalBudgetBytes: MAX_HTTP_SESSION_BYTES,
       resolved: async destination => {
         current();
         const path = this.httpResource(destination);

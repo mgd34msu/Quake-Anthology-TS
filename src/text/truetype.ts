@@ -1301,14 +1301,12 @@ export function rasterizeContours(contoursPx: FlattenedContourT[], width: number
 }
 export function rasterizeGlyph(font: ParsedFontT, gid: number, px: number): RasterizedGlyphT {
   const scale = px / font.unitsPerEm;
-  // Metrics come from the font file; a glyph cell is never legitimately many times the pixel size.
-  const limit = Math.max(64, Math.ceil(px * 4));
-  const width = Math.min(limit, Math.max(1, Math.round(font.advanceWidth(gid) * scale)));
+  const width = Math.max(1, Math.round(font.advanceWidth(gid) * scale));
   const contours = font.contours(gid);
   let yMin = 0;
   for (const c of contours) for (const p of c) if (p.y < yMin) yMin = p.y;
   const bottom = Math.min(0, yMin);
-  const height = Math.min(limit, Math.max(1, Math.round((font.ascent - bottom) * scale)));
+  const height = Math.max(1, Math.round((font.ascent - bottom) * scale));
   if (contours.length === 0) {
     return { width, height, coverage: new Uint8Array(width * height) };
   }
@@ -1359,8 +1357,7 @@ export function rasterizeColorGlyph(
   const layers = font.colorLayers(baseGid);
   if (layers === null) return null;
   const scale = px / font.unitsPerEm;
-  const limit = Math.max(64, Math.ceil(px * 4));
-  const width = Math.min(limit, Math.max(1, Math.round(font.advanceWidth(baseGid) * scale)));
+  const width = Math.max(1, Math.round(font.advanceWidth(baseGid) * scale));
   const resolved: {
     contours: FlattenedContourT[];
     color: {
@@ -1379,7 +1376,7 @@ export function rasterizeColorGlyph(
     resolved.push({ contours, color });
   }
   const bottom = Math.min(0, yMin);
-  const height = Math.min(limit, Math.max(1, Math.round((font.ascent - bottom) * scale)));
+  const height = Math.max(1, Math.round((font.ascent - bottom) * scale));
   const pixels = new Uint8Array(width * height * 4);
   for (const { contours, color } of resolved) {
     if (contours.length === 0) continue;
@@ -1422,8 +1419,6 @@ type AtlasCellT = AtlasCellFields &
         coverage: Uint8Array;
       }
   );
-/** 4096 x 4096 texels, the practical GL texture ceiling for UI atlases. */
-const MAX_ATLAS_PIXELS = 4096 * 4096;
 export function buildFontAtlas(font: ParsedFontT, codepoints: Iterable<number, unknown, unknown>, px: number, maxWidth = 512): FontAtlasT {
   if (!Number.isFinite(px) || px <= 0 || !Number.isSafeInteger(maxWidth) || maxWidth < 1)
     throw new RangeError("Font atlas pixel size and width must be positive");
@@ -1473,7 +1468,6 @@ export function buildFontAtlas(font: ParsedFontT, codepoints: Iterable<number, u
     if (height > shelfHeight) shelfHeight = height;
   }
   const atlasHeight = cursorY + shelfHeight + gap;
-  if (atlasWidth * atlasHeight > MAX_ATLAS_PIXELS) throw new RangeError("Font atlas exceeds the size limit");
   const pixels = new Uint8Array(atlasWidth * atlasHeight * 4);
   const glyphs = new Map<number, AtlasRectT>();
   for (const cell of cells) {

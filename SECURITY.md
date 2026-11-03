@@ -33,15 +33,14 @@ What is isolated:
   into a software x86/x64 CPU (`src/guest`). Guest code has no direct system-call access.
   It sees only the import table the host provides (`gi.*`). Each call is bounded by an
   instruction budget, guest memory is limited only by the guest's own address space, and the file services for classic DLLs refuse writes to names ending in `.cfg .rc
-  .dll .so .dylib .exe .bat .sh .pak .pk3 .qvm .bsp`, cap one file at 64 MiB, a session's growth
-  at 512 MiB and the number of written files at 256. Private cvars (rcon passwords) are hidden
+  .dll .so .dylib .exe .bat .sh .pak .pk3 .qvm .bsp`. Private cvars (rcon passwords) are hidden
   from the guest and it cannot overwrite them.
 - **Quake II `AddCommandString` is filtered.** A game DLL can append only `map`, `gamemap`,
   `kick`, `say`, `echo`, `exec` and `wait` to the server console. Everything else (`quit`,
   `rcon`, `set*`, `bind`, `alias` and so on) is dropped and logged.
 - **Native Quake III game modules are emulated too, and only on request.** A mod's
   `qagamex86.dll` or `qagamei386.so` runs in the same software x86 CPU and System V / Windows
-  runtime as the Quake II DLLs, with the same instruction budget and memory cap, and reaches the
+  runtime as the Quake II DLLs, with the same per-call instruction budget, and reaches the
   engine through the same system-call table as bytecode (`src/app/bootstrap/simulation/q3/server-traps.ts`).
   It is selected only with `--vm-game 0`, as in id's engine; the default (`vm_game 2`) runs the mod's
   `vm/qagame.qvm`, and a mod without one falls back to its base game's. The risk is the one the
@@ -61,8 +60,8 @@ What is **not** isolated:
   own console would. A hostile module can therefore run commands such as `exec`, `alias`,
   `connect` or `writeconfig` within the user's own directories and network reach. The Quake II
   filter above still lets a DLL `exec` a config script that is already installed.
-- A hostile module can consume CPU and memory up to the limits above, and can make the
-  game unusable for as long as the instruction budget allows.
+- A hostile module can consume CPU and memory (guest memory is bounded only by the guest's
+  address space), and can make the game unusable for as long as the instruction budget allows.
 - Emulator or host-service bugs are not ruled out. Emulation is a hardening layer, not a
   proof of containment.
 - Image, audio, video and font files are decoded by native libraries in process. No
