@@ -48,8 +48,12 @@ test.skipIf(!existsSync(path) || !existsSync(pak))("1998 Xatrix runs original gi
   const cvars = new CvarRegistry({ dialect: "q2-classic", context: { session: actors.session, origin: { kind: "server-console" } } });
   cvars.register("deathmatch", "0"); cvars.register("coop", "0"); cvars.register("ctf", "0");
   const offers: OriginalPickupOffer[] = [], prints: string[] = [];
+  let selectionMode: () => "original" | "replacement" = () => "replacement";
   const pickups: OriginalPickupAdmission = {
-    runSource: (offer, execute) => { offers.push(offer); return execute({ kind: "replacement", current: () => true, grant: () => "accepted" }, { consumePickup: () => undefined }); },
+    runSource: (offer, execute) => {
+      offers.push(offer);
+      return execute(selectionMode() === "original" ? { kind: "original" } : { kind: "replacement", current: () => true, grant: () => "accepted" }, { consumePickup: () => undefined });
+    },
     touch: () => "refused",
   };
   const world = ClassicGuestWorld.create({ prepared, capabilities: {}, instructionBudget: 8_000_000, services: {
@@ -62,10 +66,21 @@ test.skipIf(!existsSync(path) || !existsSync(pak))("1998 Xatrix runs original gi
   } });
   try {
     const origin = required(parseEntities(geometry.entities).find(entity => entity.get("classname") === "info_player_start")).get("origin") ?? "0 0 128";
-    const [x = "0", y = "0", z = "0"] = origin.split(" ");
-    const near = (dx: number): string => `${Number(x) + dx} ${y} ${Number(z) + 8}`;
+    const [x = 0, y = 0, z = 0] = origin.split(" ").map(Number);
+    const solid = (px: number, py: number, pz: number): boolean => {
+      const result = scene.pointContents({ point: { x: px, y: py, z: pz }, target: { kind: "world" }, policy: { kind: "q2", contentsMask: -1, leafContents: "merged" }, numeric: Q2_DONOR_PROFILE, passActor: null });
+      return ((result.kind === "q2" ? result.merged : result.contents) & 1) !== 0;
+    };
+    // Ten spots (two sets of five), at least 56 units from the start and each other, whose 40x40 footprint is empty from the floor up.
+    const spots: string[] = [];
+    for (let radius = 64; spots.length < 10 && radius <= 512; radius += 8) for (let angle = 0; angle < 16 && spots.length < 10; angle++) {
+      const px = x + Math.round(radius * Math.cos(angle * Math.PI / 8)), py = y + Math.round(radius * Math.sin(angle * Math.PI / 8));
+      const clear = [-20, 0, 20].every(dx => [-20, 0, 20].every(dy => [16, 40].every(dz => !solid(px + dx, py + dy, z + dz))));
+      if (clear && spots.every(spot => { const [sx = 0, sy = 0] = spot.split(" ").map(Number); return Math.hypot(sx - px, sy - py) >= 56; })) spots.push(`${px} ${py} ${z + 8}`);
+    }
+    expect(spots).toHaveLength(10);
     const entities = `{ "classname" "worldspawn" } { "classname" "info_player_start" "origin" "${origin}" }`
-      + ["item_armor_jacket", "ammo_shells", "weapon_shotgun", "item_bandolier", "item_pack"].map((classname, index) => ` { "classname" "${classname}" "origin" "${near(64 + index * 40)}" }`).join("");
+      + ["item_armor_jacket", "ammo_shells", "weapon_shotgun", "item_bandolier", "item_pack"].map((classname, index) => ` { "classname" "${classname}" "origin" "${spots[index]}" } { "classname" "${classname}" "origin" "${spots[index + 5]}" }`).join("");
     await world.initLoading(async () => { await Bun.sleep(0); });
     await world.spawnLoading("xswamp", entities, async () => { await Bun.sleep(0); }, "");
     expect(world.connect(1, "\\name\\Primary\\skin\\male/grunt\\ip\\127.0.0.1").allowed).toBe(true); world.begin(1);
@@ -117,28 +132,41 @@ test.skipIf(!existsSync(path) || !existsSync(pak))("1998 Xatrix runs original gi
       world.command(1, ["drop", "Shotgun"], "Shotgun"); world.frame(100);
       expect(counts(index("q2:weapon_shotgun"))).toBe(before - 1);
       expect(prints.join("")).not.toContain("Unknown item");
-      void drop;
 
-      // Original Touch_Item runs the declared grants; each replacement skips the original recipient writes and leaves a legal guest stack.
-      const items = new Map<string, { address: bigint; slot: number }>();
-      for (let slot = 2; slot < world.source.host.edicts.descriptor().count; slot++) {
-        const view = world.source.host.edicts.at(slot), name = view.bytes.getUint32(0x118, true);
-        if (name === 0) continue;
-        const text = readClassicString(memory, memory.pointer(BigInt(name)));
-        if (text.startsWith("item_") || text.startsWith("ammo_") || text.startsWith("weapon_")) items.set(text, { address: view.address.byteOffset, slot });
-      }
-      expect([...items.keys()].sort()).toEqual(expect.arrayContaining(["ammo_shells", "item_armor_jacket", "item_bandolier", "item_pack", "weapon_shotgun"]));
-      const armorBefore = counts(3), slugsBefore = counts(index("q2:ammo_shells")), packBefore = counts(index("q2:ammo_shells"));
+      // Touch_Item runs the declared grants. Under an original selection the DLL writes the recipient; under a replacement the recipient regions
+      // are skipped and the guest still returns through its own stack and respawn tail, leaving the source counters untouched.
+      const classnames = ["item_armor_jacket", "ammo_shells", "weapon_shotgun", "item_bandolier", "item_pack"];
+      const findItem = (classname: string, spot: string | undefined): number => {
+        const [sx = 0, sy = 0] = (spot ?? "").split(" ").map(Number);
+        for (let slot = 2; slot < world.source.host.edicts.descriptor().count; slot++) {
+          const view = world.source.host.edicts.at(slot), name = view.bytes.getUint32(0x118, true);
+          if (name !== 0 && readClassicString(memory, memory.pointer(BigInt(name))) === classname && Math.abs(view.bytes.getFloat32(4, true) - sx) < 1 && Math.abs(view.bytes.getFloat32(8, true) - sy) < 1) return slot;
+        }
+        throw new Error(`Spawned ${classname} is missing at ${spot}`);
+      };
       const touch = memory.offset(world.source.imageBase, BigInt(primary.pickups.touch));
-      for (const name of ["item_armor_jacket", "ammo_shells", "weapon_shotgun", "item_bandolier", "item_pack"]) {
-        const item = required(items.get(name)), other = record.address;
+      const touchItem = (slot: number): void => {
         const result = world.source.host.invoke(touch, classicSignature([q2Pointer, q2Pointer, q2Pointer, q2Pointer]),
-          [world.source.host.edicts.at(item.slot).address, other, null, null].map(value => ({ kind: "pointer" as const, value })));
+          [world.source.host.edicts.at(slot).address, record.address, null, null].map(value => ({ kind: "pointer" as const, value })));
         expect(result.kind).toBe("void");
-      }
-      expect(offers.map(offer => offer.item)).toEqual(["q2:item_armor_jacket", "q2:ammo_shells", "q2:weapon_shotgun", "q2:item_bandolier", "q2:item_pack"]);
-      // Replacement grants own the writes: the original recipient regions were skipped, so the source counters did not move.
-      expect(counts(3)).toBe(armorBefore); expect(counts(index("q2:ammo_shells"))).toBe(slugsBefore); expect(packBefore).toBe(slugsBefore);
+      };
+      const stores = (): Uint8Array => new Uint8Array(memory.copy(memory.offset(client, 0x2e4n), 0x704 - 0x2e4));
+      const clearStores = (): void => { memory.write(memory.offset(client, 0x2e4n), new Uint8Array(primary.inventory.count * 4)); };
+      const slots = classnames.map((classname, index) => findItem(classname, spots[index])), others = classnames.map((classname, index) => findItem(classname, spots[index + 5]));
+      let mode: "original" | "replacement" = "original";
+      selectionMode = () => mode;
+      offers.length = 0; clearStores();
+      for (const slot of slots) touchItem(slot);
+      expect(offers.map(offer => offer.item)).toEqual(classnames.map(name => `q2:${name}`));
+      expect(counts(index("q2:item_armor_jacket"))).toBeGreaterThan(0);
+      expect(counts(index("q2:ammo_shells"))).toBeGreaterThan(0);
+      expect(counts(index("q2:weapon_shotgun"))).toBe(1);
+      expect(memory.readInt32(memory.offset(client, BigInt(primary.pickups.supply.ammo.capacities[0] ?? 0)))).toBe(300);
+      mode = "replacement"; offers.length = 0; clearStores();
+      const untouched = stores();
+      for (const slot of others) touchItem(slot);
+      expect(offers.map(offer => offer.item)).toEqual(classnames.map(name => `q2:${name}`));
+      expect(stores()).toEqual(untouched);
     } finally { drop.close(); inventory.close(); commands.close(); }
   } finally { world.close(); }
 }, 120_000);

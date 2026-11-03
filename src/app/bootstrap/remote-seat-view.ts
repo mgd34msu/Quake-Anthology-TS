@@ -22,10 +22,11 @@ import type { RemoteSeatSource } from "./remote-seat-source.ts";
 import { Q3RemotePresentation } from "./network/remote-q3.ts";
 import { Q3ClientNetwork } from "./network/q3-client.ts";
 import type { ApplicationOptions } from "./options.ts";
-import { WorldSeatPresentation } from "./presentation.ts";
+import type { WorldSeatPresentation } from "./presentation.ts";
+import { createSeatPresentation, createSeatUi } from "./seat-factory.ts";
 import { ApplicationQ3Client } from "./q3-client.ts";
 import type { NativeRenderer } from "./renderer.ts";
-import { ApplicationSeatUi } from "./ui.ts";
+import type { ApplicationSeatUi } from "./ui.ts";
 import type { ApplicationViewSettings } from "./view-settings.ts";
 
 export interface RemoteSeatViewOptions {
@@ -84,8 +85,8 @@ export class RemoteSeatView {
       const typography = await assets.loadMenuTypography(); options.assertCurrent();
       for (const failure of await effects.preloadTransientResources()) options.print(`Optional effect preload skipped: ${failure.content}/${failure.path}: ${failure.error}\n`);
       options.assertCurrent();
-      ui = new ApplicationSeatUi(local, options.art, controls, operation => renderer.mutateWindow(operation), remote, font, audio,
-        options.quit, options.execute, typography, undefined, undefined, undefined, options.view.binding());
+      ui = createSeatUi({ local, art: options.art, input: controls, mutateWindow: operation => renderer.mutateWindow(operation), simulation: remote, font, audio,
+        quit: options.quit, command: options.execute, typography, view: options.view.binding() });
       if (remote instanceof Q3RemotePresentation) {
         const guest = options.q3;
         if (guest === null) throw new Error("Q3 remote seat requires its admitted guest owners");
@@ -120,9 +121,9 @@ export class RemoteSeatView {
         ? await loadQ3Character(await options.content.forContent(options.content.recipe.character.appearance.content),
           {model:options.options.characterModel,skin:"default",headModel:"",headSkin:"default",team:null,teamName:""}) : null;
       options.assertCurrent();
-      const presentation = new WorldSeatPresentation(local, assets, renderer, remote, options.count(), font,
-        characters, ui, effects, q3, null, () => options.images.cvars.variableValue("gl_debug_distfrac"),
-        () => options.view.fieldOfView, null, () => options.images.cvars.variableValue("con_scale"));
+      const presentation = createSeatPresentation({ local, assets, renderer, simulation: remote, seatCount: options.count(), font,
+        characters, ui, effects, q3Client: q3, worldTextCullFactor: () => options.images.cvars.variableValue("gl_debug_distfrac"),
+        fieldOfView: () => options.view.fieldOfView, consoleScale: () => options.images.cvars.variableValue("con_scale") });
       presentation.publishLayout(options.index(),options.count());
       seat.validatePresentation(presentation);
       return new RemoteSeatView(presentation, effects, options,assets,ownsAssets);

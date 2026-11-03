@@ -58,10 +58,20 @@ function gibfest(context: MonsterContext, damage = 20): undefined {
   acidGib(context, "head", damage, true); context.state.dead = true; context.state.gibbed = true;
   return undefined;
 }
+const FL_SWIM = 2, SPAWNFLAG_NOSWIM = 32, RANGE_NEAR = 440, RANGE_MID = 940;
+const rerelease = (context: MonsterContext): boolean => context.game.options.edition === "rerelease";
+/** Classic gekks swim from waterlevel 1; game_x64.dll compares every water test with WATER_WAIST (2). */
 function wet(context: MonsterContext, entity = context.entity): boolean {
-  if (entity === context.entity) return context.state.waterLevel > 0;
+  if (entity === context.entity) return context.state.waterLevel >= (rerelease(context) ? 2 : 1);
   const body = context.game.body(entity);
-  return (context.game.host.pointContents({ ...body.origin, z: body.origin.z + body.bounds.min.z + 1 }) & 56) !== 0;
+  const height = rerelease(context) ? (context.game.monsterTarget(entity.actor.id)?.viewHeight ?? 22) - body.bounds.min.z : 0;
+  return (context.game.host.pointContents({ ...body.origin, z: body.origin.z + body.bounds.min.z + (rerelease(context) ? height / 2 : 1) }) & 56) !== 0;
+}
+/** Rerelease gekks with the NOSWIM spawnflag never choose a swimming move. */
+function swims(context: MonsterContext): boolean { return wet(context) && !(rerelease(context) && (context.entity.spawnflags & SPAWNFLAG_NOSWIM) !== 0); }
+
+function enterWater(context: MonsterContext): undefined {
+  context.entity.flags |= FL_SWIM; context.state.locomotion = "swim"; return undefined;
 }
 function waterToLand(context: MonsterContext): undefined {
   context.entity.flags &= ~2; context.state.locomotion = "walk"; context.state.yawSpeed = 20; context.entity.viewHeight = 25;
@@ -69,8 +79,9 @@ function waterToLand(context: MonsterContext): undefined {
   return context.setMove("gekk_move_leapatk2");
 }
 function landToWater(context: MonsterContext): undefined {
-  context.entity.flags |= 2; context.state.locomotion = "swim"; context.state.yawSpeed = 10; context.entity.viewHeight = 10;
-  context.game.move(context.entity, { bounds: { min: { x: -24, y: -24, z: -24 }, max: { x: 24, y: 24, z: 16 } } }, false);
+  enterWater(context); context.state.yawSpeed = 10; context.entity.viewHeight = 10;
+  const half = rerelease(context) ? 18 : 24;
+  context.game.move(context.entity, { bounds: { min: { x: -half, y: -half, z: -24 }, max: { x: half, y: half, z: 16 } } }, false);
   return context.setMove("gekk_move_swim_start");
 }
 function checkJump(context: MonsterContext): boolean {
@@ -80,8 +91,8 @@ function checkJump(context: MonsterContext): boolean {
   const distance = Math.hypot(body.origin.x - enemy.origin.x, body.origin.y - enemy.origin.y);
   return !(distance < 100 || distance > 100 && context.game.host.random() < 0.9);
 }
-function run(context: MonsterContext): undefined { return context.setMove(wet(context) ? "gekk_move_swim_start" : context.state.standGround ? "gekk_move_stand" : "gekk_move_run"); }
-function runStart(context: MonsterContext): undefined { return context.setMove(wet(context) ? "gekk_move_swim_start" : "gekk_move_run_start"); }
+function run(context: MonsterContext): undefined { return context.setMove(swims(context) ? "gekk_move_swim_start" : context.state.standGround ? "gekk_move_stand" : "gekk_move_run"); }
+function runStart(context: MonsterContext): undefined { return context.setMove(swims(context) ? "gekk_move_swim_start" : "gekk_move_run_start"); }
 function melee(context: MonsterContext): undefined { return context.setMove(wet(context) ? "gekk_move_attack" : context.game.host.random() > 0.66 ? "gekk_move_attack1" : "gekk_move_attack2"); }
 function hit(context: MonsterContext, right: boolean): undefined {
   const bounds = context.game.body(context.entity).bounds;
@@ -111,6 +122,26 @@ function launch(context: MonsterContext, forward: number, up: number): undefined
   return context.game.move(context.entity, { velocity: add(body.velocity, add(scale(axes.forward, forward), scale(axes.up, up))) });
 }
 
+/**
+ * game_x64.dll gekk_attack (0x47e90). A swimming gekk stays in the water while its enemy is submerged within RANGE_NEAR; otherwise the
+ * water exit lives here (not in a swim frame callback as in 1998): it leaves FL_SWIM, restarts gekk_move_leapatk at its takeoff frame 75
+ * and leaves bounds, yaw speed and view height as they were. On land it spits or runs (holding its next attack) or leaps by range.
+ */
+function rereleaseAttack(context: MonsterContext): undefined {
+  const { entity, game, state } = context, distance = targetDistance(context);
+  if ((entity.flags & FL_SWIM) !== 0) {
+    const enemy = game.entity(entity.enemy);
+    if (enemy !== null && wet(context, enemy) && distance <= RANGE_NEAR) return undefined;
+    entity.flags &= ~FL_SWIM; state.locomotion = "walk";
+    context.setMove("gekk_move_leapatk"); state.nextFrame = 75; return undefined;
+  }
+  const roll = game.host.random(), hold = (seconds: number): undefined => { context.setMove("gekk_move_run_start"); state.attackFinished = game.host.now() + seconds; return undefined; };
+  if (distance >= RANGE_MID) return roll > 0.5 ? context.setMove("gekk_move_spit") : hold(2);
+  if (roll > 0.7) return context.setMove("gekk_move_spit");
+  if ((entity.spawnflags & 16) !== 0 || game.host.random() > 0.7) return hold(1.4);
+  return context.setMove("gekk_move_leapatk");
+}
+
 export function createGekkDefinition(monsters: Q2Monsters): Q2MonsterDefinition {
   const jumpTouch: Q2Touch = (entity, game, contact) => {
     const context = monsters.context(entity.actor.id); if (context === null) throw new Error("Gekk jump without its source controller");
@@ -135,8 +166,12 @@ export function createGekkDefinition(monsters: Q2Monsters): Q2MonsterDefinition 
   return {
     classname: "monster_gekk", kind: "gekk", model: "models/monsters/gekk/tris.md2", health: 125, gibHealth: -30, mass: 300,
     bounds: { min: { x: -24, y: -24, z: -24 }, max: { x: 24, y: 24, z: 24 } }, scale: 1,
-    initialMove: "gekk_move_stand", moves: [...gekkMoves, ...rereleaseJumpMoves], stand(context) { return context.setMove(wet(context) ? "gekk_move_standunderwater" : "gekk_move_stand"); }, walk: move("gekk_move_walk"), run: runStart, melee,
-    sight: sound("gek/gk_sght1.wav"), search, idle(context) { return context.setMove(wet(context) ? "gekk_move_swim_start" : "gekk_move_idle"); },
+    initialMove: "gekk_move_stand", moves: [...gekkMoves, ...rereleaseJumpMoves], stand(context) {
+      if (!rerelease(context)) return context.setMove(wet(context) ? "gekk_move_standunderwater" : "gekk_move_stand");
+      if (wet(context)) { enterWater(context); return context.setMove("gekk_move_standunderwater"); }
+      return context.state.move === "gekk_move_idle2" ? undefined : context.setMove("gekk_move_stand");
+    }, walk: move("gekk_move_walk"), run: runStart, melee,
+    sight: sound("gek/gk_sght1.wav"), search, idle(context) { return context.setMove(swims(context) ? "gekk_move_swim_start" : "gekk_move_idle"); },
     afterSpawn(context) { if ((context.entity.spawnflags & 8) !== 0) context.setMove("gekk_move_chant"); return undefined; },
     sourceCallbacks: { touch: { gekk_jump_touch: jumpTouch, loogie_touch: loogieTouch }, die: { acid_gib_die: gibDie }, think: { G_FreeEdict: freeQ2Entity } },
     ai: { ai_stand2(context, distance) {
@@ -166,7 +201,8 @@ export function createGekkDefinition(monsters: Q2Monsters): Q2MonsterDefinition 
       return false;
     },
     attack(context) {
-      if ((context.entity.flags & 2) !== 0 || wet(context)) return undefined;
+      if (rerelease(context)) return rereleaseAttack(context);
+      if ((context.entity.flags & FL_SWIM) !== 0 || wet(context)) return undefined;
       return context.setMove(context.game.host.random() > 0.5 && targetDistance(context) >= 80 || context.game.host.random() > 0.8 ? "gekk_move_spit" : "gekk_move_leapatk");
     },
     pain(context) {
@@ -174,6 +210,7 @@ export function createGekkDefinition(monsters: Q2Monsters): Q2MonsterDefinition 
       const hp = health(context.game, context.entity.actor.id); if (hp < context.entity.maxHealth / 2) context.entity.skin = hp < context.entity.maxHealth / 4 ? 2 : 1;
       if (context.game.host.now() < context.state.painTime) return undefined;
       context.state.painTime = context.game.host.now() + 3; context.game.sound(context.entity, "gek/gk_pain1.wav", 2);
+      if (rerelease(context) && wet(context)) enterWater(context);
       return context.setMove(wet(context) ? "gekk_move_pain" : context.game.host.random() > 0.5 ? "gekk_move_pain1" : "gekk_move_pain2");
     },
     die(context, reaction) {
@@ -197,7 +234,7 @@ export function createGekkDefinition(monsters: Q2Monsters): Q2MonsterDefinition 
       gekk_stand(context) { return context.stand(); }, gekk_search: search,
       gekk_swim_loop(context) { context.entity.flags |= 2; context.state.locomotion = "swim"; return context.setMove("gekk_move_swim_loop"); },
       gekk_swim(context) { const enemy = context.game.entity(context.entity.enemy); return enemy !== null && !wet(context, enemy) && context.game.host.random() > 0.7 ? waterToLand(context) : context.setMove("gekk_move_swim_start"); },
-      gekk_check_underwater(context) { return wet(context) ? landToWater(context) : undefined; },
+      gekk_check_underwater(context) { return swims(context) ? landToWater(context) : undefined; },
       gekk_idle_loop(context) { if (context.game.host.random() > 0.75 && health(context.game, context.entity.actor.id) < context.entity.maxHealth) context.state.nextFrame = gekkFrame.idle_01; return undefined; },
       gekk_step(context) { const n = (Math.floor(context.game.host.random() * 3) + 1) % 3; return context.game.sound(context.entity, `gek/gk_step${n + 1}.wav`, 2); },
       gekk_hit_left(context) { return hit(context, false); }, gekk_hit_right(context) { return hit(context, true); },

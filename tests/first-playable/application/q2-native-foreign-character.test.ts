@@ -106,14 +106,16 @@ corpusTest("q2/baseq2/pak0.pak", "q2/baseq2/gamex86.dll")("classic native DLL dr
 // DOCS3-006: in coop the guest respawns a dead client through CopyToBodyQue, which leaves a corpse edict with the guest
 // player model. With a Quake 1 character selected that corpse must be drawn as the selected character, never as the
 // guest's male/female model. Single player respawn loads a save instead, so the lane runs coop.
-async function corpseLane(game: string, library: string): Promise<{ respawned: boolean; corpses: readonly string[]; guestCorpses: readonly string[] }> {
+async function corpseLane(game: string, library: string, squadRespawn: boolean): Promise<{ respawned: boolean; corpses: readonly string[]; guestCorpses: readonly string[] }> {
   const root = await mkdtemp(join(tmpdir(), "quake-native-corpse-"));
   let app: Application | null = null;
   try {
     const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", game, "--map", "base1", "--q2-game", library, "--mode", "coop",
       "--movement", "q2", "--character", "q1", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", root]);
     if (parsed.kind !== "run") throw new Error("Missing launch options");
-    app = await Application.open(parsed.options, { saveDirectory: join(root, "saves"), print: () => undefined });
+    // The rerelease game defaults to squad respawn: a lone dead player waits for a teammate and the level restarts, so nothing respawns in place.
+    const profile = squadRespawn ? undefined : { version: 1 as const, overrides: [{ id: "server:q2.squad-respawn" as const, value: "0" }] };
+    app = await Application.open(profile === undefined ? parsed.options : { ...parsed.options, serverProfile: profile }, { saveDirectory: join(root, "saves"), print: () => undefined });
     const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
     // Cmd_Kill_f ignores the command within five seconds of a respawn.
     for (let i = 0; i < 120; i++) await app.step(50);
@@ -126,9 +128,9 @@ async function corpseLane(game: string, library: string): Promise<{ respawned: b
       app?.input({ seat: local.seat.id, kind: "key", code: 32, down, repeat: false, timeMilliseconds: performance.now() });
     };
     input(true);
-    for (let i = 0; i < 40; i++) { await app.step(50); if (i % 4 === 0) console.log("PROBE", i, app.simulation.playerUi(local.actor).health, app.simulation.presentations().filter(p => !p.viewWeapon).map(p => p.path + "#" + p.frame + (p.actor.equals(local.actor) ? "*" : "")).join(",")); }
+    for (let i = 0; i < 40; i++) await app.step(50);
     input(false);
-    for (let i = 0; i < 100; i++) { await app.step(50); if (i % 8 === 0) console.log("PROBE2", i, app.simulation.playerUi(local.actor).health, app.simulation.presentations().filter(p => !p.viewWeapon).map(p => p.path + "#" + p.frame + (p.actor.equals(local.actor) ? "*" : "")).join(",")); }
+    for (let i = 0; i < 20; i++) await app.step(50);
     const others = app.simulation.presentations().filter(p => !p.actor.equals(local.actor) && !p.viewWeapon);
     return { respawned: app.simulation.playerUi(local.actor).health > 0,
       corpses: others.filter(p => p.path === "progs/player.mdl").map(p => `${p.family}#${p.frame}`),
@@ -137,16 +139,17 @@ async function corpseLane(game: string, library: string): Promise<{ respawned: b
 }
 
 corpusTest("q2/baseq2/pak0.pak", "q2/baseq2/gamex86.dll")("classic native DLL draws a coop respawn corpse as the Quake 1 character", async () => {
-  const lane = await corpseLane("q2-classic-baseq2", "gamex86.dll");
+  const lane = await corpseLane("q2-classic-baseq2", "gamex86.dll", true);
   expect(lane.respawned).toBe(true);
   expect(lane.corpses).toEqual(["q1#60"]);
   expect(lane.guestCorpses).toEqual([]);
 }, 400_000);
 
-// The rerelease lane kills the player but never respawned it under this harness (mouse and jump held for 2 s in coop),
-// so no rerelease corpse test exists; see docs/status.md.
-
-corpusTest("q2/baseq2/pak0.pak", "q2/rerelease/baseq2/game_x64.dll")("rerelease probe", async () => {
-  const lane = await corpseLane("q2-rerelease-baseq2", "game_x64.dll");
-  console.log("PROBE END", JSON.stringify(lane));
+// The rerelease DLL does not respawn a lone coop player in place while g_coop_squad_respawn is on (its default): the player waits for
+// a teammate and the level restarts. With the option off the DLL respawns through CopyToBodyQue like the classic one.
+corpusTest("q2/baseq2/pak0.pak", "q2/rerelease/baseq2/game_x64.dll")("rerelease native DLL draws a coop respawn corpse as the Quake 1 character", async () => {
+  const lane = await corpseLane("q2-rerelease-baseq2", "game_x64.dll", false);
+  expect(lane.respawned).toBe(true);
+  expect(lane.corpses).toEqual(["q1#60"]);
+  expect(lane.guestCorpses).toEqual([]);
 }, 400_000);

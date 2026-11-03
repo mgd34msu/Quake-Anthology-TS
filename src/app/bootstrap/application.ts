@@ -166,7 +166,8 @@ import { ApplicationInput, movementDialect } from "./input.ts";
 import type { ApplicationInputCommands, LocalInput, LocalPlayer } from "./input.ts";
 import { mapResourcePath } from "./options.ts";
 import type { ApplicationOptions } from "./options.ts";
-import { seatViewport, WorldSeatPresentation } from "./presentation.ts";
+import { seatViewport, type WorldSeatPresentation } from "./presentation.ts";
+import { createSeatPresentation, createSeatUi } from "./seat-factory.ts";
 import { ApplicationQ3Client } from "./q3-client.ts";
 import { WorldReplacement } from "./world-replacement.ts";
 import { ApplicationRereleasePresentation } from "./rerelease-presentation.ts";
@@ -176,7 +177,7 @@ import { GameType, Team, PersistentIndex } from "../../content/q3/base/shared/de
 import { parseTeamArenaPostgame, recordTeamArenaScore, type TeamArenaPostgameStats } from "./team-arena-scores.ts";
 import type { TeamArenaResultService } from "./team-arena-results.ts";
 import { readTeamArenaSkirmish, teamArenaSourceCvars, teamArenaClientCvars, teamArenaServerOverrides, type TeamArenaSkirmish } from "./team-arena-skirmish.ts";
-import { ApplicationSeatUi } from "./ui.ts";
+import type { ApplicationSeatUi } from "./ui.ts";
 import { loadMenuArtImage } from "./menu-art.ts";
 import { loadSimulation, savedSimulationSettings, savedBotCheckpoint } from "./simulation/index.ts";
 import { createQ2ApplicationServerHost } from "./simulation/network.ts";
@@ -664,10 +665,11 @@ export class Application {
     audio: ConstructorParameters<typeof ApplicationSeatUi>[6], typography: ConstructorParameters<typeof ApplicationSeatUi>[9], rerelease: ApplicationRereleasePresentation,
     content: LoadedApplicationContent, options: ApplicationOptions, qvm: boolean, clientCvars?: Map<SeatId, CvarRegistry>): Promise<ApplicationSeatUi> {
     const seat = local.player.seat;
-    return new ApplicationSeatUi(local, art, input, mutateWindow, simulation, font, audio, () => this.requestQuit(),
-      (name, args) => this.queueCommand(name, args, seat.id), typography, { bindings: () => simulation.serverSettings(), store: this.serverProfileStore },
-      await rerelease.languageBinding(seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)),
-      this.saveMenu(simulation, options), this.viewSettings.binding(), this.host.llm, qvm, this.teamArenaResults(simulation, seat), this.uiSourceOptions(simulation, rerelease, seat.id, clientCvars));
+    return createSeatUi({ local, art, input, mutateWindow, simulation, font, audio, quit: () => this.requestQuit(),
+      command: (name, args) => this.queueCommand(name, args, seat.id), typography, hostSettings: { bindings: () => simulation.serverSettings(), store: this.serverProfileStore },
+      language: await rerelease.languageBinding(seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)),
+      saves: this.saveMenu(simulation, options), view: this.viewSettings.binding(), llm: this.host.llm, guestUi: qvm,
+      teamArena: this.teamArenaResults(simulation, seat), options: this.uiSourceOptions(simulation, rerelease, seat.id, clientCvars) });
   }
 
   /** The seat's world presentation, bound to the live image, view and tool settings. */
@@ -675,11 +677,12 @@ export class Application {
     seats: ConstructorParameters<typeof WorldSeatPresentation>[4], font: ConstructorParameters<typeof WorldSeatPresentation>[5], characters: ConstructorParameters<typeof WorldSeatPresentation>[6],
     ui: ApplicationSeatUi, effects: ApplicationEffects, sourceClient: Q3SeatClient | null, rerelease: ApplicationRereleasePresentation,
     nativeSeat: NativeQ2SeatClient | null, content: LoadedApplicationContent = this.content): Promise<WorldSeatPresentation> {
-    return new WorldSeatPresentation(local, assets, renderer, simulation, seats, font, characters, ui, nativeSeat?.effects ?? effects, sourceClient?.client ?? null, rerelease,
-      () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView,
-      { lines: () => simulation.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0,
-      () => readQ1ViewSettings(this.imageSettings?.cvars ?? null, this.sourceDialect(content)), () => (this.imageSettings?.cvars.variableValue("r_shadows") ?? 0) !== 0,
-      camera => this.tools?.applyCamera(camera) ?? camera, await this.createDebugGraphOverlay(assets), nativeSeat?.descriptor);
+    return createSeatPresentation({ local, assets, renderer, simulation, seatCount: seats, font, characters, ui, effects: nativeSeat?.effects ?? effects,
+      q3Client: sourceClient?.client ?? null, rerelease,
+      worldTextCullFactor: () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, fieldOfView: () => this.viewSettings.fieldOfView,
+      debugShapes: { lines: () => simulation.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, consoleScale: () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0,
+      viewSize: () => readQ1ViewSettings(this.imageSettings?.cvars ?? null, this.sourceDialect(content)), planarShadows: () => (this.imageSettings?.cvars.variableValue("r_shadows") ?? 0) !== 0,
+      cameraOverride: camera => this.tools?.applyCamera(camera) ?? camera, graphOverlay: await this.createDebugGraphOverlay(assets), nativeQ2: nativeSeat?.descriptor });
   }
 
   private saveMenu(simulation: SharedSimulation, options: ApplicationOptions): SavedGameMenuService {
@@ -3286,7 +3289,7 @@ export class Application {
   /** Create the destination presentation: assets, input, audio, effects and seat presentations. */
   private async stageGraphical(tx: WorldTransition): Promise<void> {
     const { content, staged, frontendOverrides, nextClientCvars, candidateAction, destinationSourceMilliseconds, nextSimulation, admissions, preparedCommands, save } = tx;
-    const { graphical: previous } = tx.before;
+    let { graphical: previous } = tx.before;
     if (previous !== null) {
       // Seat closures below outlive this function; the renderer carries across worlds, the old world does not.
       const sharedRenderer = previous.renderer;
@@ -3367,6 +3370,8 @@ export class Application {
           print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
           clock: { now: () => staged.committed ? this.presentationMilliseconds ?? this.elapsed : destinationSourceMilliseconds, frameNumber: () => this.presentationFrames } }) };
       if (save !== undefined) await this.restoreComponentClients(save, staged.graphical, nextSimulation);
+      // The seat, audio and modding closures above share this scope for the life of the new world.
+      previous = null;
     }
   }
 
@@ -3375,9 +3380,7 @@ export class Application {
     const { staged } = tx;
     const { graphical: previous } = tx.before;
     const previousCapture = this.capture;
-    const nextCapture = staged.graphical === null ? null : this.ownership.kind === "borrowed" ? this.ownership.client.capture
-      : new ApplicationCapture(inputCaptureServices(staged.graphical.input, applicationCaptureRoot(tx.options.userContentRoot),
-        () => this.options.map, text => this.host.print(text)), staged.graphical.renderer);
+    const nextCapture = this.createCandidateCapture(tx);
     staged.capture = this.ownership.kind === "owned" ? nextCapture : null;
     await this.capture?.beforeWorldChange();
     const publishAudio = previous !== null && staged.graphical !== null ? previous.audio.prepareOutputTransfer(staged.graphical.audio) : null;
@@ -3386,6 +3389,15 @@ export class Application {
     tx.previousCapture = previousCapture;
     tx.nextCapture = nextCapture;
     tx.publishAudio = publishAudio;
+  }
+
+  /** Built in a synchronous method: the capture's closures live as long as the new world, and an async stage's scope also holds the previous capture and world (AUDIT-001). */
+  private createCandidateCapture(tx: WorldTransition): ApplicationCapture | null {
+    const graphical = tx.staged.graphical;
+    if (graphical === null) return null;
+    if (this.ownership.kind === "borrowed") return this.ownership.client.capture;
+    return new ApplicationCapture(inputCaptureServices(graphical.input, applicationCaptureRoot(tx.options.userContentRoot),
+      () => this.options.map, text => this.host.print(text)), graphical.renderer);
   }
 
   /** Collect the presentations and client changes the session will publish. */

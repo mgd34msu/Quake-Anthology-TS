@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { corpusFile, corpusTest } from "../../support/corpus.ts";
 import { parsePe, type PeFile } from "../../../src/guest/pe/index.ts";
 import type { MonsterMove } from "../../../src/content/q2/foundation/monsters/types.ts";
-import { rereleaseMissionPackCallbacks, rereleaseMissionPackMoves } from "../../../src/content/q2/rerelease/monsters/tables/missionpack.ts";
+import { rereleaseMissionPackCallbacks, rereleaseMissionPackMoves, rereleaseMissionPackReplacements } from "../../../src/content/q2/rerelease/monsters/tables/missionpack.ts";
 import { carrierMoves } from "../../../src/content/q2/missionpacks/monsters/tables/rogue-carrier.ts";
 import { flyerMoves } from "../../../src/content/q2/missionpacks/monsters/tables/rogue-flyer.ts";
 import { hoverMoves } from "../../../src/content/q2/missionpacks/monsters/tables/rogue-hover.ts";
@@ -89,14 +89,13 @@ const species: Readonly<Record<string, readonly MonsterMove[]>> = {
 };
 /** Rerelease moves pinned to the mmove_t they were read from. */
 const pinned: Readonly<Record<string, number>> = {
-  gekk_move_death1: 0x146ed0, fixbot_move_stand2: 0x146c70, stalker_move_run: 0x15c2f0, stalker_move_walk: 0x15c2c8, stalker_move_false_death_end: 0x15c240,
+  gekk_move_death1: 0x146ed0, gekk_move_swim_loop: 0x146da8, gekk_move_standunderwater: 0x147098, fixbot_move_stand2: 0x146c70, stalker_move_run: 0x15c2f0, stalker_move_walk: 0x15c2c8, stalker_move_false_death_end: 0x15c240,
   stalker_move_swing_l: 0x15c268, stalker_move_swing_r: 0x15c310, stalker_move_jump_straightup: 0x15c288, stalker_move_jump_up: 0x15c1e0,
   stalker_move_jump_down: 0x15c330, stalker_move_death: 0x15c3b0, hover_move_death1: 0x154398, carrier_move_death: 0x15c178, carrier_move_spawn: 0x15c0d0,
   widow2_move_walk: 0x15d568, widow2_move_run: 0x15e450, widow2_move_attack_pre_beam: 0x15d548,
 };
 /** Port moves the DLL has no table for (it linked a different animation set or the port keeps them for its own logic). */
 const absent: Readonly<Record<string, readonly string[]>> = {
-  monster_gekk: ["gekk_move_standunderwater", "gekk_move_swim_loop"],
   monster_fixbot: ["fixbot_move_pickup", "fixbot_move_attack1", "fixbot_move_land", "fixbot_move_death1", "fixbot_move_backward"],
   monster_stalker: ["stalker_move_dodge_run"],
   monster_daedalus: ["hover_move_start_attack2", "hover_move_end_attack2"],
@@ -122,7 +121,7 @@ corpusTest(path)("rerelease mission pack monster moves equal the mmove_t tables 
 
 corpusTest(path)("the classic mission pack tables differ from the DLL exactly at the moves the overrides replace", () => {
   const bytes = new Uint8Array(readFileSync(corpusFile(path))), pe = parsePe(bytes), dll = scanMoves(bytes, pe);
-  const changed = new Set(Object.values(rereleaseMissionPackCallbacks).flatMap(list => list.map(spec => spec.move)));
+  const changed = new Set([...Object.values(rereleaseMissionPackCallbacks).flatMap(list => list.map(spec => spec.move)), ...Object.values(rereleaseMissionPackReplacements).flatMap(list => list.map(move => move.name))]);
   for (const [classname, classic] of Object.entries(species)) {
     for (const move of classic) {
       if (absent[classname]?.includes(move.name) === true) continue;

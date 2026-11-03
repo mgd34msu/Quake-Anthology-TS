@@ -10,7 +10,15 @@ import { QuakeLiveGameImports, QuakeLiveGameModule } from "../../../../src/compa
 import { quakeLiveFixture } from "../../../guest/runtime/system-v/fixtures.ts";
 
 export async function nativeGameFixture(name: "qagamei386.so" | "qagamex64.so") {
-  const fixture = await quakeLiveFixture(name), { module } = fixture, width = fixture.elf.abi.pointerBytes;
+  return nativeGameFixtureFrom(await quakeLiveFixture(name));
+}
+
+type NativeModuleFixture = Awaited<ReturnType<typeof quakeLiveFixture>>;
+type VariadicLayouts = NonNullable<ConstructorParameters<typeof GuestCallRunner>[0]["variadicLayouts"]>;
+
+/** Maps a loaded ELF image into a guest process with the System V runtime and the shared guest runner; the module's own entry points are not called. */
+export function nativeGuestProcess(fixture: NativeModuleFixture, variadicLayouts?: VariadicLayouts) {
+  const { module } = fixture, width = fixture.elf.abi.pointerBytes;
   const memory = new SparseGuestMemory({ module, pointerBytes: width, allocationBase: 0x50000000n });
   memory.map({ base: 0x10000n, byteLength: 0x200000, permissions: "read-write", label: "native fixture stack" });
   const sentinel = memory.map({ base: 0x300000n, byteLength: 4096, permissions: "read-execute", bytes: new Uint8Array([0xcc]) });
@@ -20,8 +28,16 @@ export async function nativeGameFixture(name: "qagamei386.so" | "qagamex64.so") 
     stackPointer: 0x210000n, flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
   const isHostCall = (address: GuestAddress): boolean => callbacks.resolve(address) !== null;
   const cpu = width === 4 ? new I386Cpu({ state, memory, hostCall: isHostCall }) : new X64Cpu({ state, memory, isHostCall });
-  const runner = new GuestCallRunner({ cpu, callbacks, returnAddress: sentinel }); runtime.attachRunner(runner);
+  const runner = new GuestCallRunner({ cpu, callbacks, returnAddress: sentinel, ...(variadicLayouts === undefined ? {} : { variadicLayouts }) }); runtime.attachRunner(runner);
   const context: GuestCallContext = { module, callback: { kind: "native-guest", module, address: sentinel, abi: fixture.elf.abi }, parent: null, self: null, other: null };
+  const image = runtime.load({ bytes: fixture.bytes, module, loadBias: width === 4 ? 0x10000000n : 0x100000000n });
+  runtime.initialize(image, { context, instructionBudget: 20000 });
+  return { memory, cpu, runner, callbacks, runtime, image, context, events, abi: fixture.elf.abi };
+}
+
+/** Loads and initializes a Quake Live API 10 module image, retail or synthetic, through the System V runtime and the shared guest runner. */
+export function nativeGameFixtureFrom(fixture: NativeModuleFixture) {
+  const { memory, cpu, runner, callbacks, runtime, image, context, events } = nativeGuestProcess(fixture);
   const cvars = new CvarRegistry({ dialect: "q3", context: { session: createIdentityOwner("native-q3").session, origin: { kind: "server-console" } }, print: text => events.push(text) });
   const configstrings = new Map<number, string>();
   let arguments_: readonly string[] = [];
@@ -31,8 +47,6 @@ export async function nativeGameFixture(name: "qagamei386.so" | "qagamex64.so") 
       executeConsoleNow: text => events.push(text), sendServerCommand: (client, text) => events.push(`${client}:${text}`),
       dropClient: () => { throw new Error("No admitted client in native fixture"); }, getUserinfo: () => { throw new Error("No admitted client in native fixture"); },
       setUserinfo: () => { throw new Error("No admitted client in native fixture"); }, getUserCommand: () => { throw new Error("No admitted client in native fixture"); } } });
-  const image = runtime.load({ bytes: fixture.bytes, module, loadBias: width === 4 ? 0x10000000n : 0x100000000n });
-  runtime.initialize(image, { context, instructionBudget: 20000 });
   const game = new QuakeLiveGameModule({ image, runner, context, instructionBudget: 1000000 }, imports.address);
   return { memory, cpu, runner, callbacks, runtime, cvars, configstrings, imports, game, image, context, events,
     command: (values: readonly string[]): boolean => { arguments_ = values; try { return game.consoleCommand(); } finally { arguments_ = []; } } };

@@ -1,6 +1,7 @@
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
-import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think } from "../foundation/host.ts";
+import type { Vec3 } from "../../../contracts/math.ts";
+import type { Q2Entity, Q2FoundationHost, Q2GameServices, Q2SpawnModule } from "../foundation/host.ts";
 
 /** Wave roster by tier. Classnames are base Q2 monsters so horde runs on
  * every Q2 program/edition without mission-pack registrations. */
@@ -15,6 +16,22 @@ const TOTAL_WAVES = 15;
 const POINT_CLASSNAMES: ReadonlySet<string> = new Set([
   "info_monster_start", "info_monster_start_flying", "info_monster_start_ranged", "info_monster_start_boss",
 ]);
+
+/** The part of the Q2 game services the wave logic reads, so tests supply typed doubles instead of the full entity services. */
+export interface Q2HordeGame {
+  readonly entities: { values(): Iterable<Q2Entity> };
+  readonly host: {
+    readonly actors: Pick<Q2FoundationHost["actors"], "resolveSaved" | "referenceSaved">;
+    readonly combat: { read(actor: ActorId): { readonly health: number } | null | undefined };
+    trace(request: Parameters<Q2FoundationHost["trace"]>[0]): Pick<ReturnType<Q2FoundationHost["trace"]>, "startSolid" | "hit">;
+    emit: Q2FoundationHost["emit"];
+  };
+  body(entity: Pick<Q2Entity, "actor">): { readonly origin: Vec3 };
+  solid: Q2GameServices["solid"];
+  schedule(entity: Q2Entity, delaySeconds: number, think: Q2HordeThink): undefined;
+  spawn: Q2GameServices["spawn"];
+}
+type Q2HordeThink = (entity: Q2Entity, game: Q2HordeGame) => undefined;
 
 const MONSTER_BOUNDS = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
 const MASK_MONSTERSOLID = 0x2020003;
@@ -32,14 +49,14 @@ export class Q2Horde implements Q2SpawnModule {
   private intermissionTicks = 0;
   private readonly waveMonsters = new Set<ActorId>();
 
-  private readonly think: Q2Think = (entity, game) => {
+  private readonly think: Q2HordeThink = (entity, game) => {
     this.tick(game);
     if (this.wave <= TOTAL_WAVES) game.schedule(entity, 0.5, this.think);
     return undefined;
   };
   readonly callbacks = { think: { "q2:horde/manager": this.think } };
 
-  spawn(entity: Q2Entity, game: Q2GameServices): boolean {
+  spawn(entity: Q2Entity, game: Q2HordeGame): boolean {
     if (entity.classname === "horde_manager") {
       this.manager = entity;
       game.solid(entity, "none");
@@ -59,7 +76,7 @@ export class Q2Horde implements Q2SpawnModule {
       monsters: [...this.waveMonsters].map(id => ({ slot: id.slot, generation: id.generation })) };
   }
 
-  restore(game: Q2GameServices, saved: { wave: number; spawned: number; intermission: number; monsters: readonly SavedActorId[] }): undefined {
+  restore(game: Q2HordeGame, saved: { wave: number; spawned: number; intermission: number; monsters: readonly SavedActorId[] }): undefined {
     this.wave = saved.wave; this.spawnedThisWave = saved.spawned; this.intermissionTicks = saved.intermission;
     this.waveMonsters.clear();
     for (const savedId of saved.monsters) {
@@ -75,13 +92,13 @@ export class Q2Horde implements Q2SpawnModule {
     return undefined;
   }
 
-  private playersAlive(game: Q2GameServices): boolean {
+  private playersAlive(game: Q2HordeGame): boolean {
     for (const entity of game.entities.values())
       if (entity.classname === "player" && (game.host.combat.read(entity.actor.id)?.health ?? 0) > 0) return true;
     return false;
   }
 
-  private aliveCount(game: Q2GameServices): number {
+  private aliveCount(game: Q2HordeGame): number {
     let alive = 0;
     for (const id of this.waveMonsters) {
       const health = game.host.combat.read(id)?.health;
@@ -92,7 +109,7 @@ export class Q2Horde implements Q2SpawnModule {
 
   private waveQuota(): number { return Math.min(4 + this.wave * 2, 24); }
 
-  private tick(game: Q2GameServices): void {
+  private tick(game: Q2HordeGame): void {
     if (this.manager === null || this.points.length === 0 || this.wave > TOTAL_WAVES) return;
     if (!this.playersAlive(game)) return;
     const alive = this.aliveCount(game);

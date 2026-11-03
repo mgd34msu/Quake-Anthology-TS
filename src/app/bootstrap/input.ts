@@ -616,6 +616,8 @@ export class ApplicationInput {
       if (previousSettings === undefined) this.controllerSettings.update();
       else this.controllerSettings.copySettledProfilesFrom(previousSettings);
     } catch (error) { if (this.ownsControllers) this.controllers.close(); throw error; }
+    // Closures stored on this input share the constructor's scope; the previous world's input must not outlive construction through it.
+    previous = undefined;
   }
 
   private executeUiCommand(name: string, args: readonly string[], seat: SeatId | null, source: CommandContext): undefined {

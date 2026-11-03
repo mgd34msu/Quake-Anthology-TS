@@ -129,10 +129,11 @@ import { Q2RemotePresentation } from "./network/remote.ts";
 import type { ApplicationNetworkPhase, Q2ApplicationGameState } from "./network/types.ts";
 import { serverMapPath } from "./server-map.ts";
 import type { ApplicationOptions } from "./options.ts";
-import { WorldSeatPresentation } from "./presentation.ts";
+import type { WorldSeatPresentation } from "./presentation.ts";
+import { createSeatPresentation, createSeatUi } from "./seat-factory.ts";
 import { NativeRenderer } from "./renderer.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
-import { ApplicationSeatUi } from "./ui.ts";
+import type { ApplicationSeatUi } from "./ui.ts";
 
 interface RemoteWorldFrontend {
   readonly assets: ApplicationAssets;
@@ -1335,8 +1336,8 @@ export class RemoteApplication {
       }
       const typography = await frontend.assets.loadMenuTypography();
       assertCurrent();
-      ui = new ApplicationSeatUi(local, frontend.art, controls, operation => this.renderer.mutateWindow(operation), remote, frontend.font, frontend.audio,
-        requestQuit, (name, args) => execute(name, args, seat.id), typography, undefined, undefined, undefined, this.viewSettings.binding(), this.host.llm);
+      ui = createSeatUi({ local, art: frontend.art, input: controls, mutateWindow: operation => this.renderer.mutateWindow(operation), simulation: remote, font: frontend.font, audio: frontend.audio,
+        quit: requestQuit, command: (name, args) => execute(name, args, seat.id), typography, view: this.viewSettings.binding(), llm: this.host.llm });
       if (this.uiPreferences !== null) ui.preferences.values = this.uiPreferences;
       if (q3Scene !== null) {
         const remote = q3Scene.remote;
@@ -1371,8 +1372,9 @@ export class RemoteApplication {
         ? await loadQ3Character(await this.content.forContent(this.content.recipe.character.appearance.content),
           {model:this.options.characterModel,skin:"default",headModel:"",headSkin:"default",team:null,teamName:""}) : null;
       assertCurrent();
-      const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, remote, 1, frontend.font, characters, ui, frontend.effects, q3, null,
-        () => this.imageSettings.cvars.variableValue("gl_debug_distfrac"), () => this.viewSettings.fieldOfView, null, () => this.imageSettings.cvars.variableValue("con_scale"));
+      const presentation = createSeatPresentation({ local, assets: frontend.assets, renderer: this.renderer, simulation: remote, seatCount: 1, font: frontend.font, characters, ui,
+        effects: frontend.effects, q3Client: q3, worldTextCullFactor: () => this.imageSettings.cvars.variableValue("gl_debug_distfrac"), fieldOfView: () => this.viewSettings.fieldOfView,
+        consoleScale: () => this.imageSettings.cvars.variableValue("con_scale") });
       const capture = this.ownership.kind === "borrowed" ? this.ownership.client.capture
         : new ApplicationCapture(inputCaptureServices(controls, applicationCaptureRoot(this.options.userContentRoot), () => this.captureMap ?? "menu", text => this.print(text)), this.renderer);
       assertCurrent();
