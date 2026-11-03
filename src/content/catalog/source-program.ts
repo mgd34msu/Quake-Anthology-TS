@@ -7,7 +7,7 @@ export function sourceProgramProduct(catalog: InstalledCatalog, content: Content
   let product = catalog.require(content);
   const visited = new Set<ContentId>();
   while (!expectedProducts.some(builtin => builtin.id === product.expectation.id)
-    && product.expectation.requiredPrograms.length === 0 && product.expectation.baseProduct !== null) {
+    && product.expectation.requiredPrograms.length === 0 && (product.expectation.nativePrograms?.length ?? 0) === 0 && product.expectation.baseProduct !== null) {
     if (visited.has(product.id)) throw new Error("Cyclic source program dependency");
     visited.add(product.id);
     const base = catalog.require(product.expectation.baseProduct);

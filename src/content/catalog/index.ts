@@ -230,7 +230,7 @@ async function inspectModDirectory(physical: string, base: ProductExpectation, i
   const members = await readdir(physical, { withFileTypes: true });
   const archives = members.filter(member => member.isFile() && archiveFormat(member.name) !== null);
   const hasContent = archives.length > 0 || members.some(member => member.isDirectory() && ["maps", "models", "vm"].includes(member.name.toLowerCase())
-    || member.isFile() && /^(?:qw?progs\.dat|progs\.dat|(?:q|)game.*\.(?:dll|so))$/i.test(member.name));
+    || member.isFile() && /^(?:qw?progs\.dat|progs\.dat|(?:qa)?game.*\.(?:dll|so))$/i.test(member.name));
   if (!hasContent) return null;
   const programNames = members.filter(member => member.isFile()).map(member => member.name.toLowerCase());
   if (base.family === "q3" && await findContentPath(physical, "vm/qagame.qvm") !== null) programNames.push("vm/qagame.qvm");

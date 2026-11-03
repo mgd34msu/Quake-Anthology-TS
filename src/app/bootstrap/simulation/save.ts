@@ -80,7 +80,7 @@ export function simulationGuestCheckpoint(image: SaveImage): QuakeCCheckpoint | 
 
 export function nativeQ2OriginalSave(image: SaveImage, expected?: ModuleIdentity) {
   const execution = image.recipe.execution.find(module => module.role === "server-game");
-  if (execution?.kind !== "native") {
+  if (execution?.kind !== "native" || execution.api.kind === "q3-qagame") {
     if (image.providers.some(record => record.schema === "q2:classic-native-original")) throw new Error("Original API 3 save has no matching native execution");
     return null;
   }

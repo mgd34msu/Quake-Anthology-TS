@@ -108,7 +108,7 @@ function q3Code(codeAt: number, dataAt: number): { readonly code: number[]; read
 
 /** PE32 with .text (code), .rdata (export directory for dllEntry and vmMain) and .data (strings, tables), loaded at its preferred base. */
 export function authoredQ3Pe(): Uint8Array {
-  const bytes = new Uint8Array(0xc00), view = new DataView(bytes.buffer);
+  const bytes = new Uint8Array(0x1200), view = new DataView(bytes.buffer);
   const { code, dllEntry, vmMain } = q3Code(Q3_MODULE_BASE + 0x1000, Q3_MODULE_BASE + 0x3000);
   const u16 = (offset: number, value: number): void => { view.setUint16(offset, value, true); };
   const u32 = (offset: number, value: number): void => { view.setUint32(offset, value, true); };
@@ -118,18 +118,19 @@ export function authoredQ3Pe(): Uint8Array {
   u16(optional, 0x10b); u32(optional + 28, Q3_MODULE_BASE); u32(optional + 32, 0x1000); u32(optional + 36, 0x200); u32(optional + 56, 0x3000 + 0xa000); u32(optional + 60, 0x400); u32(optional + 92, 16);
   u32(directories, 0x2000); u32(directories + 4, 0x100);
   const table: readonly (readonly [string, number, number, number, number, number])[] = [
-    [".text", 0x200, 0x1000, 0x200, 0x400, 0x60000020], [".rdata", 0x200, 0x2000, 0x200, 0x600, 0x40000040], [".data", 0xa000, 0x3000, 0x400, 0x800, 0xc0000040]];
+    [".text", 0x800, 0x1000, 0x800, 0x400, 0x60000020], [".rdata", 0x200, 0x2000, 0x200, 0xc00, 0x40000040], [".data", 0xa000, 0x3000, 0x400, 0xe00, 0xc0000040]];
   for (const [index, [name, size, rva, rawSize, raw, flags]] of table.entries()) {
     const at = sections + index * 40;
     bytes.set(new TextEncoder().encode(name), at); u32(at + 8, size); u32(at + 12, rva); u32(at + 16, rawSize); u32(at + 20, raw); u32(at + 36, flags);
   }
+  if (code.length > 0x800) throw new RangeError("Authored Q3 code exceeds its section");
   bytes.set(code, 0x400);
   const text = (offset: number, value: string): void => { bytes.set(new TextEncoder().encode(`${value}\0`), offset); };
-  // Export directory at RVA 0x2000 (file 0x600): functions 0x2040, names 0x2050, ordinals 0x2060, strings after.
-  u32(0x600 + 12, 0x2090); u32(0x600 + 16, 1); u32(0x600 + 20, 2); u32(0x600 + 24, 2); u32(0x600 + 28, 0x2040); u32(0x600 + 32, 0x2050); u32(0x600 + 36, 0x2060);
-  u32(0x640, 0x1000 + dllEntry); u32(0x644, 0x1000 + vmMain); u32(0x650, 0x2070); u32(0x654, 0x2080); u16(0x660, 0); u16(0x662, 1);
-  text(0x670, "dllEntry"); text(0x680, "vmMain"); text(0x690, "q3synthetic.dll");
-  for (const [offset, value] of Object.entries(Q3_STRINGS)) text(0x800 + Number(offset), value);
+  // Export directory at RVA 0x2000 (file 0xc00): functions 0x2040, names 0x2050, ordinals 0x2060, strings after.
+  u32(0xc00 + 12, 0x2090); u32(0xc00 + 16, 1); u32(0xc00 + 20, 2); u32(0xc00 + 24, 2); u32(0xc00 + 28, 0x2040); u32(0xc00 + 32, 0x2050); u32(0xc00 + 36, 0x2060);
+  u32(0xc40, 0x1000 + dllEntry); u32(0xc44, 0x1000 + vmMain); u32(0xc50, 0x2070); u32(0xc54, 0x2080); u16(0xc60, 0); u16(0xc62, 1);
+  text(0xc70, "dllEntry"); text(0xc80, "vmMain"); text(0xc90, "q3synthetic.dll");
+  for (const [offset, value] of Object.entries(Q3_STRINGS)) text(0xe00 + Number(offset), value);
   return bytes;
 }
 
