@@ -73,7 +73,7 @@ export function simulationGuestCheckpoint(image: SaveImage): QuakeCCheckpoint | 
     return checkpoint;
   }
   if (execution.owner.provider !== image.recipe.map.entities.provider || !isDeepStrictEqual(checkpoint.module, expected)
-    || checkpoint.kind === "qvm" && !isDeepStrictEqual(checkpoint.hostState.module, expected) || !isDeepStrictEqual(checkpoint.api, execution.api))
+    || !isDeepStrictEqual(checkpoint.hostState.module, expected) || !isDeepStrictEqual(checkpoint.api, execution.api))
     throw new Error(`${name} checkpoint differs from the selected artifact and API`);
   return checkpoint;
 }
