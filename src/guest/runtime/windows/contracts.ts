@@ -48,6 +48,7 @@ export interface WindowsServiceHost {
   readonly heaps: Set<bigint>;
   readonly reservations: Map<bigint, { readonly address: GuestAddress; readonly size: number }>;
   readonly tlsIndices: Set<number>;
+  readonly fiberSlots: Map<number, { readonly callback: GuestAddress | null; value: GuestAddress | null }>;
   register(library: string, name: string, signature: GuestCallSignature, invoke: WindowsImportImplementation): void;
   service(library: string, name: string, parameters: readonly GuestStorage[], result: GuestStorage | "void", invoke: WindowsImportImplementation): void;
   allocate(size: number, heap?: bigint): GuestAddress | null;

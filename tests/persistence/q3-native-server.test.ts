@@ -37,6 +37,11 @@ const launchOptions = (userRoot: string, ...flags: string[]) => {
 };
 
 /** The module's heap chain: how many frames allocated, and the addresses and contents of the blocks, newest first. */
+function word(engine: Q3NativeGuestSource, offset: number): number {
+  const { memory } = engine, address = memory.pointer(BigInt(Q3_MODULE_BASE + 0x3000 + offset));
+  if (address === null) throw new Error("Unmapped module data");
+  return memory.readUint32(address);
+}
 function heapChain(engine: Q3NativeGuestSource): { readonly count: number; readonly blocks: readonly { readonly address: number; readonly next: number }[] } {
   const { memory } = engine, word = (offset: number): number => memory.readUint32(memory.pointer(BigInt(Q3_MODULE_BASE + 0x3000 + offset)) ?? (() => { throw new Error("Unmapped module data"); })());
   const blocks: { address: number; next: number }[] = [];
@@ -163,8 +168,12 @@ for (const [label, file, build, profile] of [["authored PE", "qagamex86.dll", au
         const heapSaved = saved.heap;
         expect(saved.version).toBe(2);
         expect(heapSaved?.blocks.length).toBe(12);
+        expect(heapSaved?.windows?.fls.length).toBe(1);
+        const flsHead = word(restoredEngine, Q3_DATA.heapHead);
         // The runtime's heap table came back with them: the module frees its newest block by address and the runtime knows it.
         await restoredEngine.shutdownAsync(false);
+        // The fiber-local slot came back holding the newest block, so the module reads it after the restore.
+        expect(word(restoredEngine, Q3_DATA.flsValue)).toBe(flsHead);
         expect(restoredEngine.memory.readUint32(restoredEngine.memory.pointer(BigInt(Q3_MODULE_BASE + 0x3000 + Q3_DATA.heapFreed)) ?? (() => { throw new Error("Unmapped module data"); })())).toBe(1);
       }
     } finally { await active?.close(); }

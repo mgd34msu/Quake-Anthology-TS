@@ -38,6 +38,7 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
   readonly heaps = new Set<bigint>();
   readonly reservations = new Map<bigint, { readonly address: GuestAddress; readonly size: number }>();
   readonly tlsIndices = new Set<number>();
+  readonly fiberSlots = new Map<number, { readonly callback: GuestAddress | null; value: GuestAddress | null }>();
   readonly #tlsBlocks = new Map<PeImage, GuestAddress>();
   readonly #cfgTargets = new Set<bigint>();
   #cfgCheck: GuestAddress | null = null;
@@ -185,7 +186,7 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
   heapState(): { readonly blocks: readonly NativeHeapBlock[]; readonly tables: WindowsHeapTables } {
     return { blocks: [...this.#allocations.values()].map(entry => ({ base: entry.address.byteOffset, size: entry.size, heap: entry.heap })),
       tables: { heaps: [...this.heaps], reservations: [...this.reservations.values()].map(entry => ({ base: entry.address.byteOffset, size: entry.size })),
-        tls: [...this.tlsIndices], lastError: this.lastError } };
+        tls: [...this.tlsIndices], fls: [...this.fiberSlots].map(([index, slot]) => ({ index, callback: slot.callback?.byteOffset ?? null, value: slot.value?.byteOffset ?? null })), lastError: this.lastError } };
   }
   /** Rebinds the saved tables to this process's addresses; every block must lie in a mapping already restored. */
   restoreHeapState(blocks: readonly NativeHeapBlock[], tables: WindowsHeapTables): void {
@@ -198,6 +199,8 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
     for (const block of blocks) { const address = pointer(block.base); this.memory.check(address, 1, "read"); this.#allocations.set(block.base, { address, size: block.size, heap: block.heap }); }
     this.heaps.clear(); for (const heap of tables.heaps) this.heaps.add(heap);
     this.reservations.clear(); for (const entry of tables.reservations) this.reservations.set(entry.base, { address: pointer(entry.base), size: entry.size });
+    this.fiberSlots.clear();
+    for (const slot of tables.fls) this.fiberSlots.set(slot.index, { callback: slot.callback === null ? null : pointer(slot.callback), value: slot.value === null ? null : pointer(slot.value) });
     this.tlsIndices.clear(); for (const index of tables.tls) this.tlsIndices.add(index);
     this.lastError = tables.lastError;
   }

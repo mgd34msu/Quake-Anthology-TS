@@ -137,7 +137,7 @@ export function installKernel(host: WindowsServiceHost): void {
     host.lastError = 0; return ptr(readPointer(memory, tlsSlot(index))); });
   service("TlsSetValue", ["uint32", "pointer"], "int32", (_context, args) => { const index = Number(integer(args, 0)); if (!tls.has(index)) { host.lastError = 87; return bool(false); }
     writePointer(memory, tlsSlot(index), pointer(args, 1)); return bool(true); });
-  const fls = new Map<number, { readonly callback: GuestAddress | null; value: GuestAddress | null }>();
+  const fls = host.fiberSlots;
   service("FlsAlloc", ["pointer"], "uint32", (_context, args) => { for (let index = 0; index < 128; index++) if (!fls.has(index)) { fls.set(index, { callback: pointer(args, 0), value: null }); return u32(index); } host.lastError = 8; return u32(0xffffffff); });
   service("FlsGetValue", ["uint32"], "pointer", (_context, args) => { const slot = fls.get(Number(integer(args, 0))); if (slot === undefined) { host.lastError = 87; return ptr(null); } host.lastError = 0; return ptr(slot.value); });
   service("FlsSetValue", ["uint32", "pointer"], "int32", (_context, args) => { const slot = fls.get(Number(integer(args, 0))); if (slot === undefined) { host.lastError = 87; return bool(false); } slot.value = pointer(args, 1); return bool(true); });

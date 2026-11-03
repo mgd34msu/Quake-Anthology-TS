@@ -69,7 +69,8 @@ function readNativeHeap(reader: SaveReader): NativeGuestHeapImage | null {
     blocks: heap.field("blocks").list(block => ({ base: block.field("base").bigint(), size: block.field("size").integer(0), heap: block.field("heap").bigint() })),
     windows: heap.field("windows").nullable(windows => ({ heaps: windows.field("heaps").list(value => value.bigint()),
       reservations: windows.field("reservations").list(entry => ({ base: entry.field("base").bigint(), size: entry.field("size").integer(1) })),
-      tls: windows.field("tls").list(value => value.integer(0)), lastError: windows.field("lastError").integer(0) })) };
+      tls: windows.field("tls").list(value => value.integer(0)),
+      fls: windows.field("fls").value === undefined ? [] : windows.field("fls").list(slot => ({ index: slot.field("index").integer(0), callback: slot.field("callback").nullable(value => value.bigint()), value: slot.field("value").nullable(value => value.bigint()) })), lastError: windows.field("lastError").integer(0) })) };
 }
 export function readGuest(reader: SaveReader): GuestCheckpoint {
   const common = { module: readModule(reader.field("module")), random: reader.field("random").list(readRandom), callbacks: reader.field("callbacks").list(readCallback) };

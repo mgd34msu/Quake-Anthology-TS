@@ -190,6 +190,8 @@ export interface WindowsHeapTables {
   readonly heaps: readonly bigint[];
   readonly reservations: readonly { readonly base: bigint; readonly size: number }[];
   readonly tls: readonly number[];
+  /** Fiber-local storage slots; images saved before they were recorded read as none. */
+  readonly fls: readonly { readonly index: number; readonly callback: bigint | null; readonly value: bigint | null }[];
   readonly lastError: number;
 }
 /**
