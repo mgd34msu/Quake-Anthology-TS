@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { managedAddonHidden, managedAddonTitle, readNightdiveAddons } from "./addons.ts";
 import { open, readdir, stat } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { basename, dirname, extname, relative, resolve } from "node:path";
 import { createContentId, createMountId, createMountIdentity } from "../../contracts/content.ts";
 import type { ArchiveFormat, ContentDigest, ContentId, ContentMount, GameFamily, MountPlanId, ResolvedMountPlan } from "../../contracts/content.ts";
@@ -861,7 +862,14 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
     const existing = directories.get(directory);
     if (existing !== undefined) return existing;
     const names = new Map<string, string>();
-    for (const entry of await readdir(directory, { withFileTypes: true })) names.set(entry.name.toLowerCase(), entry.name);
+    let entries: Dirent[] = [];
+    // A user content root need not exist yet; a missing directory simply holds no programs.
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    }
+    for (const entry of entries) names.set(entry.name.toLowerCase(), entry.name);
     directories.set(directory, names);
     return names;
   };
@@ -883,7 +891,12 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
       names = new Set(product.archives.flatMap(archive => archive.entries.map(entry => entry.path.toLowerCase())));
       archivePrograms.set(product, names);
     }
-    return names.has(program.toLowerCase()) || (product.looseRoot !== null && (await looseHas(product.looseRoot, program)));
+    // A user overlay can supply the program for a corpus mod (e.g. a QW program beside a classic mod).
+    return (
+      names.has(program.toLowerCase()) ||
+      (product.looseRoot !== null && (await looseHas(product.looseRoot, program))) ||
+      (product.userContent !== null && product.userContent !== undefined && (await looseHas(product.userContent.root, program)))
+    );
   };
   // A program is found in the product's own directory or archives, or anywhere along its base chain.
   const missingPrograms = async (product: CatalogProduct): Promise<string[]> => {

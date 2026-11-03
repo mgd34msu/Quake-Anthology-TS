@@ -27,8 +27,11 @@ test("alias interpolation reuses repeated lerps and stays bounded for continuous
   const current = frame(0),
     previous = frame(10);
   expect(interpolateAliasFrames(current, previous, 0.25)).toBe(interpolateAliasFrames(current, previous, 0.25));
+  // Measure retained heap, not allocation churn: collect before both readings.
+  Bun.gc(true);
   const before = process.memoryUsage().heapUsed;
   for (let i = 0; i < 20000; i++) interpolateAliasFrames(current, previous, Math.random());
+  Bun.gc(true);
   expect(process.memoryUsage().heapUsed - before).toBeLessThan(64 * 1024 * 1024);
   expect(interpolateAliasFrames(current, previous, 0.5)[0]?.position.x).toBe(5);
 });
