@@ -28,7 +28,7 @@ function stub(time = 1): { readonly context: GameAiContext; readonly respawns: n
   const context = Object.assign(created, {
     nodeSwitches: [],
     time,
-    gameType: 0,
+    deathmatch: { gametype: 0, maxclients: 64 },
     random: () => 1,
     cvar: () => ({ integerValue: 1 }),
     game: { options: { configstrings: { get: () => "n\\bot\\t\\0" }, engine: { print: noop } } },
