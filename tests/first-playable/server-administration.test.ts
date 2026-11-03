@@ -7,6 +7,7 @@ import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CvarRegistry } from "../../src/core/cvars/index.ts";
 import { addressKey, ipAddress } from "../../src/network/common/endpoint.ts";
 import { ConfigStore } from "../../src/settings/config.ts";
+import { RconGuard } from "../../src/network/common/rcon-guard.ts";
 import { handleQ2Rcon } from "../../src/network/q2/connectionless.ts";
 import { q2OutOfBand, readQ2OutOfBand } from "../../src/network/q2/handshake.ts";
 
@@ -95,10 +96,11 @@ test("Q2 limited rcon preserves raw prefixes and refunds authenticated rate cred
     expect(state.limitedRcon(cvars).prefixes).toEqual(["say  ", "status"]);
     expect(output.pop()).toBe("Lrconcmd already exists: status\n");
     const message = (bytes: Uint8Array) => { const parsed = readQ2OutOfBand(bytes); if (parsed === null) throw new Error("Missing rcon packet"); return parsed; };
+    const guard = new RconGuard();
     const run = (command: string, now = 0) => handleQ2Rcon({ profile: "rerelease", reply: (_from, bytes) => print(message(bytes).text),
       rconPassword: () => cvars.variableString("rcon_password"), limitedRcon: () => state.limitedRcon(cvars),
       rconRateAllowed: time => state.rconRateAllowed(cvars, time, print), rechargeRconRate: () => state.rechargeRconRate(),
-      executeRcon: async (text, limited, write) => { executed.push(`${limited}:${text}`); write("done\n"); } }, ipAddress("127.0.0.1", 27910), message(q2OutOfBand(command)), now);
+      executeRcon: async (text, limited, write) => { executed.push(`${limited}:${text}`); write("done\n"); } }, ipAddress("127.0.0.1", 27910), message(q2OutOfBand(command)), now, guard);
     await run("rcon wrong status");
     await run("rcon limited quit"); expect(output.at(-1)).toContain("not permitted");
     await run('rcon limited say  "hello world"');

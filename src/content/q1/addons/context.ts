@@ -4,6 +4,7 @@ import type { Vec3 } from "../../../contracts/math.ts";
 import { encodeCheckpointValue, decodeCheckpointValue } from "../../../persistence/value.ts";
 import { SaveReader } from "../../../persistence/value.ts";
 import type { Q1Base } from "../base/provider.ts";
+import type { BaseMonster } from "../base/monsters.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
 import { moveDirection } from "../foundation/entity.ts";
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
@@ -40,6 +41,8 @@ export interface Q1AddonServices {
 export class Q1AddonContext {
   readonly game: Q1EntityServices;
   frameTime = 0;
+  /** Controllers of the ordinary add-on species, filled by registerOrdinaryAddonMonsters. */
+  readonly ordinaryMonsters = new Map<OwnedActor, BaseMonster>();
   private readonly playerWords = new Map<OwnedActor, Map<string, number>>();
   private readonly playerReferences = new Map<OwnedActor, Map<string, ActorId | null>>();
   private readonly frameTicks: Q1Actor[] = [];

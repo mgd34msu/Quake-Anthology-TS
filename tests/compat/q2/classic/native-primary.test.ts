@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+import { expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { corpusFile } from "../../../support/corpus.ts";
+import { ClassicGuestWorld } from "../../../../src/app/bootstrap/simulation/classic-guest-world.ts";
+import { prepareClassicGuest } from "../../../../src/app/bootstrap/simulation/classic-guest-source.ts";
+import { nativePrimaryWeaponHost } from "../../../../src/app/bootstrap/simulation/native-primary-weapons.ts";
+import { SharedPhysics } from "../../../../src/app/bootstrap/simulation/physics.ts";
+import { openArchive } from "../../../../src/content/archive/index.ts";
+import { openMountPlan } from "../../../../src/content/mounts/index.ts";
+import { createMountIdentity } from "../../../../src/contracts/content.ts";
+import type { ItemId } from "../../../../src/contracts/gameplay.ts";
+import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
+import type { OriginalPickupAdmission, OriginalPickupOffer } from "../../../../src/contracts/original-pickups.ts";
+import { CvarRegistry } from "../../../../src/core/cvars/index.ts";
+import { createNumericOperations, Q2_DONOR_PROFILE } from "../../../../src/core/numeric.ts";
+import { parseEntities } from "../../../../src/core/common-parse.ts";
+import { decodeQ2Map } from "../../../../src/formats/q2-map/index.ts";
+import { ActorCallbackTable, SessionActorRegistry } from "../../../../src/world/actors/index.ts";
+import { SharedInventoryTable } from "../../../../src/world/gameplay/index.ts";
+import { createSceneQueries } from "../../../../src/world/collision/index.ts";
+import { builtinNativePrimary } from "../../../../src/compat/q2/native-primary.ts";
+import { NativePrimaryCommands } from "../../../../src/compat/q2/native-primary-commands.ts";
+import { NativePrimaryInventory } from "../../../../src/compat/q2/native-primary-inventory.ts";
+import { NativePrimaryDrop } from "../../../../src/compat/q2/native-primary-drop.ts";
+import { readClassicString } from "../../../../src/compat/q2/classic/records.ts";
+import { classicSignature, q2Pointer } from "../../../../src/compat/q2/classic/layout.ts";
+import type { Q2UserCommand } from "../../../../src/contracts/protocol.ts";
+import { inertAuthority } from "../../../support/authority.ts";
+
+const path = corpusFile("q2/xatrix/gamex86.dll"), pak = corpusFile("q2/xatrix/pak0.pak");
+const command: Q2UserCommand = { kind: "q2-classic", milliseconds: 100, angleShorts: [0, 0, 0], forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0, lightLevel: 128 };
+function required<T>(value: T | null | undefined): T { if (value === null || value === undefined) throw new Error("Missing native primary fixture value"); return value; }
+
+/** Boots the shipped 1998 Xatrix DLL and binds every built-in native primary service for that digest against it. */
+test.skipIf(!existsSync(path) || !existsSync(pak))("1998 Xatrix runs original give, use, drop and pickups through the built-in native primary", async () => {
+  const archive = await openArchive(pak), geometry = decodeQ2Map(await archive.readEntry(required(archive.findEntries("maps/xswamp.bsp")[0])), "xswamp"); await archive.close();
+  const identity = createMountIdentity("mount:test:native-primary", "q2:classic:xatrix:installed", 1);
+  using mounts = await openMountPlan({ id: "mount-plan:test:native-primary", mounts: [{ kind: "loose", identity, rootPath: corpusFile("q2/xatrix") }], defaultOrder: [identity.id], prefixOrders: [] });
+  const artifact = required(await mounts.open("gamex86.dll"));
+  const prepared = await prepareClassicGuest({ kind: "native", owner: { provider: "q2:classic-native", content: identity.content }, role: "server-game", api: { kind: "q2-classic-game", version: 3 },
+    profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" }, artifact: artifact.reference }, mounts);
+  const primary = required(builtinNativePrimary(prepared.execution.artifact.digest, "classic"));
+  const identityOwner = createIdentityOwner("native-primary-1998");
+  const actors = new SessionActorRegistry(identityOwner), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(geometry);
+  const physics = new SharedPhysics({ actors, callbacks, scene, numeric: Q2_DONOR_PROFILE, sourceOrder: (a, b) => a.slot - b.slot,
+    worldActor: () => required(actors.atSource(prepared.execution.owner.provider, 0)).id, onBlocked: () => undefined });
+  const cvars = new CvarRegistry({ dialect: "q2-classic", context: { session: actors.session, origin: { kind: "server-console" } } });
+  cvars.register("deathmatch", "0"); cvars.register("coop", "0"); cvars.register("ctf", "0");
+  const offers: OriginalPickupOffer[] = [], prints: string[] = [];
+  const pickups: OriginalPickupAdmission = {
+    runSource: (offer, execute) => { offers.push(offer); return execute({ kind: "replacement", current: () => true, grant: () => "accepted" }, { consumePickup: () => undefined }); },
+    touch: () => "refused",
+  };
+  const world = ClassicGuestWorld.create({ prepared, capabilities: {}, instructionBudget: 8_000_000, services: {
+    numeric: createNumericOperations(Q2_DONOR_PROFILE), scene, cvars, maxClients: 1, mapPath: "maps/xswamp.bsp", pickups, admit: () => undefined,
+    collision: (actor, value) => physics.setCollision(actor, value), print: text => { prints.push(text); }, command: () => ({ arguments: [], args: "" }),
+    addCommand: () => undefined, debugGraph: () => undefined,
+    engine: { actors, callbacks, bodies: physics.bodies, combat: inertAuthority(actors, callbacks), inventory: new SharedInventoryTable(actors), trace: request => physics.trace(request),
+      pointContents: () => 0, inPvs: () => true, inPhs: () => true, setAreaPortal: () => undefined, setSolid: (actor, solid, model) => physics.setSolid(actor, solid, model, "q2"),
+      inlineModelBounds: model => scene.modelBounds(model), emit: event => { if (event.kind === "print") prints.push(event.text); return undefined; } },
+  } });
+  try {
+    const origin = required(parseEntities(geometry.entities).find(entity => entity.get("classname") === "info_player_start")).get("origin") ?? "0 0 128";
+    const [x = "0", y = "0", z = "0"] = origin.split(" ");
+    const near = (dx: number): string => `${Number(x) + dx} ${y} ${Number(z) + 8}`;
+    const entities = `{ "classname" "worldspawn" } { "classname" "info_player_start" "origin" "${origin}" }`
+      + ["item_armor_jacket", "ammo_shells", "weapon_shotgun", "item_bandolier", "item_pack"].map((classname, index) => ` { "classname" "${classname}" "origin" "${near(64 + index * 40)}" }`).join("");
+    await world.initLoading(async () => { await Bun.sleep(0); });
+    await world.spawnLoading("xswamp", entities, async () => { await Bun.sleep(0); }, "");
+    expect(world.connect(1, "\\name\\Primary\\skin\\male/grunt\\ip\\127.0.0.1").allowed).toBe(true); world.begin(1);
+    for (let frame = 0; frame < 4; frame++) { world.think(1, command); world.frame(100); }
+
+    const host = nativePrimaryWeaponHost(world, actors), memory = world.source.memory, actor = required(world.actor(1));
+    const record = required(host.recordFor(actor)), client = required(memory.readPointer(memory.offset(record.address, 84n)));
+    const counts = (index: number): number => memory.readInt32(memory.offset(client, BigInt(primary.inventory.inventory + index * 4)));
+    const calls: string[] = [];
+    const commands = new NativePrimaryCommands(host, primary.commands, {
+      give: (_, category) => { calls.push(`give:${category}`); },
+      giveItem: () => false,
+      giveAmmo: (_, item: ItemId, change) => { calls.push(`ammo:${item}:${change.kind}`); },
+      drop: () => null,
+    });
+    const inventory = new NativePrimaryInventory(host, primary.inventory, {
+      rows: () => null, use: () => { throw new Error("No canonical rows exist, so the original use must run"); }, print: (_, text) => { prints.push(text); },
+      itemAt: address => commands.itemAt(address), descriptor: index => required(commands.sourceItem(required(commands.inventorySlots().find(item => item.index === index)).item)).address,
+    });
+    const drop = new NativePrimaryDrop(host, primary.drop, commands, {
+      rows: () => null, selected: () => null, projection: () => { throw new Error("No canonical rows exist"); }, dropped: () => true, consume: (_, execute) => { execute(); },
+      action: () => null, print: (_, text) => { prints.push(text); },
+    });
+    try {
+      const index = (name: ItemId): number => required(commands.sourceItem(name)).index;
+      expect(commands.inventorySlots().length).toBe(46);
+      expect(commands.weapons().map(weapon => weapon.item)).toContain("q2:weapon_phalanx");
+
+      // Original Cmd_Give_f: the category hooks and the named ammo grants reach the bound regions, and the original item stores follow.
+      world.command(1, ["give", "all"], "all"); world.frame(100);
+      expect(calls).toContain("give:weapons"); expect(calls).toContain("give:ammo");
+      expect(counts(index("q2:weapon_railgun"))).toBe(1);
+      expect(counts(index("q2:ammo_slugs"))).toBeGreaterThan(0);
+      world.command(1, ["give", "shells", "7"], "shells 7"); world.frame(100);
+      expect(calls.some(call => call.startsWith("ammo:q2:ammo_shells:"))).toBe(true);
+
+      // Original Cmd_Use_f selects the weapon (newweapon at the declared offset) and ValidateSelectedItem/SelectNextItem keep a legal cursor.
+      const pending = BigInt(primary.drop.client.pending), weapon = BigInt(primary.drop.client.weapon);
+      world.command(1, ["use", "Railgun"], "Railgun"); world.frame(100);
+      const railgun = required(commands.sourceItem("q2:weapon_railgun")).address;
+      expect(memory.readPointer(memory.offset(client, pending))?.byteOffset ?? memory.readPointer(memory.offset(client, weapon))?.byteOffset).toBe(railgun.byteOffset);
+      world.command(1, ["invnext"], ""); world.frame(100);
+      const cursor = memory.readInt32(memory.offset(client, BigInt(primary.inventory.cursor)));
+      expect(cursor).toBeGreaterThan(0); expect(cursor).toBeLessThan(primary.inventory.count);
+      expect(counts(cursor)).toBeGreaterThan(0);
+
+      // Original Cmd_Drop_f spawns the pickup through Drop_Item and debits the declared counter.
+      const before = counts(index("q2:weapon_shotgun"));
+      world.command(1, ["drop", "Shotgun"], "Shotgun"); world.frame(100);
+      expect(counts(index("q2:weapon_shotgun"))).toBe(before - 1);
+      expect(prints.join("")).not.toContain("Unknown item");
+      void drop;
+
+      // Original Touch_Item runs the declared grants; each replacement skips the original recipient writes and leaves a legal guest stack.
+      const items = new Map<string, { address: bigint; slot: number }>();
+      for (let slot = 2; slot < world.source.host.edicts.descriptor().count; slot++) {
+        const view = world.source.host.edicts.at(slot), name = view.bytes.getUint32(0x118, true);
+        if (name === 0) continue;
+        const text = readClassicString(memory, memory.pointer(BigInt(name)));
+        if (text.startsWith("item_") || text.startsWith("ammo_") || text.startsWith("weapon_")) items.set(text, { address: view.address.byteOffset, slot });
+      }
+      expect([...items.keys()].sort()).toEqual(expect.arrayContaining(["ammo_shells", "item_armor_jacket", "item_bandolier", "item_pack", "weapon_shotgun"]));
+      const armorBefore = counts(3), slugsBefore = counts(index("q2:ammo_shells")), packBefore = counts(index("q2:ammo_shells"));
+      const touch = memory.offset(world.source.imageBase, BigInt(primary.pickups.touch));
+      for (const name of ["item_armor_jacket", "ammo_shells", "weapon_shotgun", "item_bandolier", "item_pack"]) {
+        const item = required(items.get(name)), other = record.address;
+        const result = world.source.host.invoke(touch, classicSignature([q2Pointer, q2Pointer, q2Pointer, q2Pointer]),
+          [world.source.host.edicts.at(item.slot).address, other, null, null].map(value => ({ kind: "pointer" as const, value })));
+        expect(result.kind).toBe("void");
+      }
+      expect(offers.map(offer => offer.item)).toEqual(["q2:item_armor_jacket", "q2:ammo_shells", "q2:weapon_shotgun", "q2:item_bandolier", "q2:item_pack"]);
+      // Replacement grants own the writes: the original recipient regions were skipped, so the source counters did not move.
+      expect(counts(3)).toBe(armorBefore); expect(counts(index("q2:ammo_shells"))).toBe(slugsBefore); expect(packBefore).toBe(slugsBefore);
+    } finally { drop.close(); inventory.close(); commands.close(); }
+  } finally { world.close(); }
+}, 120_000);

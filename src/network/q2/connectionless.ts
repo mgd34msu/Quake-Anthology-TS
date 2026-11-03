@@ -5,7 +5,7 @@ import { ipv4Address, addressKey } from '../common/endpoint.ts';
 import { RconGuard, passwordMatches } from '../common/rcon-guard.ts';
 import type { NetworkAddress, Ipv4Address } from '../common/endpoint.ts';
 import type { DiscoveryWire, ServerStatus } from '../services/discovery.ts';
-import { Q2ChallengeTable, q2OutOfBand, readQ2Connect, readQ2OutOfBand } from './handshake.ts';
+import { q2OutOfBand } from './handshake.ts';
 import type { Q2ConnectRequest, Q2ConnectionlessMessage } from './handshake.ts';
 import { readElement } from './state.ts';
 import { stringToBytes } from './message.ts';
@@ -113,12 +113,10 @@ export function q2InfoText(info: ReturnType<Q2ConnectionlessHost['info']>, proto
         : `info\n${info.name.padStart(16)} ${info.map.padStart(8)} ${String(info.players).padStart(2)}/${String(info.maxPlayers).padStart(2)}\n`;
 }
 export type Q2RconHost = Pick<Q2ConnectionlessHost, "profile" | "reply" | "rconPassword" | "limitedRcon" | "rconRateAllowed" | "rechargeRconRate" | "executeRcon">;
-export async function handleQ2Rcon(host: Q2RconHost, from: NetworkAddress, message: Q2ConnectionlessMessage, now: number): Promise<void> {
+export async function handleQ2Rcon(host: Q2RconHost, from: NetworkAddress, message: Q2ConnectionlessMessage, now: number, guard: RconGuard): Promise<void> {
     const reply = (text: string): void => host.reply(from, q2OutOfBand(text));
     if (host.profile === 'rerelease' && !host.rconRateAllowed(now))
         return;
-    let guard = rconGuards.get(host);
-    if (guard === undefined) { guard = new RconGuard(); rconGuards.set(host, guard); }
     if (!guard.permitted(from, now))
         return;
     const password = message.arguments[0] ?? '', full = host.rconPassword(), limit = host.limitedRcon();

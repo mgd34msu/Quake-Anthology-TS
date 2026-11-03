@@ -1,7 +1,7 @@
 import type { ContentDigest } from "../../../contracts/content.ts";
 import type { NativePickupProfile } from "../native-pickups.ts";
 import { classicSignature, q2Int, q2Pointer } from "./layout.ts";
-import { xatrixCombatProfile } from "./combat-profile.ts";
+import { xatrix1998CombatProfile, xatrixCombatProfile } from "./combat-profile.ts";
 
 /** Original Xatrix PE: recipient regions contain no map effects; joins retain respawn tails. */
 const xatrix: NativePickupProfile = {
@@ -22,4 +22,22 @@ const xatrix: NativePickupProfile = {
     ammo: { entry: 0xa310, signature: classicSignature([q2Pointer, q2Pointer, q2Int], q2Int), stop: null,
       tag: 0x44, capacities: [0x6e4, 0x6e8, 0x6ec, 0x6f0, 0x6f4, 0x6f8, 0x6fc, 0x700], capacityBytes: 4 } },
 };
-export function classicPickupProfile(digest: ContentDigest): NativePickupProfile | null { return digest === xatrix.digest ? xatrix : null; }
+/** 1998 retail Xatrix DLL (0b0d119e): Touch_Item 0xa3a0 (pickup call returns at 0xa3d8, G_UseTargets at 0xa4ce), Add_Ammo 0x9b60, 72-byte items.
+ * The regular grant is Pickup_Armor (0xa020), whose region starts at the ArmorIndex call and joins the respawn tail. */
+const xatrix1998: NativePickupProfile = {
+  ...xatrix, digest: xatrix1998CombatProfile.digest, touch: 0xa3a0, grantReturn: 0xa3d8, targetsReturn: 0xa4ce,
+  grants: [
+    { entry: 0xa020, recipient: { entry: 0xa035, join: 0xa16b }, resource: "regular" },
+    { entry: 0x9c30, recipient: { entry: 0x9c34, join: 0x9d08 }, resource: "inventory", supply: { kind: "ammo", entry: 0x9c6c, amount: "rbx" } },
+    { entry: 0x34c10, recipient: { entry: 0x34c84, join: 0x34c97 }, resource: "inventory",
+      supply: { kind: "weapon", ammoReturn: 0x34ce1, settle: 0x34cea, autoswitch: { entry: 0x34d4f, join: 0x34da1 } } },
+    { entry: 0x91b0, recipient: { entry: 0x91bb, join: 0x92c2 }, resource: "inventory" },
+    { entry: 0x9310, recipient: { entry: 0x931b, join: 0x95e8 }, resource: "inventory" },
+  ],
+  items: { ...xatrix.items, table: 0x497c8, stride: 72 },
+  time: { address: 0x73fe4, storage: "float32-seconds" },
+  supply: { ...xatrix.supply, ammo: { ...xatrix.supply.ammo, entry: 0x9b60, tag: 0x40 } },
+};
+export function classicPickupProfile(digest: ContentDigest): NativePickupProfile | null {
+  return digest === xatrix.digest ? xatrix : digest === xatrix1998.digest ? xatrix1998 : null;
+}

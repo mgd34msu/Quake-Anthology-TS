@@ -126,9 +126,9 @@ async function corpseLane(game: string, library: string): Promise<{ respawned: b
       app?.input({ seat: local.seat.id, kind: "key", code: 32, down, repeat: false, timeMilliseconds: performance.now() });
     };
     input(true);
-    for (let i = 0; i < 40; i++) await app.step(50);
+    for (let i = 0; i < 40; i++) { await app.step(50); if (i % 4 === 0) console.log("PROBE", i, app.simulation.playerUi(local.actor).health, app.simulation.presentations().filter(p => !p.viewWeapon).map(p => p.path + "#" + p.frame + (p.actor.equals(local.actor) ? "*" : "")).join(",")); }
     input(false);
-    for (let i = 0; i < 20; i++) await app.step(50);
+    for (let i = 0; i < 100; i++) { await app.step(50); if (i % 8 === 0) console.log("PROBE2", i, app.simulation.playerUi(local.actor).health, app.simulation.presentations().filter(p => !p.viewWeapon).map(p => p.path + "#" + p.frame + (p.actor.equals(local.actor) ? "*" : "")).join(",")); }
     const others = app.simulation.presentations().filter(p => !p.actor.equals(local.actor) && !p.viewWeapon);
     return { respawned: app.simulation.playerUi(local.actor).health > 0,
       corpses: others.filter(p => p.path === "progs/player.mdl").map(p => `${p.family}#${p.frame}`),
@@ -145,3 +145,8 @@ corpusTest("q2/baseq2/pak0.pak", "q2/baseq2/gamex86.dll")("classic native DLL dr
 
 // The rerelease lane kills the player but never respawned it under this harness (mouse and jump held for 2 s in coop),
 // so no rerelease corpse test exists; see docs/status.md.
+
+corpusTest("q2/baseq2/pak0.pak", "q2/rerelease/baseq2/game_x64.dll")("rerelease probe", async () => {
+  const lane = await corpseLane("q2-rerelease-baseq2", "game_x64.dll");
+  console.log("PROBE END", JSON.stringify(lane));
+}, 400_000);

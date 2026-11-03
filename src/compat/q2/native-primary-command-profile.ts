@@ -1,6 +1,6 @@
 import type { ContentDigest } from "../../contracts/content.ts";
 import type { NativePrimaryCommandProfile } from "./native-primary-commands.ts";
-import { xatrixCombatProfile } from "./classic/combat-profile.ts";
+import { xatrix1998CombatProfile, xatrixCombatProfile } from "./classic/combat-profile.ts";
 
 const xatrix: NativePrimaryCommandProfile = {
   digest: xatrixCombatProfile.digest, abi: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" },
@@ -8,6 +8,14 @@ const xatrix: NativePrimaryCommandProfile = {
   drop: { entry: 0x307c0, eligibility: { entry: 0x307e7, join: 0x3083b } },
   client: { pointer: 0x54, weapon: 0x704, ammoIndex: 0xdc8, inventory: 0x2e4 },
   items: { weaponFlag: 1, ammunitionFlag: 2, table: 0x4b828, stride: 76, count: 48, classname: 0, flags: 0x38, icon: 0x24, ammo: { kind: "name", offset: 0x34, label: 0x28 } },
+};
+/** 1998 retail Xatrix DLL (0b0d119e): Cmd_Give_f 0x2b60 and TossClientWeapon 0x2fda0 keep the 8187df bodies; items are 72 bytes (no weapmodel) and ammo_index sits at 0xdbc. */
+const xatrix1998: NativePrimaryCommandProfile = {
+  digest: xatrix1998CombatProfile.digest, abi: xatrix.abi,
+  give: { entry: 0x2b60, weapons: 0x2c76, ammo: 0x2ccf, unknown: { entry: 0x2e75, join: 0x2e86 }, ammoGrants: [{ entry: 0x2eee, join: 0x2ef5, descriptor: "rsi", kind: "set" }, { entry: 0x2efb, join: 0x2f13, descriptor: "rsi", kind: "add" }], argc: 0x73f5c, argv: 0x73f60 },
+  drop: { entry: 0x2fda0, eligibility: { entry: 0x2fdc7, join: 0x2fe1b } },
+  client: { pointer: 0x54, weapon: 0x704, ammoIndex: 0xdbc, inventory: 0x2e4 },
+  items: { weaponFlag: 1, ammunitionFlag: 2, table: 0x497c8, stride: 72, count: 48, classname: 0, flags: 0x38, icon: 0x24, ammo: { kind: "name", offset: 0x34, label: 0x28 } },
 };
 const retail: NativePrimaryCommandProfile = {
   digest: "sha256:045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd", abi: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" },
@@ -17,5 +25,5 @@ const retail: NativePrimaryCommandProfile = {
   items: { weaponFlag: 1, ammunitionFlag: 2, table: 0x195320, stride: 192, count: 84, classname: 8, flags: 0x7c, icon: 0x50, ammo: { kind: "index", offset: 0x74 } },
 };
 export function nativePrimaryCommandProfile(digest: ContentDigest): NativePrimaryCommandProfile | null {
-  return digest === xatrix.digest ? xatrix : digest === retail.digest ? retail : null;
+  return digest === xatrix.digest ? xatrix : digest === xatrix1998.digest ? xatrix1998 : digest === retail.digest ? retail : null;
 }

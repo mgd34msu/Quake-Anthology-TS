@@ -36,10 +36,23 @@ These notes are not edited after release. Corrections found later:
 - **1.1.10 contents.** The tag also contains foreign movement and character support on native
   Quake II worlds (commits `db69fc92`, `d6874ea9`, `e1c8620a`) and shared CTF on every world
   (`fbabc9a2`), which its notes do not mention.
-- **Known issues carried from 1.1.3 to 1.1.6.** Notes through 1.1.6 list native-DLL gameplay
-  stalls and the unified HUD as known issues. Later notes drop the section without recording a
-  resolution. Per-game rerelease HUD layouts are executed natively since the 1.1.x series (see
-  [mod-compatibility.md](../mod-compatibility.md)); a current performance number for native
-  DLL worlds has not been re-measured. Treat both as not re-verified.
+- **Known issues carried from 1.1.3 to 1.1.6.** Notes after 1.1.6 drop the "Known issue" section
+  without recording a resolution. State at 1.2.7-dev, per issue:
+  - Quake III `give`/`giveall` not granting items (1.1.3): resolved. Covered by
+    `tests/first-playable/simulation/cheat-grants.test.ts` (Quake, Quake II classic and rerelease)
+    and the Team Arena `giveall` test in `tests/first-playable/q3-client/application.test.ts`.
+  - Quake II Brain power screen and foreign shots (1.1.3): resolved. Covered by
+    `tests/first-playable/simulation/brain-armor.test.ts`.
+  - Foreign Tag, LMCTF and DeathBall state missing from saves (1.1.5, 1.1.6): still open by
+    design. Such sessions refuse to save (`tests/first-playable/application/foreign-deathball.test.ts`)
+    rather than write a partial save.
+  - Mid-level KEX Quake II saves refused (1.1.5, 1.1.6): still open. Only transition-shaped
+    saves restore (`kexQ2SaveRestorable`).
+  - Unverified QuakeWorld expansion launches (1.1.5, 1.1.6): resolved for launching. Every
+    QuakeWorld expansion product boots and plays a map in
+    `tests/first-playable/application/qw-expansions.test.ts`; that test needs the retail data.
+  - Native-DLL stalls, frame-time figures and the unified HUD (1.1.3 to 1.1.6): not re-measured,
+    so neither resolved nor confirmed. Per-game rerelease HUD layouts execute natively (see
+    [mod-compatibility.md](../mod-compatibility.md)).
 - **Unreleased.** The tree after 1.2.6 contains further changes; see the `Unreleased` section of
-  the changelog. A build from it still reports 1.2.6.
+  the changelog. A build from it reports 1.2.7-dev.

@@ -19,7 +19,6 @@ import { monsterFrames } from "../../../base/frames.ts";
 import type { Q1AddonContext } from "../../context.ts";
 import { initMg3Monster, startMg3Monster, registerMg3MonsterStartup, mg3MonsterActivator } from "../startup.ts";
 
-const stores = new WeakMap<Q1AddonContext, Map<OwnedActor, BaseMonster>>();
 const small = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
 const dopaSmall = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 40 } };
 const crucified = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 40 } };
@@ -146,11 +145,11 @@ class Q1DopaOrdinaryMonster extends BaseMonster {
 function createOrdinary(context: Q1AddonContext, entity: Q1Actor): BaseMonster { return context.program === "dopa" ? new Q1DopaOrdinaryMonster(context, entity) : new Q1OrdinaryMonster(context, entity); }
 
 export function ordinaryAddonMonster(context: Q1AddonContext, entity: Q1Actor): BaseMonster | undefined {
-  return stores.get(context)?.get(entity.actor) ?? context.base.monsters.get(entity.actor);
+  return context.ordinaryMonsters.get(entity.actor) ?? context.base.monsters.get(entity.actor);
 }
 
 export function registerOrdinaryAddonMonsters(context: Q1AddonContext): ReadonlyMap<OwnedActor, BaseMonster> {
-  const { game } = context, prefix = `${context.program}:ordinary`, monsters = new Map<OwnedActor, BaseMonster>(); stores.set(context, monsters);
+  const { game } = context, prefix = `${context.program}:ordinary`, monsters = context.ordinaryMonsters;
   const monster = (entity: Q1Actor): BaseMonster => { const value = monsters.get(entity.actor); if (value === undefined) throw new Error("Missing ordinary addon source state"); return value; };
   registerMonsterCallbacks(game, prefix, monster); registerMg3MonsterStartup(game, prefix, monster);
   game.named.register(`${prefix}:dog_jump_touch`, { touch: (_game, entity, other) => dogJumpTouch(monster(entity), other) });

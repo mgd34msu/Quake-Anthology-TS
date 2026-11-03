@@ -6,7 +6,6 @@ import type { Q1Actor } from "./entity.ts";
 import { moveDirection } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 import { ZERO, vadd, vsub, vscale, dot, yawFor, pathEndTime } from "./types.ts";
-import type { Q1PlayerState } from "./types.ts";
 import { precacheQ1World } from "./precache-world.ts";
 import { spawnPickup } from "./pickups.ts";
 import { spawnButton, spawnDoor, spawnPlat, spawnSecretDoor } from "./movers.ts";

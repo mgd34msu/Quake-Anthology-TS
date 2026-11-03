@@ -99,7 +99,7 @@ interface AncestorIndex {
   caches: AncestorCache[];
 }
 const ancestorCacheLimit = 4;
-const mergedPvs = new WeakMap<DecodedWorld, Map<string, Uint8Array | null>>();
+const mergedPvs = new WeakMap<DecodedWorld, Map<number, Uint8Array | null>>();
 const ancestorIndexes = new WeakMap<DecodedWorld, AncestorIndex>();
 function ancestorIndex(map: DecodedWorld): AncestorIndex {
   let index = ancestorIndexes.get(map);
@@ -176,8 +176,8 @@ export function visibleWorld(map: DecodedWorld, camera: SceneCamera, options: Wo
       if (second !== null && second >= 0 && pvs !== null) {
         // One merged buffer per cluster pair keeps the mark cache keyed by a stable identity.
         let merged = mergedPvs.get(map);
-        if (merged === undefined) { merged = new Map<string, Uint8Array | null>(); mergedPvs.set(map, merged); }
-        const pairKey = `${fromCluster}|${second}`;
+        if (merged === undefined) { merged = new Map<number, Uint8Array | null>(); mergedPvs.set(map, merged); }
+        const pairKey = fromCluster * 0x100000 + second;
         let combined = merged.get(pairKey);
         if (combined === undefined) {
           const other = q2Pvs(map, second);

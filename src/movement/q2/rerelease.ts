@@ -966,15 +966,15 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
     return { Pmove, PM_StepSlideMove_Generic, G_FixStuckObject_Generic };
 }
 type RereleaseMovement = ReturnType<typeof createRereleaseMovement>;
-const movementByContext = new WeakMap<NumericOperations, WeakMap<Q2RereleaseMovementContext, Map<string, RereleaseMovement>>>();
+const movementByContext = new WeakMap<NumericOperations, WeakMap<Q2RereleaseMovementContext, { readonly walking: Map<number, RereleaseMovement>; readonly flying: Map<number, RereleaseMovement> }>>();
 /** The factory closes over only the profile, context and two scalars, so commands reuse one instance. */
 export function pmoveRerelease(pm: KexPmoveT, numericOps: NumericOperations, config: PmConfigT, context: Q2RereleaseMovementContext, flight = false, speedMultiplier = 1): void {
     let contexts = movementByContext.get(numericOps);
     if (contexts === undefined) { contexts = new WeakMap(); movementByContext.set(numericOps, contexts); }
     let variants = contexts.get(context);
-    if (variants === undefined) { variants = new Map(); contexts.set(context, variants); }
-    const key = `${flight ? 1 : 0}:${speedMultiplier}`;
-    let movement = variants.get(key);
-    if (movement === undefined) { movement = createRereleaseMovement(numericOps, context, flight, speedMultiplier); variants.set(key, movement); }
+    if (variants === undefined) { variants = { walking: new Map(), flying: new Map() }; contexts.set(context, variants); }
+    const byMultiplier = flight ? variants.flying : variants.walking;
+    let movement = byMultiplier.get(speedMultiplier);
+    if (movement === undefined) { movement = createRereleaseMovement(numericOps, context, flight, speedMultiplier); byMultiplier.set(speedMultiplier, movement); }
     movement.Pmove(pm, config);
 }

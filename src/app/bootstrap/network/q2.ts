@@ -15,6 +15,7 @@ import type { WireSelection } from '../../../network/common/session.ts';
 import type { NetworkAddress } from '../../../network/common/endpoint.ts';
 import { addressKey, sameAddress } from '../../../network/common/endpoint.ts';
 import { ConnectionlessGate } from '../../../network/services/admin.ts';
+import { RconGuard } from '../../../network/common/rcon-guard.ts';
 import { printablePeerText } from '../../../network/common/diagnostics.ts';
 import { MovementBudget } from '../../../network/common/movement-budget.ts';
 import { tokenizeCommand } from '../../../core/commands/text.ts';
@@ -145,6 +146,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
     private readonly masterHeartbeat: MasterHeartbeat;
     private ended = false;
     private readonly gate = new ConnectionlessGate();
+    private readonly rconGuard = new RconGuard();
     private readonly peers = new Map<string, ServerPeer<TAddress>>();
     private readonly challenges: Q2ChallengeTable;
     private pending: ActorCommand[] = [];
@@ -220,7 +222,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         switch (message.command) {
             case 'rcon': {
                 const administration = this.host.administration;
-                if (administration !== undefined) await handleQ2Rcon({ ...administration, reply: (_to, payload) => { this.transport.send(remote, payload); } }, remote, message, now);
+                if (administration !== undefined) await handleQ2Rcon({ ...administration, reply: (_to, payload) => { this.transport.send(remote, payload); } }, remote, message, now, this.rconGuard);
                 return true;
             }
             case 'status':
