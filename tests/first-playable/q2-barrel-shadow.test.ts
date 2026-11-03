@@ -87,19 +87,22 @@ for (const backend of ["cpu", "gl"])
         expect(authored.length).toBeGreaterThan(0);
         const sampled = received.at(-1);
         if (sampled === undefined) throw new Error("Barrel lighting was not sampled");
-        for (const light of authored) expect(sampled.filter(origin => origin === light.origin)).toHaveLength(1);
+        // Cone lights are lit per fragment and must stay out of the vertex sampler; other shadow lights enter it once.
+        for (const light of authored) expect(sampled.filter(origin => origin === light.origin)).toHaveLength(light.cone === null ? 1 : 0);
         expect(ordinary).toHaveLength(0);
         omitShadowLights = true;
         const before = await capture("before");
-        let restoredSkin = 0;
+        // Authored shadow lights are cone lights lit per fragment, so leaving them out of the vertex sampler must not darken the barrel.
+        let litAfter = 0,
+          litBefore = 0;
         for (let y = 370; y < 451; y++)
           for (let x = 530; x < 599; x++) {
             const offset = (y * 640 + x) * 4;
-            const oldLight = (before[offset] ?? 0) + (before[offset + 1] ?? 0) + (before[offset + 2] ?? 0);
-            const newLight = (after[offset] ?? 0) + (after[offset + 1] ?? 0) + (after[offset + 2] ?? 0);
-            if (oldLight < 6 && newLight > 60) restoredSkin++;
+            if ((before[offset] ?? 0) + (before[offset + 1] ?? 0) + (before[offset + 2] ?? 0) > 60) litBefore++;
+            if ((after[offset] ?? 0) + (after[offset + 1] ?? 0) + (after[offset + 2] ?? 0) > 60) litAfter++;
           }
-        expect(restoredSkin).toBeGreaterThan(1500);
+        expect(litAfter).toBeGreaterThan(1500);
+        expect(litBefore).toBeGreaterThan(1500);
         omitShadowLights = false;
         const [entities, input, options] = probe.args;
         const effect = { origin: { x: 184, y: -24, z: 48 }, radius: 32, minimum: 0, color: { x: 0, y: 0.25, z: 0 } };
@@ -124,10 +127,10 @@ for (const backend of ["cpu", "gl"])
         const merged = received.at(-1);
         if (merged === undefined) throw new Error("Missing combined alias lighting");
         expect(merged.filter(origin => origin === effect.origin)).toHaveLength(1);
-        expect(merged).toHaveLength((input.lights?.length ?? 0) + authored.length + 1);
+        expect(merged).toHaveLength((input.lights?.length ?? 0) + authored.filter(light => light.cone === null).length + 1);
         await writeCapture(
           `q2-barrel-shadow-${backend}-evidence.json`,
-          JSON.stringify({ restoredSkin, authoredLights: authored.length, combinedLights: merged.length }),
+          JSON.stringify({ litAfter, litBefore, authoredLights: authored.length, combinedLights: merged.length }),
         );
       } finally {
         prepareHook.mockRestore();

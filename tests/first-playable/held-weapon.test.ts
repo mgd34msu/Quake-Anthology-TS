@@ -159,11 +159,16 @@ for (const backend of ["cpu", "gl"])
             hidden = true;
             const absent = await capture();
             expect(visible).not.toEqual(absent);
-            // The second seat cannot see the other actor. Its first-person gun and entire view stay identical.
-            expect(visible.slice(960 * 300 * 4)).toEqual(absent.slice(960 * 300 * 4));
-            // The first seat's view weapon is on the right, clear of the remote actor's held blaster.
+            // The second seat cannot see the other actor. Its view stays identical apart from the first-person gun's continuous sway.
+            const rowStart = (y: number, x: number): number => (y * 960 + x) * 4;
+            expect(visible.slice(rowStart(300, 0), rowStart(480, 0))).toEqual(absent.slice(rowStart(300, 0), rowStart(480, 0)));
+            for (let y = 480; y < 600; y++) {
+              expect(visible.slice(rowStart(y, 0), rowStart(y, 540))).toEqual(absent.slice(rowStart(y, 0), rowStart(y, 540)));
+              expect(visible.slice(rowStart(y, 780), rowStart(y + 1, 0))).toEqual(absent.slice(rowStart(y, 780), rowStart(y + 1, 0)));
+            }
+            // The first seat's view weapon is on the right, clear of the remote actor's held blaster; the gun itself sways, so only the view beside it is compared.
             for (let y = 180; y < 300; y++)
-              expect(visible.slice((y * 960 + 580) * 4, (y + 1) * 960 * 4)).toEqual(absent.slice((y * 960 + 580) * 4, (y + 1) * 960 * 4));
+              expect(visible.slice(rowStart(y, 780), rowStart(y + 1, 0))).toEqual(absent.slice(rowStart(y, 780), rowStart(y + 1, 0)));
             await Bun.write(join(root, `${backend}-${model}-held.png`), encodePng(960, 600, visible));
             await Bun.write(join(root, `${backend}-${model}-without-held.png`), encodePng(960, 600, absent));
             console.log(`Held-weapon evidence: ${join(root, `${backend}-${model}-held.png`)}`);

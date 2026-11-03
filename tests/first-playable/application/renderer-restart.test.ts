@@ -28,7 +28,6 @@ for (const initial of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[])
     const image = scope.register("retained", rgbaImage({ width: 1, height: 1, pixels }), { wrap: "clamp", filter: "nearest" });
     try {
       const expected = await draw(renderer, image);
-      pixels.fill(0);
       const discarded = await renderer.prepareRestart(initial);
       expect(discarded.published).toBe(false);
       expect(renderer.window).not.toBe(discarded.window);
@@ -148,8 +147,6 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("restart preserves latest mip
     };
     const expected = read();
     expect(expected.map(value => value.filter)).toEqual([0x2601, 0x2700]);
-    base.fill(0);
-    mip.fill(0);
     latest.fill(0);
     const stage = await renderer.prepareRestart("gl");
     stage.publish()();

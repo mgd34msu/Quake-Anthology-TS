@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { testCorpusRoot, corpusFile } from "../../support/corpus.ts";
 
-import { mkdir, rm, symlink } from "node:fs/promises";
+import { mkdir, rm, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { serviceLoading } from "../../../src/app/bootstrap/loading.ts";
 import { Application } from "../../../src/app/bootstrap/application.ts";
@@ -17,8 +17,9 @@ test.skipIf(process.env["QUAKE_Q2_NATIVE_APP"] !== "1")(
     const directory = await tempDirectory("native-q2-app-");
     const addon = join(directory, "q2", "native-app-addon");
     await mkdir(addon, { recursive: true });
-    await symlink(corpusFile("q2/xatrix/gamex86.dll"), join(addon, "gamex86.dll"));
-    await symlink(corpusFile("q2/xatrix/pak0.pak"), join(addon, "pak0.pak"));
+    // Content links that leave the content root are rejected, so the add-on holds real copies.
+    await copyFile(corpusFile("q2/xatrix/gamex86.dll"), join(addon, "gamex86.dll"));
+    await copyFile(corpusFile("q2/xatrix/pak0.pak"), join(addon, "pak0.pak"));
     const command = parseApplicationCommand([
       "--content-root",
       `${testCorpusRoot()}`,

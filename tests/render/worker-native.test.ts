@@ -219,10 +219,11 @@ for (const kind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) {
       } finally {
         const window = renderer.window,
           backend = renderer.backend;
+        // The last published restart above moved rendering into a worker, whose transport reports closure.
         renderer.close();
         renderer.close();
         expect(window.closed).toBe(true);
-        expect(() => backend.readDepthPixel(0, 0)).toThrow(kind === "gl" ? "OpenGL renderer is closed" : "CPU renderer is closed");
+        expect(() => backend.readDepthPixel(0, 0)).toThrow("Render worker is not open");
       }
     },
     30000,

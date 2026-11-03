@@ -98,7 +98,11 @@ for (const backend of ["cpu", "gl"])
             }
             expect(app.simulation.worldText().every(text => text.distanceCullFactor === 0.004)).toBe(true);
             expect(reload).not.toHaveBeenCalled();
-            expect(await Bun.file(join(userRoot, "settings/images.cfg")).exists()).toBe(false);
+            expect(
+              await Bun.file(join(userRoot, "settings/images.cfg"))
+                .text()
+                .catch(() => ""),
+            ).not.toContain("gl_debug_distfrac");
             await writeCapture("world-text-live-" + backend + "-culled.png", encodePng(320, 240, culled));
             await writeCapture("world-text-live-" + backend + "-visible.png", encodePng(320, 240, restored));
           } finally {

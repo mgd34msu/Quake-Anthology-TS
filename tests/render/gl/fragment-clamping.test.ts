@@ -35,8 +35,8 @@ for (const primitive of ["triangles", "lines"] satisfies readonly DrawBatch["pri
           const positions =
             primitive === "lines"
               ? [
-                  { x: -1, y: 0 },
-                  { x: 1, y: 0 },
+                  { x: -1, y: -0.125 },
+                  { x: 1, y: -0.125 },
                 ]
               : [
                   { x: -1, y: -1 },

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { writeCapture } from "../../support/capture.ts";
 import { SceneMaterialRegistrations } from "../../../src/render/scene/material-registrations.ts";
-import { testCorpusRoot } from "../../support/corpus.ts";
+import { corpusFile, testCorpusRoot } from "../../support/corpus.ts";
 
 import { prepareMaterialBatches } from "../../../src/materials/evaluate.ts";
 import {
@@ -733,7 +733,10 @@ for (const family of ["q1", "q2"] satisfies readonly ("q1" | "q2")[])
           await mkdir(id1, { recursive: true });
           if (family !== "q1") await copyFile(`${root}/q1/id1/PAK0.PAK`, join(id1, "pak0.pak"));
           await copyFile(`${root}/q1/id1/PAK1.PAK`, join(id1, "pak1.pak"));
-          if (family === "q2") for (const pak of ["pak1.pak", "pak2.pak"]) await copyFile(`${root}/q2/baseq2/${pak}`, join(directory, pak));
+          if (family === "q2") {
+            for (const pak of ["pak1.pak", "pak2.pak"]) await copyFile(`${root}/q2/baseq2/${pak}`, join(directory, pak));
+            await copyFile(corpusFile("q2/baseq2/gamex86.dll"), join(directory, "gamex86.dll"));
+          }
           const movieArchive = await openArchive(`${root}/q3a/missionpack/pak0.pk3`);
           try {
             const member = movieArchive.findEntries("video/mpteam1.roq", "ascii-insensitive")[0];

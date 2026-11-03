@@ -5,6 +5,7 @@ import { loadGl } from "../../src/platform/gl.ts";
 import { loadGlPrograms } from "../../src/platform/gl-programs.ts";
 import { SdlControllers, VirtualSdlController } from "../../src/platform/controller.ts";
 import { SdlAudioDevice } from "../../src/platform/audio.ts";
+import { sdlVirtualCallbackMismatch } from "../support/sdl-compat.ts";
 
 function cpu(): SdlWindow {
   return SdlWindow.open({ title: "platform native test", width: 3, height: 2, backend: "cpu", hidden: true, resizable: true });
@@ -122,7 +123,8 @@ describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL w
     }
   });
 
-  test("window polling preserves controller events and independent audio lifetime", () => {
+  // Virtual controller input is lost under SDL2-compat 2.32.70+ (see tests/support/sdl-compat.ts).
+  test.skipIf(sdlVirtualCallbackMismatch)("window polling preserves controller events and independent audio lifetime", () => {
     const virtual = VirtualSdlController.attach();
     const controllers = SdlControllers.open();
     using audio = SdlAudioDevice.open({ sampleRate: 48000, channels: 2 });

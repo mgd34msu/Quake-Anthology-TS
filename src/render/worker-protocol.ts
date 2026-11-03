@@ -328,7 +328,8 @@ export class WireEncoder {
         }
       }
       const acknowledgment = this.nextAcknowledgment++;
-      this.acknowledgments.set(acknowledgment, operation);
+      // Update buffers are rewritten by their owner, so the acknowledged operation holds the private copy.
+      this.acknowledgments.set(acknowledgment, wire.kind === "update-image" ? wire : operation);
       if (wire.kind === "texture-mode") return { ...wire, acknowledgment };
       if (wire.kind !== "create-image") return { ...wire, image, acknowledgment };
       const content = wire.content.kind === "indexed8" ? { ...wire.content, palette: { colors: wire.content.palette.colors } } : wire.content;

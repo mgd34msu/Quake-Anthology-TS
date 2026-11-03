@@ -133,6 +133,12 @@ for (const backend of ["cpu", "gl"])
         expect(widthReads).toContain(6);
         expect(widths).toContain(6);
         expect(focuses).toEqual(["game", "game"]);
+        // Frozen seats count as an intermission; travel starts from playing seats.
+        for (const player of app.localPlayers) {
+          const entity = source.game.entity(player.actor);
+          if (entity === null) throw new Error("Seat has no source entity");
+          source.players.putInServer(entity, source.game, false, null);
+        }
         await app.changeLevel("base1");
         expect(retired.debugLines()).toHaveLength(0);
         expect(app.simulation.debugLines()).toHaveLength(0);
