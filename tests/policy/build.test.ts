@@ -22,7 +22,7 @@ test("build CLI rejects unsupported flags and missing real application entries",
   expect(() => parseBuildOptions(["--keep-builds=0"])).toThrow("Usage:");
   const project = join(temporary, "missing-runtime");
   await Bun.write(join(project, "package.json"), "{}\n");
-  await expect(buildWorkspace(project, "runtime")).rejects.toThrow("src/main.ts is not implemented");
+  await expect(buildWorkspace(project, "runtime")).rejects.toThrow("Build entry is missing: src/main.ts");
   expect(await Bun.file(join(project, "dist/runtime.json")).exists()).toBe(false);
 });
 

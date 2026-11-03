@@ -135,28 +135,29 @@ test("Q3 runs all due source frames, consumes one command, retains residual thro
       source: { kind: "local-seat", seat: identity.seat(0), client },
       command: { kind: "q3", serverTimeMilliseconds: 200, angleWords: [0, 0, 0], forwardMove: 127, rightMove: 0, upMove: 0, buttons: 0, weapon: 2 },
     };
+    // SRC3Q3-002: first Q3 admission runs sv_init's three 100 ms settle frames, so the timeline starts at 300 ms.
     simulation.step({ elapsedMilliseconds: 225, commands: [command] });
-    expect(begin.mock.calls.map(call => call[0].time.value)).toEqual([50, 100, 150, 200]);
+    expect(begin.mock.calls.map(call => call[0].time.value)).toEqual([350, 400, 450, 500]);
     expect(end).toHaveBeenCalledTimes(4);
     expect(think).toHaveBeenCalledTimes(1);
-    expect([...actorTimes]).toEqual([50, 100, 150, 200]);
-    expect(source.level.time).toBe(200);
-    expect(source.level.frameNum).toBe(4);
+    expect([...actorTimes]).toEqual([350, 400, 450, 500]);
+    expect(source.level.time).toBe(500);
+    expect(source.level.frameNum).toBe(10);
     simulation.drainPresentationEvents();
     const saved = simulation.checkpoint();
     const restored = createSimulation({ ...options, restore: saved, restoredClients: [client] });
     try {
       for (const current of [simulation, restored]) {
         current.step({ elapsedMilliseconds: 0, commands: [] });
-        expect(current.timeSeconds).toBe(0.2);
+        expect(current.timeSeconds).toBe(0.5);
         current.step({ elapsedMilliseconds: 24, commands: [] });
-        expect(current.timeSeconds).toBe(0.2);
+        expect(current.timeSeconds).toBe(0.5);
         current.step({ elapsedMilliseconds: 1, commands: [] });
-        expect(current.timeSeconds).toBe(0.25);
-        expect(current.q3Source()?.level.time).toBe(250);
+        expect(current.timeSeconds).toBe(0.55);
+        expect(current.q3Source()?.level.time).toBe(550);
         current.step({ elapsedMilliseconds: 200, commands: [] });
-        expect(current.timeSeconds).toBe(0.45);
-        expect(current.q3Source()?.level.frameNum).toBe(9);
+        expect(current.timeSeconds).toBe(0.75);
+        expect(current.q3Source()?.level.frameNum).toBe(15);
       }
     } finally {
       restored.close();

@@ -86,7 +86,10 @@ test("audio disk preferences reject malformed or out-of-range settings at load b
       { version: 1, deviceName: null, effectsVolume: 2, musicVolume: 0.5 },
     ]) {
       await store.dump("audio.json", JSON.stringify(invalid));
-      await expect(loadAudioSettings(store)).rejects.toThrow("Invalid audio preferences");
+      // GAPAPP2-011: invalid files are ignored with a warning instead of stopping the launch.
+      const warnings: string[] = [];
+      expect(await loadAudioSettings(store, text => warnings.push(text))).toEqual({});
+      expect(warnings.join("")).toContain("Invalid audio preferences");
     }
   } finally {
     await rm(root, { recursive: true, force: true });

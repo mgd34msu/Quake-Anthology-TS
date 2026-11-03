@@ -683,7 +683,11 @@ test("Quake colored explosions retain source palette cycle, count, bounds and li
   const bounded = new SourceParticles(new SourceRandom(1), 5);
   bounded.q1ColorExplosion(origin, 1, 0, 4);
   expect(bounded.sample(1, 0).q1).toHaveLength(5);
-  expect(() => bounded.q1ColorExplosion(origin, 1, 0, 0)).toThrow("palette range");
+  // GAPAPP2-005: a zero-length palette range drops the explosion instead of throwing.
+  const dropped = new SourceParticles(new SourceRandom(1));
+  dropped.q1ColorExplosion(origin, 1, 0, 0);
+  expect(dropped.sample(1, 0).q1).toHaveLength(0);
+  expect(() => bounded.q1ColorExplosion(origin, 1, 0, 256)).toThrow("palette range");
   for (const [color, count, minimum] of [
     [20, 30, 16],
     [226, 20, 224],

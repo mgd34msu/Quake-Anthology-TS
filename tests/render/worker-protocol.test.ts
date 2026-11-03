@@ -249,11 +249,12 @@ test("successful resource acknowledgments consume exact immutable frontend opera
     content: { kind: "rgba8", levels: [{ width: 1, height: 1, pixels }], borderColor: { x: 0, y: 0, z: 0, w: 1 } },
   };
   const decoded = decoder.imageOperation(encoder.imageOperation(operation));
-  pixels.fill(0);
   const token = decoder.acknowledgment(decoded),
     acknowledged = encoder.acknowledge(token);
   if (acknowledged.kind !== "create-image") throw new Error("Wrong acknowledged operation");
   expect(acknowledged.image).toBe(original);
+  // RENDER-013: the acknowledgment returns the frontend's own operation instead of a private copy of its content.
+  expect(acknowledged).toBe(operation);
   expect([...acknowledged.content.levels[0].pixels]).toEqual([4, 3, 2, 1]);
   expect(() => encoder.acknowledge(token)).toThrow("Unknown");
 });

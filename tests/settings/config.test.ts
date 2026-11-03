@@ -163,7 +163,8 @@ test("typed archives preserve local owners and do not execute stored values", as
     expect(restored.variableString("custom")).toBe("a; quit\nset stolen 1");
     expect(restored.find("stolen")).toBeUndefined();
     expect(restored.archiveEntries()).toEqual(entries);
-    await expect(loadCvarArchive(store, ["client", "q3", "base", "0"], "q2-classic")).rejects.toThrow("dialect");
+    // GAPAPP2-011: a parsed archive of another dialect restores nothing instead of throwing.
+    expect(await loadCvarArchive(store, ["client", "q3", "base", "0"], "q2-classic")).toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

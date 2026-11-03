@@ -137,7 +137,8 @@ for (const arsenal of arsenals)
         const zombie = [...source.game.entities.values()].find(entity => entity.classname === "monster_zombie" && entity.damageable);
         if (zombie === undefined) throw new Error("Authored e1m3 zombie missing");
         const body = source.game.body(zombie);
-        grenade.game.move(grenade.entity, { origin: { x: body.origin.x, y: body.origin.y, z: body.origin.z + 8 }, velocity: { x: 0, y: 0, z: 0 } });
+        // Q2 sv_world.c lets a start-solid entity trace replace the world hit (SRCQ2-004), so the grenade lands on the zombie instead of starting inside it.
+        grenade.game.move(grenade.entity, { origin: { x: body.origin.x, y: body.origin.y, z: body.origin.z + body.bounds.max.z + 2 }, velocity: { x: 0, y: 0, z: 0 } });
         for (let index = 0; index < 40 && simulation.actors.isLive(grenade.entity.actor.id); index++) step();
         expect(simulation.actors.isLive(grenade.entity.actor.id)).toBe(false);
         expect(zombie.model).toBe("progs/h_zombie.mdl");
