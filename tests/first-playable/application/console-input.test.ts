@@ -490,4 +490,4 @@ test("local archived cvars retain seat ownership before fresh client initializat
     await app?.close();
     await rm(root, { recursive: true, force: true });
   }
-}, 240000);
+}, 600000); // About 75-95 s alone (the same on f855f940); the limit leaves room for a loaded machine.

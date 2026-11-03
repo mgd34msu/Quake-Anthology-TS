@@ -31,6 +31,16 @@ const nativeGates: readonly string[] = [
   "QUAKE_WORLD_TEXT_APP",
   "QUAKE_DOWNLOAD_WORKFLOW_TEST",
   "QUAKE_DEATH_APPLICATION_TEST",
+  "QUAKE_ARENA_PUBLIC_TEST",
+  "QUAKE_BARREL_SHADOW",
+  "QUAKE_DEBUG_SHAPES_APP",
+  "QUAKE_FLASHLIGHT_RENDER",
+  "QUAKE_HELD_WEAPON_APP",
+  "QUAKE_HUD_READABILITY_APP",
+  "QUAKE_IMAGE_HUD",
+  "QUAKE_PLATFORM_HEADLESS_TEST",
+  "QUAKE_PRIVATE_NATIVE",
+  "QUAKE_ROUND_AUDIO_DEVICE",
 ];
 
 if (tier === "unit") {
@@ -44,6 +54,12 @@ if (tier === "unit") {
   env["QTS_TEST_REQUIRE_CORPUS"] = "1";
   if (tier === "gl") {
     env["SDL_VIDEODRIVER"] ??= "offscreen";
+    // Native gates must never draw on the developer's desktop: the offscreen driver needs no display.
+    if (env["SDL_VIDEODRIVER"] === "offscreen") {
+      delete env["DISPLAY"];
+      delete env["WAYLAND_DISPLAY"];
+    }
+    env["SDL_AUDIODRIVER"] ??= "dummy";
     for (const name of nativeGates) env[name] = "1";
   }
 }
