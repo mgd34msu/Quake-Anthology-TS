@@ -18,3 +18,6 @@
 | APP-024 | fixed | Travel passes the current catalog to loadApplicationContent for non-Q3, non-remote worlds (the travel recipe already came from it); Q3 still discovers because its catalog is restricted per product. Covered only by existing travel tests (source-transition). |
 | APP-025 | fixed | application.ts passes the CSPRNG `random` to QwServerNetwork (change was already in the working tree when checked; handshake masks to 31 bits). No test. |
 | APP-026 | fixed | Added tests for the paths fixed in this pass (crash-log rotation, option validation, frame-time clamp, master list tolerance, browser open tolerance, preferences fallback, HUD picture miss, addons catalog) alongside the earlier startup-session-fault and crash-log tests; EPIPE and remote world-load failure paths still have no direct test. |
+
+Post-run addendum (sperf): secondary Q2 seats could pin stale content after a same-map travel.
+| SPERF-REMOTE-TRAVEL | fixed | `src/app/bootstrap/remote-application.ts`: secondary seat world loads for Q2 now wait until the primary has loaded the same level spawn (matching `servercount`) instead of only the same map path, which let a secondary capture the pre-travel content and stay unbound (~1 in 6 runs). Covered by tests/first-playable/remote-application/application.test.ts. |

@@ -335,6 +335,8 @@ export class RemoteApplication {
   private ownedRecording: ClientDemoRecording | null = null;
   private worldLoadGeneration = 0;
   private primaryViewGeneration = -1;
+  /** Q2 servercount of the world the primary last loaded; secondary seats wait for the same level spawn. */
+  private loadedServerCount: number | null = null;
   private get primaryViewCurrent(): boolean {
     return this.presentation !== null && (this.primaryPeer !== null || this.primaryViewGeneration === this.worldLoadGeneration);
   }
@@ -1912,11 +1914,13 @@ export class RemoteApplication {
     if (map === undefined) throw new Error("Q2 server supplied no world model");
     const names = (first: number, maximum: number): string[] =>
       Array.from({ length: maximum - 1 }, (_, index) => state.configStrings.get(first + index + 1) ?? "").filter(Boolean);
-    return this.loadServerWorld(
+    const content = await this.loadServerWorld(
       { map, models: names(layout.models, layout.maxModels), sounds: names(layout.sounds, layout.maxSounds), images: names(layout.images, layout.maxImages) },
       undefined,
       true,
     );
+    this.loadedServerCount = state.data.servercount;
+    return content;
   }
 
   private async selectRemoteContent(selection: RemoteContentMounts["selection"], assertPeerCurrent: () => void): Promise<RemoteContentMounts> {
@@ -3515,7 +3519,11 @@ export class RemoteApplication {
             },
             () => current() === this.primaryPeer || (this.primaryViewCurrent && this.options.product === remoteContentProduct(selection)),
           );
-        const load = (world: Q1RemoteWorld & { readonly images?: readonly string[] }, prepared?: LoadedApplicationContent): Promise<LoadedApplicationContent> =>
+        const load = (
+          world: Q1RemoteWorld & { readonly images?: readonly string[] },
+          prepared?: LoadedApplicationContent,
+          serverCount?: number,
+        ): Promise<LoadedApplicationContent> =>
           current().pump.enqueue(
             async () => {
               const peer = current();
@@ -3523,11 +3531,15 @@ export class RemoteApplication {
               peer.view = null;
               peer.map = serverMapPath(world.map);
               peer.loadedContent = peer === this.primaryPeer ? await this.loadServerWorld(world, prepared) : (prepared ?? this.content);
+              if (peer === this.primaryPeer && serverCount !== undefined) this.loadedServerCount = serverCount;
               if (peer === this.primaryPeer && this.remoteContent === null) peer.content = null;
               return peer.loadedContent;
             },
             () =>
-              current() === this.primaryPeer || (this.primaryViewCurrent && this.loadedContent?.recipe.map.geometry.requestedPath === serverMapPath(world.map)),
+              current() === this.primaryPeer ||
+              (this.primaryViewCurrent &&
+                this.loadedContent?.recipe.map.geometry.requestedPath === serverMapPath(world.map) &&
+                (serverCount === undefined || this.loadedServerCount === serverCount)),
           );
         const common = {
           identity: this.identity,
@@ -3559,12 +3571,16 @@ export class RemoteApplication {
               if (map === undefined) throw new Error("Q2 remote seat server supplied no world model");
               const names = (first: number, maximum: number): string[] =>
                 Array.from({ length: maximum - 1 }, (_, index) => state.configStrings.get(first + index + 1) ?? "").filter(Boolean);
-              return load({
-                map,
-                models: names(layout.models, layout.maxModels),
-                sounds: names(layout.sounds, layout.maxSounds),
-                images: names(layout.images, layout.maxImages),
-              });
+              return load(
+                {
+                  map,
+                  models: names(layout.models, layout.maxModels),
+                  sounds: names(layout.sounds, layout.maxSounds),
+                  images: names(layout.images, layout.maxImages),
+                },
+                undefined,
+                state.data.servercount,
+              );
             },
             loadQ3World: (world: Q1RemoteWorld, _connection: Q3ClientConnection, prepared: LoadedApplicationContent) => load(world, prepared),
             initializeQ3: (connection: Q3ClientConnection) =>

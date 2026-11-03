@@ -268,7 +268,7 @@ test("Q1 setup in Q3: +back moves backwards and arena bot combat never selects w
   } finally {
     await app.close();
   }
-}, 240000);
+}, 600000); // About 145 s alone; the limit leaves room for a loaded machine.
 
 test("Q1 lightning gibs a Q3 bot corpse in a Q3 world", async () => {
   const parsed = parseApplicationCommand([
