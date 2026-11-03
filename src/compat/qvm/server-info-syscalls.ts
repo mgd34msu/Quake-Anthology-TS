@@ -4,7 +4,7 @@ import { CommonError } from "../../core/common-error.ts";
 import { CvarFlag, type CvarRegistry } from "../../core/cvars/index.ts";
 import { QvmGameImport } from "./abi.ts";
 import { qvmConfigstring } from "./legacy-presentation.ts";
-import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
+import type { SharedHostCall, QvmHostResult } from "./syscalls.ts";
 
 export interface QvmServerInformationServices {
   readonly abiProfile: QvmAbiProfile;
@@ -18,7 +18,7 @@ function configIndex(index: number, operation: string): void {
   if (index < 0 || index >= 1024) throw new CommonError("drop", `${operation}: bad index ${index}\n`);
 }
 
-export function qvmServerInformationSyscall(call: QvmHostCall, services: QvmServerInformationServices): QvmHostResult | null {
+export function qvmServerInformationSyscall(call: SharedHostCall, services: QvmServerInformationServices): QvmHostResult | null {
   if (call.kind !== "engine" || call.role !== "qagame") return null;
   const { guest, words } = call, word = (index: number): number => words.getInt32(index * 4, true);
   switch (call.code) {

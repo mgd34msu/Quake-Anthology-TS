@@ -1,17 +1,15 @@
 import { expect } from "bun:test";
 import { corpusTest, corpusFile } from "../../../support/corpus.ts";
 
-import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
+import type { ActorId } from "../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { Q1Entity, Q1Map } from "../../../../src/formats/q1-map/index.ts";
 import { readQ1Bsp } from "../../../../src/formats/q1-map/index.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
-import { Q1_DONOR_PROFILE } from "../../../../src/core/numeric.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
 import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { Q1Foundation } from "../../../../src/content/q1/foundation/runtime.ts";
-import type { Q1Event, Q1FoundationHost } from "../../../../src/content/q1/foundation/types.ts";
 import { ZERO, PLAYER_BOUNDS, vadd } from "../../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base, Q1CharacterActor } from "../../../../src/content/q1/base/index.ts";
 import { Q1AddonContext } from "../../../../src/content/q1/addons/context.ts";
@@ -22,6 +20,7 @@ import { touchFlag, dropFlag } from "../../../../src/content/q1/addons/ctf/flags
 import { fireHook, hookTouch } from "../../../../src/content/q1/addons/ctf/grapple.ts";
 import type { ItemId } from "../../../../src/contracts/gameplay.ts";
 import { impulseAuthority } from "../../../support/authority.ts";
+import { q1TestHost } from "../../../support/q1-host.ts";
 const test = corpusTest("q1/rerelease/ctf/pak0.pak");
 
 async function map(name: string): Promise<Q1Map> {
@@ -32,22 +31,13 @@ async function map(name: string): Promise<Q1Map> {
 function world(map: Q1Map, coop = false) {
   const actors = new SessionActorRegistry(createIdentityOwner("ctf-content-check")), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const pending = new Map<OwnedActor, number>(), events: Q1Event[] = [], players: ActorId[] = [];
+  const players: ActorId[] = [];
   const scores = new Map<ActorId, number>(), captures = new Map<CtfTeam, number>(), observers = new Set<ActorId>(), inputs = new Map<ActorId, CtfInput>(), statuses = new Map<ActorId, CtfStatus>(), weapons = new Map<ActorId, ItemId>(), cvars = new Map<string, number>([["teamplay", 130]]);
   const combat = impulseAuthority(actors, callbacks, bodies);
   const inventory = new SharedInventoryTable(actors); let runtime: Q1Foundation | null = null;
-  const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
-    trace: request => {
-      const result = scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" }, policy: { kind: "q1", move: request.missile === true ? "missile" : request.monsters ? "normal" : "no-monsters", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: request.ignore });
-      if (result.kind !== "q1") throw new Error("CTF expected Q1 trace");
-      return { fraction: result.fraction, end: result.end, normal: result.sourcePlane.normal, actor: result.hit.kind === "actor" ? result.hit.actor : result.hit.kind === "world" ? runtime?.world?.actor.id ?? null : null, startSolid: result.startSolid, allSolid: result.allSolid, sky: false, inOpen: result.inOpen, inWater: result.inWater };
-    },
-    contents: () => "empty", walkMove: () => false, moveToGoal: () => undefined,
-    changeYaw: () => { throw new Error("CTF fixture removes monsters before their yaw phase"); }, checkBottom: () => false,
-    pusherServices: () => { throw new Error("This fixture does not step native pushers"); },
-    scheduleThink: (actor, time) => { pending.set(actor, time); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
-    emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => players, checkClient: () => null, classname: actor => runtime?.entity(actor)?.classname ?? "player", powerup: () => undefined,
-  };
+  const { host, pending } = q1TestHost({ actors, callbacks, bodies, combat, inventory, scene, world: () => runtime?.world?.actor.id ?? null, entity: actor => runtime?.entity(actor), players: () => players }, {
+    contents: () => "empty", changeYaw: () => { throw new Error("CTF fixture removes monsters before their yaw phase"); },
+  });
   const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch: coop ? 0 : 1, coop, gravity: 800, maxClients: 4, campaign: "q1:ctf", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => ({ ...game.combatContext(request), teamplay: cvars.get("teamplay") ?? 0 }), sourceEffects: game.damageSourceEffects, armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
   const context = new Q1AddonContext(registerQ1Base(game), "ctf", { emit: () => undefined, isMonster: () => false, cvar: name => cvars.get(name) ?? 0, setCvar: (name, value) => { cvars.set(name, Number(value)); return undefined; } });

@@ -21,7 +21,7 @@ async function runLane(game: string, library: string, character: string): Promis
       "--movement", "q2", "--character", character, "--renderer", "cpu", "--hidden",
       "--width", "320", "--height", "240", "--user-content-root", root]);
     if (parsed.kind !== "run") throw new Error("Missing launch options");
-    app = await Application.open(parsed.options, { saveDirectory: join(root, "saves"), print: () => undefined });
+    app = await Application.open(parsed.options, { saveDirectory: join(root, "saves"), print: (t: string) => { if (process.env.SRR) require("node:fs").appendFileSync(process.env.SRR, t); } });
     const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
     if (app.simulation.q2Native() === null) throw new Error("Native source was not admitted");
     for (let i = 0; i < 20; i++) await app.step(50);
@@ -63,7 +63,7 @@ corpusTest("q2/baseq2/pak0.pak", "q2/baseq2/gamex86.dll")("foreign movement and 
       "--movement", "q1", "--character", "q1", "--renderer", "cpu", "--hidden",
       "--width", "320", "--height", "240", "--user-content-root", root]);
     if (parsed.kind !== "run") throw new Error("Missing launch options");
-    app = await Application.open(parsed.options, { saveDirectory: join(root, "saves"), print: () => undefined });
+    app = await Application.open(parsed.options, { saveDirectory: join(root, "saves"), print: (t: string) => { if (process.env.SRR) require("node:fs").appendFileSync(process.env.SRR, t); } });
     const first = app.localPlayers[0]; if (first === undefined) throw new Error("Missing local player");
     let local: Exclude<typeof first, undefined> = first;
     const bodies = (): string[] => app?.simulation.presentations().filter(p => p.actor.equals(local.actor) && !p.viewWeapon).map(p => p.path) ?? [];
@@ -115,7 +115,7 @@ async function corpseLane(game: string, library: string, squadRespawn: boolean):
     if (parsed.kind !== "run") throw new Error("Missing launch options");
     // The rerelease game defaults to squad respawn: a lone dead player waits for a teammate and the level restarts, so nothing respawns in place.
     const profile = squadRespawn ? undefined : { version: 1 as const, overrides: [{ id: "server:q2.squad-respawn" as const, value: "0" }] };
-    app = await Application.open(profile === undefined ? parsed.options : { ...parsed.options, serverProfile: profile }, { saveDirectory: join(root, "saves"), print: () => undefined });
+    app = await Application.open(profile === undefined ? parsed.options : { ...parsed.options, serverProfile: profile }, { saveDirectory: join(root, "saves"), print: (t: string) => { if (process.env.SRR) require("node:fs").appendFileSync(process.env.SRR, t); } });
     const local = app.localPlayers[0]; if (local === undefined) throw new Error("Missing local player");
     // Cmd_Kill_f ignores the command within five seconds of a respawn.
     for (let i = 0; i < 120; i++) await app.step(50);
@@ -132,6 +132,7 @@ async function corpseLane(game: string, library: string, squadRespawn: boolean):
     input(false);
     for (let i = 0; i < 20; i++) await app.step(50);
     const others = app.simulation.presentations().filter(p => !p.actor.equals(local.actor) && !p.viewWeapon);
+    if (process.env.SRR) require('node:fs').appendFileSync(process.env.SRR, 'PRES ' + JSON.stringify(app.simulation.presentations().map(p => [String(p.actor), p.family, p.path, p.frame, p.viewWeapon])) + '\n');
     return { respawned: app.simulation.playerUi(local.actor).health > 0,
       corpses: others.filter(p => p.path === "progs/player.mdl").map(p => `${p.family}#${p.frame}`),
       guestCorpses: others.filter(p => p.path.startsWith("players/") && !p.path.includes("deadbods")).map(p => p.path) };

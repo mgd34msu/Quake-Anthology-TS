@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 import { CommonError } from "../../core/common-error.ts";
+import type { Q3GameMemory } from "./game-memory.ts";
 import { QvmMemoryWrites, QvmWritableView } from "./memory-writes.ts";
 import type { QvmCommittedWrite, QvmWriteRange } from "./memory-writes.ts";
 export type { QvmCommittedWrite, QvmWriteRange, QvmCommittedBytes } from "./memory-writes.ts";
@@ -22,7 +23,7 @@ function qStrncpyz(destination: Uint8Array | null, source: string, size: number)
 }
 
 /** Borrows an interpreter allocation; pointer masking applies only to its start. */
-export class QvmMemory {
+export class QvmMemory implements Q3GameMemory {
   private readonly writes: QvmMemoryWrites;
   constructor(readonly bytes: Uint8Array, effect?: (perform: () => undefined) => undefined) {
     const length = bytes.byteLength;
@@ -53,6 +54,21 @@ export class QvmMemory {
     this.writes.assertWritable(); this.writes.range(destinationOffset, byteLength); this.writes.range(sourceOffset, byteLength);
     const capture = this.writes.intercepts ? this.writes.before(destinationOffset, byteLength) : null;
     this.bytes.copyWithin(destinationOffset, sourceOffset, sourceOffset + byteLength); this.writes.after(capture);
+  }
+
+  address(word: number): number | null {
+    const pointer = this.pointer(word);
+    return pointer === null ? null : pointer.byteOffset - this.bytes.byteOffset;
+  }
+  /** Offset zero is the pointer word that names the allocation size, which masks to zero. */
+  pointerWord(address: number | null): number { return address === null ? 0 : address === 0 ? this.bytes.length : address; }
+  viewAt(address: number, length: number): DataView { return this.dataView(address, length); }
+  regionView(region: Uint8Array, offset = 0, length = region.byteLength - offset): DataView {
+    return this.dataView(region.byteOffset - this.bytes.byteOffset + offset, length);
+  }
+  regionWrite(region: Uint8Array, bytes: Uint8Array): void { this.writeBytes(region.byteOffset - this.bytes.byteOffset, bytes); }
+  regionFill(region: Uint8Array, start: number, length: number, value: number): void {
+    this.fillBytes(region.byteOffset - this.bytes.byteOffset + start, length, value);
   }
 
   pointer(word: number): Uint8Array | null {

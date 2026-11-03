@@ -3,7 +3,7 @@ import type { QvmAbiProfile } from "../../contracts/execution.ts";
 import { CommonError } from "../../core/common-error.ts";
 import { QvmGameImport } from "./abi.ts";
 import { QVM_USER_COMMAND_BYTES, writeQvmUserCommand } from "./client-state-record.ts";
-import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
+import type { SharedHostCall, QvmHostResult } from "./syscalls.ts";
 
 export interface QvmClientGameServices {
   readonly abiProfile: QvmAbiProfile;
@@ -21,7 +21,7 @@ function client(slot: number, services: QvmClientGameServices, operation: string
 }
 function complete(result: void | Promise<void>): QvmHostResult { return result === undefined ? 0 : result.then(() => 0); }
 
-export function qvmClientGameSyscall(call: QvmHostCall, services: QvmClientGameServices): QvmHostResult | null {
+export function qvmClientGameSyscall(call: SharedHostCall, services: QvmClientGameServices): QvmHostResult | null {
   if (call.kind !== "engine" || call.role !== "qagame") return null;
   const { guest, words } = call, word = (index: number): number => words.getInt32(index * 4, true);
   switch (call.code) {

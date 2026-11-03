@@ -6,7 +6,6 @@ import type { ActorId } from "../../../../src/contracts/identity.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
 import { SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { Q2Weapons } from "../../../../src/content/q2/foundation/weapons/index.ts";
-import type { Q2FoundationHost } from "../../../../src/content/q2/foundation/host.ts";
 import type { Q2PlayerHooks, Q2PlayerMovement } from "../../../../src/content/q2/base/player/index.ts";
 import type { Q2RereleaseEvent, Q2RereleaseHooks } from "../../../../src/content/q2/rerelease/index.ts";
 
@@ -37,15 +36,15 @@ function compose(initializeInventory = true, entities = '{ "classname" "worldspa
     clipTrigger: () => true, navigation: () => ({ kind: "no-navigation" }), monstersSearching: () => false, groundedOnWorld: () => true,
     pushPlayer: () => undefined, setActorGravity: () => undefined, setWorldGravity: () => undefined, lightStyle: () => "m" };
   const weapons = new Q2Weapons({ emit: () => undefined, noise: () => undefined, dodge: () => undefined, lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
-  const host: Q2FoundationHost = { actors, callbacks, bodies, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => 0.025, random: () => 0.5,
-    schedule: () => undefined, touchTriggers: () => undefined, keyConsumed: () => undefined,
+  const { host } = q2TestHost({ actors, callbacks, bodies, combat, inventory, players: () => ids, entity: () => undefined,
+    world: () => { const world = [...game.entities.values()].find(entity => entity.classname === "worldspawn"); if (world === undefined) throw new Error("world missing"); return world.actor.id; } }, {
+    now: () => now, frameSeconds: () => 0.025,
     trace: request => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: (match.kind === "ctf" || match.kind === "lmctf") && request.end.z === request.start.z - 128 ? request.start : request.end, contact: { kind: "none" }, hit: { kind: "none" }, contents: 0,
       surface: null, sourcePlane: { normal: zero, distance: 0, type: 0, signbits: 0 }, secondary: null }),
-    pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true, nearby: () => [], players: () => ids, isPlayer: actor => ids.includes(actor), isMonster: () => false,
-    worldActor: () => { const world = [...game.entities.values()].find(entity => entity.classname === "worldspawn"); if (world === undefined) throw new Error("world missing"); return world.actor.id; },
-    inlineModelBounds: () => bounds, setSolid: () => undefined, setMotion: () => undefined, setAreaPortal: () => undefined,
-    emit: event => { if (event.kind === "centerprint") messages.push(event.text); return undefined; }, playerViewState: () => ({ viewAngles: zero, oldVelocity: zero }),
-    prepareLevelChange: () => undefined, transition: () => undefined, diagnostic: message => { throw new Error(message); } };
+    inlineModelBounds: () => bounds, emit: event => { if (event.kind === "centerprint") messages.push(event.text); return undefined; },
+    diagnostic: message => { throw new Error(message); },
+  });
+
   const composition = createQ2ProductRuntime({ edition: "rerelease", program: "baseq2", host, weapons, match,
     options: { mapName: "base1", skill: 1, mode: match.kind === "standard" ? "coop" : "deathmatch", deathmatchFlags: 0, maxClients: 4,
       provider: "q2:game", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q2:movement" },
@@ -273,6 +272,7 @@ test("LMCTF referee countdown and team lock survive the shared checkpoint", () =
 import { readInventoryEntry } from "../../../../src/persistence/save-image.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../../src/persistence/value.ts";
 import { inertAuthority } from "../../../support/authority.ts";
+import { q2TestHost } from "../../../support/q2-host.ts";
 
 test("LMCTF plasma retains signed native cell debits and infinite-ammo counters through saves", () => {
   for (const scenario of [{ cells: 1, infinite: false, expected: -9 }, { cells: 1, infinite: true, expected: -8 }, { cells: 10, infinite: false, expected: 0 }, { cells: 10, infinite: true, expected: 1 }]) {

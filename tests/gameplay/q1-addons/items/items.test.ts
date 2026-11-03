@@ -13,7 +13,7 @@ import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from ".
 import { Q1Foundation } from "../../../../src/content/q1/foundation/runtime.ts";
 import type { Q1Actor } from "../../../../src/content/q1/foundation/entity.ts";
 import type { Q1FoundationCheckpoint } from "../../../../src/content/q1/foundation/checkpoint.ts";
-import type { Q1Event, Q1FoundationHost } from "../../../../src/content/q1/foundation/types.ts";
+import type { Q1FoundationHost } from "../../../../src/content/q1/foundation/types.ts";
 import { ZERO, PLAYER_BOUNDS } from "../../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base } from "../../../../src/content/q1/base/index.ts";
 import { registerQ1CampaignAddons, BLOODY_NIGHTMARE_ACTIVE, BLOODY_NIGHTMARE_NEWGAME, captureQ1AddonTravel, admitQ1AddonTravel } from "../../../../src/content/q1/addons/index.ts";
@@ -22,12 +22,14 @@ import { giveNextMg3Upgrade, mg3UpgradeFlag, mg3UpgradedMaximum, mg3HammerBodyFr
 import type { Mg3Upgrade } from "../../../../src/content/q1/addons/items/index.ts";
 import { handleMg3ItemImpulse } from "../../../../src/content/q1/addons/items/commands.ts";
 import { q1PowerupTimers } from "../../../../src/app/bootstrap/simulation/powerup-timers.ts";
-import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../src/persistence/world-state.ts";
+import { restoreSharedBodyLinks } from "../../../../src/persistence/world-state.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../../src/persistence/q1-foundation.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ1Bsp, q1EntityValue } from "../../../../src/formats/q1-map/index.ts";
 import type { Q1Entity } from "../../../../src/formats/q1-map/index.ts";
 import { inertAuthority } from "../../../support/authority.ts";
+import { q1TestHost } from "../../../support/q1-host.ts";
+import { captureSharedActors } from "../../../support/save-capture.ts";
 const test = corpusTest("q1/rerelease/mg3/pak0.pak");
 
 interface Saved {
@@ -41,16 +43,14 @@ function session(saved?: Saved, options: { readonly skill?: 0 | 1 | 2 | 3; reado
   const actors = saved === undefined ? new SessionActorRegistry(identity) : SessionActorRegistry.restore(identity, saved.slots, saved.sources);
   const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const combat = inertAuthority(actors, callbacks);
-  const inventory = new SharedInventoryTable(actors), events: Q1Event[] = [], players: ActorId[] = [], pending = new Map<OwnedActor, number>();
+  const inventory = new SharedInventoryTable(actors), players: ActorId[] = [];
   let runtime: Q1Foundation | null = null, hit: ActorId | null = null;
   let contents: ReturnType<Q1FoundationHost["contents"]> = "empty";
-  const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
+  const { host, pending, events } = q1TestHost({ actors, callbacks, bodies, combat, inventory, entity: actor => runtime?.entity(actor), players: () => players }, {
     trace: request => ({ fraction: options.itemFloor === true && request.start.z - request.end.z === 256 ? 0.5 : hit === null || !request.monsters ? 1 : 0.5, end: request.end, normal: { x: -1, y: 0, z: 0 }, actor: request.monsters ? hit : null,
-      startSolid: false, allSolid: false, sky: false, inOpen: true, inWater: false }), contents: () => contents, walkMove: () => false,
-    changeYaw: () => { throw new Error("This item fixture does not drive monster turning"); }, moveToGoal: () => undefined, checkBottom: () => false, pusherServices: () => { throw new Error("This fixture does not step native pushers"); },
-    scheduleThink: (actor, seconds) => { pending.set(actor, seconds); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
-    emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => players, checkClient: () => null,
-    classname: actor => runtime?.entity(actor)?.classname ?? "player", powerup: () => undefined };
+      startSolid: false, allSolid: false, sky: false, inOpen: true, inWater: false }),
+    contents: () => contents, changeYaw: () => { throw new Error("This item fixture does not drive monster turning"); },
+  });
   const game = new Q1Foundation(host, { edition: "rerelease", skill: options.skill ?? 1, deathmatch: options.deathmatch ?? 0, coop: options.coop ?? false, gravity: 800, maxClients: 2,
     campaign: "q1:mg3", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => game.combatContext(request), sourceEffects: game.damageSourceEffects,
@@ -76,9 +76,7 @@ function session(saved?: Saved, options: { readonly skill?: 0 | 1 | 2 | 3; reado
   function spawn(classname: string, source?: Q1Entity): Q1Actor { const entity = game.create(classname, source); game.spawnEntity(entity); return entity; }
   function think(entity: Q1Actor, seconds: number): void { callbacks.think(entity.actor, { frame: 0, time: { kind: "seconds", value: seconds }, elapsed: { kind: "seconds", value: 0.1 }, phase: "entity-think" }); }
   function touch(entity: Q1Actor): void { callbacks.touch({ self: entity.actor, other: actor.id, plane: null, surface: null }); }
-  function save(): Saved { return { source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(game.capture())), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(),
-    bodies: captureSharedBodies(actors, bodies), combat: actors.observations().flatMap(observation => { const state = combat.read(observation.id); return state === null ? [] : [{ actor: { slot: observation.id.slot, generation: observation.id.generation }, state }]; }),
-    inventories: actors.observations().flatMap(observation => inventory.has(observation.id) ? [{ actor: { slot: observation.id.slot, generation: observation.id.generation }, entries: inventory.entries(observation.id) }] : []) }; }
+  function save(): Saved { return { source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(game.capture())), ...captureSharedActors({ actors, bodies: bodies, combat, inventory }) }; }
   return { actors, game, base, context, player, inventory, combat, events, pending, spawn, think, touch, save, contents: (value: ReturnType<Q1FoundationHost["contents"]>) => { contents = value; }, hit: (entity: Q1Actor | null) => { hit = entity?.actor.id ?? null; } };
 }
 

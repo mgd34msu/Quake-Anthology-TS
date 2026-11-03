@@ -7,7 +7,7 @@ import { SaveReader } from "../../persistence/value.ts";
 import { CommonError } from "../../core/common-error.ts";
 import type { MountedContent, OpenedResource } from "../../content/mounts/index.ts";
 import { QvmGameImport, QvmCgameImport, QvmUiImport } from "./abi.ts";
-import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
+import type { SharedHostCall, QvmHostResult } from "./syscalls.ts";
 
 interface ReadHandle { readonly kind: "read"; readonly resource: OpenedResource; position: number; }
 type FileHandle = ReadHandle | { readonly kind: "write"; readonly file: WritableBinaryFile };
@@ -224,7 +224,7 @@ export class QvmFiles {
 }
 
 /** Null is unhandled; FS_READ and FS_WRITE return zero rather than their byte count. */
-export function qvmFileSyscall(call: QvmHostCall, files: QvmFiles): QvmHostResult | null {
+export function qvmFileSyscall(call: SharedHostCall, files: QvmFiles): QvmHostResult | null {
   if (call.kind !== "engine") return null;
   const ui = call.role === "ui", game = call.role === "qagame", trap = call.code, { words, guest } = call;
   const open = ui ? QvmUiImport.UI_FS_FOPENFILE : game ? QvmGameImport.G_FS_FOPEN_FILE : QvmCgameImport.CG_FS_FOPENFILE;
@@ -252,7 +252,7 @@ export function qvmFileSyscall(call: QvmHostCall, files: QvmFiles): QvmHostResul
     const buffer = pointer === 0 && length === 0 ? new Uint8Array(0) : guest.span(pointer, length);
     if (trap === open + 2) files.write(slot, buffer);
     else files.read(slot, { length: buffer.length, set: bytes => {
-      if (bytes.length !== 0) guest.writeBytes(buffer.byteOffset - guest.bytes.byteOffset, bytes);
+      if (bytes.length !== 0) guest.regionWrite(buffer, bytes);
     } });
     return 0;
   }

@@ -19,6 +19,9 @@ export class NativeQ3GameError extends Error {
 export interface NativeQ3EngineServices extends Pick<Q3SourceHost, "engine" | "cvars" | "configstrings"> {
   commandArguments(): readonly string[];
 }
+export interface NativeQ3GameServices extends NativeQ3EngineServices {
+  milliseconds(): number;
+}
 type Service = (context: GuestCallContext, args: readonly GuestCallValue[]) => GuestCallResult;
 
 /** Engine service slots from ioquakelive g_public.h, verified on reached guest call sites.

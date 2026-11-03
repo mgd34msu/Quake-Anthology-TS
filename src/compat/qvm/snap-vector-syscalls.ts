@@ -6,7 +6,7 @@
  * Selected Linux i386 x87 profile: cw037F nearest-even, masked exceptions,
  * signed dword fistp/fild, then binary32 fstp. This is not the C rint profile.
  */
-import type { QvmMemory } from "./memory.ts";
+import type { Q3GameMemory } from "./game-memory.ts";
 
 function snapComponent(value: number): number {
   const lower = Math.floor(value);
@@ -23,13 +23,13 @@ function snapComponent(value: number): number {
 export function qvmSnapVectorSyscall(
   role: "game" | "cgame" | "ui",
   words: DataView,
-  memory: QvmMemory,
+  memory: Q3GameMemory,
 ): number | null {
   if (role === "ui") return null;
   if (words.getInt32(0, true) !== (role === "game" ? 42 : 71)) return null;
   const pointer = memory.pointer(words.getInt32(4, true));
   if (pointer === null) throw new RangeError("QVM SnapVector requires a nonnull pointer");
-  const vector = memory.dataView(pointer.byteOffset - memory.bytes.byteOffset, pointer.byteLength);
+  const vector = memory.regionView(pointer);
   // Mask only the base; publish each component before reaching the next read.
   for (let offset = 0; offset < 12; offset += 4) {
     vector.setFloat32(offset, snapComponent(vector.getFloat32(offset, true)), true);

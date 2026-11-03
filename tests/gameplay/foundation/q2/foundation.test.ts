@@ -9,7 +9,7 @@ import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts"
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
 import { SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { Q2Foundation } from "../../../../src/content/q2/foundation/runtime.ts";
-import type { Q2FoundationHost, Q2GameOptions, Q2PresentationEvent } from "../../../../src/content/q2/foundation/host.ts";
+import type { Q2GameOptions, Q2PresentationEvent } from "../../../../src/content/q2/foundation/host.ts";
 import { createQ2TargetModule } from "../../../../src/content/q2/foundation/targets.ts";
 import { createQ2ItemModule } from "../../../../src/content/q2/foundation/items.ts";
 import { noInfiniteAmmo } from "../../../../src/content/q2/foundation/infinite-ammo.ts";
@@ -28,6 +28,7 @@ import { SharedPickupAdmission } from "../../../../src/world/gameplay/pickups.ts
 import { Q2_Q3_SUPPLY_PROFILE } from "../../../../src/content/composition/q2-q3-supply.ts";
 import { Q3_WEAPON_ITEMS, q3SpawnLoadout } from "../../../../src/content/q3/foundation/arsenal.ts";
 import { inertAuthority } from "../../../support/authority.ts";
+import { q2TestHost } from "../../../support/q2-host.ts";
 const test = corpusTest("q2/baseq2/pak0.pak", "q2/rerelease/baseq2/pak0.pak");
 const describe = corpusDescribe("q2/baseq2/pak0.pak", "q2/rerelease/baseq2/pak0.pak");
 
@@ -102,8 +103,6 @@ function targetGame(selected: Q2GameOptions = options) {
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const callbacks = new ActorCallbackTable(actors);
   const inventory = new SharedInventoryTable(actors);
-  const events: Q2PresentationEvent[] = [];
-  const scheduled = new Map<OwnedActor, number>();
   const players: ActorId[] = [];
   let now = 0;
   const combat = inertAuthority(actors, callbacks);
@@ -111,17 +110,12 @@ function targetGame(selected: Q2GameOptions = options) {
     context: request => ({ arithmetic: "binary64", player: players.includes(request.target), monster: false, attackerPlayer: false,
       hasEnemy: false, easySkill: false, deathmatch: false, defenderSphere: false, teamDamageEnabled: false,
       friendlyFire: false, nuke: false, noKnockback: true, movable: false, rejectTeamDamage: false, suppressPain: false }) }));
-  const host: Q2FoundationHost = { actors, bodies, callbacks, combat, inventory, originalPickups: new SharedOriginalPickupAdmission(actors, combat, inventory), now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5,
-    schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
-    touchTriggers: () => undefined,
+  const { host, events, scheduled } = q2TestHost({ actors, bodies, callbacks, combat, inventory, players: () => players, entity: () => undefined, world: () => { throw new Error("This target-only check has no world actor"); } }, {
+    originalPickups: new SharedOriginalPickupAdmission(actors, combat, inventory), now: () => now,
     trace: () => { throw new Error("This target-only check must not query geometry"); },
-    pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true, nearby: () => [],
-    players: () => players, isPlayer: actor => players.includes(actor), isMonster: () => false,
-    worldActor: () => { throw new Error("This target-only check has no world actor"); },
-    inlineModelBounds: () => { throw new Error("This target-only check must not use brush models"); },
-    setSolid: () => undefined, setMotion: () => undefined, setAreaPortal: () => undefined,
-    emit: event => { events.push(event); return undefined; }, playerViewState: () => ({ viewAngles: zero, oldVelocity: zero }),
-    keyConsumed: () => undefined, prepareLevelChange: () => undefined, transition: () => undefined, diagnostic: () => undefined };
+    inlineModelBounds: () => { throw new Error("This target-only check must not use brush models"); }, diagnostic: () => undefined,
+  });
+
   const items = createQ2ItemModule({ weaponPicked: () => undefined, silencer: () => undefined, powerArmor: () => undefined });
   const movers = createQ2MoverModule({ pathCorner: () => undefined, combatPoint: () => undefined });
   const game = new Q2Foundation(host, selected, [createQ2TargetModule(), items, movers]);
@@ -442,12 +436,13 @@ describe("Q2 permanent gameplay foundation", () => {
       if (scene.host.inventory.has(entry.id)) inventory.create(actor, scene.host.inventory.entries(entry.id));
     }
     let now = 0.2;
-    const events: Q2PresentationEvent[] = [], scheduled = new Map<OwnedActor, number>(), player = actors.referenceSaved(scene.player.id);
-    const host: Q2FoundationHost = { ...scene.host, actors, callbacks, bodies, combat, inventory, now: () => now,
-      players: () => [player], isPlayer: actor => actor === player,
+    const player = actors.referenceSaved(scene.player.id);
+    const { host, events, scheduled } = q2TestHost({ actors, callbacks, bodies, combat, inventory, world: scene.host.worldActor, players: () => [player], entity: () => undefined }, {
+      ...(scene.host.originalPickups === undefined ? {} : { originalPickups: scene.host.originalPickups }),
+      now: () => now, trace: scene.host.trace, inlineModelBounds: scene.host.inlineModelBounds, diagnostic: scene.host.diagnostic,
       random: () => { throw new Error("Restoration and this continuation must not consume spawn randomness"); },
-      emit: event => { events.push(event); return undefined; },
-      schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; } };
+    });
+
     const items = createQ2ItemModule({ weaponPicked: () => undefined, silencer: () => undefined, powerArmor: () => undefined });
     const movers = createQ2MoverModule({ pathCorner: () => undefined, combatPoint: () => undefined });
     const game = new Q2Foundation(host, options, [createQ2TargetModule(), items, movers]);

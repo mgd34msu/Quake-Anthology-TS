@@ -61,7 +61,7 @@ test('located guest spans reject invalid strides, indexes, pointers and wire cap
     [64, 3, 700, 4096, 464], [0, 3, 700, 4096, 600], [64, 3, 700, 0, 600],
     [15000, 3, 700, 4096, 600], [64, 3, 700, 16000, 600],
   ];
-  for (const words of invalid) { expect(() => data.locate(...words)).toThrow(/Game-data record exceeds the interpreter allocation|Game-data stride is undersized or unaligned|Game-data tables require aligned nonnull pointers|Q3 wire entity capacity is/); expect(data.checkpoint()).toEqual(before); }
+  for (const words of invalid) { expect(() => data.locate(...words)).toThrow(/Game-data record exceeds the guest allocation|Game-data stride is undersized or unaligned|Game-data tables require aligned nonnull pointers|Q3 wire entity capacity is/); expect(data.checkpoint()).toEqual(before); }
   for (const slot of [-1, 0.5, 3, 1023]) expect(() => data.entity(slot)).toThrow("Entity slot is outside located game data");
   for (const pointer of [0, 60, 65, 68, 64 + 3 * 700]) {
     expect(() => data.numberFromPointer(pointer)).toThrow(/Entity numbering requires nonnull source pointers|Entity slot is outside located game data/);

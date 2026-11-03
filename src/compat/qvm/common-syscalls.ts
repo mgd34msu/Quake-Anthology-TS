@@ -3,7 +3,7 @@ import { CommonError } from "../../core/common-error.ts";
 import type { QvmCvarServices } from "./cvar-syscalls.ts";
 import { QvmCgameImport, QvmGameImport, QvmUiImport } from "./abi.ts";
 import { qvmCvarSyscall } from "./cvar-syscalls.ts";
-import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
+import type { SharedHostCall, QvmHostResult } from "./syscalls.ts";
 
 export interface QvmCalendar {
   readonly second: number; readonly minute: number; readonly hour: number; readonly day: number;
@@ -36,7 +36,7 @@ export type QvmCommonServices = CommonServices & (
 );
 
 /** Null means unhandled; zero remains a completed guest result. */
-export function qvmCommonSyscall(call: QvmHostCall, services: QvmCommonServices): QvmHostResult | null {
+export function qvmCommonSyscall(call: SharedHostCall, services: QvmCommonServices): QvmHostResult | null {
   if (call.kind !== "engine" || call.role !== services.role) return null;
   const { words, guest } = call;
   const cvar = qvmCvarSyscall(call.role, words, guest, services.cvars);

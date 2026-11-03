@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
-import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
+import { SessionActorRegistry, ActorCallbackTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
 import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
@@ -17,7 +17,6 @@ import { openArchive } from "../../../src/content/archive/index.ts";
 import { readQ1Bsp, parseQ1Entities } from "../../../src/formats/q1-map/index.ts";
 import type { Q1Map } from "../../../src/formats/q1-map/index.ts";
 import { Q1Foundation } from "../../../src/content/q1/foundation/runtime.ts";
-import type { Q1Event, Q1FoundationHost } from "../../../src/content/q1/foundation/types.ts";
 import { PLAYER_BOUNDS, ZERO } from "../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base, Q1CharacterActor, Q1CampaignState, captureQ1Travel, admitQ1Travel, newQ1Travel, q1Obituary, dropBackpack } from "../../../src/content/q1/base/index.ts";
 import type { Q1ObituaryActor } from "../../../src/content/q1/base/index.ts";
@@ -25,9 +24,11 @@ import { setMonsterRoute } from "../../../src/content/q1/base/monsters.ts";
 import { monsterFrames } from "../../../src/content/q1/base/frames.ts";
 import type { Q1FoundationCheckpoint } from "../../../src/content/q1/foundation/checkpoint.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../src/persistence/q1-foundation.ts";
-import { captureSharedBodies, restoreSharedBodyLinks } from "../../../src/persistence/world-state.ts";
+import { restoreSharedBodyLinks } from "../../../src/persistence/world-state.ts";
 import { decodeCheckpointValue, encodeCheckpointValue } from "../../../src/persistence/value.ts";
 import { impulseAuthority } from "../../support/authority.ts";
+import { q1SceneBodies, q1TestHost } from "../../support/q1-host.ts";
+import { captureSharedActors } from "../../support/save-capture.ts";
 
 const archivePath = corpusFile("q1/rerelease/id1/pak0.pak");
 /** Directory of the original QuakeC monster sources (progs106 layout), when provided. */
@@ -48,14 +49,9 @@ interface SavedBaseWorld {
 function createGame(map: Q1Map, saved?: SavedBaseWorld, deathmatch = 0, nativePrecaches = true) {
   const identities = createIdentityOwner("q1-base-smoke");
   const actors = saved === undefined ? new SessionActorRegistry(identities) : SessionActorRegistry.restore(identities, saved.slots, saved.sources), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
-  const pending = new Map<OwnedActor, number>(), events: Q1Event[] = [], players: ActorId[] = [];
+  const players: ActorId[] = [];
   let runtime: Q1Foundation | null = null;
-  const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onUnlink: actor => { scene.unlink(actor); return undefined; }, onLink: body => {
-    const entity = runtime?.entity(body.actor);
-    if (entity === null || entity === undefined || entity.solid === "none" || entity.classname === "worldspawn") { scene.unlink(body.actor); return undefined; }
-    const model = entity.model.startsWith("*") ? Number(entity.model.slice(1)) : null;
-    scene.link(body, { family: "q1", shape: model === null ? { kind: "box" } : { kind: "model", model }, contents: -2, owner: entity.owner, role: entity.solid === "trigger" ? "trigger" : "solid", monster: entity.monster !== null, deadMonster: false }); return undefined;
-  } });
+  const bodies = q1SceneBodies(actors, scene, actor => runtime?.entity(actor));
   const movement = new Q1MonsterMovement({ scene, numeric: createNumericOperations(Q1_DONOR_PROFILE), random: { nextInteger: () => 1 }, readTarget: actor => {
     const owner = actors.resolveOwned(actor), body = bodies.read(actor);
     return owner === null || body === null ? null : { origin: body.origin, absoluteBounds: translatedBodyBounds(owner, body) };
@@ -65,23 +61,9 @@ function createGame(map: Q1Map, saved?: SavedBaseWorld, deathmatch = 0, nativePr
   }, write: (actor, state) => { const body = bodies.read(actor.id); if (body === null) throw new Error("Missing source body"); bodies.write(actor, { ...body, angles: state.angles }); return undefined; }, link: actor => bodies.link(actor) });
   const combat = impulseAuthority(actors, callbacks, bodies);
   const inventory = new SharedInventoryTable(actors);
-  const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
-    trace: request => {
-      const trace = scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" }, policy: { kind: "q1", move: request.monsters ? "normal" : "no-monsters", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: request.ignore });
-      if (trace.kind !== "q1") throw new Error("Q1 trace expected");
-      return { fraction: trace.fraction, end: trace.end, normal: trace.sourcePlane.normal, actor: trace.hit.kind === "actor" ? trace.hit.actor : trace.hit.kind === "world" ? runtime?.world?.actor.id ?? null : null, startSolid: trace.startSolid, allSolid: trace.allSolid, sky: false, inOpen: trace.inOpen, inWater: trace.inWater };
-    },
-    contents: point => {
-      const result = scene.pointContents({ point, target: { kind: "world" }, policy: { kind: "q1", move: "normal", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: null });
-      if (result.kind !== "q1") throw new Error("Q1 contents expected"); return result.contents === -2 ? "solid" : result.contents === -3 ? "water" : result.contents === -4 ? "slime" : result.contents === -5 ? "lava" : result.contents === -6 ? "sky" : "empty";
-    },
-    // This smoke exercises registration, shared mutations and animation, not step movement.
-    walkMove: () => false, moveToGoal: () => undefined, changeYaw: actor => movement.changeYaw(actor), checkBottom: () => false,
-    pusherServices: () => { throw new Error("This fixture does not step native pushers"); },
-    scheduleThink: (actor, seconds) => { pending.set(actor, seconds); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
-    emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => players, checkClient: () => null,
-    classname: actor => runtime?.entity(actor)?.classname ?? "player", powerup: () => undefined,
-  };
+  // This smoke exercises registration, shared mutations and animation, not step movement.
+  const { host, pending, events } = q1TestHost({ actors, callbacks, bodies, combat, inventory, scene, world: () => runtime?.world?.actor.id ?? null, entity: actor => runtime?.entity(actor), players: () => players },
+    { changeYaw: actor => movement.changeYaw(actor) });
   const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch, coop: false, gravity: 800, maxClients: 4, campaign: "q1:id1", ...(nativePrecaches ? { precacheProgram: "id1" } : {}), combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => game.combatContext(request), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
   const campaign = new Q1CampaignState(), base = registerQ1Base(game, { campaign });
@@ -152,10 +134,7 @@ test.skipIf(!existsSync(archivePath))("actual Shub finale resumes named source s
   const source = game.capture();
   expect(source.entities.some(entity => entity.callbacks.think === "base:finale_2")).toBe(true);
   const saved: SavedBaseWorld = {
-    source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(source)), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(),
-    bodies: captureSharedBodies(actors, game.host.bodies),
-    combat: actors.observations().flatMap(actor => { const state = combat.read(actor.id); return state === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state }]; }),
-    inventories: actors.observations().flatMap(actor => inventory.has(actor.id) ? [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: inventory.entries(actor.id) }] : []),
+    source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(source)), ...captureSharedActors({ actors, bodies: game.host.bodies, combat, inventory }),
   };
   const restored = createGame(map, saved); expect(restored.report).toBe(null); expect(restored.events).toHaveLength(0); expect(restored.game.capture()).toEqual(source);
   expect(restored.game.precaches.models).toEqual(game.precaches.models); expect(restored.game.precaches.sounds).toEqual(game.precaches.sounds);
@@ -359,10 +338,7 @@ test.skipIf(!existsSync(archivePath))("a version 5 save with a live grunt and do
     return { ...extension, bytes: encodeCheckpointValue({ ...root, monsters: root.monsters.filter(entry => !legacySlots.has(entry.actor.slot)) }) };
   }) };
   const saved: SavedBaseWorld = {
-    source: decodeQ1FoundationCheckpoint(encodeCheckpointValue(version5)), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(),
-    bodies: captureSharedBodies(actors, game.host.bodies),
-    combat: actors.observations().flatMap(actor => { const state = combat.read(actor.id); return state === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state }]; }),
-    inventories: actors.observations().flatMap(actor => inventory.has(actor.id) ? [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: inventory.entries(actor.id) }] : []),
+    source: decodeQ1FoundationCheckpoint(encodeCheckpointValue(version5)), ...captureSharedActors({ actors, bodies: game.host.bodies, combat, inventory }),
   };
   const restored = createGame(map, saved);
   const resumedArmy = restored.game.find("legacy_army")[0], resumedDog = restored.game.find("legacy_dog")[0];

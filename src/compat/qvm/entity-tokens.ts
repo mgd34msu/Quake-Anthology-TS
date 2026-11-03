@@ -1,7 +1,7 @@
 import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
 import { SaveReader } from "../../persistence/value.ts";
 import { QvmGameImport } from "./abi.ts";
-import type { QvmHostCall } from "./syscalls.ts";
+import type { SharedHostCall } from "./syscalls.ts";
 
 export interface QvmEntityTokenServices {
   entityToken(): { readonly token: string; readonly ended: boolean };
@@ -36,7 +36,7 @@ export class QvmEntityTokens implements QvmEntityTokenServices {
 }
 
 /** Q3 server/sv_game.c: consume a token before copying and retain a final nonempty token at EOF. */
-export function qvmEntityTokenSyscall(call: QvmHostCall, services: QvmEntityTokenServices): number | null {
+export function qvmEntityTokenSyscall(call: SharedHostCall, services: QvmEntityTokenServices): number | null {
   if (call.kind !== "engine" || call.role !== "qagame" || call.code !== QvmGameImport.G_GET_ENTITY_TOKEN) return null;
   const result = services.entityToken();
   call.guest.writeString(call.words.getInt32(4, true), result.token, call.words.getInt32(8, true));

@@ -7,7 +7,7 @@ import type { GoalWorld } from '../../../../bots/behavior/library/goals.ts';
 import { qvmBotLibrarySyscall, type QvmBotLibraryServices } from '../../../../compat/qvm/bot-library-syscalls.ts';
 import { qvmBotNavigationSyscall, qvmBotMovementPrediction } from '../../../../compat/qvm/bot-navigation-syscalls.ts';
 import { readQvmBotEntityState, type AasEntityInfo, type BotEntityUpdate } from '../../../../compat/qvm/bot-navigation-records.ts';
-import type { QvmHostCall, QvmHostResult } from '../../../../compat/qvm/syscalls.ts';
+import type { SharedHostCall, QvmHostResult } from '../../../../compat/qvm/syscalls.ts';
 import type { Q3GuestSpatial } from './guest-spatial.ts';
 import type { Q3GuestRecords } from './guest-records.ts';
 import { emptyInfo } from '../../../../bots/behavior/q3/observations.ts';
@@ -130,7 +130,7 @@ export class Q3GuestBots {
       entityInfo: number => this.observations.get(number) ?? emptyInfo(number),
     } };
   }
-  syscall(call: QvmHostCall): QvmHostResult | null {
+  syscall(call: SharedHostCall): QvmHostResult | null {
     return qvmBotLibrarySyscall(call, this.services) ?? qvmBotNavigationSyscall(call, {
       library: this.library, navigation: this.navigation, bspEntities: this.bspEntities,
       time: () => this.library.time(), initialized: () => this.initialized && this.loaded && this.navigation.ready,

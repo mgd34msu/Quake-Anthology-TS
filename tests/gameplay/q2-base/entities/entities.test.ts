@@ -8,7 +8,8 @@ import type { BodyCheckpoint, CombatCheckpoint, InventoryCheckpoint, SavedActorI
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
 import { GameplayAuthority, SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { Q2Foundation } from "../../../../src/content/q2/foundation/runtime.ts";
-import type { Q2FoundationHost, Q2PresentationEvent } from "../../../../src/content/q2/foundation/host.ts";
+import { q2TestHost } from "../../../support/q2-host.ts";
+import { captureSharedActors } from "../../../support/save-capture.ts";
 import { createQ2TargetModule } from "../../../../src/content/q2/foundation/targets.ts";
 import { Q2MoverModule } from "../../../../src/content/q2/foundation/movers.ts";
 import { Q2Ballistics } from "../../../../src/content/q2/foundation/weapons/ballistics.ts";
@@ -19,7 +20,7 @@ import type { Q2FoundationCheckpoint } from "../../../../src/content/q2/foundati
 import type { Q2MoversCheckpoint } from "../../../../src/content/q2/foundation/movers.ts";
 import type { Q2MonstersCheckpoint } from "../../../../src/content/q2/foundation/monsters/checkpoint.ts";
 import { registerQ2ClassicBaseMonsters } from "../../../../src/content/q2/base/monsters/index.ts";
-import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../src/persistence/world-state.ts";
+import { restoreSharedBodyLinks } from "../../../../src/persistence/world-state.ts";
 import { encodeQ2FoundationCheckpoint, decodeQ2FoundationCheckpoint } from "../../../../src/persistence/q2-foundation.ts";
 import { encodeQ2BaseEntitiesCheckpoint, decodeQ2BaseEntitiesCheckpoint } from "../../../../src/persistence/q2-base-entities.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
@@ -43,27 +44,22 @@ function fixture(saved?: SavedEntities) {
   const identity = createIdentityOwner("q2-base-entities"), actors = saved === undefined ? new SessionActorRegistry(identity) : SessionActorRegistry.restore(identity, saved.slots, saved.sources);
   const callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const events: Q2PresentationEvent[] = [], outcomes: DamageOutcome[] = [], players: ActorId[] = [];
-  const scheduled = new Map<OwnedActor, number>();
+  const outcomes: DamageOutcome[] = [], players: ActorId[] = [];
   const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined,
     confirmed: outcome => { outcomes.push(outcome); return undefined; } });
   combat.register(createQ2CombatPolicy({ id: "q2:combat", armor: nativeVictimArmor(() => ({ arithmetic: "binary64", screenFacingDot: 1 })),
     context: request => ({ arithmetic: "binary64", player: players.includes(request.target), monster: false, attackerPlayer: false,
       hasEnemy: false, easySkill: false, deathmatch: false, defenderSphere: false, teamDamageEnabled: false, friendlyFire: false,
       nuke: false, noKnockback: true, movable: false, rejectTeamDamage: false, suppressPain: false }) }));
-  const host: Q2FoundationHost = { actors, bodies, callbacks, combat, inventory: new SharedInventoryTable(actors),
-    now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => { if (restoring) throw new Error("Restore consumed source randomness"); return 0.5; }, touchTriggers: () => undefined, keyConsumed: () => undefined,
-    schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
+  const { host, scheduled, events } = q2TestHost({ actors, bodies, callbacks, combat, inventory: new SharedInventoryTable(actors), players: () => players, entity: () => undefined,
+    world: () => { const world = [...game.entities.values()].find(entity => entity.classname === "worldspawn"); if (world === undefined) throw new Error("Missing source world"); return world.actor.id; } }, {
+    now: () => now, random: () => { if (restoring) throw new Error("Restore consumed source randomness"); return 0.5; },
     trace: request => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end,
       contact: { kind: "none" }, hit: { kind: "none" }, contents: 0, surface: null, secondary: null,
       sourcePlane: { normal: zero, distance: 0, type: 0, signbits: 0 } }),
-    pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true, nearby: () => [],
-    players: () => players, isPlayer: actor => players.includes(actor), isMonster: () => false,
-    worldActor: () => { const world = [...game.entities.values()].find(entity => entity.classname === "worldspawn"); if (world === undefined) throw new Error("Missing source world"); return world.actor.id; },
-    inlineModelBounds: () => ({ min: zero, max: { x: 128, y: 128, z: 64 } }), setSolid: () => undefined, setMotion: () => undefined,
-    setAreaPortal: () => undefined, emit: event => { events.push(event); return undefined; },
-    playerViewState: () => ({ viewAngles: zero, oldVelocity: zero }), prepareLevelChange: () => undefined, transition: () => undefined,
-    diagnostic: message => { throw new Error(message); } };
+    inlineModelBounds: () => ({ min: zero, max: { x: 128, y: 128, z: 64 } }), diagnostic: message => { throw new Error(message); },
+  });
+
   const weapons = new Q2Ballistics({ emit: () => undefined, noise: () => undefined, dodge: () => undefined,
     lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
   const monsters = new Q2Monsters(weapons);
@@ -92,9 +88,8 @@ function fixture(saved?: SavedEntities) {
   function spawn(classname: string, values: ReadonlyMap<string, string> = new Map<string, string>()) { return game.spawn({ classname, ordinal: -1, values }); }
   function save(): SavedEntities {
     const reference = (actor: ActorId): SavedActorId => ({ slot: actor.slot, generation: actor.generation });
-    return { now, slots: actors.checkpoint(), sources: actors.sourceCheckpoint(), bodies: captureSharedBodies(actors, bodies), players: players.map(reference),
-      combat: actors.observations().flatMap(actor => { const state = combat.read(actor.id); return state === null ? [] : [{ actor: reference(actor.id), state }]; }),
-      inventory: actors.observations().flatMap(actor => host.inventory.has(actor.id) ? [{ actor: reference(actor.id), entries: host.inventory.entries(actor.id) }] : []),
+    const { inventories, ...shared } = captureSharedActors({ actors, bodies, combat, inventory: host.inventory });
+    return { now, ...shared, players: players.map(reference), inventory: inventories,
       foundation: decodeQ2FoundationCheckpoint(encodeQ2FoundationCheckpoint(game.capture())), entities: decodeQ2BaseEntitiesCheckpoint(encodeQ2BaseEntitiesCheckpoint(entities.capture(game))),
       movers: movers.capture(game), monsters: monsters.capture() };
   }

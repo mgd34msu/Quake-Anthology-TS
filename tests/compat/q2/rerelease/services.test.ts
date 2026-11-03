@@ -18,7 +18,7 @@ import { nativeWorld } from "./world.ts";
 
 test("API2023 services retain public records, ordered native messages and exact unlinked clip target", async () => {
   let services: RereleaseGuestServices | null = null;
-  const world = await nativeWorld(index => services?.resource("model", index));
+  const world = await nativeWorld();
   const module: ModuleIdentity = { id: "test:rr-public-services", artifactPath: "authored-public-api", revision: "1", digest: createContentDigest("92".repeat(32)) };
   const memory = new SparseGuestMemory({ module, pointerBytes: 8 }), callbacks = new GuestCallbackTable(memory);
   const stack = memory.allocate({ byteLength: 65536 }), returned = memory.allocate({ byteLength: 16, permissions: "read-execute" });
@@ -34,8 +34,8 @@ test("API2023 services retain public records, ordered native messages and exact 
   const cgetterBytes = getterBytes.slice(); new DataView(cgetterBytes.buffer).setBigUint64(2, cgame.byteOffset, true); const cgetter = memory.allocate({ byteLength: cgetterBytes.length }); memory.write(cgetter, cgetterBytes); memory.protect(cgetter, cgetterBytes.length, "read-execute");
   const prints: string[] = [], cvars = new CvarRegistry({ dialect: "q2-rerelease", context: { session: world.engine.actors.session, origin: { kind: "server-console" } } });
   services = new RereleaseGuestServices({ scene: world.scene, cvars, numeric: createNumericOperations(Q2_DONOR_PROFILE), maxClients: 2, mapPath: "maps/base1.bsp", frameMilliseconds: 25,
-    engine: { ...world.engine, emit: () => undefined, inPvs: (a, b) => world.spatial.visibility("pvs", a, b, true), inPhs: (a, b) => world.spatial.visibility("phs", a, b, true) },
-    admit: () => undefined, collision: () => undefined, print: text => { prints.push(text); }, command: () => ({ arguments: [], args: "" }), addCommand: () => undefined, debugGraph: () => undefined,
+    engine: world.engine,
+    admit: () => undefined, collision: world.collision, print: text => { prints.push(text); }, command: () => ({ arguments: [], args: "" }), addCommand: () => undefined, debugGraph: () => undefined,
     navigation: { runtime: () => null, moveToPoint: () => 0, followActor: () => 0 },
     clipboard: { kind: "dedicated" }, localize: (key, args) => [key, ...args].join(":"), debugShapes: () => undefined, worldText: () => undefined,
   });

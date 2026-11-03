@@ -124,7 +124,7 @@ export class GuestCallbackTable {
     return entry.callback;
   }
 
-  invoke(address: GuestAddress, context: GuestCallContext, arguments_: readonly GuestCallValue[]): GuestCallResult {
+  invoke(address: GuestAddress, context: GuestCallContext, arguments_: readonly GuestCallValue[]): GuestCallResult | Promise<GuestCallResult> {
     const callback = this.resolve(address);
     if (callback === null) throw new Error(`No host callback at guest address 0x${address.byteOffset.toString(16)}`);
     return callback.invoke(context, arguments_);

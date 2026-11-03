@@ -6928,8 +6928,10 @@ export class SharedSimulation implements Simulation {
     const { fraction, backLerp } = this.presentationFraction();
     if (this.source.kind === "q2-native") {
       const source = this.source, content = this.recipe.map.entities.content;
+      if (process.env.SRRDBG) { let t = ""; for (let i = 1; i < 14; i++) { const q = source.game.entityInfo(i); t += ` ${i}:${q.active ? 1 : 0}/${q.serverFlags}/${q.actor !== null ? 1 : 0}/${source.game.entityState(i).modelIndexes[0]}`; } require("node:fs").appendFileSync(process.env.SRRDBG, `ALL${t}\n`); } // SRRTEMP
       for (const state of source.game.entityStates()) {
         const info = source.game.entityInfo(state.number);
+        if (process.env.SRRDBG && state.number >= 1 && state.number <= 10) require("node:fs").appendFileSync(process.env.SRRDBG, `E${state.number} actor=${info.actor !== null} active=${info.active} sv=${info.serverFlags} mi=${JSON.stringify(state.modelIndexes)} fr=${state.frame}\n`); // SRRTEMP
         if (state.number === 0 || info.actor === null || !info.active || (info.serverFlags & 1) !== 0) continue;
         // A foreign selected character replaces the guest player model;
         // the selected-character presentation below draws this actor.

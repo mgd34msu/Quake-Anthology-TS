@@ -6,23 +6,23 @@
  */
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { float32ToBits } from "../../core/numeric.ts";
-import type { QvmMemory } from "./memory.ts";
+import type { Q3GameMemory } from "./game-memory.ts";
 
 export type QvmCvarServices = Pick<CvarRegistry, "bindVm" | "readVm" | "get" | "set" | "setValue" | "reset" | "register" | "infoString">;
 
-function update(pointer: number, memory: QvmMemory, cvars: QvmCvarServices): void {
+function update(pointer: number, memory: Q3GameMemory, cvars: QvmCvarServices): void {
   const record = memory.view(pointer, 272);
   const source = cvars.readVm(record.getInt32(0, true));
   if (source === undefined || source.modificationCount === record.getInt32(4, true)) return;
   record.setInt32(4, source.modificationCount, true);
   if (source.value.length > 255) throw new RangeError("Cvar_Update: value exceeds MAX_CVAR_VALUE_STRING");
-  memory.fillBytes(record.byteOffset - memory.bytes.byteOffset + 16, 256, 0);
+  memory.regionFill(memory.span(pointer, 272), 16, 256, 0);
   for (let index = 0; index < source.value.length; index++) record.setUint8(16 + index, source.value.charCodeAt(index));
   record.setFloat32(8, source.numericValue, true);
   record.setInt32(12, source.integerValue, true);
 }
 
-function register(words: DataView, memory: QvmMemory, cvars: QvmCvarServices): void {
+function register(words: DataView, memory: Q3GameMemory, cvars: QvmCvarServices): void {
   const pointer = words.getInt32(4, true);
   const handle = cvars.bindVm(memory.readString(words.getInt32(8, true)),
     memory.readString(words.getInt32(12, true)), words.getInt32(16, true));
@@ -33,14 +33,14 @@ function register(words: DataView, memory: QvmMemory, cvars: QvmCvarServices): v
   update(pointer, memory, cvars);
 }
 
-function set(words: DataView, memory: QvmMemory, cvars: QvmCvarServices): void {
+function set(words: DataView, memory: Q3GameMemory, cvars: QvmCvarServices): void {
   const name = memory.readString(words.getInt32(4, true));
   const pointer = words.getInt32(8, true);
   if (memory.pointer(pointer) === null) cvars.reset(name, true);
   else cvars.set(name, memory.readString(pointer), true);
 }
 
-function variableString(words: DataView, memory: QvmMemory, cvars: QvmCvarServices): void {
+function variableString(words: DataView, memory: Q3GameMemory, cvars: QvmCvarServices): void {
   const source = cvars.get(memory.readString(words.getInt32(4, true)));
   const pointer = words.getInt32(8, true);
   // Cvar_VariableStringBuffer's missing-name branch ignores the capacity.
@@ -50,7 +50,7 @@ function variableString(words: DataView, memory: QvmMemory, cvars: QvmCvarServic
 
 /** Trap numbers come from g_public.h, cg_public.h and ui_public.h. */
 export function qvmCvarSyscall(
-  role: "qagame" | "cgame" | "ui", words: DataView, memory: QvmMemory, cvars: QvmCvarServices,
+  role: "qagame" | "cgame" | "ui", words: DataView, memory: Q3GameMemory, cvars: QvmCvarServices,
 ): number | null {
   const trap = words.getInt32(0, true);
   if (role !== "ui") {

@@ -6,7 +6,7 @@ import type { ActorId } from "../../../../src/contracts/identity.ts";
 import type { ActorSlotCheckpoint, SavedActorId } from "../../../../src/contracts/session.ts";
 import type { BodyState } from "../../../../src/contracts/world.ts";
 import type { CombatState, InventoryEntry } from "../../../../src/contracts/gameplay.ts";
-import type { Q2Entity, Q2FoundationHost, Q2PresentationEvent, Q2TraceRequest } from "../../../../src/content/q2/foundation/host.ts";
+import type { Q2Entity } from "../../../../src/content/q2/foundation/host.ts";
 import { Q2Foundation } from "../../../../src/content/q2/foundation/runtime.ts";
 import type { Q2FoundationCheckpoint } from "../../../../src/content/q2/foundation/checkpoint.ts";
 import { Q2ItemModule } from "../../../../src/content/q2/foundation/items.ts";
@@ -24,6 +24,7 @@ import { SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from ".
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ2Bsp } from "../../../../src/formats/q2-map/index.ts";
 import { inertAuthority } from "../../../support/authority.ts";
+import { q2TestHost } from "../../../support/q2-host.ts";
 const test = corpusTest("q2/ctf/pak0.pak");
 
 interface SavedFixture {
@@ -42,7 +43,7 @@ function fixture(saved: SavedFixture | null = null) {
   let now = saved?.now ?? 0, flags = 0;
   const identities = createIdentityOwner("original-q2-ctf"), actors = saved === null ? new SessionActorRegistry(identities) : SessionActorRegistry.restore(identities, saved.slots, saved.sources);
   const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const inventory = new SharedInventoryTable(actors), common = new Map<ActorId, Q2PlayerState>(), events: Q2CtfEvent[] = [], presentation: Q2PresentationEvent[] = [], destinations: (string | null)[] = [];
+  const inventory = new SharedInventoryTable(actors), common = new Map<ActorId, Q2PlayerState>(), events: Q2CtfEvent[] = [], destinations: (string | null)[] = [];
   const combat = inertAuthority(actors, callbacks);
   combat.register(createQ2CombatPolicy({ id: "q2:combat", context: request => ({ arithmetic: "binary64", player: common.has(request.target), monster: false,
     attackerPlayer: request.attack.attacker !== null && common.has(request.attack.attacker), hasEnemy: false, easySkill: false, deathmatch: true,
@@ -63,13 +64,11 @@ function fixture(saved: SavedFixture | null = null) {
     }
   }
   const world = actors.ownedBy("q2:game").find(actor => actors.sourceOf(actor.id)?.slot === 0); if (world === undefined) throw new Error("Missing fixture world");
-  const host: Q2FoundationHost = { actors, callbacks, bodies, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.25, schedule: () => undefined, touchTriggers: () => undefined,
-    trace: (request: Q2TraceRequest) => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, contact: { kind: "none" }, hit: { kind: "none" }, contents: 0, surface: null,
-      sourcePlane: { normal: { x: 0, y: 0, z: 1 }, distance: 0, type: 2, signbits: 0 }, secondary: null }),
-    pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true, nearby: () => [...common.keys()], players: () => [...common.keys()],
-    worldActor: () => world.id, isPlayer: actor => common.has(actor), isMonster: () => false, inlineModelBounds: () => ({ min: zero, max: zero }),
-    setSolid: () => undefined, setMotion: () => undefined, setAreaPortal: () => undefined, playerViewState: () => ({ viewAngles: zero, oldVelocity: zero }), keyConsumed: () => undefined,
-    prepareLevelChange: () => undefined, emit: event => { presentation.push(event); return undefined; }, transition: () => undefined, diagnostic: message => { throw new Error(message); } };
+  const { host, events: presentation } = q2TestHost({ actors, callbacks, bodies, combat, inventory, world: world.id, players: () => [...common.keys()], entity: () => undefined }, {
+    now: () => now, random: () => 0.25, nearby: () => [...common.keys()], isPlayer: actor => common.has(actor),
+    diagnostic: message => { throw new Error(message); },
+  });
+
   const items = new Q2ItemModule({ weaponPicked: () => undefined, silencer: () => undefined, powerArmor: () => undefined });
   const weapons = new Q2Weapons({ emit: () => undefined, noise: () => undefined, dodge: () => undefined, lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
   const ctf: Q2Ctf = new Q2Ctf({ items, weapons, player: actor => common.get(actor) ?? null, setSkin: (actor, skin) => { const state = common.get(actor); if (state === undefined) throw new Error("Missing fixture skin"); state.skin = skin; return undefined; },

@@ -1,6 +1,6 @@
 import { qvmLegacyBotLibrarySyscall } from './legacy-bot-syscalls.ts';
 import { QvmGameImport } from './abi.ts';
-import type { QvmHostCall, QvmHostResult } from './syscalls.ts';
+import type { SharedHostCall, QvmHostResult } from './syscalls.ts';
 import { float32ToBits } from '../../core/numeric.ts';
 import type { BotLibrary } from '../../bots/behavior/q3/library.ts';
 import { readQvmBotGoal, writeQvmBotGoal, QVM_BOT_GOAL_BYTES } from './bot-navigation-records.ts';
@@ -9,12 +9,12 @@ import { QVM_SCRIPT_TOKEN_BYTES, writeQvmScriptToken } from './script-record.ts'
 import { QVM_USER_COMMAND_BYTES, readQvmUserCommand } from './client-state-record.ts';
 import { stringContains, unifyWhiteSpacesInPlace, type ChatVariableSources, type ChatMatchBuffer, type ChatMatchVariable, type ChatBufferWrites } from '../../bots/behavior/library/chat.ts';
 import type { WireUserCommand } from '../../network/q3/message.ts';
-import type { QvmMemory } from './memory.ts';
-function chatWrites(guest: QvmMemory): ChatBufferWrites {
+import type { Q3GameMemory } from './game-memory.ts';
+function chatWrites(guest: Q3GameMemory): ChatBufferWrites {
     return {
-        view: bytes => guest.dataView(bytes.byteOffset - guest.bytes.byteOffset, bytes.length),
-        copy: (destination, source) => guest.writeBytes(destination.byteOffset - guest.bytes.byteOffset, source),
-        clear: (destination, start) => guest.fillBytes(destination.byteOffset - guest.bytes.byteOffset + start, destination.length - start, 0),
+        view: bytes => guest.regionView(bytes),
+        copy: (destination, source) => guest.regionWrite(destination, source),
+        clear: (destination, start) => guest.regionFill(destination, start, destination.length - start, 0),
     };
 }
 export interface QvmBotLibraryServices {
@@ -22,7 +22,7 @@ export interface QvmBotLibraryServices {
     setup(): number | Promise<number>;
     shutdown(): number;
     loadMap(name: string): number | Promise<number>;
-    updateEntity(number: number, call: QvmHostCall, pointer: number): number;
+    updateEntity(number: number, call: SharedHostCall, pointer: number): number;
     snapshotEntity(client: number, sequence: number): number;
     consoleMessage(client: number): string | null;
     userCommand(client: number, command: WireUserCommand): void | Promise<void>;
@@ -31,7 +31,7 @@ export interface QvmBotLibraryServices {
     /** Runs after the library has taken the frame time; AAS_InvalidateEntities belongs here. */
     startedFrame?(): void;
 }
-export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryServices): QvmHostResult | null {
+export function qvmBotLibrarySyscall(call: SharedHostCall, services: QvmBotLibraryServices): QvmHostResult | null {
     const legacy = qvmLegacyBotLibrarySyscall(call, services);
     if (legacy !== null) return legacy;
     if (call.kind !== 'engine' || call.role !== 'qagame') return null;
@@ -85,7 +85,7 @@ export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryS
         case QvmGameImport.BOTLIB_EA_MOVE: library.actions.move(int(1), vector(2), float(3)); return 0;
         case QvmGameImport.BOTLIB_EA_VIEW: library.actions.view(int(1), vector(2)); return 0;
         case QvmGameImport.BOTLIB_EA_END_REGULAR: library.actions.endRegular(int(1), float(2)); return 0;
-        case QvmGameImport.BOTLIB_EA_GET_INPUT: guest.writeBytes(guest.span(int(3), 40).byteOffset - guest.bytes.byteOffset, library.actions.getInputBytes(int(1), float(2))); return 0;
+        case QvmGameImport.BOTLIB_EA_GET_INPUT: guest.regionWrite(guest.span(int(3), 40), library.actions.getInputBytes(int(1), float(2))); return 0;
         case QvmGameImport.BOTLIB_EA_RESET_INPUT: library.actions.resetInput(int(1)); return 0;
         case QvmGameImport.BOTLIB_AI_LOAD_CHARACTER: return library.characters.load(text(1), float(2));
         case QvmGameImport.BOTLIB_AI_FREE_CHARACTER: library.characters.free(int(1)); return 0;
@@ -126,7 +126,7 @@ export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryS
         case QvmGameImport.BOTLIB_AI_GET_TOP_GOAL:
         case QvmGameImport.BOTLIB_AI_GET_SECOND_GOAL: {
             const result = call.code === QvmGameImport.BOTLIB_AI_GET_TOP_GOAL ? library.goals.getTopGoalBytes(int(1)) : library.goals.getSecondGoalBytes(int(1));
-            if (result === null) return 0; guest.writeBytes(guest.span(int(2), QVM_BOT_GOAL_BYTES).byteOffset - guest.bytes.byteOffset, result); return 1;
+            if (result === null) return 0; guest.regionWrite(guest.span(int(2), QVM_BOT_GOAL_BYTES), result); return 1;
         }
         case QvmGameImport.BOTLIB_AI_GOAL_NAME: guest.writeString(int(2), library.goals.goalName(int(1)), int(3)); return 0;
         case QvmGameImport.BOTLIB_AI_AVOID_GOAL_TIME: return float32ToBits(library.goals.avoidGoalTime(int(1), int(2)));
@@ -146,7 +146,7 @@ export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryS
         case QvmGameImport.BOTLIB_AI_LOAD_WEAPON_WEIGHTS: return library.weapons.loadWeights(int(1), () => text(2));
         case QvmGameImport.BOTLIB_AI_CHOOSE_BEST_FIGHT_WEAPON: return library.weapons.chooseBestFightWeapon(int(1), inventory(2));
         case QvmGameImport.BOTLIB_AI_GET_WEAPON_INFO: {
-            const bytes = library.weapons.weaponInfoBytes(int(1), int(2)); if (bytes !== undefined) guest.writeBytes(guest.span(int(3), bytes.length).byteOffset - guest.bytes.byteOffset, bytes); return 0;
+            const bytes = library.weapons.weaponInfoBytes(int(1), int(2)); if (bytes !== undefined) guest.regionWrite(guest.span(int(3), bytes.length), bytes); return 0;
         }
         case QvmGameImport.BOTLIB_AI_GET_LEVEL_ITEM_GOAL:
         case QvmGameImport.BOTLIB_AI_GET_MAP_LOCATION_GOAL: {

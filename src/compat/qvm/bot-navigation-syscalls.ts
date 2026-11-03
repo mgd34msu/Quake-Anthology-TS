@@ -6,7 +6,7 @@ import type { BotMovementPrediction } from "../../bots/behavior/q3/navigation-ty
 import type { Vec3 } from "../../contracts/math.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import { float32ToBits } from "../../core/numeric.ts";
-import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
+import type { SharedHostCall, QvmHostResult } from "./syscalls.ts";
 import { qvmBotInitMoveReference, qvmBotMoveResultReference, qvmBotMovementTarget,
   qvmBotMovementVector, readQvmBotGoalReference, writeQvmAasEntityInfo } from "./bot-navigation-records.ts";
 import type { AasEntityInfo } from "./bot-navigation-records.ts";
@@ -67,14 +67,14 @@ function vector(view: DataView, offset: number, value: Vec3): void {
   view.setFloat32(offset, value.x, true); view.setFloat32(offset + 4, value.y, true); view.setFloat32(offset + 8, value.z, true);
 }
 
-export function qvmBotNavigationSyscall(call: QvmHostCall, services: QvmBotNavigationServices): QvmHostResult | null {
+export function qvmBotNavigationSyscall(call: SharedHostCall, services: QvmBotNavigationServices): QvmHostResult | null {
   if (call.kind !== "engine" || call.role !== "qagame") return null;
   const words = call.words, memory = call.guest, states = services.library.moveStates;
   const integer = (index: number): number => words.getInt32(index * 4, true);
   const float = (index: number): number => words.getFloat32(index * 4, true);
   const point = (index: number): Vec3 => qvmBotMovementVector(() => memory.pointer(integer(index)));
   const goal = (index: number) => readQvmBotGoalReference(() => memory.pointer(integer(index)));
-  const fieldView = (bytes: Uint8Array, offset: number) => memory.dataView(bytes.byteOffset - memory.bytes.byteOffset + offset, 4);
+  const fieldView = (bytes: Uint8Array, offset: number) => memory.regionView(bytes, offset, 4);
   const target = (index: number) => qvmBotMovementTarget(() => memory.pointer(integer(index)), fieldView);
   const nodeId = (area: number): number => services.navigation.host.runtime.graph.asset?.kind === "aas" ? area : area - 1;
   const key = (index: number) => (candidate: string): boolean => {
@@ -116,7 +116,7 @@ export function qvmBotNavigationSyscall(call: QvmHostCall, services: QvmBotNavig
     }
     case 303: {
       const info = services.entityInfo(integer(1));
-      if (info === null) memory.fillBytes(memory.span(integer(2), 140).byteOffset - memory.bytes.byteOffset, 140, 0);
+      if (info === null) memory.regionFill(memory.span(integer(2), 140), 0, 140, 0);
       else writeQvmAasEntityInfo(memory.view(integer(2), 140), info);
       return 0;
     }
@@ -143,9 +143,8 @@ export function qvmBotNavigationSyscall(call: QvmHostCall, services: QvmBotNavig
     case 311: {
       const output = memory.pointer(integer(3));
       if (output === null) throw new RangeError("QVM BSP epair output is null");
-      const offset = output.byteOffset - memory.bytes.byteOffset;
       return Number(services.bspEntities.value(integer(1), key(2), output, integer(4), {
-        view: memory.dataView(offset, output.length), clear: length => memory.fillBytes(offset, length, 0),
+        view: memory.regionView(output), clear: length => memory.regionFill(output, 0, length, 0),
       }));
     }
     case 312: {
@@ -167,7 +166,7 @@ export function qvmBotNavigationSyscall(call: QvmHostCall, services: QvmBotNavig
       if (presence !== 2 && presence !== 4) {
         // AAS_PresenceTypeBoundingBox only prints; no prediction runs, so the caller reads a cleared result.
         services.library.options.print(4, "AAS_PresenceTypeBoundingBox: unknown presence type\n");
-        memory.fillBytes(memory.span(integer(1), 84).byteOffset - memory.bytes.byteOffset, 84, 0);
+        memory.regionFill(memory.span(integer(1), 84), 0, 84, 0);
         return 0;
       }
       const result = services.predictClientMovement({ entityNum: integer(2), origin: point(3), presence, onGround: integer(5) !== 0,

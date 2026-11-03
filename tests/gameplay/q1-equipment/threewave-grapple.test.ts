@@ -1,25 +1,25 @@
 import { expect } from "bun:test";
 import { corpusTest, corpusFile } from "../../support/corpus.ts";
 
-import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
+import type { ActorId } from "../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { Q1Map } from "../../../src/formats/q1-map/index.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
-import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
 import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
 import { Q1EntityServices } from "../../../src/content/q1/foundation/entity-services.ts";
-import type { Q1Event, Q1FoundationHost } from "../../../src/content/q1/foundation/types.ts";
+import type { Q1FoundationHost } from "../../../src/content/q1/foundation/types.ts";
 import { ZERO, PLAYER_BOUNDS } from "../../../src/content/q1/foundation/types.ts";
 import { ThreewaveGrapple } from "../../../src/content/q1/equipment/threewave-grapple.ts";
 import type { ThreewaveGrappleHost, ThreewaveGrappleInput } from "../../../src/content/q1/equipment/threewave-grapple.ts";
-import { captureSharedBodies } from "../../../src/persistence/world-state.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../src/persistence/q1-foundation.ts";
 import type { Q1FoundationCheckpoint } from "../../../src/content/q1/foundation/checkpoint.ts";
 import type { BodyCheckpoint, CombatCheckpoint } from "../../../src/contracts/session.ts";
 import { inertAuthority } from "../../support/authority.ts";
+import { q1TestHost } from "../../support/q1-host.ts";
+import { captureSharedActors } from "../../support/save-capture.ts";
 const test = corpusTest("q1/rerelease/id1/pak0.pak");
 
 interface Saved {
@@ -41,23 +41,13 @@ function equipment(map: Q1Map, saved?: Saved, edition: "classic" | "rerelease" =
   const actors = saved === undefined ? new SessionActorRegistry(identities) : SessionActorRegistry.restore(identities, saved.slots, saved.sources);
   const callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  const pending = new Map<OwnedActor, number>(), events: Q1Event[] = [];
   let contents: ReturnType<Q1FoundationHost["contents"]> = "empty";
   const combat = inertAuthority(actors, callbacks);
   const inventory = new SharedInventoryTable(actors);
-  const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
-    trace: request => {
-      const result = scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" },
-        policy: { kind: "q1", move: request.missile === true ? "missile" : request.monsters ? "normal" : "no-monsters", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: request.ignore });
-      if (result.kind !== "q1") throw new Error("Expected Q1 geometry trace");
-      return { fraction: result.fraction, end: result.end, normal: result.sourcePlane.normal, actor: result.hit.kind === "actor" ? result.hit.actor : null,
-        startSolid: result.startSolid, allSolid: result.allSolid, sky: false, inOpen: result.inOpen, inWater: result.inWater };
-    },
-    contents: () => contents, walkMove: () => false, moveToGoal: () => undefined, checkBottom: () => false,
-    changeYaw: () => { throw new Error("Equipment does not run monster yaw"); }, pusherServices: () => { throw new Error("Equipment does not run map pushers"); },
-    scheduleThink: (actor, time) => { pending.set(actor, time); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
-    emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => [], checkClient: () => null, classname: () => "", powerup: () => undefined,
-  };
+  const { host, pending, events } = q1TestHost({ actors, callbacks, bodies, combat, inventory, scene, entity: () => undefined, players: () => [] }, {
+    contents: () => contents, changeYaw: () => { throw new Error("Equipment does not run monster yaw"); }, pusherServices: () => { throw new Error("Equipment does not run map pushers"); },
+    classname: () => "",
+  });
   const game = new Q1EntityServices(host, { edition, skill: 1, deathmatch: 0, coop: false, gravity: 800, maxClients: 4,
     campaign: "q1:id1", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q3:movement" });
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => game.combatContext(request), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
@@ -87,9 +77,7 @@ function equipment(map: Q1Map, saved?: Saved, edition: "classic" | "rerelease" =
     }
     game.time = time;
   };
-  const capture = (): Saved => ({ source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(game.capture())), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(),
-    bodies: captureSharedBodies(actors, bodies), combat: actors.observations().flatMap(actor => { const state = combat.read(actor.id);
-      return state === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state }]; }) });
+  const capture = (): Saved => ({ source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(game.capture())), ...captureSharedActors({ actors, bodies, combat, inventory }) });
   return { actors, bodies, combat, callbacks, game, grapple, events, inventory, pending, sharedActor, advance, capture,
     contents: (value: ReturnType<Q1FoundationHost["contents"]>) => { contents = value; },
     input: (patch: Partial<ThreewaveGrappleInput>) => { input = { ...input, ...patch }; }, anchor: (value: typeof anchor) => { anchor = value; } };

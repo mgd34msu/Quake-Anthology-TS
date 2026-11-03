@@ -183,7 +183,8 @@ export interface GuestCallSignature {
 export interface GuestHostCallback {
   readonly id: CallbackId;
   readonly signature: GuestCallSignature;
-  readonly invoke: (context: GuestCallContext, arguments_: readonly GuestCallValue[]) => GuestCallResult;
+  /** A promise result is legal only inside an asynchronous guest call, which resumes with the awaited value. */
+  readonly invoke: (context: GuestCallContext, arguments_: readonly GuestCallValue[]) => GuestCallResult | Promise<GuestCallResult>;
 }
 export interface GuestAbiAdapter {
   readonly abi: NativeCallAbi;

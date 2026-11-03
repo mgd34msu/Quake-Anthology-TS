@@ -12,7 +12,8 @@ export interface Q2HostParts {
   readonly bodies: SharedBodyTable;
   readonly combat: GameplayAuthority;
   readonly inventory: SharedInventoryTable;
-  readonly world: ActorId;
+  /** The world actor, or a lookup for tests that create it after the host. */
+  readonly world: ActorId | (() => ActorId);
   readonly players: () => readonly ActorId[];
   /** The game that owns the entities; read lazily because the host is built before the game. */
   readonly entity: (actor: ActorId) => Q2Entity | null | undefined;
@@ -44,7 +45,7 @@ export function q2TestHost(parts: Q2HostParts, overrides: Partial<Q2FoundationHo
     trace: request => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, hit: { kind: "none" }, contact: { kind: "none" }, contents: 0,
       surface: null, sourcePlane: { normal: { x: 0, y: 0, z: 1 }, distance: 0, type: 2, signbits: 0 }, secondary: null }),
     pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true, nearby: () => [],
-    players: parts.players, worldActor: () => parts.world, isPlayer: actor => parts.players().some(player => player.equals(actor)),
+    players: parts.players, worldActor: () => typeof parts.world === "function" ? parts.world() : parts.world, isPlayer: actor => parts.players().some(player => player.equals(actor)),
     isMonster: actor => ((parts.entity(actor)?.serverFlags ?? 0) & 4) !== 0,
     inlineModelBounds: () => ({ min: zero, max: zero }), setSolid: () => undefined, setMotion: () => undefined, setAreaPortal: () => undefined,
     emit: event => { events.push(event); return undefined; },

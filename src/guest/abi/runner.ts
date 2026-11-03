@@ -56,6 +56,8 @@ export interface GuestCallRunnerOptions {
   readonly variadicLayouts?: (callback: GuestHostCallback, fixedArguments: readonly GuestCallValue[], context: GuestCallContext) => readonly GuestValueLayout[];
 }
 interface ActiveCall { readonly context: GuestCallContext; remaining: number; }
+/** A suspended call is either between instruction slices or waiting for a host operation that cannot finish synchronously. */
+type GuestCallSuspension = { readonly kind: "slice" } | { readonly kind: "host"; readonly completion: Promise<GuestCallResult> };
 export interface GuestInlineContinuation { execute(): undefined; skip(): undefined; }
 interface InlineRegion {
   readonly entry: GuestAddress;
@@ -86,8 +88,28 @@ export class GuestCallRunner {
     if (this.#loadingSuspended) throw new Error("Guest loading call is suspended");
     const steps = this.invokeSteps(request);
     const result = steps.next();
-    if (!result.done) throw new Error("Synchronous guest call yielded");
+    if (!result.done) {
+      steps.return({ kind: "void" });
+      throw new Error("Synchronous guest call yielded");
+    }
     return result.value;
+  }
+  /** Runs a call whose host callbacks may complete asynchronously; the guest resumes with each awaited result. Nested entries made while one is pending are legal. */
+  async invokeAsync(request: GuestCallRequest): Promise<GuestCallResult> {
+    if (this.#loadingSuspended) throw new Error("Guest loading call is suspended");
+    const steps = this.invokeSteps(request, Number.MAX_SAFE_INTEGER, true);
+    let step = steps.next();
+    try {
+      while (!step.done) {
+        const suspension = step.value;
+        if (suspension.kind === "slice") { step = steps.next(); continue; }
+        let completed: GuestCallResult;
+        try { completed = await suspension.completion; }
+        catch (error) { step = steps.throw(error); continue; }
+        step = steps.next(completed);
+      }
+      return step.value;
+    } finally { steps.return({ kind: "void" }); }
   }
   async invokeLoading(request: GuestCallRequest, nextFrame: () => Promise<void>): Promise<GuestCallResult> {
     if (this.depth !== 0) throw new Error("Guest loading requires an idle call runner");
@@ -96,6 +118,7 @@ export class GuestCallRunner {
       for (;;) {
         const started = performance.now();
         const result = steps.next();
+        if (!result.done && result.value.kind === "host") throw new Error("Guest loading calls cannot await host operations");
         this.#maximumLoadingSliceMilliseconds = Math.max(this.#maximumLoadingSliceMilliseconds, performance.now() - started);
         if (result.done) return result.value;
         this.#loadingSuspended = true;
@@ -103,7 +126,7 @@ export class GuestCallRunner {
       }
     } finally { steps.return({ kind: "void" }); }
   }
-  private *invokeSteps(request: GuestCallRequest, slice = Number.MAX_SAFE_INTEGER): Generator<undefined, GuestCallResult, void> {
+  private *invokeSteps(request: GuestCallRequest, slice = Number.MAX_SAFE_INTEGER, asynchronous = false): Generator<GuestCallSuspension, GuestCallResult, GuestCallResult | undefined> {
     if (!Number.isSafeInteger(request.instructionBudget) || request.instructionBudget <= 0) throw new RangeError("Guest instruction budget must be positive");
     const { cpu, returnAddress } = this.options;
     if (request.context.module.id !== cpu.memory.module.id || request.context.module.digest !== cpu.memory.module.digest) throw new TypeError("Call context belongs to a different guest module");
@@ -121,7 +144,7 @@ export class GuestCallRunner {
       : request.arguments.map((value, index) => request.signature.parameters[index] ?? inferredLayout(value, request.signature.variadic)));
     this.#active.push(active);
     try {
-      yield* this.runSteps(active, returnAddress, slice);
+      yield* this.runSteps(active, returnAddress, slice, asynchronous);
       if (cpu.state.registers.read("rsp", width) !== entryStack + BigInt(cpu.memory.pointerBytes + plan.calleePopBytes)) throw new Error("Guest returned with incorrect ABI stack cleanup");
       const result = adapter.returnValue(cpu, request.signature);
       if (saved !== null) restoreAbiProcessorState(cpu.state, saved);
@@ -136,11 +159,11 @@ export class GuestCallRunner {
       this.#active.pop();
     }
   }
-  private *runSteps(active: ActiveCall, returnAddress: GuestAddress, slice = Number.MAX_SAFE_INTEGER): Generator<undefined, undefined, void> {
+  private *runSteps(active: ActiveCall, returnAddress: GuestAddress, slice = Number.MAX_SAFE_INTEGER, asynchronous = false): Generator<GuestCallSuspension, undefined, GuestCallResult | undefined> {
     const { cpu, callbacks } = this.options, context = active.context;
     let sliceRemaining = slice;
     for (;;) {
-      if (sliceRemaining <= 0 && active.remaining > 0) { yield undefined; sliceRemaining = slice; }
+      if (sliceRemaining <= 0 && active.remaining > 0) { yield { kind: "slice" }; sliceRemaining = slice; }
       const rawStop = cpu.run({ instructionBudget: Math.min(active.remaining, sliceRemaining), returnAddress });
       const stop: GuestExecutionStop = rawStop.kind === "budget" && cpu.state.instructionPointer === returnAddress.byteOffset
         ? { kind: "return", instructions: rawStop.instructions, address: returnAddress } : rawStop;
@@ -173,9 +196,15 @@ export class GuestCallRunner {
       for (const frame of this.#active) frame.remaining = Math.max(0, frame.remaining - 1);
       const previousContext = this.#callbackContext;
       this.#callbackContext = callbackContext;
-      let result: GuestCallResult;
+      let result: GuestCallResult | Promise<GuestCallResult>;
       try { result = callbacks.invoke(stop.address, callbackContext, arguments_); }
       finally { this.#callbackContext = previousContext; }
+      if (result instanceof Promise) {
+        if (!asynchronous) { void result.catch(() => undefined); throw new Error("Synchronous guest call reached an asynchronous host operation"); }
+        const completed = yield { kind: "host", completion: result };
+        if (completed === undefined) throw new Error("Guest call resumed without its host result");
+        result = completed;
+      }
       callbackAdapter.leave(cpu, callback.signature, result);
     }
   }

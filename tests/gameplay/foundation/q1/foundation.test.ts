@@ -21,15 +21,16 @@ import { Q1Creatures } from "../../../../src/content/q1/base/creatures.ts";
 import { baseSpecies } from "../../../../src/content/q1/base/species.ts";
 import { Q1_PROVIDER, PLAYER_BOUNDS, weaponItem } from "../../../../src/content/q1/foundation/types.ts";
 import { observeQ1Supply } from "../../../../src/content/q1/foundation/pickups.ts";
-import type { Q1Event, Q1FoundationHost } from "../../../../src/content/q1/foundation/types.ts";
 import type { Q1FoundationCheckpoint } from "../../../../src/content/q1/foundation/checkpoint.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../../src/persistence/q1-foundation.ts";
-import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../src/persistence/world-state.ts";
+import { restoreSharedBodyLinks } from "../../../../src/persistence/world-state.ts";
 import { SharedPickupAdmission } from "../../../../src/world/gameplay/pickups.ts";
 import { Q1_Q2_SUPPLY_PROFILE } from "../../../../src/content/composition/q1-q2-supply.ts";
 import { previewQ1Supply } from "../../../../src/content/q1/foundation/pickups.ts";
 import { ZERO, vadd } from "../../../../src/content/q1/foundation/types.ts";
 import { impulseAuthority } from "../../../support/authority.ts";
+import { q1TestHost } from "../../../support/q1-host.ts";
+import { captureSharedActors } from "../../../support/save-capture.ts";
 
 const path = corpusFile("q1/rerelease/id1/pak0.pak");
 test.skipIf(!existsSync(path))("authored soldier gib death launches a persistent head before its gib pieces", async () => {
@@ -83,7 +84,7 @@ interface SavedTestWorld {
 function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerelease" = "rerelease", deathmatch = 0) {
   const identities = createIdentityOwner("q1-foundation");
   const actors = saved === undefined ? new SessionActorRegistry(identities) : SessionActorRegistry.restore(identities, saved.slots, saved.sources), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
-  const pending = new Map<OwnedActor, number>(), events: Q1Event[] = [], players: ActorId[] = [];
+  const players: ActorId[] = [];
   let game: Q1Foundation | null = null;
   const execution = (actor: OwnedActor) => { const entity = game?.entity(actor.id); return entity == null || game === null ? null :
     { kind: "q1", entity, services: game, content: "q1:rerelease:id1:test" } satisfies import("../../../../src/app/bootstrap/simulation/actor-execution.ts").ActorExecution; };
@@ -107,25 +108,11 @@ function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerel
       bodies.write(actor, { ...body, origin: state.origin, angles: state.angles }); entity.movementFlags = state.flags; entity.idealYaw = state.idealYaw; entity.yawSpeed = state.yawSpeed; return undefined; },
     link: actor => bodies.link(actor),
   });
-  const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
-    trace: request => {
-      const result = scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" }, policy: { kind: "q1", move: request.missile === true ? "missile" : request.monsters ? "normal" : "no-monsters", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: request.ignore });
-      if (result.kind !== "q1") throw new Error("Unexpected trace family");
-      return { fraction: result.fraction, end: result.end, normal: result.sourcePlane.normal, actor: result.hit.kind === "actor" ? result.hit.actor : result.hit.kind === "world" ? game?.world?.actor.id ?? null : null,
-        startSolid: result.startSolid, allSolid: result.allSolid, sky: false, inOpen: result.inOpen, inWater: result.inWater };
-    },
-    contents: point => { const result = scene.pointContents({ point, target: { kind: "world" }, policy: { kind: "q1", move: "normal", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: null });
-      if (result.kind !== "q1") throw new Error("Unexpected contents family");
-      return result.contents === -2 ? "solid" : result.contents === -3 ? "water" : result.contents === -4 ? "slime" : result.contents === -5 ? "lava" : result.contents === -6 ? "sky" : "empty";
-    },
-    // These tests drive pickups/targets and unobstructed mover completion, not the source movement engine.
-    walkMove: () => false, moveToGoal: () => undefined, checkBottom: () => false, changeYaw: actor => monsterMovement.changeYaw(actor),
-    pusherServices: game => createNativeQ1PusherServices(game, physics),
-    scheduleThink: (actor, time) => { pending.set(actor, time); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
-    emit: event => { events.push(event); return undefined; }, transition: () => undefined,
-    players: () => players, checkClient: () => null, classname: actor => game?.entity(actor)?.classname ?? "player",
+  // These tests drive pickups/targets and unobstructed mover completion, not the source movement engine.
+  const { host, pending, events } = q1TestHost({ actors, callbacks, bodies, combat, inventory, scene, world: () => game?.world?.actor.id ?? null, entity: actor => game?.entity(actor), players: () => players }, {
+    changeYaw: actor => monsterMovement.changeYaw(actor), pusherServices: game => createNativeQ1PusherServices(game, physics),
     powerup: (actor, powerup, expires) => { if (powerup === "invulnerability") combat.setTraits(actor, { invulnerable: expires > 0 }); return undefined; },
-  };
+  });
   const runtime = new Q1Foundation(host, { edition: saved?.source.edition ?? edition, skill: 1, deathmatch, coop: false, gravity: 800, maxClients: 4,
     campaign: "q1:id1", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q1:movement" });
   game = runtime;
@@ -311,10 +298,7 @@ test.skipIf(!existsSync(path))("actual e1m1 source save resumes mover, delay, me
   expect(checkpoint.entities.some(entity => entity.callbacks.think === "player_axe3")).toBe(true);
   expect(checkpoint.entities.some(entity => entity.callbacks.think === "base:monster_frame")).toBe(true);
   const saved: SavedTestWorld = {
-    source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(checkpoint)), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(),
-    bodies: captureSharedBodies(actors, bodies),
-    combat: actors.observations().flatMap(actor => { const state = combat.read(actor.id); return state === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state }]; }),
-    inventories: actors.observations().flatMap(actor => inventory.has(actor.id) ? [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: inventory.entries(actor.id) }] : []),
+    source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(checkpoint)), ...captureSharedActors({ actors, bodies: bodies, combat, inventory }),
   };
   const restored = gameFor(map, saved);
   expect(restored.events).toHaveLength(0);
@@ -354,10 +338,7 @@ test.skipIf(!existsSync(path))("Q1 services attach existing foreign owners and r
   expect(checkpoint.entities.find(entity => entity.actor.slot === owners[0]?.id.slot)?.sourceSlot).toBe(900);
   expect(checkpoint.entities.find(entity => entity.actor.slot === owners[1]?.id.slot)?.sourceSlot).toBeNull();
   const saved: SavedTestWorld = {
-    source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(checkpoint)), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(),
-    bodies: captureSharedBodies(actors, bodies),
-    combat: actors.observations().flatMap(actor => { const state = combat.read(actor.id); return state === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state }]; }),
-    inventories: actors.observations().flatMap(actor => inventory.has(actor.id) ? [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: inventory.entries(actor.id) }] : []),
+    source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(checkpoint)), ...captureSharedActors({ actors, bodies: bodies, combat, inventory }),
   };
   const restored = gameFor(map, saved);
   expect(restored.runtime.capture()).toEqual(checkpoint);
@@ -391,10 +372,7 @@ test.skipIf(!existsSync(path))("external primary holster saves the real weapon a
   expect(runtime.attack(player, ZERO, 1)).toBe(false);
   const checkpoint = runtime.capture();
   const saved: SavedTestWorld = {
-    source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(checkpoint)), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(),
-    bodies: captureSharedBodies(actors, bodies),
-    combat: actors.observations().flatMap(actor => { const value = combat.read(actor.id); return value === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state: value }]; }),
-    inventories: actors.observations().flatMap(actor => inventory.has(actor.id) ? [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: inventory.entries(actor.id) }] : []),
+    source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(checkpoint)), ...captureSharedActors({ actors, bodies: bodies, combat, inventory }),
   };
   const restored = gameFor(map, saved);
   const resumed = restored.runtime.primaryWeaponHandoff(restored.player);

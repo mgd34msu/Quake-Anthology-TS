@@ -5,7 +5,7 @@
  */
 import { angleVectors, dot3, perpendicularVector, vec3 } from "../../core/math.ts";
 import type { Vec3 } from "../../core/math.ts";
-import type { QvmMemory } from "./memory.ts";
+import type { Q3GameMemory } from "./game-memory.ts";
 
 function readVector(view: DataView): Vec3 {
   return vec3(view.getFloat32(0, true), view.getFloat32(4, true), view.getFloat32(8, true));
@@ -17,7 +17,7 @@ function writeVector(view: DataView, value: Vec3): void {
   view.setFloat32(8, value.z, true);
 }
 
-function optionalVector(memory: QvmMemory, word: number): DataView | null {
+function optionalVector(memory: Q3GameMemory, word: number): DataView | null {
   return word === 0 ? null : memory.view(word, 12);
 }
 
@@ -29,7 +29,7 @@ function optionalVector(memory: QvmMemory, word: number): DataView | null {
 export function qvmVectorSyscall(
   role: "game" | "cgame" | "ui",
   words: DataView,
-  memory: QvmMemory,
+  memory: Q3GameMemory,
 ): number | null {
   if (role !== "game") return null;
   switch (words.getInt32(0, true)) {

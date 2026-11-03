@@ -7,7 +7,7 @@ import { QvmGameImport } from "./abi.ts";
 import type { writeQvmUserCommand } from "./client-state-record.ts";
 import { qvmClientGameSyscall } from "./client-game-syscalls.ts";
 import type { QvmGameData } from "./game-data.ts";
-import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
+import type { SharedHostCall, QvmHostResult } from "./syscalls.ts";
 import { qvmServerInformationSyscall } from "./server-info-syscalls.ts";
 import { qvmEntityTokenSyscall } from "./entity-tokens.ts";
 import { QVM_TRACE_BYTES, writeQvmTrace } from "./trace-record.ts";
@@ -44,7 +44,7 @@ export interface QvmServerGameServices {
 }
 
 /** Null delegates to another trap owner; zero means the requested operation completed. */
-export function qvmServerGameSyscall(call: QvmHostCall, services: QvmServerGameServices): QvmHostResult | null {
+export function qvmServerGameSyscall(call: SharedHostCall, services: QvmServerGameServices): QvmHostResult | null {
   if (call.kind !== "engine" || call.role !== "qagame") return null;
   const { guest, words } = call;
   const word = (index: number): number => words.getInt32(index * 4, true);

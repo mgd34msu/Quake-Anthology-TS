@@ -6,7 +6,7 @@ import type { Vec3 } from "../../../../../src/contracts/math.ts";
 import type { TraceResult } from "../../../../../src/contracts/scene.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../../src/world/actors/index.ts";
 import { SharedInventoryTable } from "../../../../../src/world/gameplay/index.ts";
-import type { Q2Edition, Q2Entity, Q2FoundationHost, Q2GameServices, Q2TraceRequest } from "../../../../../src/content/q2/foundation/host.ts";
+import type { Q2Edition, Q2Entity, Q2GameServices, Q2TraceRequest } from "../../../../../src/content/q2/foundation/host.ts";
 import { Q2Foundation } from "../../../../../src/content/q2/foundation/runtime.ts";
 import { Q2Weapons } from "../../../../../src/content/q2/foundation/weapons/index.ts";
 import { Q2Monsters, throwGib } from "../../../../../src/content/q2/foundation/monsters/index.ts";
@@ -216,9 +216,12 @@ describe("source soldier and infantry behavior", () => {
       if (health !== null) combat.create(actor, health);
     }
     const player = actors.referenceSaved(scene.player.id), world = actors.referenceSaved(scene.host.worldActor());
-    const host: Q2FoundationHost = { ...scene.host, actors, bodies, callbacks, combat, inventory: new SharedInventoryTable(actors),
-      worldActor: () => world, players: () => [player], isPlayer: actor => actor === player, isMonster: actor => (game.entity(actor)?.serverFlags ?? 0) % 8 >= 4,
-      trace: request => { const trace = scene.host.trace(request); return trace.hit.kind === "actor" ? { ...trace, hit: { kind: "actor", actor: actors.referenceSaved(trace.hit.actor) } } : trace; } };
+    const { host } = q2TestHost({ actors, bodies, callbacks, combat, inventory: new SharedInventoryTable(actors), world, players: () => [player], entity: actor => game.entity(actor) }, {
+      now: scene.host.now, frameSeconds: scene.host.frameSeconds, random: scene.host.random, pointContents: scene.host.pointContents, touchTriggers: scene.host.touchTriggers,
+      schedule: scene.host.schedule, emit: scene.host.emit,
+      trace: request => { const trace = scene.host.trace(request); return trace.hit.kind === "actor" ? { ...trace, hit: { kind: "actor", actor: actors.referenceSaved(trace.hit.actor) } } : trace; },
+    });
+
     const restored = new Q2Monsters(scene.weapons), game = new Q2Foundation(host, scene.game.options, [restored]);
     game.restore(source); restored.restore(game, snapshot);
     expect(scene.random).toEqual(random);

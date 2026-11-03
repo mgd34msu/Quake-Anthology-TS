@@ -18,10 +18,11 @@ import { registerMissionPackArsenal } from "../../../../../src/content/q1/missio
 import { registerMissionPackMonsters } from "../../../../../src/content/q1/missionpacks/monsters/index.ts";
 import { registerHipnoticMisc } from "../../../../../src/content/q1/missionpacks/world/hipnotic-misc.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../../../src/persistence/q1-foundation.ts";
-import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../../src/persistence/world-state.ts";
+import { restoreSharedBodyLinks } from "../../../../../src/persistence/world-state.ts";
 import type { BodyCheckpoint, CombatCheckpoint, InventoryCheckpoint } from "../../../../../src/contracts/session.ts";
 import { impulseAuthority } from "../../../../support/authority.ts";
 import { q1SceneBodies, q1TestHost } from "../../../../support/q1-host.ts";
+import { captureSharedActors } from "../../../../support/save-capture.ts";
 const test = corpusTest("q1/id1/pak0.pak");
 
 interface SavedBoss {
@@ -80,9 +81,7 @@ async function session(pack: "hipnotic" | "rogue", edition: "classic" | "rerelea
   }
   players.push(player.id);
   function tick(entity: Q1Actor) { const callback = entity.think; if (callback === null || active === null) throw new Error("Missing scheduled source callback"); active.time = entity.nextThink; entity.think = null; entity.nextThink = -1; pending.delete(entity.actor); callback(); }
-  function capture(): SavedBoss { return { source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(initial.game.capture())), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(), bodies: captureSharedBodies(actors, bodies),
-    combat: actors.observations().flatMap(actor => { const state = combat.read(actor.id); return state === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state }]; }),
-    inventories: actors.observations().flatMap(actor => inventory.has(actor.id) ? [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: inventory.entries(actor.id) }] : []) }; }
+  function capture(): SavedBoss { return { source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(initial.game.capture())), ...captureSharedActors({ actors, bodies: bodies, combat, inventory }) }; }
   return { ...initial, player, actors, events, tick, capture, random: (value: number) => { randomValue = value; } };
 }
 

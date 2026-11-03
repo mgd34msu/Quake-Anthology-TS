@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { ResolvedExecutionModule } from "../../../../contracts/content.ts";
-import type { GuestAddress, GuestCallContext, ModuleIdentity } from "../../../../contracts/execution.ts";
+import type { GuestAddress, GuestCallContext, ModuleIdentity, NativeGuestCheckpoint } from "../../../../contracts/execution.ts";
 import type { MountedContent } from "../../../../content/mounts/index.ts";
 import { GuestCallRunner } from "../../../../guest/abi/index.ts";
+import { inspectElf } from "../../../../guest/elf/index.ts";
 import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from "../../../../guest/core/index.ts";
+import type { GuestProcessorState } from "../../../../guest/core/index.ts";
 import { mapPeImage, parsePe } from "../../../../guest/pe/index.ts";
 import { WindowsGuestRuntime } from "../../../../guest/runtime/windows/index.ts";
 import type { WindowsCapabilities, WindowsFile } from "../../../../guest/runtime/windows/contracts.ts";
@@ -11,12 +13,18 @@ import { SystemVGuestRuntime } from "../../../../guest/runtime/system-v/index.ts
 import { readString } from "../../../../guest/runtime/common/memory.ts";
 import { X64Cpu } from "../../../../guest/x64/index.ts";
 import { I386Cpu } from "../../../../guest/x86/index.ts";
-import { QvmGameExport } from "../../../../compat/qvm/abi.ts";
-import { NativeQ3GameData, nativeQ3GameSyscalls, NativeQ3Syscalls, QuakeLiveGameImports, QuakeLiveGameModule, Quake3VmModule, nativeQ3Export } from "../../../../compat/q3/native/index.ts";
+import { QvmGameExport, QvmGameImport } from "../../../../compat/qvm/abi.ts";
+import { QvmGameData } from "../../../../compat/qvm/game-data.ts";
+import type { QvmHostState } from "../../../../compat/qvm/module.ts";
+import { qvmIntrinsicSyscall } from "../../../../compat/qvm/syscalls.ts";
+import type { QvmHostResult, SharedHostCall } from "../../../../compat/qvm/syscalls.ts";
+import { NativeGameMemory, nativeQ3GameCall, NativeQ3Syscalls, QuakeLiveGameImports, QuakeLiveGameModule, Quake3VmModule, nativeQ3Export } from "../../../../compat/q3/native/index.ts";
 import type { NativeQ3GameServices } from "../../../../compat/q3/native/index.ts";
+import type { Q3GameEngine } from "./engine.ts";
 
 type NativeExecution = Extract<ResolvedExecutionModule, { readonly kind: "native" }>;
-export type Q3NativeProfile = "q3-pe" | "quake-live-elf";
+/** A Windows PE or a Linux ELF with vmMain runs id's dllEntry(syscall) / vmMain interface; a Linux ELF without it is the Quake Live table interface. */
+export type Q3NativeProfile = "q3-pe" | "q3-elf" | "quake-live-elf";
 
 /** A native Q3 or Quake Live module image: its bytes, which API profile its format implies, and the identity every guest call is attributed to. */
 export interface Q3NativeImage {
@@ -32,7 +40,9 @@ export interface PreparedQ3Native extends Q3NativeImage {
 const elfMagic = [0x7f, 0x45, 0x4c, 0x46];
 export function q3NativeProfile(bytes: Uint8Array): Q3NativeProfile {
   if (bytes[0] === 0x4d && bytes[1] === 0x5a) return "q3-pe";
-  if (elfMagic.every((value, index) => bytes[index] === value)) return "quake-live-elf";
+  if (elfMagic.every((value, index) => bytes[index] === value)) {
+    return inspectElf(bytes).symbols.some(symbol => symbol.name === "vmMain" && symbol.section !== 0) ? "q3-elf" : "quake-live-elf";
+  }
   throw new Error("Native Q3 server game must be a Windows PE or a Linux ELF image");
 }
 
@@ -43,52 +53,66 @@ export async function prepareQ3Native(execution: NativeExecution, mounts: Mounte
   if (profile === "q3-pe") {
     const pe = parsePe(bytes);
     if (pe.abi.kind !== "windows-i386" || execution.profile.kind !== "windows-i386") throw new Error("Native Q3 1.32 modules require the Windows i386 profile");
-    if (execution.api.version !== 7 && execution.api.version !== 8) throw new Error("Native Q3 server games implement game API 7 or 8");
   } else if (execution.profile.kind === "windows-i386" || execution.profile.kind === "windows-x86-64") throw new Error("Native ELF module declared a Windows profile");
+  else if (profile === "q3-elf" && execution.profile.kind !== "linux-i386") throw new Error("Native Q3 1.32 modules require the i386 profile");
+  if (profile !== "quake-live-elf" && execution.api.version !== 7 && execution.api.version !== 8) throw new Error("Native Q3 server games implement game API 7 or 8");
   const reference = execution.artifact;
   return { execution, bytes, profile, module: { id: execution.owner.provider, artifactPath: reference.requestedPath, digest: reference.digest,
     revision: `${reference.provenance.mount.identity.id}:${reference.provenance.mount.identity.generation}` } };
 }
 
-/** QvmGame's lifecycle shape over a native module, so the Q3 runtime can select either execution form for the same provider. */
-export interface Q3ServerGameModule {
-  initialize(levelTime: number, randomSeed: number, restart?: boolean): void;
-  shutdown(restart: boolean): void;
-  clientConnect(client: number, firstTime: boolean, isBot: boolean): string | null;
-  clientBegin(client: number): void;
-  clientUserinfoChanged(client: number): void;
-  clientDisconnect(client: number): void;
-  clientCommand(client: number, arguments_: readonly string[]): void;
-  clientThink(client: number): void;
-  runFrame(time: number): void;
-  consoleCommand(arguments_: readonly string[]): boolean;
-  botFrame(time: number): void;
-}
-
 export interface Q3NativeGuestOptions {
   readonly prepared: Q3NativeImage;
-  readonly services: NativeQ3GameServices;
+  /** Q3 1.32 modules: the server game's shared trap table, which also serves interpreted modules. */
+  readonly traps?: (call: SharedHostCall) => QvmHostResult;
+  /** Quake Live API 10 modules: the engine services behind the import table. */
+  readonly services?: NativeQ3GameServices;
+  /** Saves and restores the server game's own record; required to checkpoint. */
+  readonly hostState?: QvmHostState;
   readonly windows?: WindowsCapabilities;
   readonly instructionBudget?: number;
 }
 
 type Phase = "created" | "running" | "closed";
-type Lifecycle = Q3ServerGameModule & { readonly syscalls: NativeQ3Syscalls | null; readonly imports: QuakeLiveGameImports | null };
+interface Lifecycle {
+  readonly imports: QuakeLiveGameImports | null;
+  initialize(levelTime: number, randomSeed: number, restart: boolean): Promise<void>;
+  shutdown(restart: boolean): Promise<void>;
+  clientConnect(client: number, firstTime: boolean, isBot: boolean): Promise<string | null>;
+  clientBegin(client: number): Promise<void>;
+  clientUserinfoChanged(client: number): Promise<void>;
+  clientDisconnect(client: number): Promise<void>;
+  clientCommand(client: number, argv: readonly string[]): Promise<void>;
+  clientCommandNow(client: number, argv: readonly string[]): void;
+  clientThink(client: number): Promise<void>;
+  runFrame(time: number): Promise<void>;
+  consoleCommand(argv: readonly string[]): Promise<boolean>;
+  botFrame(time: number): Promise<void>;
+}
+
+const STACK_LABEL = "native Q3 stack";
+const PROCESSOR_LAYOUT = { id: "q3:native-processor", byteLength: 0, alignment: 1, byteOrder: "little-endian", fields: [] } as const;
+const writable = (permissions: string): boolean => permissions === "read-write" || permissions === "read-write-execute";
 
 /**
- * Hosts one native Q3 qagame module in a private guest process. The Windows i386 form runs through dllEntry(syscall)/vmMain; the Quake Live
- * form runs through dllEntry(output, imports, version) and its export table. Both reach the same engine services and the same record locator.
+ * Hosts one native Q3 qagame module in a private guest process. A Windows i386 PE or a Linux i386 ELF runs through dllEntry(syscall)/vmMain,
+ * with every trap decoded by the same table that serves interpreted modules; the Quake Live form runs through dllEntry(output, imports,
+ * version) and its export table. The module owns its entity and player tables, which the server game reads through {@link data}.
  */
-export class Q3NativeGuestSource implements Q3ServerGameModule {
-  readonly data: NativeQ3GameData;
+export class Q3NativeGuestSource implements Q3GameEngine {
+  readonly kind = "native";
+  readonly data: QvmGameData;
   private phase: Phase = "created";
+  private readonly baseline: string;
   private constructor(readonly prepared: Q3NativeImage, readonly memory: SparseGuestMemory, readonly runner: GuestCallRunner, private readonly lifecycle: Lifecycle,
-    data: NativeQ3GameData, private readonly files: Set<WindowsFile>, private readonly detach: () => void) {
+    data: QvmGameData, private readonly files: Set<WindowsFile>, private readonly state: GuestProcessorState, private readonly hostState: QvmHostState | undefined,
+    private readonly abi: NativeGuestCheckpoint["abi"], private readonly detach: () => void) {
     this.data = data;
+    this.baseline = layoutOf(memory);
   }
 
   static create(options: Q3NativeGuestOptions): Q3NativeGuestSource {
-    const { prepared, services } = options, budget = options.instructionBudget ?? 5_000_000, { bytes, module } = prepared;
+    const { prepared } = options, budget = options.instructionBudget ?? 5_000_000, { bytes, module } = prepared;
     const files = new Set<WindowsFile>(), argumentsOf: { current: readonly string[] | null } = { current: null };
     const windows = prepared.profile === "q3-pe";
     const wide = !windows && bytes[4] === 2, width = windows || !wide ? 4 : 8;
@@ -97,7 +121,7 @@ export class Q3NativeGuestSource implements Q3ServerGameModule {
       const callbacks = new GuestCallbackTable(memory);
       const stackBytes = 1_048_576;
       // Variadic syscall arguments are decoded from the stack top; keep a mapped guard above the first frame.
-      const stack = memory.allocate({ byteLength: stackBytes + 4096, alignment: 16n, label: "native Q3 stack" });
+      const stack = memory.allocate({ byteLength: stackBytes + 4096, alignment: 16n, label: STACK_LABEL });
       const returned = memory.allocate({ byteLength: 16, permissions: "read-execute", label: "native Q3 return" });
       const state = createGuestProcessorState({ architecture: width === 8 ? "x86-64" : "i386", instructionPointer: 0n, stackPointer: stack.byteOffset + BigInt(stackBytes) - 16n,
         flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
@@ -109,7 +133,49 @@ export class Q3NativeGuestSource implements Q3ServerGameModule {
         if (layouts === null) throw new Error("Native Q3 variadic callback has no declared layout");
         return layouts;
       } });
-      const data = new NativeQ3GameData(memory), argv = (): readonly string[] => argumentsOf.current ?? services.commandArguments();
+      const guest = width === 4 ? new NativeGameMemory(memory) : null;
+      const data = new QvmGameData(guest ?? unavailableMemory(), "q3-modern");
+      const argv = (): readonly string[] => argumentsOf.current ?? options.services?.commandArguments() ?? [];
+      const withArguments = async <T>(values: readonly string[], run: () => Promise<T>): Promise<T> => {
+        const previous = argumentsOf.current; argumentsOf.current = values;
+        try { return await run(); } finally { argumentsOf.current = previous; }
+      };
+      /** SV_GameSystemCalls: libc and math traps, then G_LOCATE_GAME_DATA, then the server game's table. */
+      const trap = (words: DataView): number | Promise<number> => {
+        if (guest === null || options.traps === undefined) throw new Error("A Q3 1.32 native module needs the server trap table");
+        const intrinsic = qvmIntrinsicSyscall("qagame", "q3-modern", words, guest);
+        if (intrinsic !== null) return intrinsic;
+        const call = nativeQ3GameCall(words, guest, argumentsOf.current);
+        if (call.kind === "engine" && call.code === QvmGameImport.G_LOCATE_GAME_DATA) {
+          data.locate(words.getInt32(4, true), words.getInt32(8, true), words.getInt32(12, true), words.getInt32(16, true), words.getInt32(20, true));
+          return 0;
+        }
+        return options.traps(call);
+      };
+      const q3Lifecycle = (game: Quake3VmModule): Lifecycle => {
+        const call = (command: QvmGameExport, values: readonly number[] = []): Promise<number> => game.callAsync(command, values);
+        return { imports: null,
+          initialize: async (levelTime, seed, restart) => { await call(QvmGameExport.GAME_INIT, [levelTime, seed, Number(restart)]); },
+          shutdown: async restart => { await call(QvmGameExport.GAME_SHUTDOWN, [Number(restart)]); },
+          clientConnect: async (client, firstTime, isBot) => {
+            const denied = await call(QvmGameExport.GAME_CLIENT_CONNECT, [client, Number(firstTime), Number(isBot)]);
+            const address = denied === 0 ? null : memory.pointer(BigInt(denied >>> 0));
+            return address === null ? null : readString(memory, address);
+          },
+          clientBegin: async client => { await call(QvmGameExport.GAME_CLIENT_BEGIN, [client]); },
+          clientUserinfoChanged: async client => { await call(QvmGameExport.GAME_CLIENT_USERINFO_CHANGED, [client]); },
+          clientDisconnect: async client => { await call(QvmGameExport.GAME_CLIENT_DISCONNECT, [client]); },
+          clientCommand: (client, values) => withArguments(values, async () => { await call(QvmGameExport.GAME_CLIENT_COMMAND, [client]); }),
+          clientCommandNow: (client, values) => {
+            const previous = argumentsOf.current; argumentsOf.current = values;
+            try { game.call(QvmGameExport.GAME_CLIENT_COMMAND, [client]); } finally { argumentsOf.current = previous; }
+          },
+          clientThink: async client => { await call(QvmGameExport.GAME_CLIENT_THINK, [client]); },
+          runFrame: async time => { await call(QvmGameExport.GAME_RUN_FRAME, [time]); },
+          consoleCommand: values => withArguments(values, async () => await call(QvmGameExport.GAME_CONSOLE_COMMAND) !== 0),
+          botFrame: async time => { await call(QvmGameExport.BOTAI_START_FRAME, [time]); },
+        };
+      };
       if (windows) {
         const image = mapPeImage({ bytes, memory });
         const runtime = new WindowsGuestRuntime({ memory, callbacks, capabilities: { ...options.windows, openFile: (path, mode) => {
@@ -124,52 +190,42 @@ export class Q3NativeGuestSource implements Q3ServerGameModule {
         if (vmMain === null) throw new Error("Native Q3 module has no vmMain export");
         const context: GuestCallContext = { module, callback: { kind: "native-guest", module, address: vmMain, abi: image.abi }, parent: null, self: null, other: null };
         runtime.initialize(image, { context, instructionBudget: budget });
-        syscalls = new NativeQ3Syscalls(callbacks, image.abi, nativeQ3GameSyscalls(memory, services, data, argv));
+        syscalls = new NativeQ3Syscalls(callbacks, image.abi, trap);
         const game = new Quake3VmModule({ image, runner, context, instructionBudget: budget }, syscalls.address);
-        const call = (command: QvmGameExport, values: readonly number[] = []): number => game.call(command, values);
-        const lifecycle: Lifecycle = { syscalls, imports: null,
-          initialize: (levelTime, seed, restart = false) => { call(QvmGameExport.GAME_INIT, [levelTime, seed, Number(restart)]); },
-          shutdown: restart => { call(QvmGameExport.GAME_SHUTDOWN, [Number(restart)]); },
-          clientConnect: (client, firstTime, isBot) => {
-            const denied = call(QvmGameExport.GAME_CLIENT_CONNECT, [client, Number(firstTime), Number(isBot)]);
-            const address = denied === 0 ? null : memory.pointer(BigInt(denied >>> 0));
-            return address === null ? null : readString(memory, address);
-          },
-          clientBegin: client => { call(QvmGameExport.GAME_CLIENT_BEGIN, [client]); },
-          clientUserinfoChanged: client => { call(QvmGameExport.GAME_CLIENT_USERINFO_CHANGED, [client]); },
-          clientDisconnect: client => { call(QvmGameExport.GAME_CLIENT_DISCONNECT, [client]); },
-          clientCommand: (client, arguments_) => { argumentsOf.current = arguments_; try { call(QvmGameExport.GAME_CLIENT_COMMAND, [client]); } finally { argumentsOf.current = null; } },
-          clientThink: client => { call(QvmGameExport.GAME_CLIENT_THINK, [client]); },
-          runFrame: time => { call(QvmGameExport.GAME_RUN_FRAME, [time]); },
-          consoleCommand: arguments_ => { argumentsOf.current = arguments_; try { return call(QvmGameExport.GAME_CONSOLE_COMMAND) !== 0; } finally { argumentsOf.current = null; } },
-          botFrame: time => { call(QvmGameExport.BOTAI_START_FRAME, [time]); },
-        };
-        return new Q3NativeGuestSource(prepared, memory, runner, lifecycle, data, files, () => runtime.detach(image, { context, instructionBudget: budget }));
+        return new Q3NativeGuestSource(prepared, memory, runner, q3Lifecycle(game), data, files, state, options.hostState, image.abi, () => runtime.detach(image, { context, instructionBudget: budget }));
       }
       const sentinel = memory.map({ base: 0x30000n, byteLength: 4096, permissions: "read-execute", bytes: new Uint8Array([0xcc]) });
-      const runtime = new SystemVGuestRuntime({ memory, callbacks, capabilities: { nowSeconds: () => BigInt(Math.trunc(services.milliseconds() / 1000)) } });
+      const nowSeconds = (): bigint => BigInt(Math.trunc((options.services?.milliseconds() ?? 0) / 1000));
+      const runtime = new SystemVGuestRuntime({ memory, callbacks, capabilities: { nowSeconds } });
       runtime.attachRunner(runner);
       const abi = runtime.signature([], "void").abi;
       const context: GuestCallContext = { module, callback: { kind: "native-guest", module, address: sentinel, abi }, parent: null, self: null, other: null };
       const image = runtime.load({ bytes, module, loadBias: width === 4 ? 0x10000000n : 0x100000000n });
       runtime.initialize(image, { context, instructionBudget: budget });
-      const imports = new QuakeLiveGameImports(memory, callbacks, image.abi, { ...services, commandArguments: argv });
+      const finalize = (): void => runtime.finalize(image, { context, instructionBudget: budget });
+      if (prepared.profile === "q3-elf") {
+        syscalls = new NativeQ3Syscalls(callbacks, image.abi, trap);
+        const game = new Quake3VmModule({ image, runner, context, instructionBudget: budget }, syscalls.address);
+        return new Q3NativeGuestSource(prepared, memory, runner, q3Lifecycle(game), data, files, state, options.hostState, image.abi, finalize);
+      }
+      if (options.services === undefined) throw new Error("A Quake Live native module needs the engine services behind its import table");
+      const imports = new QuakeLiveGameImports(memory, callbacks, image.abi, { ...options.services, commandArguments: argv });
       const game = new QuakeLiveGameModule({ image, runner, context, instructionBudget: budget }, imports.address);
       const unverified = (name: string) => (): never => { throw new Error(`Quake Live export ${name} is outside the verified API 10 table`); };
-      const lifecycle: Lifecycle = { syscalls: null, imports,
-        initialize: (levelTime, seed, restart = false) => { game.registerCvars(); game.initialize(levelTime, seed, restart); },
-        shutdown: restart => { game.shutdown(restart); },
-        clientConnect: (client, firstTime, isBot) => {
+      const lifecycle: Lifecycle = { imports,
+        initialize: async (levelTime, seed, restart) => { game.registerCvars(); game.initialize(levelTime, seed, restart); },
+        shutdown: async restart => { game.shutdown(restart); },
+        clientConnect: async (client, firstTime, isBot) => {
           const address = game.clientConnect(client, firstTime, isBot);
           return address === null ? null : readString(memory, address);
         },
         clientBegin: unverified("ClientBegin"), clientUserinfoChanged: unverified("ClientUserinfoChanged"), clientDisconnect: unverified("ClientDisconnect"),
-        clientCommand: unverified("ClientCommand"), clientThink: unverified("ClientThink"),
-        runFrame: time => { game.runFrame(time); },
-        consoleCommand: arguments_ => { argumentsOf.current = arguments_; try { return game.consoleCommand(); } finally { argumentsOf.current = null; } },
+        clientCommand: unverified("ClientCommand"), clientCommandNow: unverified("ClientCommand"), clientThink: unverified("ClientThink"),
+        runFrame: async time => { game.runFrame(time); },
+        consoleCommand: values => withArguments(values, async () => game.consoleCommand()),
         botFrame: unverified("BotAIStartFrame"),
       };
-      return new Q3NativeGuestSource(prepared, memory, runner, lifecycle, data, files, () => runtime.finalize(image, { context, instructionBudget: budget }));
+      return new Q3NativeGuestSource(prepared, memory, runner, lifecycle, data, files, state, options.hostState, image.abi, finalize);
     } catch (error) {
       try { releaseMemory(memory); closeFiles(files); } catch (cleanup) { throw new AggregateError([error, cleanup], "Native Q3 guest construction and cleanup failed"); }
       throw error;
@@ -177,47 +233,109 @@ export class Q3NativeGuestSource implements Q3ServerGameModule {
   }
 
   get profile(): Q3NativeProfile { return this.prepared.profile; }
-  /** Engine services the loaded module has called, by trap or import slot. */
+  get module(): ModuleIdentity { return this.prepared.module; }
+  get active(): boolean { return this.runner.depth !== 0; }
+  /** Engine services the loaded Quake Live module has called, by import slot. */
   get coverage(): readonly { readonly name: string; readonly reached: number }[] { return this.lifecycle.imports?.coverage.filter(call => call.reached > 0) ?? []; }
-  private running<T>(run: () => T): T {
-    if (this.phase === "closed") throw new Error("Native Q3 guest is closed");
-    if (this.runner.depth !== 0) throw new Error("Native Q3 guest has an active call");
+
+  private live<T>(run: () => Promise<T>): Promise<T> {
+    if (this.phase === "closed") return Promise.reject(new Error("Native Q3 guest is closed"));
+    if (this.phase !== "running") return Promise.reject(new Error("Native Q3 guest has not run GAME_INIT"));
     return run();
   }
-  initialize(levelTime: number, randomSeed: number, restart = false): void {
-    if (this.phase !== "created" && !restart) throw new Error("Native Q3 GAME_INIT requires a fresh game or a restart");
-    this.running(() => this.lifecycle.initialize(levelTime, randomSeed, restart)); this.phase = "running";
-  }
-  shutdown(restart: boolean): void { this.live(() => this.lifecycle.shutdown(restart)); }
-  clientConnect(client: number, firstTime: boolean, isBot: boolean): string | null { return this.live(() => this.lifecycle.clientConnect(client, firstTime, isBot)); }
-  clientBegin(client: number): void { this.live(() => this.lifecycle.clientBegin(client)); }
-  clientUserinfoChanged(client: number): void { this.live(() => this.lifecycle.clientUserinfoChanged(client)); }
-  clientDisconnect(client: number): void { this.live(() => this.lifecycle.clientDisconnect(client)); }
-  clientCommand(client: number, arguments_: readonly string[]): void { this.live(() => this.lifecycle.clientCommand(client, arguments_)); }
-  clientThink(client: number): void { this.live(() => this.lifecycle.clientThink(client)); }
-  runFrame(time: number): void { this.live(() => this.lifecycle.runFrame(time)); }
-  consoleCommand(arguments_: readonly string[]): boolean { return this.live(() => this.lifecycle.consoleCommand(arguments_)); }
-  botFrame(time: number): void { this.live(() => this.lifecycle.botFrame(time)); }
-  private live<T>(run: () => T): T {
+  async initializeAsync(levelTime: number, randomSeed: number, restart = false): Promise<void> {
     if (this.phase === "closed") throw new Error("Native Q3 guest is closed");
-    if (this.phase !== "running") throw new Error("Native Q3 guest has not run GAME_INIT");
-    return this.running(run);
+    if (this.phase !== "created" && !restart) throw new Error("Native Q3 GAME_INIT requires a fresh game or a restart");
+    if (this.runner.depth !== 0) throw new Error("Native Q3 guest has an active call");
+    await this.lifecycle.initialize(levelTime, randomSeed, restart); this.phase = "running";
+  }
+  shutdownAsync(restart: boolean): Promise<void> { return this.live(() => this.lifecycle.shutdown(restart)); }
+  clientConnectAsync(client: number, firstTime: boolean, isBot: boolean): Promise<string | null> { return this.live(() => this.lifecycle.clientConnect(client, firstTime, isBot)); }
+  clientBeginAsync(client: number): Promise<void> { return this.live(() => this.lifecycle.clientBegin(client)); }
+  clientUserinfoChangedAsync(client: number): Promise<void> { return this.live(() => this.lifecycle.clientUserinfoChanged(client)); }
+  clientDisconnectAsync(client: number): Promise<void> { return this.live(() => this.lifecycle.clientDisconnect(client)); }
+  clientCommandAsync(client: number, argv: readonly string[]): Promise<void> { return this.live(() => this.lifecycle.clientCommand(client, argv)); }
+  clientCommand(client: number, argv: readonly string[]): void {
+    if (this.phase !== "running") throw new Error(this.phase === "closed" ? "Native Q3 guest is closed" : "Native Q3 guest has not run GAME_INIT");
+    this.lifecycle.clientCommandNow(client, argv);
+  }
+  clientThinkAsync(client: number): Promise<void> { return this.live(() => this.lifecycle.clientThink(client)); }
+  runFrameAsync(time: number): Promise<void> { return this.live(() => this.lifecycle.runFrame(time)); }
+  consoleCommandAsync(argv: readonly string[]): Promise<boolean> { return this.live(() => this.lifecycle.consoleCommand(argv)); }
+  botFrameAsync(time: number): Promise<void> { return this.live(() => this.lifecycle.botFrame(time)); }
+
+  /**
+   * The process image between calls: every writable mapping the module or its runtime owns, the processor registers, and the server game's record.
+   * The runtime's own bookkeeping is rebuilt deterministically on restore, so a process whose mappings changed since startup (a heap block
+   * allocated by game code) cannot be saved.
+   */
+  checkpoint(): NativeGuestCheckpoint {
+    if (this.phase !== "running") throw new Error("Native Q3 checkpoint requires an initialized game");
+    if (this.runner.depth !== 0) throw new Error("Native Q3 checkpoint requires a completed game call");
+    if (this.hostState === undefined) throw new Error("Native Q3 host has not bound checkpoint services");
+    if (layoutOf(this.memory) !== this.baseline) throw new Error("Native Q3 module allocated memory after startup; its process cannot be saved");
+    const host = this.hostState.checkpoint();
+    const regions = this.memory.mappings().filter(mapping => mapping.label !== STACK_LABEL && writable(mapping.permissions)).map(mapping => {
+      const address = this.memory.pointer(mapping.base);
+      if (address === null) throw new Error("Native Q3 mapping has no address");
+      return { base: mapping.base, permissions: mapping.permissions, bytes: this.memory.copy(address, mapping.byteLength) };
+    });
+    return { kind: "native-guest", module: this.prepared.module, random: host.random, callbacks: host.callbacks, abi: this.abi, regions,
+      processorLayout: { ...PROCESSOR_LAYOUT, pointerBytes: this.memory.pointerBytes }, processorState: this.state.registers.checkpoint(), runtimeState: { ...host.state, bytes: host.state.bytes.slice() } };
   }
 
-  /** Shuts the running game down, runs the image's finalizers, and releases the guest process. */
-  close(): void {
+  /** Overlays a saved process image on this freshly started, identical process, then restores the server game's record from it. */
+  restore(checkpoint: Parameters<Q3GameEngine["restore"]>[0]): void {
+    if (checkpoint.kind !== "native-guest") throw new Error("Native Q3 restore requires a native-guest checkpoint");
+    if (this.phase !== "created") throw new Error("Native Q3 restore requires a freshly started module");
+    if (this.hostState === undefined) throw new Error("Native Q3 host has not bound checkpoint services");
+    const saved = checkpoint.module, module = this.prepared.module;
+    if (saved.id !== module.id || saved.digest !== module.digest || saved.revision !== module.revision || saved.artifactPath !== module.artifactPath
+      || checkpoint.abi.kind !== this.abi.kind || checkpoint.runtimeState.module.digest !== module.digest) throw new Error("Native Q3 checkpoint belongs to a different module");
+    const targets = this.memory.mappings().filter(mapping => mapping.label !== STACK_LABEL && writable(mapping.permissions));
+    if (targets.length !== checkpoint.regions.length) throw new Error("Native Q3 checkpoint memory layout differs from the started module");
+    for (const region of checkpoint.regions) {
+      const target = targets.find(mapping => mapping.base === region.base);
+      if (target === undefined || target.permissions !== region.permissions || target.byteLength !== region.bytes.byteLength) throw new Error("Native Q3 checkpoint memory layout differs from the started module");
+    }
+    for (const region of checkpoint.regions) {
+      const address = this.memory.pointer(region.base);
+      if (address === null) throw new Error("Native Q3 mapping has no address");
+      this.memory.write(address, region.bytes);
+    }
+    this.state.registers.restore(checkpoint.processorState);
+    this.phase = "running";
+    this.hostState.restore({ state: checkpoint.runtimeState, random: checkpoint.random, callbacks: checkpoint.callbacks });
+  }
+
+  /** Runs the image's finalizers and releases the guest process. Callers run GAME_SHUTDOWN first. */
+  retire(): void {
     if (this.phase === "closed") return;
-    if (this.runner.depth !== 0) throw new Error("Native Q3 guest shutdown requires a completed game call");
-    const errors: unknown[] = [], initialized = this.phase === "running";
+    if (this.runner.depth !== 0) throw new Error("Native Q3 guest retirement requires a completed game call");
+    const errors: unknown[] = [];
     this.runner.recover(); this.phase = "closed";
-    if (initialized) { try { this.lifecycle.shutdown(false); } catch (error) { errors.push(error); } }
     try { this.detach(); } catch (error) { errors.push(error); }
     try { closeFiles(this.files); } catch (error) { errors.push(error); }
     try { releaseMemory(this.memory); } catch (error) { errors.push(error); }
+    if (errors.length !== 0) throw new AggregateError(errors, "Native Q3 guest retirement failed");
+  }
+
+  /** Shuts the running game down, then retires the process. */
+  async close(): Promise<void> {
+    if (this.phase === "closed") return;
+    const initialized = this.phase === "running", errors: unknown[] = [];
+    if (initialized) { try { this.runner.recover(); await this.lifecycle.shutdown(false); } catch (error) { errors.push(error); } }
+    try { this.retire(); } catch (error) { errors.push(error); }
     if (errors.length !== 0) throw new AggregateError(errors, "Native Q3 guest shutdown failed");
   }
 }
 
+function layoutOf(memory: SparseGuestMemory): string {
+  return memory.mappings().map(mapping => `${mapping.base}:${mapping.byteLength}:${mapping.permissions}`).join(",");
+}
+function unavailableMemory(): never {
+  throw new Error("Native Q3 game tables require a 32-bit module; the Quake Live table interface locates no game data");
+}
 function releaseMemory(memory: SparseGuestMemory): void {
   for (const mapping of memory.mappings()) {
     const address = memory.pointer(mapping.base); if (address !== null) memory.unmap(address, mapping.byteLength);

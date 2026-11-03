@@ -52,28 +52,10 @@ test("six map changes with a local seat on the hidden CPU renderer carry present
       expect(preferences()).toBe(preferencesBefore);
     }
     for (let round = 0; round < 8; round++) { await Bun.sleep(25); Bun.gc(true); }
-    // The collector is conservative about the stack, so a couple of recent generations may survive; the older chain must not.
-    console.log("DBG", JSON.stringify(released.map(entry => `${entry.name}:${entry.ref.deref() !== undefined}`)));
-    await Bun.write("/tmp/claude-1000/-home-buzzkill-Projects-quake-anthology-ts/699b7558-0559-479c-bd99-8e1fdd26131f/scratchpad/heap.json", JSON.stringify((await import("bun:jsc")).generateHeapSnapshotForDebugging()));
+    // The collector is conservative about the stack and the engine may pin the first world through its startup scope, so a couple of worlds may survive; a chain of every world must not.
     for (const name of ["simulation", "assets", "input", "presentation"]) {
       const alive = released.filter(entry => entry.name === name && entry.ref.deref() !== undefined).length;
       expect(`${name}:${alive <= 2}`).toBe(`${name}:true`);
     }
   } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
-}, 240000);
-
-test("TMPDEDICATED", async () => {
-  const root = await mkdtemp(join(tmpdir(), "graphical-travel-"));
-  const parsed = parseApplicationCommand(["--content-root", testCorpusRoot(), "--game", "q1-classic-id1", "--map", "e1m1", "--mode", "singleplayer", "--dedicated", "--user-content-root", root]);
-  if (parsed.kind !== "run") throw new Error("Missing launch");
-  const app = await Application.open(parsed.options, { print: () => undefined, saveDirectory: join(root, "saves") });
-  const worlds: WeakRef<object>[] = [];
-  for (let travel = 0; travel < 6; travel++) {
-    worlds.push(new WeakRef(app.simulation));
-    app.queueCommand("map", [travel % 2 === 0 ? "e1m2" : "e1m1"], null);
-    for (let frame = 0; frame < 5; frame++) await app.step(50);
-  }
-  for (let round = 0; round < 8; round++) { await Bun.sleep(25); Bun.gc(true); }
-  console.log("DEDI", worlds.filter(world => world.deref() !== undefined).length);
-  await app.close();
 }, 240000);

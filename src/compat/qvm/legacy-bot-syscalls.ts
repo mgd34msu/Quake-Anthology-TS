@@ -1,6 +1,6 @@
 // Q3 1.16n/1.17 botlib.h and g_syscalls.c boundary adaptations.
 import { QvmGameImport } from './abi.ts';
-import type { QvmHostCall, QvmHostResult } from './syscalls.ts';
+import type { SharedHostCall, QvmHostResult } from './syscalls.ts';
 import type { QvmBotLibraryServices } from './bot-library-syscalls.ts';
 import { BotActionFlag } from '../../bots/behavior/library/actions.ts';
 
@@ -17,7 +17,7 @@ export function legacyBotActionFlags(flags: number): number {
   return result;
 }
 
-export function qvmLegacyBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryServices): QvmHostResult | null {
+export function qvmLegacyBotLibrarySyscall(call: SharedHostCall, services: QvmBotLibraryServices): QvmHostResult | null {
   if (call.role !== 'qagame' || call.abiProfile !== 'q3-1.16n-base') return null;
   const integer = (index: number): number => call.words.getInt32(index * 4, true);
   const text = (index: number): string => call.guest.readString(integer(index));
@@ -39,8 +39,8 @@ export function qvmLegacyBotLibrarySyscall(call: QvmHostCall, services: QvmBotLi
     case QvmGameImport.BOTLIB_EA_GET_INPUT: {
       const bytes = library.actions.getInputBytes(integer(1), call.words.getFloat32(8, true));
       const target = call.guest.span(integer(3), 40);
-      call.guest.writeBytes(target.byteOffset - call.guest.bytes.byteOffset, bytes);
-      const view = call.guest.dataView(target.byteOffset - call.guest.bytes.byteOffset, target.byteLength);
+      call.guest.regionWrite(target, bytes);
+      const view = call.guest.regionView(target);
       view.setInt32(32, legacyBotActionFlags(view.getInt32(32, true)), true); return 0;
     }
     case QvmGameImport.BOTLIB_USER_COMMAND: {

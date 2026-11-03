@@ -4,7 +4,7 @@ import type { QvmAbiProfile } from "../../contracts/execution.ts";
 // Copyright (C) 1999-2005 Id Software, Inc.
 import type { QvmSharedEntity } from "./shared-entity-record.ts";
 import type { Q3PlayerState } from "../../contracts/protocol.ts";
-import type { QvmMemory } from "./memory.ts";
+import type { Q3GameMemory } from "./game-memory.ts";
 import { qvmPlayerStateBytes, readQvmPlayerState, writeQvmPlayerState } from "./player-record.ts";
 import { qvmSharedEntityBytes, borrowQvmSharedEntity } from "./shared-entity-record.ts";
 
@@ -22,7 +22,7 @@ export interface QvmGameDataState {
   readonly clientStride: number;
 }
 
-/** Borrows the interpreter allocation. Relocation changes table descriptors, not existing pointers. */
+/** Borrows the module allocation, interpreted or native. Relocation changes table descriptors, not existing pointers. */
 export class QvmGameData {
   private entities: number | null = null;
   private entityStride = 0;
@@ -32,7 +32,7 @@ export class QvmGameData {
   private clientCount = 64;
   private readonly entityPointers = new Map<number, QvmSharedEntity>();
 
-  constructor(private readonly memory: QvmMemory, readonly abiProfile: QvmAbiProfile = "q3-modern") {}
+  constructor(private readonly memory: Q3GameMemory, readonly abiProfile: QvmAbiProfile = "q3-modern") {}
 
   /** Native Q3 reserves at most MAX_CLIENTS player slots; the server may narrow it. */
   setClientCount(count: number): void {
@@ -53,9 +53,8 @@ export class QvmGameData {
   clear(): void { this.entities = null; this.clients = null; this.entityStride = 0; this.clientStride = 0; this.count = 0; }
 
   checkpoint(): QvmGameDataState {
-    const word = (offset: number | null): number => offset === null ? 0 : offset === 0 ? this.memory.bytes.length : offset;
-    return { entitiesWord: word(this.entities), numEntities: this.count, entityStride: this.entityStride,
-      clientsWord: word(this.clients), clientStride: this.clientStride };
+    return { entitiesWord: this.memory.pointerWord(this.entities), numEntities: this.count, entityStride: this.entityStride,
+      clientsWord: this.memory.pointerWord(this.clients), clientStride: this.clientStride };
   }
 
   restore(state: QvmGameDataState): void {
@@ -87,10 +86,7 @@ export class QvmGameData {
     this.clientStride = clientStride;
   }
 
-  private offset(word: number): number | null {
-    const pointer = this.memory.pointer(word);
-    return pointer === null ? null : pointer.byteOffset - this.memory.bytes.byteOffset;
-  }
+  private offset(word: number): number | null { return this.memory.address(word); }
 
   private entityOffset(number: number): number {
     if (!Number.isInteger(number) || number < 0 || number >= this.count) throw new RangeError("Entity slot is outside located game data");
@@ -110,18 +106,14 @@ export class QvmGameData {
     const displacement = stride * number;
     int32(displacement);
     const offset = base + displacement;
-    if (offset < 0 || offset > this.memory.bytes.byteLength) {
-      throw new RangeError("Game-data pointer arithmetic leaves the interpreter allocation");
-    }
+    if (offset < 0 || offset > 0xffffffff) throw new RangeError("Game-data pointer arithmetic leaves the guest allocation");
     return offset;
   }
 
   private view(offset: number, size: number): DataView {
-    const bytes = this.memory.bytes;
-    if (!Number.isSafeInteger(offset) || offset < 0 || offset > bytes.byteLength - size) {
-      throw new RangeError("Game-data record exceeds the interpreter allocation");
-    }
-    return this.memory.dataView(offset, size);
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new RangeError("Game-data record exceeds the guest allocation");
+    try { return this.memory.viewAt(offset, size); }
+    catch (error) { throw new RangeError("Game-data record exceeds the guest allocation", { cause: error }); }
   }
 
   private entityAt(offset: number): QvmSharedEntity {

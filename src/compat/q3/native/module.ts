@@ -88,13 +88,18 @@ export class Quake3VmModule {
     runner.invoke({ target: entry, signature: nativeQ3Signature(image.abi, ["pointer"], "void"),
       arguments: [{ kind: "pointer", value: syscall }], context, instructionBudget });
   }
-  call(command: number, arguments_: readonly number[] = []): number {
+  private request(command: number, arguments_: readonly number[]) {
     if (arguments_.length > 12) throw new RangeError("Q3 vmMain accepts at most twelve arguments");
-    const { image, runner, context, instructionBudget } = this.options;
+    const { image, context, instructionBudget } = this.options;
     const args: GuestCallValue[] = [command, ...arguments_, ...new Array<number>(12 - arguments_.length).fill(0)].map(value => ({ kind: "int32", value }));
-    const result = runner.invoke({ target: this.vmMain, signature: nativeQ3Signature(image.abi, new Array<GuestStorage>(13).fill("int32"), "int32"),
-      arguments: args, context: { ...context, callback: { kind: "native-guest", module: image.module, address: this.vmMain, abi: image.abi } }, instructionBudget });
+    return { target: this.vmMain, signature: nativeQ3Signature(image.abi, new Array<GuestStorage>(13).fill("int32"), "int32"),
+      arguments: args, context: { ...context, callback: { kind: "native-guest" as const, module: image.module, address: this.vmMain, abi: image.abi } }, instructionBudget };
+  }
+  private value(result: GuestCallResult): number {
     if (result.kind !== "int32") throw new TypeError("Q3 vmMain returned the wrong ABI type");
     return result.value;
   }
+  call(command: number, arguments_: readonly number[] = []): number { return this.value(this.options.runner.invoke(this.request(command, arguments_))); }
+  /** Traps the module makes during this call may complete asynchronously, and may enter the module again. */
+  async callAsync(command: number, arguments_: readonly number[] = []): Promise<number> { return this.value(await this.options.runner.invokeAsync(this.request(command, arguments_))); }
 }

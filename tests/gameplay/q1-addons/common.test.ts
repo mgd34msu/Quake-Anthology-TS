@@ -10,12 +10,10 @@ import { createSceneQueries } from "../../../src/world/collision/index.ts";
 import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 import { expect, test } from "bun:test";
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
-import type { TransitionIntent } from "../../../src/contracts/gameplay.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { SessionActorRegistry, ActorCallbackTable } from "../../../src/world/actors/index.ts";
 import { SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
 import { Q1Foundation } from "../../../src/content/q1/foundation/runtime.ts";
-import type { Q1Event, Q1FoundationHost } from "../../../src/content/q1/foundation/types.ts";
 import { ZERO, PLAYER_BOUNDS } from "../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base } from "../../../src/content/q1/base/index.ts";
 import { registerQ1CampaignAddons, registerQ1Horde, mg1LastSigil, mg3RuneCount, handleQ1AddonImpulse, frameQ1AddonPlayer } from "../../../src/content/q1/addons/index.ts";
@@ -24,6 +22,7 @@ import { openArchive } from "../../../src/content/archive/index.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
 import type { Q1Entity } from "../../../src/formats/q1-map/index.ts";
 import { inertAuthority } from "../../support/authority.ts";
+import { q1TestHost } from "../../support/q1-host.ts";
 
 function world(program: "mg1" | "mg3", withHorde = false, walkable = false, coop = false) {
   const actors = new SessionActorRegistry(createIdentityOwner("q1-addon-smoke")), callbacks = new ActorCallbackTable(actors);
@@ -43,16 +42,12 @@ function world(program: "mg1" | "mg3", withHorde = false, walkable = false, coop
   const bodies = physics.bodies;
 
   const combat = inertAuthority(actors, callbacks);
-  const inventory = new SharedInventoryTable(actors), events: Q1Event[] = [], addonEvents: Q1AddonEvent[] = [], pending = new Map<OwnedActor, number>(), players: ActorId[] = [];
-  const cvars = new Map<string, number>(), transitions: TransitionIntent[] = [];
-  const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, originalPickups: new SharedOriginalPickupAdmission(actors, combat, inventory), random: () => 0.4,
-    trace: request => ({ fraction: 1, end: request.end, normal: ZERO, actor: null, startSolid: false, allSolid: false, sky: false, inOpen: true, inWater: false }),
-    contents: () => "empty", walkMove: () => walkable, moveToGoal: () => undefined, changeYaw: () => { throw new Error("This check does not drive monster turning"); }, checkBottom: () => false,
-    pusherServices: game => createNativeQ1PusherServices(game, physics),
-    scheduleThink: (actor, due) => { pending.set(actor, due); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
-    emit: event => { events.push(event); return undefined; }, transition: intent => { transitions.push(intent); return undefined; }, players: () => players, checkClient: () => null,
-    classname: actor => runtime?.entity(actor)?.classname ?? "player", powerup: () => undefined,
-  };
+  const inventory = new SharedInventoryTable(actors), addonEvents: Q1AddonEvent[] = [], players: ActorId[] = [];
+  const cvars = new Map<string, number>();
+  const { host, pending, events, transitions } = q1TestHost({ actors, callbacks, bodies, combat, inventory, entity: actor => runtime?.entity(actor), players: () => players }, {
+    originalPickups: new SharedOriginalPickupAdmission(actors, combat, inventory), walkMove: () => walkable,
+    changeYaw: () => { throw new Error("This check does not drive monster turning"); }, pusherServices: game => createNativeQ1PusherServices(game, physics),
+  });
   const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch: 0, coop, gravity: 800, maxClients: 4,
     campaign: program === "mg1" ? "q1:mg1" : "q1:mg3", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => game.combatContext(request), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));

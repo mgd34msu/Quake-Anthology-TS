@@ -7,7 +7,7 @@ import type { TraceResult } from "../../../../../src/contracts/scene.ts";
 import { SessionActorRegistry, ActorCallbackTable, SharedBodyTable, translatedBodyBounds } from "../../../../../src/world/actors/index.ts";
 import { GameplayAuthority, SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../../src/world/gameplay/index.ts";
 import { Q2EntityServices } from "../../../../../src/content/q2/foundation/entity-services.ts";
-import type { Q2Edition, Q2FoundationHost, Q2PresentationEvent, Q2TraceRequest } from "../../../../../src/content/q2/foundation/host.ts";
+import type { Q2Edition, Q2TraceRequest } from "../../../../../src/content/q2/foundation/host.ts";
 import { Q2Weapons, Q2WeaponState } from "../../../../../src/content/q2/foundation/weapons/index.ts";
 import type { Q2WeaponEvent, Q2WeaponInput, Q2WeaponHooks } from "../../../../../src/content/q2/foundation/weapons/index.ts";
 
@@ -19,6 +19,7 @@ import { PlayerState } from "../../../../../src/content/q3/base/shared/player-st
 import { Weapon } from "../../../../../src/content/q3/base/shared/definitions.ts";
 import { add, scale, subtract, normalize } from "../../../../../src/content/q2/foundation/fields.ts";
 import { angleVectorsRule } from "../../../../../src/core/math.ts";
+import { q2TestHost } from "../../../../support/q2-host.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const plane = { normal: { x: -1, y: 0, z: 0 }, distance: 0, type: 0, signbits: 1 };
@@ -42,7 +43,7 @@ function fixture(edition: Q2Edition, frameSeconds = 0.1, modifiers: Pick<Q2Weapo
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const world = actors.allocateAtSource("q2:game", 0, "q2:worldspawn");
   bodies.create(world, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
-  const outcomes: DamageOutcome[] = [], events: Q2WeaponEvent[] = [], presentation: Q2PresentationEvent[] = [];
+  const outcomes: DamageOutcome[] = [], events: Q2WeaponEvent[] = [];
   const combat = new GameplayAuthority(actors, callbacks, {
     impulse: (actor, impulse) => {
       const body = bodies.read(actor.id);
@@ -61,19 +62,17 @@ function fixture(edition: Q2Edition, frameSeconds = 0.1, modifiers: Pick<Q2Weapo
   const primary = new PlayerState("baseq3"); primary.weapon = Weapon.WP_RAILGUN;
   const monsters = new Set<ActorId>();
   const tracing = { trace: clearTrace };
-  const host: Q2FoundationHost = {
-    actors, callbacks, bodies, combat, inventory,
-    now: () => now, gravity: () => 800, frameSeconds: () => frameSeconds, random: () => { randomCalls.push(0.5); return 0.5; }, schedule: () => undefined, touchTriggers: () => undefined,
-    trace: request => tracing.trace(request), pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true,
+  const { host, events: presentation } = q2TestHost({ actors, callbacks, bodies, combat, inventory, world: world.id, players: () => [player.id], entity: () => undefined }, {
+    now: () => now, frameSeconds: () => frameSeconds, random: () => { randomCalls.push(0.5); return 0.5; },
+    trace: request => tracing.trace(request),
     nearby: (origin, radius) => [...actors.ownedBy("q3:character"), ...actors.ownedBy("q2:game")].map(actor => actor.id).filter(actor => {
       const body = bodies.read(actor);
       return body !== null && Math.hypot(body.origin.x - origin.x, body.origin.y - origin.y, body.origin.z - origin.z) <= radius;
-    }), players: () => [player.id], worldActor: () => world.id, isPlayer: actor => actor.equals(player.id), isMonster: actor => monsters.has(actor),
-    inlineModelBounds: () => ({ min: zero, max: zero }), setSolid: () => undefined, setMotion: () => undefined, setAreaPortal: () => undefined,
+    }), isMonster: actor => monsters.has(actor),
     playerViewState: actor => actor.equals(player.id) ? { viewAngles: input.angles, oldVelocity: bodies.read(actor)?.velocity ?? zero } : null,
-    keyConsumed: () => undefined, prepareLevelChange: () => undefined,
-    emit: event => { presentation.push(event); return undefined; }, transition: () => undefined, diagnostic: message => { throw new Error(message); },
-  };
+    diagnostic: message => { throw new Error(message); },
+  });
+
   const game = new Q2EntityServices(host, { edition, mapName: "weapon-check", skill: 1, mode: "singleplayer", deathmatchFlags: 0, maxClients: 1,
     provider: "q2:game", campaign: "q2:campaign", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" }, []);
   const weapons = new Q2Weapons({ ...modifiers, emit: event => { events.push(event); return undefined; }, noise: () => undefined, dodge: () => undefined,

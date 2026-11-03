@@ -107,7 +107,8 @@ import { Q2Foundation } from "../../../../src/content/q2/foundation/runtime.ts";
 import { createQ2TargetModule } from "../../../../src/content/q2/foundation/targets.ts";
 import { createQ2ItemModule } from "../../../../src/content/q2/foundation/items.ts";
 import { Q2Weapons } from "../../../../src/content/q2/foundation/weapons/index.ts";
-import type { Q2FoundationHost, Q2GameOptions } from "../../../../src/content/q2/foundation/host.ts";
+import type { Q2GameOptions } from "../../../../src/content/q2/foundation/host.ts";
+import { q2TestHost } from "../../../support/q2-host.ts";
 import type { Q2WeaponInput } from "../../../../src/content/q2/foundation/weapons/index.ts";
 
 function campaign(options: Partial<Pick<Q2GameOptions, "edition" | "mode" | "maxClients" | "mapName" | "deathmatchFlags">> = {}, random = new Q2RereleaseRandom()) {
@@ -123,17 +124,16 @@ function campaign(options: Partial<Pick<Q2GameOptions, "edition" | "mode" | "max
   const hooks: Q2PlayerHooks = { movement: () => shared.movement.value, setMovement: () => undefined, emit: event => { events.push(event); return undefined; },
     noise: () => undefined, weaponInput: () => input, banned: () => false };
   const players = new Q2Players(items, weapons, hooks);
-  const host: Q2FoundationHost = {
-    actors: shared.actors, bodies: shared.bodies, combat: shared.combat, inventory: shared.inventory, callbacks: new ActorCallbackTable(shared.actors),
-    now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5, rereleaseRandom: random, schedule: () => undefined,
-    touchTriggers: () => undefined, keyConsumed: id => { const entity = game.entity(id); return entity === null ? undefined : players.consumedKey(entity, game); },
+  const { host } = q2TestHost({ actors: shared.actors, bodies: shared.bodies, combat: shared.combat, inventory: shared.inventory, callbacks: new ActorCallbackTable(shared.actors),
+    players: () => [actor.id], entity: () => undefined,
+    world: () => { const world = [...game.entities.values()].find(entity => entity.classname === "worldspawn"); if (world === undefined) throw new Error("world missing"); return world.actor.id; } }, {
+    now: () => now, rereleaseRandom: random,
+    keyConsumed: id => { const entity = game.entity(id); return entity === null ? undefined : players.consumedKey(entity, game); },
     trace: request => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, contact: { kind: "none" }, hit: { kind: "none" }, contents: 0,
       surface: null, sourcePlane: { normal: zero, distance: 0, type: 0, signbits: 0 }, secondary: null }),
-    pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true, nearby: () => [], players: () => [actor.id], isPlayer: id => id === actor.id,
-    isMonster: () => false, worldActor: () => { const world = [...game.entities.values()].find(entity => entity.classname === "worldspawn"); if (world === undefined) throw new Error("world missing"); return world.actor.id; },
-    inlineModelBounds: () => ({ min: zero, max: zero }), setSolid: () => undefined, setMotion: () => undefined, setAreaPortal: () => undefined, emit: () => undefined,
-    playerViewState: () => ({ viewAngles: zero, oldVelocity: zero }), prepareLevelChange: () => undefined, transition: () => undefined, diagnostic: text => { throw new Error(text); },
-  };
+    emit: () => undefined, diagnostic: text => { throw new Error(text); },
+  });
+
   const game = new Q2Foundation(host, { edition: "classic", mapName: "base1", skill: 1, mode: "coop", deathmatchFlags: 0, maxClients: 4,
     provider: "q2:game", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement", ...options }, [players, createQ2TargetModule(), items]);
   game.load('{ "classname" "worldspawn" } { "classname" "info_player_start" "origin" "32 64 24" } { "classname" "info_player_intermission" "origin" "100 200 300" }');

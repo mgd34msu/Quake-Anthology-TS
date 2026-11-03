@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
-import type { OwnedActor } from "../../../../src/contracts/identity.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
 import { SharedInventoryTable } from "../../../../src/world/gameplay/index.ts";
 import { Q2EntityServices } from "../../../../src/content/q2/foundation/entity-services.ts";
 import { Q2Foundation } from "../../../../src/content/q2/foundation/runtime.ts";
-import type { Q2FoundationHost, Q2GameOptions } from "../../../../src/content/q2/foundation/host.ts";
+import { q2TestHost } from "../../../support/q2-host.ts";
+import type { Q2GameOptions } from "../../../../src/content/q2/foundation/host.ts";
 import { q2PlayerSpawns } from "../../../../src/content/q2/base/player/spawns.ts";
 import { createQ2TargetModule } from "../../../../src/content/q2/foundation/targets.ts";
 import { encodeQ2FoundationCheckpoint, decodeQ2FoundationCheckpoint } from "../../../../src/persistence/q2-foundation.ts";
@@ -20,18 +20,12 @@ function sharedHost(actors = new SessionActorRegistry(createIdentityOwner("q2-en
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const callbacks = new ActorCallbackTable(actors), inventory = new SharedInventoryTable(actors);
   const combat = inertAuthority(actors, callbacks);
-  const scheduled = new Map<OwnedActor, number>();
   let now = 0;
-  const host: Q2FoundationHost = { actors, bodies, callbacks, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5,
-    schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
-    touchTriggers: () => undefined, trace: () => { throw new Error("Entity service check does not trace geometry"); },
-    pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true, nearby: () => [],
-    players: () => [], isPlayer: () => false, isMonster: () => false,
-    worldActor: () => { throw new Error("No map was loaded"); },
-    inlineModelBounds: () => { throw new Error("No map was loaded"); },
-    setSolid: () => undefined, setMotion: () => undefined, setAreaPortal: () => undefined, emit: () => undefined,
-    playerViewState: () => ({ viewAngles: zero, oldVelocity: zero }),
-    keyConsumed: () => undefined, prepareLevelChange: () => undefined, transition: () => undefined, diagnostic: () => undefined };
+  const { host, scheduled } = q2TestHost({ actors, bodies, callbacks, combat, inventory, players: () => [], entity: () => undefined, world: () => { throw new Error("No map was loaded"); } }, {
+    now: () => now, trace: () => { throw new Error("Entity service check does not trace geometry"); },
+    inlineModelBounds: () => { throw new Error("No map was loaded"); }, emit: () => undefined, diagnostic: () => undefined,
+  });
+
   return { host, advance(time: number) {
     now = time;
     for (const [actor, due] of [...scheduled]) if (due <= now) {
