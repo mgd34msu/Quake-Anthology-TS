@@ -134,7 +134,6 @@ export class StartupServerBrowser {
           saved = await config.loadText(name);
         if (saved !== null && isJsonText(saved))
           tolerate(name, () => {
-            if (saved.length > 65536) throw new Error("Saved server list is too large");
             const core = result.browser(protocol);
             core.restoreFavorites(saved);
             try {

@@ -68,4 +68,4 @@ The compiled executable still needs the native libraries and your game data
 | `bun run format:check`, `bun run spdx`, `bun run codec:check` | Biome formatting, SPDX headers, and the generated event codec being current |
 | `bun run check` | typecheck, format, SPDX, codec, policy and the unit tier together |
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for the test tiers.
+The test tiers are `bun run test:unit`, `test:corpus` and `test:gl` (see `tools/test-tier.ts`).

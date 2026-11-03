@@ -15,11 +15,6 @@ import type { VmRegistration } from "./registry.ts";
 import { QvmSymbols } from "./symbols.ts";
 import type { QvmSymbolLoadOptions } from "./symbols.ts";
 
-/** Per root invocation. Retail frames use a few million; this only stops code that never returns. */
-const QVM_INSTRUCTION_BUDGET = 100_000_000;
-/** Return records kept outside guest memory (two words per call) for the compiled-semantics profile. */
-const QVM_MAX_RETURN_WORDS = 2 * 65_536;
-
 export type QvmArguments = readonly [number, number, number, number, number, number, number, number, number, number];
 
 const cancellationScope = Symbol("QVM cancellation scope");
@@ -1245,9 +1240,7 @@ export class QvmInterpreter {
       let evaluationStarted = false;
       let profileSymbol = debug ? this.symbols.valueToFunctionSymbol(0) : null;
       const debugString = (): string => `${this.indent()}${operands.count}`;
-      let executed = 0;
       for (;;) {
-        if (++executed > QVM_INSTRUCTION_BUDGET) throw new CommonError("drop", "VM instruction budget exceeded");
         const counter = this.counterEvaluation;
         if (counter !== null && (--counter.remaining < 0 || !counter.ranges.some(range => pc >= range.start && pc < range.end)))
           throw new Error("QVM counter evaluation escaped its admitted original functions or instruction budget");
@@ -1380,10 +1373,7 @@ export class QvmInterpreter {
               if (binding === undefined && hook !== undefined && this.codeWord(this.targetPC(target)) !== QvmOpcode.OP_ENTER)
                 throw new Error("QVM resolver requires a function entry instruction");
               if (hook === undefined && observers === undefined) {
-                if (returns !== null) {
-                  if (returns.length >= QVM_MAX_RETURN_WORDS) throw new CommonError("drop", "VM call depth exceeded");
-                  returns.push(sp, returnPC);
-                }
+                returns?.push(sp, returnPC);
                 pc = this.targetPC(target);
               } else {
                 const savedCallLevel = this.callLevel,

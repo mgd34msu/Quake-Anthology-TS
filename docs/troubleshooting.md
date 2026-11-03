@@ -86,5 +86,5 @@ times out, start it again.
 
 ## Tests skip or fail
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md#tests): tests that need game data skip unless
+Tests that need game data skip unless
 `QTS_TEST_CORPUS` is set, and the `corpus` tier fails instead of skipping.

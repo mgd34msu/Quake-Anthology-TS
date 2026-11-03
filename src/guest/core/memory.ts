@@ -21,8 +21,7 @@ export type GuestMemoryFaultReason =
   | "unmapped"
   | "permission"
   | "overlap"
-  | "noncontiguous-borrow"
-  | "quota";
+  | "noncontiguous-borrow";
 export class GuestMemoryFault extends Error {
   constructor(
     readonly reason: GuestMemoryFaultReason,

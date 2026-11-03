@@ -95,8 +95,7 @@ bun run test:unit     # no game data needed; data-dependent tests skip
 
 `bun run check` runs those three plus the format, SPDX and event-codec checks.
 `bun run test:corpus` (needs `QTS_TEST_CORPUS`) and `bun run test:gl` (adds native
-window and renderer tests) run the data-dependent tiers. [CONTRIBUTING.md](../CONTRIBUTING.md)
-describes the tiers and the rules the checks enforce.
+window and renderer tests) run the data-dependent tiers.
 
 ## Where to look
 

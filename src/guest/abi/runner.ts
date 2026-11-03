@@ -302,12 +302,6 @@ export class GuestCallRunner {
     this.#entryState = null;
     return undefined;
   }
-  /** Host services that touch many bytes pay one budget unit per 64 of them, so a loop of bulk calls cannot outlast its budget. */
-  chargeBytes(byteLength: number): undefined {
-    const units = Math.floor(byteLength / 64);
-    if (units > 0) for (const frame of this.#active) frame.remaining = Math.max(0, frame.remaining - units);
-    return undefined;
-  }
   /** The source adapter qualifies a fixed entry and join against its original artifact. */
   bindInlineRegion(
     entry: GuestAddress,

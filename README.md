@@ -179,7 +179,7 @@ Tests that render screenshots or write JSON evidence only do so when `QTS_TEST_C
 - [Architecture overview](docs/architecture.md) and [contracts](docs/contracts.md)
 - [Server guide](docs/server-guide.md), [troubleshooting](docs/troubleshooting.md)
 - [Save format](docs/save-format.md), [network protocols](docs/protocol.md)
-- [Contributing](CONTRIBUTING.md), [release process](docs/release-process.md), [security policy](SECURITY.md)
+- [Release process](docs/release-process.md), [security policy](SECURITY.md)
 
 ## License
 

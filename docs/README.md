@@ -26,5 +26,5 @@ sequence. These guides contain the detailed instructions.
 - [Shared foundation: primitives and the event system](foundation.md)
 - [Save format](save-format.md) and [network protocols](protocol.md)
 - [Release process](release-process.md), [release notes](releases/README.md), [changelog](../CHANGELOG.md)
-- [Contributing](../CONTRIBUTING.md) and [security policy](../SECURITY.md)
+- [Security policy](../SECURITY.md)
 - [Development checks](getting-started.md#check-a-change)

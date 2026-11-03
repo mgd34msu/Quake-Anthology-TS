@@ -18,10 +18,7 @@ export interface NativeQ2HudRendering extends NativeQ2HudEnvironment {
 }
 
 /** Uses mounted Q2 pictures and conchars with the normal seat-clipped UiDrawCommand renderer. */
-const MAXIMUM_PICTURES = 512;
-
 export class ApplicationQ2NativeHud {
-  private capReported = false;
   private readonly pictures = new Map<ResourceId, PictureAsset>();
   private readonly ids = new Map<string, ResourceId>();
   private content: ContentId | null = null;
@@ -38,7 +35,6 @@ export class ApplicationQ2NativeHud {
     this.content = null;
     this.ids.clear();
     this.pictures.clear();
-    this.capReported = false;
   }
   picture(id: ResourceId): PictureAsset | undefined {
     return this.pictures.get(id);
@@ -79,15 +75,8 @@ export class ApplicationQ2NativeHud {
     current();
     const numbers = ["num", "anum"].flatMap(prefix => [...Array.from({ length: 10 }, (_, digit) => `${prefix}_${digit}`), `${prefix}_minus`]);
     const names = new Set(["conchars", "field_3", ...numbers, ...ops.flatMap(op => (op.kind === "picture" || op.kind === "sized-picture" ? [op.name] : []))]);
-    // Layout names come from the game module; past the cap further pictures are left undrawn (once reported).
-    const room = Math.max(0, MAXIMUM_PICTURES - this.ids.size);
-    const wanted = [...names].filter(name => !this.ids.has(name));
-    if (wanted.length > room && !this.capReported) {
-      this.capReported = true;
-      assets.warnOnce("q2-native-hud-cap", `Native HUD layout names more than ${MAXIMUM_PICTURES} pictures; the rest are not drawn.\n`);
-    }
     await Promise.all(
-      wanted.slice(0, room).map(async name => {
+      [...names].map(async name => {
         if (this.ids.has(name)) return;
         const path = name.startsWith("/") || name.startsWith("\\") ? name.slice(1) : `pics/${name}.pcx`;
         let texture = await provider.textures.load(path, { family: "q2", mipmap: false, wrap: "clamp" });

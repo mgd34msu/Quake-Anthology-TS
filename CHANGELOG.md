@@ -67,7 +67,7 @@ script refuses it, the build accepts it).
 - PVS-invisible BSP subtrees are skipped through ancestor marks.
 
 ### Documentation
-- Added [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md), this changelog,
+- Added [SECURITY.md](SECURITY.md), this changelog,
   [architecture](docs/architecture.md), [troubleshooting](docs/troubleshooting.md),
   [server guide](docs/server-guide.md), [save format](docs/save-format.md),
   [protocols](docs/protocol.md), [release process](docs/release-process.md) and a

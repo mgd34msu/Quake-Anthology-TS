@@ -4,6 +4,7 @@
 /build/
 /.goodvibes/
 /docs/dev/
+/CONTRIBUTING.md
 
 # Local runtime data and generated output.
 /qfiles/

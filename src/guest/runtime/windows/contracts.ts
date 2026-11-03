@@ -47,8 +47,6 @@ export interface WindowsServiceHost {
   readonly capabilities: WindowsCapabilities;
   readonly pointerStorage: "uint32" | "uint64";
   readonly runner: GuestCallRunner;
-  /** Charges the running guest call for bulk work; a host with no attached runner has nothing to charge. */
-  chargeBytes(byteLength: number): void;
   readonly images: readonly PeImage[];
   readonly teb: GuestAddress;
   readonly processId: number;

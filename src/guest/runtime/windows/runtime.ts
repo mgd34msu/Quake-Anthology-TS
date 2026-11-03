@@ -110,9 +110,6 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
     this.registerData("msvcp140.dll", "?_Id_cnt@id@locale@std@@0HA", new Uint8Array(4));
     this.registerData("msvcp140.dll", "?id@?$numpunct@D@std@@2V0locale@2@A", new Uint8Array(width));
   }
-  chargeBytes(byteLength: number): void {
-    this.#runner?.chargeBytes(byteLength);
-  }
   get runner(): GuestCallRunner {
     if (this.#runner === null) throw new Error("Attach the shared GuestCallRunner before Windows execution");
     return this.#runner;

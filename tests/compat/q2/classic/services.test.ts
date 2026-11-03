@@ -253,8 +253,8 @@ test.skipIf(!existsSync(dll) || !existsSync(pak))(
   },
 );
 
-test("native CRT writes refuse executable or console-script names and stop at the file size quota", () => {
-  const root = mkdtempSync(join(tmpdir(), "classic-files-quota-"));
+test("native CRT writes refuse executable or console-script names", () => {
+  const root = mkdtempSync(join(tmpdir(), "classic-files-protected-"));
   try {
     const open = classicGuestFiles(root);
     for (const name of ["autoexec.cfg", "pak9.pak", "game.dll", "vm\\qagame.qvm", "x.PK3"])
@@ -262,7 +262,6 @@ test("native CRT writes refuse executable or console-script names and stop at th
     expect(existsSync(join(root, "autoexec.cfg"))).toBe(false);
     const file = required(open("save/game.sav", { read: true, write: true, creation: 2 }));
     expect(file.write(0, Uint8Array.of(1, 2, 3))).toBe(3);
-    expect(file.write(64 * 1024 * 1024, Uint8Array.of(1))).toBe(0);
     expect(file.size()).toBe(3);
     file.close();
   } finally {

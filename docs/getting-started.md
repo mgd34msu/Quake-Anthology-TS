@@ -97,7 +97,7 @@ bun run test:unit
 ```
 
 `test:unit` runs the suite without game data or a native window; `test:corpus` and
-`test:gl` need `QTS_TEST_CORPUS` (see [CONTRIBUTING.md](../CONTRIBUTING.md#tests)).
+`test:gl` need `QTS_TEST_CORPUS` (see `tools/test-tier.ts`).
 
 The project enforces strong typing and source boundaries, including restrictions
 on unsafe casts and `any`. Some tests need installed game data or native libraries.

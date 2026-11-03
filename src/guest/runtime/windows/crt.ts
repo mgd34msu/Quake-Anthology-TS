@@ -132,13 +132,10 @@ export function installCrt(host: WindowsServiceHost): void {
   const zero = (): GuestCallResult => ({ kind: "int32", value: 0 });
   const done = (): GuestCallResult => ({ kind: "void" });
   service("heap", "malloc", [host.pointerStorage], "pointer", (_context, args) => {
-    const size = count(args, 0);
-    host.chargeBytes(size);
-    return { kind: "pointer", value: host.allocate(size) };
+    return { kind: "pointer", value: host.allocate(count(args, 0)) };
   });
   service("heap", "calloc", [host.pointerStorage, host.pointerStorage], "pointer", (_context, args) => {
     const size = integer(args, 0) * integer(args, 1);
-    host.chargeBytes(size > 0x10000000n ? 0x10000000 : Number(size));
     return { kind: "pointer", value: size > 0x10000000n ? null : host.allocate(Number(size)) };
   });
   service("heap", "free", ["pointer"], "void", (_context, args) => {
@@ -150,20 +147,17 @@ export function installCrt(host: WindowsServiceHost): void {
     service("vcruntime", name, ["pointer", "pointer", host.pointerStorage], "pointer", (_context, args) => {
       const size = count(args, 2),
         destination = pointer(args, 0);
-      host.chargeBytes(size);
       if (size > 0) moveBytes(memory, requiredPointer(args, 0), requiredPointer(args, 1), size);
       return { kind: "pointer", value: destination };
     });
   service("vcruntime", "memset", ["pointer", "int32", host.pointerStorage], "pointer", (_context, args) => {
     const size = count(args, 2),
       destination = pointer(args, 0);
-    host.chargeBytes(size);
     if (size > 0) fillBytes(memory, requiredPointer(args, 0), size, Number(integer(args, 1)) & 255);
     return { kind: "pointer", value: destination };
   });
   service("vcruntime", "memcmp", ["pointer", "pointer", host.pointerStorage], "int32", (_context, args) => {
     const size = count(args, 2);
-    host.chargeBytes(size);
     if (size === 0) return zero();
     const left = memory.copy(requiredPointer(args, 0), size),
       right = memory.copy(requiredPointer(args, 1), size);
@@ -176,7 +170,6 @@ export function installCrt(host: WindowsServiceHost): void {
   });
   service("vcruntime", "memchr", ["pointer", "int32", host.pointerStorage], "pointer", (_context, args) => {
     const size = count(args, 2);
-    host.chargeBytes(size);
     if (size === 0) return { kind: "pointer", value: null };
     const address = requiredPointer(args, 0);
     const index = memory.copy(address, size).indexOf(Number(integer(args, 1)) & 255);
@@ -184,7 +177,6 @@ export function installCrt(host: WindowsServiceHost): void {
   });
   service("string", "strlen", ["pointer"], host.pointerStorage, (_context, args) => {
     const value = stringLength(memory, requiredPointer(args, 0));
-    host.chargeBytes(value);
     return host.pointerStorage === "uint64" ? { kind: "uint64", value: BigInt(value) } : { kind: "uint32", value };
   });
   for (const name of ["strcmp", "strncmp"])
@@ -197,7 +189,6 @@ export function installCrt(host: WindowsServiceHost): void {
         const firstLength = stringLength(memory, left),
           secondLength = stringLength(memory, right);
         const shared = Math.min(firstLength, secondLength);
-        host.chargeBytes(shared);
         // The terminator is compared too, so one byte beyond the shorter string is read.
         const first = loadString(memory, left, shared + 1, 0),
           second = loadString(memory, right, shared + 1, 1);

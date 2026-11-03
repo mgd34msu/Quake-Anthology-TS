@@ -99,19 +99,6 @@ for (const row of cases)
     );
   });
 
-test("Q2 native HUD: pictures past the cap are left undrawn and reported once", async () => {
-  const hud = new ApplicationQ2NativeHud(),
-    { assets, warnings, loaded } = stubAssets();
-  const names = Array.from({ length: 600 }, (_, index) => `picn p${index}`).join(" ");
-  const source = frame(names),
-    draw = context();
-  await hud.prepare(content, assets, source, draw);
-  await hud.prepare(content, assets, source, draw);
-  expect(warnings.filter(key => key === "q2-native-hud-cap")).toHaveLength(1);
-  expect(loaded.filter(path => /^pics\/p\d+\.pcx$/.test(path)).length).toBeLessThanOrEqual(512);
-  expect(hud.commands(source, draw).filter(command => command.kind === "image").length).toBeLessThanOrEqual(512);
-});
-
 test("Q2 native HUD: scale multiplies every rectangle and clear retires prepared pictures", async () => {
   const hud = new ApplicationQ2NativeHud(),
     { assets } = stubAssets();
