@@ -63,7 +63,7 @@ export class Q2EntityServices implements Q2GameServices {
   }
 
   /** Live projectiles monsters may dodge, without scanning every entity; stale members are dropped as they are found. */
-  dodgeables(): Iterable<Q2Entity> {
+  dodgeables(): Iterable<Q2Entity, undefined, unknown> {
     for (const entity of this.dodgeCandidates)
       if (this.entities.get(entity.actor.id) !== entity || !entity.projectile || !entity.dodgeable) this.dodgeCandidates.delete(entity);
     return this.dodgeCandidates;

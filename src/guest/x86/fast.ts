@@ -14,7 +14,8 @@ const registerMembers = Object.getOwnPropertyNames(IntegerRegisterFile.prototype
 const flagMembers = Object.getOwnPropertyNames(ProcessorFlags.prototype);
 const memoryMembers = Object.getOwnPropertyNames(SparseGuestMemory.prototype);
 function originalInstance(value: object, prototype: object, members: readonly string[]): boolean {
-  return Object.getPrototypeOf(value) === prototype && members.every(member => !Object.hasOwn(value, member));
+  const actual: unknown = Object.getPrototypeOf(value);
+  return actual === prototype && members.every(member => !Object.hasOwn(value, member));
 }
 
 const EAX = 0,
@@ -24,7 +25,7 @@ const EAX = 0,
   EBP = 10,
   ESI = 12,
   EDI = 14;
-const segmentNames = ["ds", "ss", "es"] as const;
+const segmentNames: readonly string[] = ["ds", "ss", "es"];
 const shiftNames: readonly ShiftOperation[] = ["rol", "ror", "rcl", "rcr", "shl", "shr", "shl", "sar"];
 
 function parity(byte: number): number {
@@ -849,7 +850,7 @@ export class I386Fast {
       registers = this.registers,
       flags = this.flags,
       ea = parsed.ea;
-    const template = {
+    const template: Omit<NumericInstruction, "operand"> = {
       opcode: op,
       secondaryOpcode: null,
       modrm: cursor.at(start),
@@ -857,7 +858,7 @@ export class I386Fast {
       prefix: "none",
       operandBits: 32,
       immediate: null,
-    } as const;
+    };
     const register: NumericOperand = { kind: "register", index: parsed.rm };
     const saved = new Uint8Array(64);
     return () => {

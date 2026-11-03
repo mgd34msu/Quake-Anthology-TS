@@ -6,7 +6,18 @@ import type { MappedGuestMemory } from "../../../guest/core/index.ts";
 import { readString } from "../../../guest/runtime/common/memory.ts";
 import type { Q3GameMemory } from "../../qvm/game-memory.ts";
 
-const writers = ["setInt8", "setUint8", "setInt16", "setUint16", "setInt32", "setUint32", "setFloat32", "setFloat64", "setBigInt64", "setBigUint64"] as const;
+const writers: readonly string[] = [
+  "setInt8",
+  "setUint8",
+  "setInt16",
+  "setUint16",
+  "setInt32",
+  "setUint32",
+  "setFloat32",
+  "setFloat64",
+  "setBigInt64",
+  "setBigUint64",
+];
 
 /** A view of a copy of bytes the module mapped read-only. Reads see them; a store through it faults, as a store to those pages does in the module's own process. */
 function readOnlyView(buffer: ArrayBufferLike, byteOffset: number, byteLength: number): DataView {

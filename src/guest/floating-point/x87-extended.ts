@@ -38,6 +38,9 @@ function denormalFlag(...values: readonly BinaryValue[]): number {
 function signedNegate(sign: Sign): Sign {
   return sign === 0 ? 1 : 0;
 }
+function xorSign(a: Sign, b: Sign): Sign {
+  return a === b ? 0 : 1;
+}
 
 /** ln 2 in `scale` units with guard bits, from 2 * atanh(1/3). */
 let ln2Cache: bigint | null = null;
@@ -172,12 +175,12 @@ function logTimes(y: BinaryValue, x: BinaryValue, plusOne: boolean, mode: Roundi
     exponent = x.exponent,
     sign: Sign = x.sign;
   if (plusOne) {
-    if (x.coefficient === 0n) return y.kind === "finite" ? { value: zero((y.sign ^ x.sign) as Sign), flags, roundedUp: false } : invalidResult();
+    if (x.coefficient === 0n) return y.kind === "finite" ? { value: zero(xorSign(y.sign, x.sign)), flags, roundedUp: false } : invalidResult();
     if (topExponent(x) < -200) {
-      if (y.kind === "infinity") return infinite((y.sign ^ x.sign) as Sign);
+      if (y.kind === "infinity") return infinite(xorSign(y.sign, x.sign));
       if (y.kind !== "finite") return invalidResult();
       const reciprocal = (scale << guard) / ln2();
-      const result = roundRational((y.sign ^ x.sign) as Sign, y.coefficient * x.coefficient * reciprocal, 1n << guard, y.exponent + x.exponent, binary80, mode);
+      const result = roundRational(xorSign(y.sign, x.sign), y.coefficient * x.coefficient * reciprocal, 1n << guard, y.exponent + x.exponent, binary80, mode);
       return { ...result, flags: result.flags | flags | precision };
     }
     const shift = exponent < 0 ? -exponent : 0;
@@ -192,13 +195,13 @@ function logTimes(y: BinaryValue, x: BinaryValue, plusOne: boolean, mode: Roundi
     return yZero ? invalidResult() : { value: { kind: "infinity", sign: signedNegate(y.sign) }, flags: flags | zeroDivide, roundedUp: false };
   else if (sign === 1) return invalidResult();
   const argumentIsOne = coefficient === 1n << BigInt(bitLength(coefficient) - 1) && exponent === -(bitLength(coefficient) - 1);
-  if (y.kind === "infinity") return argumentIsOne ? invalidResult() : infinite(((exponent + bitLength(coefficient) - 1 < 0 ? 1 : 0) ^ y.sign) as Sign);
+  if (y.kind === "infinity") return argumentIsOne ? invalidResult() : infinite(xorSign(exponent + bitLength(coefficient) - 1 < 0 ? 1 : 0, y.sign));
   if (y.kind !== "finite") return invalidResult();
   if (yZero) return { value: zero(y.sign), flags, roundedUp: false };
   const logarithm = log2Fixed(coefficient, exponent);
   if (logarithm === 0n) return { value: zero(y.sign), flags, roundedUp: false };
   const negative = logarithm < 0n;
-  const result = roundRational((y.sign ^ (negative ? 1 : 0)) as Sign, y.coefficient * (negative ? -logarithm : logarithm), scale, y.exponent, binary80, mode);
+  const result = roundRational(xorSign(y.sign, negative ? 1 : 0), y.coefficient * (negative ? -logarithm : logarithm), scale, y.exponent, binary80, mode);
   const exact = argumentIsOne || (logarithm % scale === 0n && result.flags === 0);
   return { ...result, flags: result.flags | flags | (exact ? 0 : precision) };
 }

@@ -52,6 +52,7 @@ export interface Q2AttackChanceProfile {
   readonly far: number;
   readonly strafeScalar: number;
 }
+const AXES: readonly (keyof Vec3)[] = ["x", "y", "z"];
 const normalAttackChances: Q2AttackChanceProfile = { standGround: 0.7, melee: 0.4, near: 0.25, mid: 0.06, far: 0, strafeScalar: 1 };
 export function defaultCheckAttack(context: MonsterContext, profile: Q2AttackChanceProfile = normalAttackChances): boolean {
   const { game, state, entity } = context;
@@ -853,7 +854,7 @@ export class MonsterPerception {
     const d1 = length(subtract(state.lastSighting, body.origin));
     const reached =
       game.options.edition === "rerelease"
-        ? (["x", "y", "z"] as const).every(
+        ? AXES.every(
             axis =>
               state.lastSighting[axis] >= body.origin[axis] + body.bounds.min[axis] && state.lastSighting[axis] <= body.origin[axis] + body.bounds.max[axis],
           )

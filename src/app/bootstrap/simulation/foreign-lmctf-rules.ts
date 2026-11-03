@@ -27,7 +27,7 @@ interface RuneState {
   holder: ActorId | null;
 }
 
-const RUNE_KINDS = ["damage", "haste", "resist", "regen", "vampire"] as const;
+const RUNE_KINDS: readonly string[] = ["damage", "haste", "resist", "regen", "vampire"];
 const RUNE_MODELS: Readonly<Record<string, string>> = {
   damage: "models/ctf/damage/tris.md2",
   haste: "models/ctf/haste/tris.md2",

@@ -126,6 +126,12 @@ export class QcAsmFn {
   ) {
     for (const type of paramTypes) this.params.push(this.local(type));
   }
+  /** The local slot of a declared parameter. */
+  param(index: number): number {
+    const slot = this.params[index];
+    if (slot === undefined) throw new RangeError(`The function has no parameter ${index}`);
+    return slot;
+  }
   local(type: QcAsmType = "float"): number {
     const size = type === "vector" ? 3 : 1,
       offset = this.parameterStart + this.localWords;

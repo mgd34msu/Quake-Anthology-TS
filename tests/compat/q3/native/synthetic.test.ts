@@ -14,7 +14,7 @@ import { nativeGameFixtureFrom, nativeGuestProcess } from "./fixture.ts";
 // modules are assembled here: real ELF images, loaded and run by the System V runtime and the x86 and x86-64 interpreters.
 
 const D = SYNTHETIC_ELF.data;
-const slots = { table: D, imports: D + 0x80, time: D + 0x90, client: D + 0xa0, text: D + 0xc0, syscall: D + 0x80 } as const;
+const slots = { table: D, imports: D + 0x80, time: D + 0x90, client: D + 0xa0, text: D + 0xc0, syscall: D + 0x80 };
 const message = "hello from the synthetic module";
 const identity = (name: string): ModuleIdentity => ({
   id: `test:synthetic-${name}`,
@@ -22,7 +22,7 @@ const identity = (name: string): ModuleIdentity => ({
   revision: "1",
   digest: createContentDigest("ab".repeat(32)),
 });
-const tableSlots = ["Shutdown", "RunFrame", "RegisterCvars", "Init", "ConsoleCommand", "", "", "", "ClientConnect", "", ""] as const;
+const tableSlots = ["Shutdown", "RunFrame", "RegisterCvars", "Init", "ConsoleCommand", "", "", "", "ClientConnect", "", ""];
 
 /** Quake Live API 10, x86-64 System V: dllEntry(output, imports, version) publishes an eleven slot export table. */
 function quakeLiveX64(version: number): Uint8Array {
@@ -128,10 +128,11 @@ function fixtureOf(name: string, bytes: Uint8Array) {
   return { bytes, module: identity(name), elf: inspectElf(bytes) };
 }
 
-for (const [label, build] of [
+const builders: readonly (readonly [string, (version: number) => Uint8Array])[] = [
   ["x86-64", quakeLiveX64],
   ["i386", quakeLiveI386],
-] as const) {
+];
+for (const [label, build] of builders) {
   test(`a synthetic ${label} Quake Live module runs its exports through the System V runtime`, () => {
     const game = nativeGameFixtureFrom(fixtureOf(`ql-${label}`, build(10)));
     const { memory, image: loaded } = game,

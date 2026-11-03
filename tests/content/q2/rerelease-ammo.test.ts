@@ -108,10 +108,11 @@ corpusTest(path)("rerelease ammo capacities equal what game_x64.dll stores and c
   expect(initial.every(value => value > 0)).toBe(true);
   for (const [classname, limits] of bySlot) expect([classname, initial[limits.tag]]).toEqual([classname, limits.capacity]);
 
-  for (const [rva, pick] of [
+  const raises: readonly (readonly [number, "bandolier" | "pack"])[] = [
     [bandolierRva, "bandolier"],
     [packRva, "pack"],
-  ] as const) {
+  ];
+  for (const [rva, pick] of raises) {
     const raised = ceilings(image, rva);
     for (const [classname, limits] of bySlot) expect([classname, raised.get(limits.tag) ?? null]).toEqual([classname, limits[pick]]);
   }

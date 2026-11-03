@@ -12,6 +12,7 @@ import {
 import type { ResolvedResourceReference } from "../../../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { SceneCamera } from "../../../../src/contracts/render.ts";
+import type { WorldViewInput } from "../../../../src/render/scene/world.ts";
 import type { SceneEntity } from "../../../../src/contracts/scene.ts";
 import { decodeQ3World } from "../../../../src/formats/q3-map/index.ts";
 import { parseMd3 } from "../../../../src/formats/q3-model/md3.ts";
@@ -27,6 +28,7 @@ const axis = [
   { x: 0, y: 1, z: 0 },
   { x: 0, y: 0, z: 1 },
 ] satisfies SceneCamera["axis"];
+type LooseMountRef = Extract<ResolvedResourceReference["provenance"], { readonly kind: "loose" }>["mount"];
 const RF_SHADOW_PLANE = 256,
   RF_NOSHADOW = 64;
 
@@ -36,7 +38,7 @@ async function member(path: string): Promise<{ bytes: Uint8Array; resource: Reso
     const entry = archive.findEntries(path)[0];
     if (entry === undefined) throw new Error(`Missing ${path}`);
     const bytes = await archive.readEntry(entry);
-    const mount = {
+    const mount: LooseMountRef = {
       kind: "loose",
       identity: createMountIdentity(
         createMountId("scene", "q3"),
@@ -44,7 +46,7 @@ async function member(path: string): Promise<{ bytes: Uint8Array; resource: Reso
         0,
       ),
       rootPath: "/",
-    } as const;
+    };
     const resource: Omit<ResolvedResourceReference, "id"> = {
       requestedPath: path,
       provenance: { kind: "loose", mount, memberPath: path },
@@ -103,7 +105,7 @@ test("cg_shadows 2 and 3 submit stencil volumes with one finish, and projection 
       viewport: { x: 0, y: 0, width: 640, height: 480 },
       clip: { kind: "none" },
     };
-    const input = { camera, time: { kind: "seconds", value: 0 }, target: { kind: "seat", seat: identity.seat(0) } } as const;
+    const input: WorldViewInput = { camera, time: { kind: "seconds", value: 0 }, target: { kind: "seat", seat: identity.seat(0) } };
     const renderer = new SceneModelRenderer({ family: "q3", textures, shaders, palette: null }, world);
     const options = () => ({ customSkin: [{ name: "l_legs", shader: "models/players/sarge/legs" }] });
     await renderer.preload([base], options);

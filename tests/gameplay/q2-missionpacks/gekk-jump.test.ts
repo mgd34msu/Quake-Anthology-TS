@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createGekkDefinition } from "../../../src/content/q2/missionpacks/monsters/gekk.ts";
+import { partialStub } from "../../support/stub.ts";
 import type { Q2Monsters } from "../../../src/content/q2/foundation/monsters/index.ts";
 
 test("the rerelease gekk carries game_x64.dll's two blocked jump moves and callbacks", () => {
-  const definition = createGekkDefinition({} as Q2Monsters);
+  const definition = createGekkDefinition(partialStub<Q2Monsters>());
   const jump = definition.moves.find(move => move.name === "gekk_move_jump"),
     jump2 = definition.moves.find(move => move.name === "gekk_move_jump2");
   for (const move of [jump, jump2]) {

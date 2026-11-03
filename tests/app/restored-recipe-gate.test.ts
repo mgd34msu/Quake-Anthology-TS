@@ -68,7 +68,7 @@ test.skipIf(!available)(
         maxClients: 1,
       };
       const original = createSimulation(options);
-      let image;
+      let image: ReturnType<typeof original.checkpoint>;
       try {
         image = original.checkpoint();
       } finally {

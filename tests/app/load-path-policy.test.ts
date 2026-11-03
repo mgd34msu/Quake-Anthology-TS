@@ -17,9 +17,8 @@ test("assertLoadPathAllowed accepts inside paths, local origins and the option, 
   const directory = "/saves",
     outside = "/elsewhere/original.sav",
     inside = "/saves/a/b.sav";
-  const open = { allowAnyPath: false, trustedDirectories: ["/addons/saves"] } as const;
-  const context = (origin: CommandContext["origin"], producer?: CommandContext["producer"]): CommandContext => ({
-    session: undefined as never,
+  const open = { allowAnyPath: false, trustedDirectories: ["/addons/saves"] };
+  const context = (origin: CommandContext["origin"], producer?: CommandContext["producer"]): Pick<CommandContext, "origin" | "producer"> => ({
     origin,
     ...(producer === undefined ? {} : { producer }),
   });
@@ -69,10 +68,11 @@ async function launch(extra: readonly string[]): Promise<{ app: Application; pri
   return { app, printed, root };
 }
 
-for (const [label, extra, delegatedAllowed] of [
+const loadPathCases: readonly (readonly [string, readonly string[], boolean])[] = [
   ["by default", [], false],
   ["with --allow-load-paths", ["--allow-load-paths"], true],
-] as const) {
+];
+for (const [label, extra, delegatedAllowed] of loadPathCases) {
   corpusTest("q1/id1/pak0.pak")(
     `the load command ${label} ${delegatedAllowed ? "lets" : "refuses"} a script and a remote client reach a file outside the save directory`,
     async () => {

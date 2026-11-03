@@ -1591,7 +1591,8 @@ export class CommandBuffer {
         cvars?.setCommandFlags(variable, command.argv.slice(2).join(" "), name === "seta" ? "archive" : name === "setu" ? "userinfo" : "serverinfo");
       });
     }
-    for (const name of ["serverinfo", "localinfo"] as const) {
+    const infoCommands: readonly ("serverinfo" | "localinfo")[] = ["serverinfo", "localinfo"];
+    for (const name of infoCommands) {
       register(
         name,
         command => {

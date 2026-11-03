@@ -74,8 +74,8 @@ async function paletteFor(mounts: MountedContent, family: GameFamily): Promise<P
 
 /** FS_ListFilteredFiles order: highest-priority mount first, zip order within an archive, sorted names in a directory; first name wins. */
 async function shaderPaths(content: LoadedApplicationContent, mounts: MountedContent): Promise<readonly string[]> {
-  const archives = new Map(content.catalog.products.flatMap(product => product.archives).map(archive => [archive.path, archive] as const));
-  const byId = new Map(mounts.plan.mounts.map(mount => [mount.identity.id, mount] as const));
+  const archives = new Map(content.catalog.products.flatMap(product => product.archives).map((archive): [string, typeof archive] => [archive.path, archive]));
+  const byId = new Map(mounts.plan.mounts.map((mount): [string, typeof mount] => [mount.identity.id, mount]));
   const seen = new Set<string>(),
     paths: string[] = [];
   const add = (path: string): void => {

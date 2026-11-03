@@ -525,7 +525,10 @@ test.skipIf(!available)(
     });
     // The minimal-map level JSON is under 2 KB; a real map's is two orders of magnitude larger.
     expect(saved.native.length).toBeGreaterThan(100_000);
-    const parsedSave = (): unknown => JSON.parse(new TextDecoder().decode(saved.native));
+    const parsedSave = (): unknown => {
+      const parsed: unknown = JSON.parse(new TextDecoder().decode(saved.native));
+      return parsed;
+    };
     expect(parsedSave).not.toThrow();
     await host.readSaveLoading("level", saved, async () => {
       pumps++;

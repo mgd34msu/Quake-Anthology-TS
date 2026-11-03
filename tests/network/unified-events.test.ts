@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { createContentId } from "../../src/contracts/content.ts";
 import type { SimulationPresentationEvent } from "../../src/app/bootstrap/simulation/types.ts";
-import type { ArmorState } from "../../src/contracts/gameplay.ts";
+import type { ArmorState, AttackProvenance } from "../../src/contracts/gameplay.ts";
 import type { SimulationEvent } from "../../src/contracts/session.ts";
 import type { UnifiedIdentityDecoder } from "../../src/app/bootstrap/network/unified-types.ts";
 import { unifiedPresentationFor } from "../../src/app/bootstrap/simulation/network-unified.ts";
@@ -205,17 +205,17 @@ test("unified events carry the Q2 help icon and the attack damage-powerup owner"
     identity,
   );
   expect(absent?.kind === "q2-player" && absent.event.kind === "view" && "helpIcon" in absent.event.view).toBe(false);
-  const attack = {
+  const attack: AttackProvenance = {
     sequence: 1,
-    time: { kind: "seconds" as const, value: 2 },
+    time: { kind: "seconds", value: 2 },
     attacker: actor,
     inflictor: actor,
-    weapon: "q3:machinegun" as const,
-    weaponProvider: "q3:weapons" as const,
-    combatProvider: "q1:combat" as const,
-    inventoryProvider: "q2:inventory" as const,
-    movementProvider: "q1:movement" as const,
-    cause: { kind: "q3" as const, meansOfDeath: 3, damageFlags: 0 },
+    weapon: "q3:machinegun",
+    weaponProvider: "q3:weapons",
+    combatProvider: "q1:combat",
+    inventoryProvider: "q2:inventory",
+    movementProvider: "q1:movement",
+    cause: { kind: "q3", meansOfDeath: 3, damageFlags: 0 },
   };
   const damage = (owner: boolean): SimulationEvent => ({
     sequence: 4,

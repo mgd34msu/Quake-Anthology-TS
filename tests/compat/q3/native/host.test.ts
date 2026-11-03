@@ -55,7 +55,7 @@ async function host(bytes: Uint8Array, name: string, profile: NativeExecution["p
     const prepared = await prepareQ3Native(execution, mounts);
     const events: string[] = [],
       configstrings = new Map<number, string>(),
-      arguments_ = { current: [] as readonly string[] };
+      arguments_: { current: readonly string[] } = { current: [] };
     const cvars = new CvarRegistry({
       dialect: "q3",
       context: { session: createIdentityOwner("native-q3-host").session, origin: { kind: "server-console" } },
@@ -92,8 +92,9 @@ async function host(bytes: Uint8Array, name: string, profile: NativeExecution["p
       },
     };
     // The shared server trap table's handlers, over recording services: the module's traps decode exactly as an interpreted module's do.
+    const qagame: "qagame" = "qagame";
     const common = {
-      role: "qagame" as const,
+      role: qagame,
       cvars,
       print: (text: string) => events.push(text),
       milliseconds: () => 12345,
@@ -111,12 +112,16 @@ async function host(bytes: Uint8Array, name: string, profile: NativeExecution["p
         },
       },
     };
+    const modern: "q3-modern" = "q3-modern";
     const client = {
-      abiProfile: "q3-modern" as const,
+      abiProfile: modern,
       maxClients: 4,
       getUserinfo: () => "",
       setUserinfo: () => undefined,
-      getUserCommand: () => ({ serverTime: 0, angles: [0, 0, 0] as [number, number, number], buttons: 0, weapon: 0, forwardmove: 0, rightmove: 0, upmove: 0 }),
+      getUserCommand: () => {
+        const angles: [number, number, number] = [0, 0, 0];
+        return { serverTime: 0, angles, buttons: 0, weapon: 0, forwardmove: 0, rightmove: 0, upmove: 0 };
+      },
       dropClient: async () => undefined,
       sendServerCommand: (slot: number, text: string) => {
         events.push(`${slot}:${text}`);
@@ -211,7 +216,7 @@ test("native Q3 admission refuses artifacts that are not an i386 PE or an ELF im
 });
 
 // ---- A Quake Live API 10 x86-64 ELF: the same host, the other profile. ----
-const ql = { table: SYNTHETIC_ELF.data, imports: SYNTHETIC_ELF.data + 0x80, time: SYNTHETIC_ELF.data + 0x90, text: SYNTHETIC_ELF.data + 0xc0 } as const;
+const ql = { table: SYNTHETIC_ELF.data, imports: SYNTHETIC_ELF.data + 0x80, time: SYNTHETIC_ELF.data + 0x90, text: SYNTHETIC_ELF.data + 0xc0 };
 function quakeLiveElf(): Uint8Array {
   const c = new CodeBuilder(),
     table: Record<string, number> = {};
@@ -306,7 +311,9 @@ test("a native Quake Live ELF module runs through the same host and engine servi
     await source.clientDisconnectAsync(3);
     await source.botFrameAsync(800);
     expect(events).toEqual(["1:ClientBegin", "2:ClientCommand", "2:ClientCommand", "3:ClientThink", "1:ClientUserinfoChanged", "3:ClientDisconnect"]);
-    expect(source.coverage.map(call => call.name)).toEqual(expect.arrayContaining(["Printf", "Argc"]));
+    const covered = source.coverage.map(call => call.name);
+    expect(covered).toContain("Printf");
+    expect(covered).toContain("Argc");
   } finally {
     await harness.close();
   }

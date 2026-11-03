@@ -44,7 +44,7 @@ export function saveCommandPath(directory: string, name: string): string {
 export function assertLoadPathAllowed(
   directory: string,
   path: string,
-  source: CommandContext | undefined,
+  source: Pick<CommandContext, "origin" | "producer"> | undefined,
   options: { readonly allowAnyPath: boolean; readonly trustedDirectories: readonly string[] },
 ): void {
   if (options.allowAnyPath) return;

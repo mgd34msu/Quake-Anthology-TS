@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
+import type { ServerProfile } from "../../../src/settings/server/types.ts";
 import { corpusTest, testCorpusRoot } from "../../support/corpus.ts";
 
 // A foreign selected character must be what a native Q2 DLL world draws for
@@ -225,7 +226,8 @@ async function corpseLane(
     ]);
     if (parsed.kind !== "run") throw new Error("Missing launch options");
     // The rerelease game defaults to squad respawn: a lone dead player waits for a teammate and the level restarts, so nothing respawns in place.
-    const profile = squadRespawn ? undefined : { version: 1 as const, overrides: [{ id: "server:q2.squad-respawn" as const, value: "0" }] };
+    const noSquadRespawn: ServerProfile = { version: 1, overrides: [{ id: "server:q2.squad-respawn", value: "0" }] };
+    const profile = squadRespawn ? undefined : noSquadRespawn;
     app = await Application.open(profile === undefined ? parsed.options : { ...parsed.options, serverProfile: profile }, {
       saveDirectory: join(root, "saves"),
       print: () => undefined,

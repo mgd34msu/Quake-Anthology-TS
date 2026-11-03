@@ -8,7 +8,9 @@ function isStub<T extends object>(value: unknown): value is T {
  * touches. Members the test does not list are absent, so an unexpected read fails loudly as undefined.
  */
 export function partialStub<T extends object>(members: object = {}): T {
-  const created: unknown = Object.assign(Object.create(null), members);
+  const blank: unknown = Object.create(null);
+  if (typeof blank !== "object" || blank === null) throw new Error("Stub construction failed");
+  const created: unknown = Object.assign(blank, members);
   if (!isStub<T>(created)) throw new Error("Stub construction failed");
   return created;
 }

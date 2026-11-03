@@ -658,8 +658,12 @@ function run(): void {
   PM_CatagorizePosition();
   PM_SnapPosition();
 }
+/** Keeps each binding's own type, which an array literal would widen to a union. */
+function savedBindings<T extends readonly unknown[]>(...bindings: T): T {
+  return bindings;
+}
 export function pmoveClassic(pmove: ClassicPmove, ops: NumericOperations, airAccelerate = 0, strafejump = false, flying = false, multiplier = 1): void {
-  const saved = [
+  const saved = savedBindings(
     pm,
     numericOps,
     strafejumpHack,
@@ -684,7 +688,7 @@ export function pmoveClassic(pmove: ClassicPmove, ops: NumericOperations, airAcc
     pm_friction,
     pm_waterfriction,
     pm_waterspeed,
-  ] as const;
+  );
   pm = pmove;
   numericOps = ops;
   strafejumpHack = strafejump;

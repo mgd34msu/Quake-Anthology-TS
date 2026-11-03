@@ -2,6 +2,7 @@
 import type { ExecutableRecipe, MonsterDefinitionReference } from "../../../contracts/content.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
+import type { TraceQuery } from "../../../contracts/scene.ts";
 import type { AuthoredMonster } from "../../../content/monsters/authored.ts";
 import { setMonsterRoute } from "../../../content/q1/base/monsters.ts";
 import type { SessionActorRegistry } from "../../../world/actors/index.ts";
@@ -127,8 +128,9 @@ export class MonsterAdmission implements Pick<SelectedMonsterBehavior, "enemy" |
 
   /** The query a relocation search runs with for this monster's source. */
   query(entry: AuthoredMonster, definition: MonsterDefinitionReference, strategy: MonsterSourceStrategy) {
+    const target: TraceQuery["target"] = { kind: "world" };
     return {
-      target: { kind: "world" as const },
+      target,
       passActor: entry.actor.id,
       numeric: providerTiming(this.services.recipe, definition.source.provider).numeric,
       policy: strategy.tracePolicy(),

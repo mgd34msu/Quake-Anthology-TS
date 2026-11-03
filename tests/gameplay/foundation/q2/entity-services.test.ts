@@ -89,7 +89,7 @@ describe("Q2 reusable entity services", () => {
       const services = new Q2EntityServices(host, { ...options, mapName, mode: "coop" }, [q2PlayerSpawns]);
       const actor = host.actors.allocateAtSource("q2:map", 3, "q2:authored");
       host.bodies.create(actor, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
-      const spot = services.attach(actor, { classname, ordinal: 3, values: new Map() });
+      const spot = services.attach(actor, { classname, ordinal: 3, values: new Map<string, string>() });
       expect(q2PlayerSpawns.spawn(spot, services)).toBe(true);
       expect(spot.think).not.toBeNull();
       advance(0.2);

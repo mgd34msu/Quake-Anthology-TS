@@ -2,14 +2,11 @@
 import { expect, test } from "bun:test";
 import { createGekkDefinition } from "../../../src/content/q2/missionpacks/monsters/gekk.ts";
 import { rereleaseMissionPackMoves } from "../../../src/content/q2/rerelease/monsters/tables/missionpack.ts";
+import { partialStub } from "../../support/stub.ts";
 import type { Q2Monsters } from "../../../src/content/q2/foundation/monsters/index.ts";
 import type { MonsterContext } from "../../../src/content/q2/foundation/monsters/types.ts";
 
 const FL_SWIM = 2;
-/** The gekk code under test reads only the fields the scene declares. */
-function stand<T>(value: object): T {
-  return value as T;
-}
 interface Scene {
   readonly edition: "classic" | "rerelease";
   readonly flags?: number;
@@ -45,7 +42,7 @@ function scene(input: Scene) {
       random: () => rolls.shift() ?? 0,
     },
   };
-  const context = stand<MonsterContext>({
+  const context = partialStub<MonsterContext>({
     entity,
     game,
     state,
@@ -58,7 +55,7 @@ function scene(input: Scene) {
 }
 const attack = (input: Scene) => {
   const result = scene(input),
-    definition = createGekkDefinition({} as Q2Monsters);
+    definition = createGekkDefinition(partialStub<Q2Monsters>());
   if (definition.attack === undefined) throw new Error("The gekk has no attack");
   definition.attack(result.context);
   return result;
@@ -110,7 +107,7 @@ test("the classic gekk attack keeps its 1998 water rule: no attack while swimmin
 });
 
 test("rerelease gekks swim and stand underwater on frames 291-322 without a swim-loop exit callback, and test water at WATER_WAIST", () => {
-  const definition = createGekkDefinition({} as Q2Monsters);
+  const definition = createGekkDefinition(partialStub<Q2Monsters>());
   const classic = definition.moves.find(move => move.name === "gekk_move_swim_loop");
   expect(classic?.firstFrame).toBe(242);
   expect(classic?.frames.some(frame => frame.actions.includes("gekk_swim"))).toBe(true);

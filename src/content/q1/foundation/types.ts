@@ -286,12 +286,12 @@ export function createPlayerCues(): Q1PlayerCues {
   const cue = (): Q1PowerupCue => ({ warned: false, flashAt: 0, hum: 0 });
   return { protectSoundAt: 0, windFlySoundAt: 0, quadSoundAt: 0, invisibility: cue(), invulnerability: cue(), quad: cue(), suit: cue() };
 }
-const POWERUP_WARNINGS = {
+const POWERUP_WARNINGS: Readonly<Record<"invisibility" | "invulnerability" | "quad" | "suit", readonly [string, string]>> = {
   invisibility: ["$qc_ring_fade", "items/inv2.wav"],
   invulnerability: ["$qc_protection_fade", "items/protect2.wav"],
   quad: ["$qc_quad_fade", "items/damage2.wav"],
   suit: ["$qc_biosuit_fade", "items/suit2.wav"],
-} as const;
+};
 /** Fade message and sound of the four powerups CheckPowerups warns about, or null. */
 export function powerupWarning(powerup: Q1Powerup): readonly [string, string] | null {
   return powerup === "invisibility" || powerup === "invulnerability" || powerup === "quad" || powerup === "suit" ? POWERUP_WARNINGS[powerup] : null;

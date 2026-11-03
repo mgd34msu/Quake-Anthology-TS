@@ -148,7 +148,8 @@ export function writeQ3BrowserCache(entries: readonly BrowserEntry[], view: Q3Br
       let storable = cached;
       if (cached !== null) {
         try {
-          status(JSON.parse(JSON.stringify(cached)));
+          const roundTrip: unknown = JSON.parse(JSON.stringify(cached));
+          status(roundTrip);
         } catch {
           storable = null;
         }

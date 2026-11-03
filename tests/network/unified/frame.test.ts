@@ -345,16 +345,16 @@ test("unified frame reconstructs mixed presentation identities and local resourc
   expect(result.acknowledgedInput).toBe(9);
 });
 test("unified frame version 10 carries the event fields version 9 dropped and version 9 bytes still decode", async () => {
-  const v10 = new SaveReader(decodeCheckpointValue(inflateRawSync(encodeUnifiedFrame(frame)))),
-    value = v10.value as Record<string, unknown>;
+  const value = decodeCheckpointValue(inflateRawSync(encodeUnifiedFrame(frame)));
+  if (typeof value !== "object" || value === null) throw new Error("A unified frame decodes to a record");
   const old = deflateRawSync(encodeCheckpointValue({ ...value, version: 9 }));
   const result = await decodeUnifiedFrame(old, context);
   expect(result.epoch).toBe(3);
   expect(result.output.events[0]?.audience.kind).toBe("client");
-  const sound = {
-    kind: "q2" as const,
+  const sound: Parameters<typeof encodeUnifiedPresentationEvents>[0][number] = {
+    kind: "q2",
     event: {
-      kind: "sound" as const,
+      kind: "sound",
       actor: id,
       origin,
       path: "misc/x.wav",
@@ -362,11 +362,11 @@ test("unified frame version 10 carries the event fields version 9 dropped and ve
       volume: 1,
       attenuation: 1,
       reliable: false,
-      loop: "once" as const,
+      loop: "once",
       local: true,
     },
     sequence: 1,
-    content: "q1:registered:id1:1" as const,
+    content: "q1:registered:id1:1",
     seconds: 1,
   };
   const decoded = decodeUnifiedPresentationEvents(encodeUnifiedPresentationEvents([sound]), context);

@@ -269,7 +269,7 @@ export class ClassicGuestWorld {
     map: ClassicGuestMap,
     binding: ClassicGuestMapServices,
     revisit?: ClassicGuestRevisit,
-  ): Generator<ClassicTravelStep, ClassicGuestWorld> {
+  ): Generator<ClassicTravelStep, ClassicGuestWorld, undefined> {
     this.requireRunning();
     const source = this.source,
       services = this.services;

@@ -660,6 +660,27 @@ test("MG programs check monsters before water, MG3 keeps its variant keys and CT
   expect(q1Obituary({ ...base, victim: { ...self }, attacker: hooker, variant: "ctf" }).message?.text).toBe("$qc_death_hook1");
 });
 
+interface MonsterRecordList {
+  monsters: { actor: { slot: number } }[];
+}
+function isMonsterRecord(value: unknown): value is MonsterRecordList["monsters"][number] {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "actor" in value &&
+    typeof value.actor === "object" &&
+    value.actor !== null &&
+    "slot" in value.actor &&
+    typeof value.actor.slot === "number"
+  );
+}
+function isRecordList(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
+}
+function hasMonsterList(value: unknown): value is MonsterRecordList {
+  return typeof value === "object" && value !== null && "monsters" in value && isRecordList(value.monsters) && value.monsters.every(isMonsterRecord);
+}
+
 test.skipIf(!existsSync(archivePath))("a version 5 save with a live grunt and dog resumes them as base controllers", async () => {
   const base = await readMap("e1m1"),
     map = {
@@ -692,7 +713,8 @@ test.skipIf(!existsSync(archivePath))("a version 5 save with a live grunt and do
     }),
     extensions: source.extensions.map(extension => {
       if (extension.id !== "q1:base") return extension;
-      const root = decodeCheckpointValue(extension.bytes) as { monsters: { actor: { slot: number } }[] };
+      const root = decodeCheckpointValue(extension.bytes);
+      if (!hasMonsterList(root)) throw new Error("Missing base monster list");
       return { ...extension, bytes: encodeCheckpointValue({ ...root, monsters: root.monsters.filter(entry => !legacySlots.has(entry.actor.slot)) }) };
     }),
   };

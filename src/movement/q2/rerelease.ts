@@ -52,6 +52,10 @@ export class Q2RereleaseMovementContext {
   }
 }
 
+/** Keeps each binding's own type, which an array literal would widen to a union. */
+function savedBindings<T extends readonly unknown[]>(...bindings: T): T {
+  return bindings;
+}
 export function createRereleaseMovement(numericOps: NumericOperations, context: Q2RereleaseMovementContext, flight = false, speedMultiplier = 1) {
   const equipmentSpeed = (value: number): number => (speedMultiplier === 1 ? value : numericOps.multiply(value, speedMultiplier));
   const sourceFloat = (value: number): number => (numericOps.profile.arithmetic.kind === "donor-binary64" ? value : numericOps.store(value));
@@ -860,7 +864,7 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
     }
   }
   function Pmove(pmove: KexPmoveT, pmoveConfig: PmConfigT = PM_CONFIG_DEFAULT): void {
-    const saved = [pm, config, pml, acceptedBodyBounds, acceptedDuck, acceptedHeight] as const;
+    const saved = savedBindings(pm, config, pml, acceptedBodyBounds, acceptedDuck, acceptedHeight);
     pm = pmove;
     config = pmoveConfig;
     try {
@@ -989,12 +993,12 @@ export function pmoveRerelease(
 ): void {
   let contexts = movementByContext.get(numericOps);
   if (contexts === undefined) {
-    contexts = new WeakMap();
+    contexts = new WeakMap<Q2RereleaseMovementContext, { readonly walking: Map<number, RereleaseMovement>; readonly flying: Map<number, RereleaseMovement> }>();
     movementByContext.set(numericOps, contexts);
   }
   let variants = contexts.get(context);
   if (variants === undefined) {
-    variants = { walking: new Map(), flying: new Map() };
+    variants = { walking: new Map<number, RereleaseMovement>(), flying: new Map<number, RereleaseMovement>() };
     contexts.set(context, variants);
   }
   const byMultiplier = flight ? variants.flying : variants.walking;

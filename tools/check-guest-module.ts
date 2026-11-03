@@ -146,12 +146,13 @@ export async function runGuestModule(bytes: Uint8Array, name: string, instructio
       },
     };
     // The check host serves the traps that need no map or clients; any other trap ends the run as an unbound service.
+    const qagame: "qagame" = "qagame";
     const common = {
-      role: "qagame" as const,
+      role: qagame,
       cvars,
       print: (text: string) => output.push(text),
       milliseconds: () => 0,
-      arguments: () => [] as readonly string[],
+      arguments: (): readonly string[] => [],
       realTime: () => 0,
       commands: {
         executeNow: (text: string | null) => {

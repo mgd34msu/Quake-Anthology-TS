@@ -20,7 +20,7 @@ export interface SyntheticElfOptions {
   readonly bss?: number;
 }
 
-export const SYNTHETIC_ELF = { code: 0x600, data: 0xc00, size: 0x1000 } as const;
+export const SYNTHETIC_ELF = { code: 0x600, data: 0xc00, size: 0x1000 };
 
 export function syntheticElfModule(options: SyntheticElfOptions): Uint8Array {
   const { width, code } = options,
@@ -62,25 +62,24 @@ export function syntheticElfModule(options: SyntheticElfOptions): Uint8Array {
   const relative = options.relative ?? [];
   const entry = wide ? 24 : 16,
     relocationEntry = wide ? 24 : 8;
+  const relocationTags: readonly (readonly [number, number])[] = wide
+    ? [
+        [7, relocationsAt],
+        [8, relative.length * relocationEntry],
+        [9, relocationEntry],
+      ]
+    : [
+        [17, relocationsAt],
+        [18, relative.length * relocationEntry],
+        [19, relocationEntry],
+      ];
   const tags: readonly (readonly [number, number])[] = [
     [4, hashAt],
     [5, stringsAt],
     [10, 0x80],
     [6, symbolsAt],
     [11, entry],
-    ...(relative.length === 0
-      ? []
-      : wide
-        ? ([
-            [7, relocationsAt],
-            [8, relative.length * relocationEntry],
-            [9, relocationEntry],
-          ] as const)
-        : ([
-            [17, relocationsAt],
-            [18, relative.length * relocationEntry],
-            [19, relocationEntry],
-          ] as const)),
+    ...(relative.length === 0 ? [] : relocationTags),
     [0, 0],
   ];
   segment(0, 1, 0, SYNTHETIC_ELF.size, SYNTHETIC_ELF.size + (options.bss ?? 0), 4096);

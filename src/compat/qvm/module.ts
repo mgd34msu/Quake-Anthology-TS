@@ -35,7 +35,7 @@ import type {
   QvmSystemCallResult,
 } from "./interpreter.ts";
 import { parseQvmRestart } from "./image.ts";
-import type { QvmCvarServices } from "./cvar-syscalls.ts";
+import type { CvarSnapshot } from "../../core/cvars/index.ts";
 import type { QvmSemantics } from "./interpreter.ts";
 import type { QvmMemory } from "./memory.ts";
 import type { QvmRegionEvaluation } from "./regions.ts";
@@ -70,7 +70,10 @@ export interface QvmHostState {
   readonly restore: (state: QvmHostCheckpoint) => undefined;
 }
 /** vm_game, vm_cgame and vm_ui (qcommon/vm.c): 1 selects vm_interpreted.c; 0 and 2 run the compiled-VM semantics, id's default. */
-export function qvmSemanticsFromCvar(cvars: Pick<QvmCvarServices, "register">, role: QvmRole): QvmSemantics {
+export function qvmSemanticsFromCvar(
+  cvars: { register(name: string, defaultValue: string, flags?: number): Pick<CvarSnapshot, "integerValue"> | undefined },
+  role: QvmRole,
+): QvmSemantics {
   const name = role === "qagame" ? "vm_game" : role === "cgame" ? "vm_cgame" : "vm_ui";
   const value = cvars.register(name, "2", 1)?.integerValue;
   return value === 1 ? "interpreted" : "compiled";

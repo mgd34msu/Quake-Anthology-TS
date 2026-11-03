@@ -297,8 +297,9 @@ export function parseApplicationCommand(argv: readonly string[], search: Content
         break;
       }
       case "--vm-game": {
-        if (value !== "0" && value !== "1" && value !== "2") throw new Error("--vm-game requires 0 (native module), 1 (interpreted) or 2 (compiled)");
-        options = { ...options, vmGame: Number(value) as 0 | 1 | 2 };
+        const vmGame = value === "0" ? 0 : value === "1" ? 1 : value === "2" ? 2 : undefined;
+        if (vmGame === undefined) throw new Error("--vm-game requires 0 (native module), 1 (interpreted) or 2 (compiled)");
+        options = { ...options, vmGame };
         break;
       }
       case "--progs": {

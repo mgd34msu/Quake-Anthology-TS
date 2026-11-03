@@ -6,7 +6,7 @@ import type { MountedContent, OpenedResource } from "../../content/mounts/index.
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
 
 export interface BotAssetResources {
-  open(path: string): Promise<OpenedResource | null>;
+  open(path: string): Promise<Pick<OpenedResource, "bytes"> | null>;
 }
 export interface BotSourceFiles {
   read(path: string): Uint8Array | null;

@@ -22,6 +22,11 @@ export interface NativeUiArtSelection {
   /** The startup menu's backdrop. */
   readonly mainBackground?: boolean;
 }
+const menuBackgroundId: ResourceId = "resource:engine-menu:background";
+const mainBackgroundId: ResourceId = "resource:engine-menu:main-background";
+const panelId: ResourceId = "resource:engine-menu:panel";
+const focusId: ResourceId = "resource:engine-menu:focus";
+
 export async function loadNativeUiArt(
   font: ResourceId,
   images: SceneImageRegistry,
@@ -30,12 +35,12 @@ export async function loadNativeUiArt(
 ): Promise<NativeUiArt> {
   const { frames = true, mainBackground = true } = selection;
   const assets: readonly { readonly resource: ResourceId; readonly file: MenuArtFile }[] = [
-    ...(frames ? [{ resource: "resource:engine-menu:background" as const, file: menuBackground }] : []),
-    ...(mainBackground ? [{ resource: "resource:engine-menu:main-background" as const, file: mainMenuBackground }] : []),
+    ...(frames ? [{ resource: menuBackgroundId, file: menuBackground }] : []),
+    ...(mainBackground ? [{ resource: mainBackgroundId, file: mainMenuBackground }] : []),
     ...(frames
       ? [
-          { resource: "resource:engine-menu:panel" as const, file: menuPanel },
-          { resource: "resource:engine-menu:focus" as const, file: menuFocus },
+          { resource: panelId, file: menuPanel },
+          { resource: focusId, file: menuFocus },
         ]
       : []),
   ];
@@ -67,9 +72,9 @@ export async function loadNativeUiArt(
     const skin = frames
       ? {
           ...defaultUiSkin(font),
-          background: "resource:engine-menu:background" as const,
-          panel: slice("resource:engine-menu:panel", menuPanel),
-          focus: slice("resource:engine-menu:focus", menuFocus),
+          background: menuBackgroundId,
+          panel: slice(panelId, menuPanel),
+          focus: slice(focusId, menuFocus),
         }
       : { ...defaultUiSkin(font), background: null, panel: null, focus: null };
     return {

@@ -50,7 +50,9 @@ export class Deque<T> {
     if (records.length === 0) return;
     if (this.start >= records.length) {
       this.start -= records.length;
-      for (let i = 0; i < records.length; i++) this.items[this.start + i] = records[i] as T;
+      records.forEach((record, i) => {
+        this.items[this.start + i] = record;
+      });
     } else {
       this.items = [...records, ...this.items.slice(this.start)];
       this.start = 0;
@@ -60,11 +62,12 @@ export class Deque<T> {
     return this.items.slice(this.start);
   }
   forEachLive(visit: (record: T) => void): void {
-    for (let i = this.start; i < this.items.length; i++) visit(this.items[i] as T);
+    this.items.forEach((record, i) => {
+      if (i >= this.start) visit(record);
+    });
   }
   someLive(predicate: (record: T) => boolean): boolean {
-    for (let i = this.start; i < this.items.length; i++) if (predicate(this.items[i] as T)) return true;
-    return false;
+    return this.items.some((record, i) => i >= this.start && predicate(record));
   }
   filterLive(predicate: (record: T) => boolean): void {
     this.items = this.items.slice(this.start).filter(predicate);

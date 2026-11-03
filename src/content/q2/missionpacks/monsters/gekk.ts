@@ -215,8 +215,8 @@ function search(context: MonsterContext): undefined {
 
 /** game_x64.dll gekk_blocked jump moves (frames 74-81, ai_move, ending in gekk_run), read from the shipped DLL; classic has none. */
 const rereleaseJumpFrames = (first: string, firstDistance: number): MonsterMove["frames"] =>
-  Array.from({ length: 8 }, (_, index) => ({
-    ai: "move" as const,
+  Array.from({ length: 8 }, (_, index): MonsterMove["frames"][number] => ({
+    ai: "move",
     distance: index < 2 ? firstDistance : 0,
     actions: index === 0 ? [first] : index === 6 ? ["gekk_jump_wait_land"] : [],
     lerpFrame: -1,

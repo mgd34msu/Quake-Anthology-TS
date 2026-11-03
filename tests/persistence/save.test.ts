@@ -1077,10 +1077,11 @@ test("saves written before schema 4 load and migrate to an empty selection-consu
   const { consumption: _consumption, ...rest } = image;
   const headerLength = loadU32LE(current, 8),
     header = current.subarray(12, 12 + headerLength);
-  for (const [magic, payloadImage] of [
+  const previousWriters: readonly (readonly [string, object])[] = [
     ["QTSAVE4\n", { ...rest, schemaVersion: 3 }],
     ["QTSAVE4\n", { ...rest, schemaVersion: 3, consumption }],
-  ] as const) {
+  ];
+  for (const [magic, payloadImage] of previousWriters) {
     const payload = encodeCheckpointValue(payloadImage),
       old = new Uint8Array(12 + header.length + payload.length);
     old.set(new TextEncoder().encode(magic));

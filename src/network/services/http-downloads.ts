@@ -72,7 +72,7 @@ async function downloadResponse(url: URL, signal: AbortSignal, method: "GET" | "
     } finally {
       clearTimeout(timer);
     }
-    const source = response.body;
+    const source: unknown = response.body;
     if (isReadableStream(source) && ![204, 205, 304].includes(response.status) && ![301, 302, 303, 307, 308].includes(response.status)) {
       // The deadline covers response headers and each wait for the next chunk, not the whole transfer.
       const reader = source.getReader();
@@ -88,7 +88,7 @@ async function downloadResponse(url: URL, signal: AbortSignal, method: "GET" | "
             clearTimeout(timer);
           }
         },
-        cancel(reason) {
+        cancel(reason: unknown) {
           return reader.cancel(reason);
         },
       });

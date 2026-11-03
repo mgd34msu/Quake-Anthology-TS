@@ -3,6 +3,7 @@ import type { ResolvedExecutionModule } from "../../../../contracts/content.ts";
 import type {
   GuestAddress,
   GuestCallContext,
+  GuestLayout,
   GuestMappingRecord,
   ModuleIdentity,
   NativeGuestCheckpoint,
@@ -126,7 +127,7 @@ interface Lifecycle {
 }
 
 const STACK_LABEL = "native Q3 stack";
-const PROCESSOR_LAYOUT = { id: "q3:native-processor", byteLength: 0, alignment: 1, byteOrder: "little-endian", fields: [] } as const;
+const PROCESSOR_LAYOUT: Omit<GuestLayout, "pointerBytes"> = { id: "q3:native-processor", byteLength: 0, alignment: 1, byteOrder: "little-endian", fields: [] };
 const writable = (permissions: string): boolean => permissions === "read-write" || permissions === "read-write-execute";
 
 /**

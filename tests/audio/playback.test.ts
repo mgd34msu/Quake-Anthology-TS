@@ -652,7 +652,10 @@ test("Doppler singularities and arbitrarily large finite rates have bounded samp
       let reads = 0;
       const samples = new Proxy(backing, {
         get(target, key) {
-          if (typeof key !== "string" || !/^\d+$/.test(key)) return target[key as keyof Int16Array];
+          if (typeof key !== "string" || !/^\d+$/.test(key)) {
+            const member: unknown = Reflect.get(target, key);
+            return member;
+          }
           reads++;
           return target[Number(key)];
         },

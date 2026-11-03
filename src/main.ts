@@ -22,12 +22,17 @@ export function redactOutput(text: string): string {
     "$1<redacted>",
   );
 }
+function isUnknownList(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
+}
 /** The stack plus everything the error wraps; AggregateError and `cause` otherwise vanish from the log. */
 export function describeFailure(error: unknown, depth = 0): string {
   if (!(error instanceof Error)) return String(error);
   let text = error.stack ?? error.message;
   if (depth >= 8) return text;
-  if (error instanceof AggregateError) for (const inner of error.errors) text += `\n[aggregated] ${describeFailure(inner, depth + 1)}`;
+  let aggregated: unknown;
+  if (error instanceof AggregateError) aggregated = error.errors;
+  if (isUnknownList(aggregated)) for (const inner of aggregated) text += `\n[aggregated] ${describeFailure(inner, depth + 1)}`;
   if (error.cause !== undefined) text += `\n[cause] ${describeFailure(error.cause, depth + 1)}`;
   return text;
 }

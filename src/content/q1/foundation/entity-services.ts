@@ -679,7 +679,7 @@ export class Q1EntityServices {
   find(targetname: string): readonly Q1Actor[] {
     if (targetname === "") return [];
     if (this.nameIndexEpoch !== this.entityEpoch || this.nameIndexRenames !== targetnameEpoch.value) {
-      this.nameIndex = new Map();
+      this.nameIndex = new Map<string, Q1Actor[]>();
       for (const entity of this.entities.values())
         if (entity.targetname !== "") {
           const bucket = this.nameIndex.get(entity.targetname);

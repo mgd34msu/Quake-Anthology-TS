@@ -126,7 +126,7 @@ export class ApplicationQ3Assets implements SoundAssetReader {
     // Owners of one mount plan (one per seat and source generation) share the opened bytes instead of each reading them again.
     let shared = sharedSynchronousAssets.get(provider.mounts);
     if (shared === undefined) {
-      shared = new Map();
+      shared = new Map<string, Promise<OpenedResource | null>>();
       sharedSynchronousAssets.set(provider.mounts, shared);
     }
     const table = shared;

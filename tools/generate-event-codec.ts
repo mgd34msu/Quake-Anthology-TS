@@ -16,6 +16,15 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { handWritten, keptCases, ranges } from "./event-codec-rules.ts";
 
+function isTypeReference(type: ts.Type): type is ts.TypeReference {
+  return (
+    (type.flags & ts.TypeFlags.Object) !== 0 &&
+    "objectFlags" in type &&
+    typeof type.objectFlags === "number" &&
+    (type.objectFlags & ts.ObjectFlags.Reference) !== 0
+  );
+}
+
 const root = new URL("..", import.meta.url).pathname;
 export const codecPath = `${root}src/app/bootstrap/network/unified-event-codec.ts`;
 
@@ -122,7 +131,7 @@ export class Deriver {
     if (identity !== undefined) return `id:${identity}`;
     const depth = stack.indexOf(type);
     if (depth >= 0) return `~${depth}`;
-    if (this.checker.isArrayType(type)) return `[${this.structure(this.checker.getTypeArguments(type as ts.TypeReference)[0] ?? type, stack)}]`;
+    if (this.checker.isArrayType(type) && isTypeReference(type)) return `[${this.structure(this.checker.getTypeArguments(type)[0] ?? type, stack)}]`;
     // Well-known symbol members (`__@iterator@115`) carry compiler-assigned ids that shift whenever the program changes.
     const props = this.props(type).filter(prop => !prop.name.startsWith("__@"));
     if (props.length === 0 || type.flags & (ts.TypeFlags.StringLike | ts.TypeFlags.NumberLike | ts.TypeFlags.BooleanLike)) return this.leaf(type);
@@ -294,8 +303,8 @@ export class Deriver {
       const only = members[0];
       if (only.flags & ts.TypeFlags.String) return `${expr}.string()`;
       if (only.flags & ts.TypeFlags.Number) return `${expr}.finite()`;
-      if (this.checker.isArrayType(only)) {
-        const element = this.checker.getTypeArguments(only as ts.TypeReference)[0];
+      if (this.checker.isArrayType(only) && isTypeReference(only)) {
+        const element = this.checker.getTypeArguments(only)[0];
         if (element === undefined) throw new Error("array without element type");
         return `boundedList(${expr}, item => ${this.read(element, "item", { scope: ctx.scope, node: this.elementNode(ctx.node) })})`;
       }
@@ -349,8 +358,8 @@ export class Deriver {
     if (members.length === 1 && members[0] !== undefined) {
       const only = members[0];
       if (only.flags & (ts.TypeFlags.String | ts.TypeFlags.Number)) return acc;
-      if (this.checker.isArrayType(only)) {
-        const element = this.checker.getTypeArguments(only as ts.TypeReference)[0];
+      if (this.checker.isArrayType(only) && isTypeReference(only)) {
+        const element = this.checker.getTypeArguments(only)[0];
         if (element === undefined) throw new Error("array without element type");
         return `${acc}.map(item => ${this.write(element, "item", { scope: ctx.scope, node: this.elementNode(ctx.node) })})`;
       }
@@ -497,7 +506,8 @@ export function derive(input: string): Derivation {
   const writes = declared(anyWrite);
   const names = new Set([...declared(anyRead)].filter(name => writes.has(name) && /\btype Event/.test(source) && source.includes(`type ${name} =`)));
   const config = ts.readConfigFile(`${root}tsconfig.json`, ts.sys.readFile);
-  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
+  const tsconfigJson: unknown = config.config;
+  const parsed = ts.parseJsonConfigFileContent(tsconfigJson, ts.sys, root);
   const host = ts.createCompilerHost(parsed.options);
   const defaultRead = host.readFile.bind(host);
   host.readFile = file => (file === codecPath ? source : defaultRead(file));

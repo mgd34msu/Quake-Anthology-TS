@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 
 export const spdxLine = "// SPDX-License-Identifier: GPL-2.0-or-later";
 const roots = ["src", "tests", "tools"];
+/** Files whose exact text is mandated by tools/check-policy.ts, so they cannot carry a header comment. */
+const verbatimFiles = new Set(["src/types/png.d.ts"]);
 
 /** Returns the source text with the SPDX identifier as its first line (after a shebang), unchanged when already present. */
 export function withSpdx(text: string): string {
@@ -27,6 +29,7 @@ export async function missingSpdx(directory: string): Promise<string[]> {
     for (const entry of readdirSync(join(directory, root), { recursive: true, encoding: "utf8" })) {
       if (!entry.endsWith(".ts") || entry.includes("node_modules")) continue;
       const file = `${root}/${entry}`;
+      if (verbatimFiles.has(file)) continue;
       if (!hasSpdx(await Bun.file(join(directory, file)).text())) missing.push(file);
     }
   }

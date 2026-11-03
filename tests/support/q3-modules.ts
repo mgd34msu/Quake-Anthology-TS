@@ -34,7 +34,7 @@ export const Q3_DATA = {
   entities: 0x400,
   clients: 0x400 + Q3_ENTITIES * Q3_ENTITY_STRIDE,
   end: 0x400 + Q3_ENTITIES * Q3_ENTITY_STRIDE + Q3_CLIENTS * Q3_CLIENT_STRIDE,
-} as const;
+};
 export const Q3_STRINGS: Readonly<Record<number, string>> = {
   [Q3_DATA.cvarName]: "g_synthetic",
   [Q3_DATA.cvarDefault]: "42",
@@ -59,7 +59,7 @@ export const Q3_FIELDS = {
   clientNumber: 140,
   viewHeight: 164,
   health: 184,
-} as const;
+};
 
 type Operand = number | { readonly arg: number } | "eax" | "ecx";
 const float = (value: number): number => new DataView(Float32Array.of(value).buffer).getInt32(0, true);
@@ -158,7 +158,7 @@ const PE_IMPORTS = {
   address: 0x3360,
   names: [0x3380, 0x3390, 0x33a0, 0x33b0, 0x33c0, 0x33d0],
   functions: ["GetProcessHeap", "HeapAlloc", "HeapFree", "FlsAlloc", "FlsSetValue", "FlsGetValue"],
-} as const;
+};
 const peImportSlots: HeapImports = {
   getProcessHeap: Q3_MODULE_BASE + PE_IMPORTS.address,
   heapAlloc: Q3_MODULE_BASE + PE_IMPORTS.address + 4,

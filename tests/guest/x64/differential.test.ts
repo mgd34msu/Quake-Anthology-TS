@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createContentDigest } from "../../../src/contracts/content.ts";
-import type { GuestAddress, ModuleIdentity } from "../../../src/contracts/execution.ts";
+import type { ModuleIdentity } from "../../../src/contracts/execution.ts";
 import { createGuestProcessorState, createManagedGuestProcessorState, SparseGuestMemory } from "../../../src/guest/core/index.ts";
 import { X64Cpu } from "../../../src/guest/x64/index.ts";
 
@@ -28,7 +28,9 @@ function random(): number {
   return seed;
 }
 function pick<T>(values: readonly T[]): T {
-  return values[random() % values.length] as T;
+  const value = values[random() % values.length];
+  if (value === undefined) throw new Error("Cannot pick from an empty list");
+  return value;
 }
 function imm32(value: number): number[] {
   return [value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255];
@@ -110,7 +112,24 @@ function build(mode: Mode, bytes: readonly number[], registers: readonly bigint[
     mxcsr: 0x1f80,
     mxcsrMask: 0xffff,
   });
-  const names = ["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"] as const;
+  const names: readonly Parameters<typeof state.registers.write>[0][] = [
+    "rax",
+    "rcx",
+    "rdx",
+    "rbx",
+    "rsp",
+    "rbp",
+    "rsi",
+    "rdi",
+    "r8",
+    "r9",
+    "r10",
+    "r11",
+    "r12",
+    "r13",
+    "r14",
+    "r15",
+  ];
   const reset = (): void => {
     state.instructionPointer = codeBase;
     state.flags.value = 2n;
@@ -132,7 +151,7 @@ function build(mode: Mode, bytes: readonly number[], registers: readonly bigint[
       ip: state.instructionPointer,
       flags: state.flags.value,
       registers: [...state.registers.checkpoint()],
-      data: [...memory.copy(data as GuestAddress, 256)],
+      data: [...memory.copy(data, 256)],
     };
   };
   return { reset, observe };

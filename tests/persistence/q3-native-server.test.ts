@@ -6,7 +6,7 @@ import { loadApplicationContent } from "../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { createSimulation, savedSimulationSettings } from "../../src/app/bootstrap/simulation/index.ts";
 import { simulationQ3GuestCheckpoint, validateSimulationSave } from "../../src/app/bootstrap/simulation/save.ts";
-import { Q3NativeGuestSource } from "../../src/app/bootstrap/simulation/q3/native-guest-source.ts";
+import { Q3NativeGuestSource, type Q3NativeProfile } from "../../src/app/bootstrap/simulation/q3/native-guest-source.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { SaveImage } from "../../src/contracts/session.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
@@ -83,11 +83,12 @@ function heapChain(engine: Q3NativeGuestSource): { readonly count: number; reado
 }
 
 const heapPe = (): Uint8Array => authoredQ3Pe({ heap: true });
-for (const [label, file, build, profile] of [
+const nativeCases: readonly (readonly [string, string, () => Uint8Array, Q3NativeProfile])[] = [
   ["authored PE", "qagamex86.dll", authoredQ3Pe, "q3-pe"],
   ["synthetic ELF", "qagamei386.so", syntheticQ3Elf, "q3-elf"],
   ["authored PE that allocates heap every frame", "qagamex86.dll", heapPe, "q3-pe"],
-] as const) {
+];
+for (const [label, file, build, profile] of nativeCases) {
   test(`a mod that ships a native ${label} qagame runs spawn, connect, frames and a save through the server entry point`, async () => {
     const userRoot = await userRootWith(file, build());
     const options = launchOptions(userRoot, "--vm-game", "0");
@@ -189,25 +190,25 @@ for (const [label, file, build, profile] of [
       simulation.drainPresentationEvents();
       simulation.events.take();
       output.length = 0;
-      async function frames(count: number) {
+      const frames = async (count: number) => {
         const trace: { readonly frame: SaveImage["frame"]; readonly time: number; readonly commandTime: number }[] = [];
         for (let frame = 0; frame < count; frame++) {
           milliseconds += 50;
-          const player = guest!.players()[0];
+          const player = guest.players()[0];
           if (player === undefined) throw new Error("Guest client vanished");
-          await guest!.think(player, userCommand());
+          await guest.think(player, userCommand());
           const completed = await session.stepAsync({ elapsedMilliseconds: 50, commands: [] });
           commands().execute();
           simulation.drainPresentationEvents();
           simulation.events.take();
           trace.push({
             frame: completed.snapshot.frame,
-            time: guest!.records.entity(0).s.time,
-            commandTime: guest!.records.player(player.sourceEntity).commandTimeMilliseconds,
+            time: guest.records.entity(0).s.time,
+            commandTime: guest.records.player(player.sourceEntity).commandTimeMilliseconds,
           });
         }
         return trace;
-      }
+      };
       return {
         simulation,
         guest,

@@ -3,7 +3,7 @@
  * (frame-yielding) entry points differ only in how each stage executes, so the two cannot drift apart. */
 
 /** Runs the stages with synchronous host calls. A stage failure is thrown into the generator so its cleanup runs. */
-export function driveTravel<Step, Result>(stages: Generator<Step, Result>, execute: (step: Step) => void): Result {
+export function driveTravel<Step, Result>(stages: Generator<Step, Result, undefined>, execute: (step: Step) => void): Result {
   let next = stages.next();
   while (next.done !== true) {
     try {
@@ -18,7 +18,7 @@ export function driveTravel<Step, Result>(stages: Generator<Step, Result>, execu
 }
 
 /** Same stages with loading host calls that yield to the frame loop between instruction slices. */
-export async function driveTravelLoading<Step, Result>(stages: Generator<Step, Result>, execute: (step: Step) => Promise<void>): Promise<Result> {
+export async function driveTravelLoading<Step, Result>(stages: Generator<Step, Result, undefined>, execute: (step: Step) => Promise<void>): Promise<Result> {
   let next = stages.next();
   while (next.done !== true) {
     try {

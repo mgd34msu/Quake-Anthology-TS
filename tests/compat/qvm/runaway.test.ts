@@ -64,7 +64,7 @@ test("vm_game, vm_cgame and vm_ui select the instruction semantics, with id's co
   const cvars = {
     register: (name: string, fallback: string) => {
       if (!values.has(name)) values.set(name, Number(fallback));
-      return { integerValue: values.get(name) ?? 0 } as never;
+      return { integerValue: values.get(name) ?? 0 };
     },
   };
   expect(qvmSemanticsFromCvar(cvars, "qagame")).toBe("compiled");

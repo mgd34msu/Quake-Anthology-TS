@@ -232,11 +232,11 @@ describe("source soldier and infantry behavior", () => {
   test("rerelease Xatrix soldiers spawn as soldier-family variants with their own skin, count and health", () => {
     const scene = fixture("rerelease");
     try {
-      const expected = [
+      const expected: readonly (readonly [string, number, number, number, string])[] = [
         ["monster_soldier_ripper", 50, 6, 0, "blaster"],
         ["monster_soldier_hypergun", 60, 8, 2, "shotgun"],
         ["monster_soldier_lasergun", 70, 10, 4, "machinegun"],
-      ] as const;
+      ];
       for (const [classname, health, skin, count, weapon] of expected) {
         const context = scene.spawn(classname);
         expect([

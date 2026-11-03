@@ -155,11 +155,12 @@ export class Quake3VmModule {
     if (arguments_.length > 12) throw new RangeError("Q3 vmMain accepts at most twelve arguments");
     const { image, context, instructionBudget } = this.options;
     const args: GuestCallValue[] = [command, ...arguments_, ...new Array<number>(12 - arguments_.length).fill(0)].map(value => ({ kind: "int32", value }));
+    const callback: GuestCallContext["callback"] = { kind: "native-guest", module: image.module, address: this.vmMain, abi: image.abi };
     return {
       target: this.vmMain,
       signature: nativeQ3Signature(image.abi, new Array<GuestStorage>(13).fill("int32"), "int32"),
       arguments: args,
-      context: { ...context, callback: { kind: "native-guest" as const, module: image.module, address: this.vmMain, abi: image.abi } },
+      context: { ...context, callback },
       instructionBudget,
     };
   }

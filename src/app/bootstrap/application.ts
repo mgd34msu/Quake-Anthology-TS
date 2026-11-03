@@ -405,6 +405,22 @@ interface WorldPlan {
   nextOverrides: TeamArenaOverrides | null;
 }
 
+/** One output of a transaction stage: reading it before its stage has run is a sequencing fault, not an undefined value. */
+class StageSlot<T> {
+  #held: { readonly value: T } | null = null;
+  constructor(private readonly name: string) {}
+  get value(): T {
+    if (this.#held === null) throw new Error(`World transition stage output ${this.name} was read before its stage ran`);
+    return this.#held.value;
+  }
+  set value(next: T) {
+    this.#held = { value: next };
+  }
+  current(): T | undefined {
+    return this.#held?.value;
+  }
+}
+
 /**
  * One world replacement as an explicit transaction. The planning stage fills `WorldPlan`; each later stage acquires
  * its resources into `staged` and records its outputs here, so the data one stage hands the next is named rather
@@ -425,39 +441,39 @@ class WorldTransition {
   recordingTransitionError: unknown = null;
   readonly retirementErrors: { readonly label: string; readonly error: unknown }[] = [];
   // set by initializeWorldTransition
-  staged!: WorldReplacement;
-  candidateGraph!: SourceDebugGraph;
-  guestRejectedClients!: Map<ClientId, string>;
-  guestNetworkCommands!: EventRing<{ readonly slot: number; readonly text: string }>;
-  guestCandidateOutput!: Q3GuestOutput;
-  carriedGuestCommands!: Map<number, ReturnType<Q3GuestRuntime["state"]["getUserCommand"]> | undefined>;
-  nextClientCvars!: Map<SeatId, CvarRegistry>;
+  readonly staged = new StageSlot<WorldReplacement>("staged");
+  readonly candidateGraph = new StageSlot<SourceDebugGraph>("candidateGraph");
+  readonly guestRejectedClients = new StageSlot<Map<ClientId, string>>("guestRejectedClients");
+  readonly guestNetworkCommands = new StageSlot<EventRing<{ readonly slot: number; readonly text: string }>>("guestNetworkCommands");
+  readonly guestCandidateOutput = new StageSlot<Q3GuestOutput>("guestCandidateOutput");
+  readonly carriedGuestCommands = new StageSlot<Map<number, ReturnType<Q3GuestRuntime["state"]["getUserCommand"]> | undefined>>("carriedGuestCommands");
+  readonly nextClientCvars = new StageSlot<Map<SeatId, CvarRegistry>>("nextClientCvars");
   // set by stageCandidateInputs and stageCandidateCommands
-  q1SourceRegistry!: ReturnType<typeof cloneQ1SourceCvars> | undefined;
-  clients!: readonly ClientId[];
-  modCommands!: ModCommands;
-  candidateActions!: ApplicationCommandRequest[];
-  candidateAction!: (request: ApplicationCommandRequest) => undefined;
-  nativeCommand!: (text: string) => undefined;
-  guestCommands!: () => CommandBuffer;
-  monsterNavigation!: Awaited<ReturnType<typeof preloadApplicationMonsterNavigation>>;
+  readonly q1SourceRegistry = new StageSlot<ReturnType<typeof cloneQ1SourceCvars> | undefined>("q1SourceRegistry");
+  readonly clients = new StageSlot<readonly ClientId[]>("clients");
+  readonly modCommands = new StageSlot<ModCommands>("modCommands");
+  readonly candidateActions = new StageSlot<ApplicationCommandRequest[]>("candidateActions");
+  readonly candidateAction = new StageSlot<(request: ApplicationCommandRequest) => undefined>("candidateAction");
+  readonly nativeCommand = new StageSlot<(text: string) => undefined>("nativeCommand");
+  readonly guestCommands = new StageSlot<() => CommandBuffer>("guestCommands");
+  readonly monsterNavigation = new StageSlot<Awaited<ReturnType<typeof preloadApplicationMonsterNavigation>>>("monsterNavigation");
   modTravel: Awaited<ReturnType<SharedSimulation["checkpointModsForTravel"]>> | undefined = undefined;
-  continueQ3Clock!: boolean;
-  destinationSourceMilliseconds!: number;
+  readonly continueQ3Clock = new StageSlot<boolean>("continueQ3Clock");
+  readonly destinationSourceMilliseconds = new StageSlot<number>("destinationSourceMilliseconds");
   // set by stageSimulation, stageClientState, stageNetworkHost and stageSourceCommands
-  nextSimulation!: SharedSimulation;
-  admissions!: Map<number, ActorId>;
-  nextUnifiedHost!: {
+  readonly nextSimulation = new StageSlot<SharedSimulation>("nextSimulation");
+  readonly admissions = new StageSlot<Map<number, ActorId>>("admissions");
+  readonly nextUnifiedHost = new StageSlot<{
     readonly host: ReturnType<typeof createUnifiedApplicationServerHost>;
     readonly composition: Awaited<ReturnType<typeof buildUnifiedComposition>>;
-  } | null;
-  preparedCommands!: PreparedSourceCommands;
+  } | null>("nextUnifiedHost");
+  readonly preparedCommands = new StageSlot<PreparedSourceCommands>("preparedCommands");
   // set by stageCapture, stageReplacementSet, stageHeadlessAdoption and stageCommit
   previousCapture: ApplicationCapture | null = null;
-  nextCapture!: ApplicationCapture | null;
+  readonly nextCapture = new StageSlot<ApplicationCapture | null>("nextCapture");
   publishAudio: ReturnType<ApplicationAudio["prepareOutputTransfer"]> | null = null;
-  replacementPresentations!: Parameters<EngineSession["replaceWorld"]>[1];
-  replacementClients!: Parameters<EngineSession["replaceWorld"]>[2];
+  readonly replacementPresentations = new StageSlot<Parameters<EngineSession["replaceWorld"]>[1]>("replacementPresentations");
+  readonly replacementClients = new StageSlot<Parameters<EngineSession["replaceWorld"]>[2]>("replacementClients");
   adoptHeadless: () => void = () => {};
   replacement: ReturnType<EngineSession["replaceWorld"]> | null = null;
   constructor(plan: WorldPlan, before: PreviousWorld) {
@@ -479,7 +495,7 @@ class WorldTransition {
     this.nextRules = null;
     this.carry = null;
     this.nextOverrides = null;
-    this.carriedGuestCommands.clear();
+    this.carriedGuestCommands.current()?.clear();
     this.replacement = null;
     this.adoptHeadless = () => {};
     this.previousCapture = null;
@@ -4600,7 +4616,7 @@ export class Application {
     });
     try {
       this.initializeWorldTransition(tx);
-      const { staged } = tx;
+      const staged = tx.staged.value;
       try {
         await this.stageCandidateInputs(tx);
         await this.stageCandidateCommands(tx);
@@ -4822,18 +4838,19 @@ export class Application {
     const nextClientCvars = new Map<SeatId, CvarRegistry>();
     tx.candidateImages = null;
 
-    tx.staged = staged;
-    tx.candidateGraph = candidateGraph;
-    tx.guestRejectedClients = guestRejectedClients;
-    tx.guestNetworkCommands = guestNetworkCommands;
-    tx.guestCandidateOutput = guestCandidateOutput;
-    tx.carriedGuestCommands = carriedGuestCommands;
-    tx.nextClientCvars = nextClientCvars;
+    tx.staged.value = staged;
+    tx.candidateGraph.value = candidateGraph;
+    tx.guestRejectedClients.value = guestRejectedClients;
+    tx.guestNetworkCommands.value = guestNetworkCommands;
+    tx.guestCandidateOutput.value = guestCandidateOutput;
+    tx.carriedGuestCommands.value = carriedGuestCommands;
+    tx.nextClientCvars.value = nextClientCvars;
   }
 
   /** Validate the match, prepare client settings and saved clients for the destination. */
   private async stageCandidateInputs(tx: WorldTransition): Promise<void> {
-    const { content, settings, savedBots, staged, preserveBots, q1CvarsSource, save, skirmish, q3Map } = tx;
+    const { content, settings, savedBots, preserveBots, q1CvarsSource, save, skirmish, q3Map } = tx;
+    const staged = tx.staged.value;
     const { graphical: previous, botClients: previousBotClients } = tx.before;
     if (save === undefined)
       preflightApplicationMatch(content, tx.options, [
@@ -4858,8 +4875,8 @@ export class Application {
       staged.savedClients?.clients ??
       this.simulation.clientIdentities().filter(client => preserveBots || !previousBotClients.some(bot => bot.client.id.equals(client)));
 
-    tx.q1SourceRegistry = q1SourceRegistry;
-    tx.clients = clients;
+    tx.q1SourceRegistry.value = q1SourceRegistry;
+    tx.clients.value = clients;
   }
 
   /** Open the candidate command sinks and decide the destination clock. */
@@ -4891,11 +4908,11 @@ export class Application {
       if (commands === null) throw new Error("Q3 guest candidate console is unavailable");
       return commands;
     };
-    tx.modCommands = modCommands;
-    tx.candidateActions = candidateActions;
-    tx.candidateAction = candidateAction;
-    tx.nativeCommand = nativeCommand;
-    tx.guestCommands = guestCommands;
+    tx.modCommands.value = modCommands;
+    tx.candidateActions.value = candidateActions;
+    tx.candidateAction.value = candidateAction;
+    tx.nativeCommand.value = nativeCommand;
+    tx.guestCommands.value = guestCommands;
   }
 
   private async stageCandidateCommands(tx: WorldTransition): Promise<void> {
@@ -4913,15 +4930,16 @@ export class Application {
       );
     const destinationSourceMilliseconds = continueQ3Clock && q3 !== null ? q3.host.now() : tx.initialSourceMilliseconds;
 
-    tx.monsterNavigation = monsterNavigation;
+    tx.monsterNavigation.value = monsterNavigation;
     tx.modTravel = modTravel;
-    tx.continueQ3Clock = continueQ3Clock;
-    tx.destinationSourceMilliseconds = destinationSourceMilliseconds;
+    tx.continueQ3Clock.value = continueQ3Clock;
+    tx.destinationSourceMilliseconds.value = destinationSourceMilliseconds;
   }
 
   /** Retain the native Q2 module across a gamemap. */
   private async stageNativeMapTravel(tx: WorldTransition): Promise<void> {
-    const { content, staged, nextRules, save, nativeTravel } = tx;
+    const { content, nextRules, save, nativeTravel } = tx;
+    const staged = tx.staged.value;
     const { graphical: previous, simulation: previousSimulation } = tx.before;
     if (nativeTravel !== undefined) {
       const oldNative = previousSimulation.q2Native(),
@@ -4960,7 +4978,8 @@ export class Application {
 
   /** Shut the previous QVM game down for a map change. */
   private async stageGuestMapShutdown(tx: WorldTransition): Promise<void> {
-    const { content, staged, save, guestRestart } = tx;
+    const { content, save, guestRestart } = tx;
+    const staged = tx.staged.value;
     const { graphical: previous, simulation: previousSimulation } = tx.before;
     const oldGuest = previousSimulation.q3Guest();
     if (save === undefined && oldGuest !== null) {
@@ -4999,25 +5018,13 @@ export class Application {
     maxClients: number,
     guest: Awaited<ReturnType<typeof Application.guestOptions>>,
   ): Parameters<typeof loadSimulation>[0] {
-    const {
-      content,
-      q3Session,
-      serverProfile,
-      sourceArchive,
-      q2Cvars,
-      q1SourceRegistry,
-      guestRestart,
-      continueQ3Clock,
-      destinationSourceMilliseconds,
-      modCommands,
-      modTravel,
-      monsterNavigation,
-      q2NextServer,
-      skirmish,
-      q3Map,
-      save,
-      clients,
-    } = tx;
+    const { content, q3Session, serverProfile, sourceArchive, q2Cvars, guestRestart, modTravel, q2NextServer, skirmish, q3Map, save } = tx;
+    const q1SourceRegistry = tx.q1SourceRegistry.value;
+    const continueQ3Clock = tx.continueQ3Clock.value;
+    const destinationSourceMilliseconds = tx.destinationSourceMilliseconds.value;
+    const modCommands = tx.modCommands.value;
+    const monsterNavigation = tx.monsterNavigation.value;
+    const clients = tx.clients.value;
     return {
       ...(retainedNative === undefined ? {} : { nativeQ2Travel: retainedNative }),
       dedicated: tx.options.dedicated,
@@ -5066,7 +5073,12 @@ export class Application {
   }
 
   private async stageSimulation(tx: WorldTransition): Promise<void> {
-    const { content, settings, staged, nextRules, candidateGraph, clients, nativeCommand, guestCommands, skirmish, nativeTravel, q3Map, nextFrame } = tx;
+    const { content, settings, nextRules, skirmish, nativeTravel, q3Map, nextFrame } = tx;
+    const staged = tx.staged.value;
+    const candidateGraph = tx.candidateGraph.value;
+    const clients = tx.clients.value;
+    const nativeCommand = tx.nativeCommand.value;
+    const guestCommands = tx.guestCommands.value;
     const { simulation: previousSimulation } = tx.before;
     const retainedNative =
       nativeTravel === undefined ? undefined : await previousSimulation.captureNativeQ2Travel(nativeTravel.newUnit, nativeTravel.spawnPoint, nextFrame);
@@ -5095,12 +5107,15 @@ export class Application {
       nextGuest.state.cvars.set("sv_mapname", mapName, true);
     }
 
-    tx.nextSimulation = nextSimulation;
+    tx.nextSimulation.value = nextSimulation;
   }
 
   /** Create seat cvars and team overrides, and admit every carried client into the destination. */
   private async stageClientState(tx: WorldTransition): Promise<void> {
-    const { content, savedBots, sameClientOwner, botClients, nextClientCvars, clients, nextSimulation, save, skirmish } = tx;
+    const { content, savedBots, sameClientOwner, botClients, save, skirmish } = tx;
+    const nextClientCvars = tx.nextClientCvars.value;
+    const clients = tx.clients.value;
+    const nextSimulation = tx.nextSimulation.value;
     const { graphical: previous, simulation: previousSimulation, clientCvars: previousClientCvars, nativeClients: previousNativeClients } = tx.before;
     if (save !== undefined && nextSimulation.q3Source() !== null && savedBots === null)
       throw new Error("Q3 application restoration requires saved bot service state");
@@ -5165,12 +5180,13 @@ export class Application {
               }),
           );
 
-    tx.admissions = admissions;
+    tx.admissions.value = admissions;
   }
 
   /** Build the destination network host (or the offline recording host). */
   private async stageNetworkHost(tx: WorldTransition): Promise<void> {
-    const { content, nextSimulation } = tx;
+    const { content } = tx;
+    const nextSimulation = tx.nextSimulation.value;
     tx.nextNetworkHost = null;
     const nextUnifiedHost =
       this.network?.kind === "unified"
@@ -5217,37 +5233,34 @@ export class Application {
       }
     }
 
-    tx.nextUnifiedHost = nextUnifiedHost;
+    tx.nextUnifiedHost.value = nextUnifiedHost;
   }
 
   /** Prepare the destination source console. */
   private async stageSourceCommands(tx: WorldTransition): Promise<void> {
-    const { content, modCommands, candidateAction, nextSimulation, save } = tx;
+    const { content, save } = tx;
+    const modCommands = tx.modCommands.value;
+    const candidateAction = tx.candidateAction.value;
+    const nextSimulation = tx.nextSimulation.value;
     const preparedCommands = await this.prepareSourceCommands(nextSimulation, content, save !== undefined, candidateAction);
     tx.candidateCommands = preparedCommands.commands;
     modCommands.flush();
     await this.prepareGuestBots(content, nextSimulation);
 
-    tx.preparedCommands = preparedCommands;
+    tx.preparedCommands.value = preparedCommands;
   }
 
   /** Reconnect carried clients to a continued QVM game or finish restoring one. */
   private async stageGuestContinuation(tx: WorldTransition): Promise<void> {
-    const {
-      content,
-      staged,
-      sameClientOwner,
-      guestRejectedClients,
-      guestCandidateOutput,
-      carriedGuestCommands,
-      nextClientCvars,
-      destinationSourceMilliseconds,
-      nextSimulation,
-      admissions,
-      save,
-      q3Map,
-      guestRestart,
-    } = tx;
+    const { content, sameClientOwner, save, q3Map, guestRestart } = tx;
+    const staged = tx.staged.value;
+    const guestRejectedClients = tx.guestRejectedClients.value;
+    const guestCandidateOutput = tx.guestCandidateOutput.value;
+    const carriedGuestCommands = tx.carriedGuestCommands.value;
+    const nextClientCvars = tx.nextClientCvars.value;
+    const destinationSourceMilliseconds = tx.destinationSourceMilliseconds.value;
+    const nextSimulation = tx.nextSimulation.value;
+    const admissions = tx.admissions.value;
     const { graphical: previous, clientCvars: previousClientCvars } = tx.before;
     const restoredGuest = nextSimulation.q3Guest();
     if (staged.guestTransition !== null && restoredGuest !== null) {
@@ -5350,7 +5363,10 @@ export class Application {
 
   /** Create or restore the destination bots. */
   private async stageBots(tx: WorldTransition): Promise<void> {
-    const { content, savedBots, staged, botClients, guestCommands, nextSimulation, save } = tx;
+    const { content, savedBots, botClients, save } = tx;
+    const staged = tx.staged.value;
+    const guestCommands = tx.guestCommands.value;
+    const nextSimulation = tx.nextSimulation.value;
     const { bots: previousBots } = tx.before;
     if (save === undefined)
       staged.bots = await this.createBots(content, nextSimulation, {
@@ -5377,18 +5393,14 @@ export class Application {
 
   /** Create the destination presentation: assets, input, audio, effects and seat presentations. */
   private async stageGraphical(tx: WorldTransition): Promise<void> {
-    const {
-      content,
-      staged,
-      frontendOverrides,
-      nextClientCvars,
-      candidateAction,
-      destinationSourceMilliseconds,
-      nextSimulation,
-      admissions,
-      preparedCommands,
-      save,
-    } = tx;
+    const { content, frontendOverrides, save } = tx;
+    const staged = tx.staged.value;
+    const nextClientCvars = tx.nextClientCvars.value;
+    const candidateAction = tx.candidateAction.value;
+    const destinationSourceMilliseconds = tx.destinationSourceMilliseconds.value;
+    const nextSimulation = tx.nextSimulation.value;
+    const admissions = tx.admissions.value;
+    const preparedCommands = tx.preparedCommands.value;
     let { graphical: previous } = tx.before;
     if (previous !== null) {
       // Seat closures below outlive this function; the renderer carries across worlds, the old world does not.
@@ -5679,7 +5691,7 @@ export class Application {
 
   /** Choose the destination capture owner and prepare the audio output transfer. */
   private async stageCapture(tx: WorldTransition): Promise<void> {
-    const { staged } = tx;
+    const staged = tx.staged.value;
     const { graphical: previous } = tx.before;
     const previousCapture = this.capture;
     const nextCapture = this.createCandidateCapture(tx);
@@ -5689,13 +5701,13 @@ export class Application {
     if (this.closed) throw new Error("Application closed during world preparation");
 
     tx.previousCapture = previousCapture;
-    tx.nextCapture = nextCapture;
+    tx.nextCapture.value = nextCapture;
     tx.publishAudio = publishAudio;
   }
 
   /** Built in a synchronous method: the capture's closures live as long as the new world, and an async stage's scope also holds the previous capture and world (AUDIT-001). */
   private createCandidateCapture(tx: WorldTransition): ApplicationCapture | null {
-    const graphical = tx.staged.graphical;
+    const graphical = tx.staged.value.graphical;
     if (graphical === null) return null;
     if (this.ownership.kind === "borrowed") return this.ownership.client.capture;
     return new ApplicationCapture(
@@ -5711,7 +5723,7 @@ export class Application {
 
   /** Collect the presentations and client changes the session will publish. */
   private async stageReplacementSet(tx: WorldTransition): Promise<void> {
-    const { staged } = tx;
+    const staged = tx.staged.value;
     const replacementPresentations = staged.presentations.map(presentation => ({
       seat: presentation.local.player.seat,
       presentation,
@@ -5719,13 +5731,15 @@ export class Application {
     }));
     const replacementClients = staged.savedClients ?? { added: [], removed: [] };
 
-    tx.replacementPresentations = replacementPresentations;
-    tx.replacementClients = replacementClients;
+    tx.replacementPresentations.value = replacementPresentations;
+    tx.replacementClients.value = replacementClients;
   }
 
   /** Validate the prepared startup against the destination so a headless world can adopt it on publication. */
   private async stageHeadlessAdoption(tx: WorldTransition): Promise<void> {
-    const { content, staged, nextSimulation } = tx;
+    const { content } = tx;
+    const staged = tx.staged.value;
+    const nextSimulation = tx.nextSimulation.value;
     // Resolved outside the closure below: the adoption handler outlives this call inside the prepared startup, and must not capture the simulation.
     const headlessSource = staged.graphical !== null || this.preparedStartup === null ? null : this.sourceCvars(nextSimulation);
     const adoptHeadless = (() => {
@@ -5765,19 +5779,16 @@ export class Application {
 
   /** Validate every candidate piece, then hand the world to the session; after this the old world is gone. */
   private async stageCommit(tx: WorldTransition): Promise<void> {
-    const {
-      content,
-      staged,
-      frontendOverrides,
-      candidateGraph,
-      nextClientCvars,
-      destinationSourceMilliseconds,
-      nextSimulation,
-      preparedCommands,
-      nextCapture,
-      replacementPresentations,
-      replacementClients,
-    } = tx;
+    const { content, frontendOverrides } = tx;
+    const staged = tx.staged.value;
+    const candidateGraph = tx.candidateGraph.value;
+    const nextClientCvars = tx.nextClientCvars.value;
+    const destinationSourceMilliseconds = tx.destinationSourceMilliseconds.value;
+    const nextSimulation = tx.nextSimulation.value;
+    const preparedCommands = tx.preparedCommands.value;
+    const nextCapture = tx.nextCapture.value;
+    const replacementPresentations = tx.replacementPresentations.value;
+    const replacementClients = tx.replacementClients.value;
     const { graphical: previous, simulation: previousSimulation } = tx.before;
     if (preparedCommands.options === null) throw new Error("Published world requires source command bindings");
     this.sourceCommands?.validateProfile(preparedCommands.options.dialect, undefined);
@@ -5834,7 +5845,11 @@ export class Application {
 
   /** Publish the committed world: console, settings, input, audio and scripts, then retire the previous world. */
   private async publishWorld(tx: WorldTransition): Promise<void> {
-    const { content, staged, candidateActions, preparedCommands, nextCapture, publishAudio, adoptHeadless, replacement, save } = tx;
+    const { content, publishAudio, adoptHeadless, replacement, save } = tx;
+    const staged = tx.staged.value;
+    const candidateActions = tx.candidateActions.value;
+    const preparedCommands = tx.preparedCommands.value;
+    const nextCapture = tx.nextCapture.value;
     const { graphical: previous } = tx.before;
     try {
       this.publishSourceCommands(preparedCommands);
@@ -5905,7 +5920,11 @@ export class Application {
 
   /** Start music, move the network owner to the new world and report retirement failures. */
   private async finishPublication(tx: WorldTransition): Promise<void> {
-    const { content, staged, guestNetworkCommands, guestRejectedClients, nextUnifiedHost, retirementErrors, skirmish } = tx;
+    const { content, retirementErrors, skirmish } = tx;
+    const staged = tx.staged.value;
+    const guestNetworkCommands = tx.guestNetworkCommands.value;
+    const guestRejectedClients = tx.guestRejectedClients.value;
+    const nextUnifiedHost = tx.nextUnifiedHost.value;
     const nextNetworkHost = tx.nextNetworkHost;
     if (staged.graphical !== null) {
       this.frontendBaseline = readFrontendPreferences(staged.graphical.input, staged.graphical.audio);

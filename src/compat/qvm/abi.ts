@@ -4,11 +4,11 @@
 
 /** Build a decoder that admits exactly the numeric members of an enum; the table is sized once at load. */
 function enumDecoder<T extends number>(members: { readonly [key: string]: string | T }): (word: number) => T | null {
-  const numeric: number[] = [];
+  const numeric: T[] = [];
   for (const value of Object.values(members)) if (typeof value === "number") numeric.push(value);
-  const admitted = new Uint8Array(Math.max(...numeric) + 1);
-  for (const value of numeric) admitted[value] = 1;
-  return word => (Number.isInteger(word) && word >= 0 && word < admitted.length && admitted[word] === 1 ? (word as T) : null);
+  const admitted = new Array<T | null>(Math.max(...numeric) + 1).fill(null);
+  for (const value of numeric) admitted[value] = value;
+  return word => (Number.isInteger(word) && word >= 0 && word < admitted.length ? (admitted[word] ?? null) : null);
 }
 
 export enum QvmGameImport {

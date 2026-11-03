@@ -291,7 +291,7 @@ type Moved = ReturnType<MovementPlayer["move"]>;
 export interface PreFrameInput {
   readonly elapsed: number;
   readonly commands: readonly ActorCommand[];
-  readonly players: Iterable<MovementPlayer>;
+  readonly players: Iterable<MovementPlayer, undefined, unknown>;
   /** Whether a mod client application defers the command's own pre-think to its execution. */
   readonly deferred: boolean;
   readonly pending: Map<MovementPlayer, number> | null;
@@ -681,7 +681,7 @@ export interface ArsenalUiParts {
 
 const STANCE_CLAIM_ERROR = "Selected original Quake movement has no crouch-request interface; authored collision changes require an explicit source boundary";
 
-function joinInfo(values: Iterable<readonly [string, string]>): string {
+function joinInfo(values: Iterable<readonly [string, string], undefined, unknown>): string {
   return [...values].map(([name, value]) => `\\${name}\\${value}`).join("");
 }
 function sameInfo(previous: ReadonlyMap<string, string>, values: ReadonlyMap<string, string>): boolean {
@@ -1400,7 +1400,7 @@ class Q1Strategy extends LoadedStrategy {
   ) {
     super();
   }
-  override readonly kind = "q1" as const;
+  override readonly kind: "q1" = "q1";
   override restoreFoundation(save: SaveImage, reader: SaveReader): void {
     if (savedSourceCvars(save) === undefined)
       reader.field("sourceCvars").list(value => {
@@ -1896,7 +1896,7 @@ class QuakeCStrategy extends LoadedStrategy {
   ) {
     super();
   }
-  override readonly kind = "quakec" as const;
+  override readonly kind: "quakec" = "quakec";
   override damageCommitted(actor: OwnedActor, decision: DamageDecision): void {
     const player = this.host.playerStates.get(actor);
     if (player?.character === "q2" && decision.appliedDamage > 0)
@@ -2258,7 +2258,7 @@ class Q2Strategy extends LoadedStrategy {
   ) {
     super();
   }
-  override readonly kind = "q2" as const;
+  override readonly kind: "q2" = "q2";
   override restoreFoundation(save: SaveImage): void {
     restoreQ2Product(this.source.product, save.providers);
     const savedCvars = savedSourceCvars(save),
@@ -2897,7 +2897,7 @@ class Q2NativeStrategy extends LoadedStrategy {
   ) {
     super();
   }
-  override readonly kind = "q2-native" as const;
+  override readonly kind: "q2-native" = "q2-native";
   override checkOutputClaim(channels: readonly string[], movement: string | undefined): void {
     super.checkOutputClaim(channels, movement);
     if (
@@ -3387,7 +3387,7 @@ class Q3Strategy extends LoadedStrategy {
   ) {
     super();
   }
-  override readonly kind = "q3" as const;
+  override readonly kind: "q3" = "q3";
   override ammoTimer(actor: ActorId, weapon: number): number | null {
     const client = this.source.game.records.nativeByActor(actor)?.client;
     return client == null ? null : client.ammoTimes.get(weapon);
@@ -3861,7 +3861,7 @@ class Q3QvmStrategy extends LoadedStrategy {
   ) {
     super();
   }
-  override readonly kind = "q3-qvm" as const;
+  override readonly kind: "q3-qvm" = "q3-qvm";
   override checkOutputClaim(channels: readonly string[], movement: string | undefined): void {
     super.checkOutputClaim(channels, movement);
     const options = this.host.options.q3Guest?.prepared.primary;

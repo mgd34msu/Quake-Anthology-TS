@@ -122,7 +122,7 @@ q1Test(
       const standings = rankings.standings(app.simulation.recipe.match.provider);
       expect(standings).toHaveLength(1);
       expect(standings[0]).toMatchObject({ matches: 1, wins: 1, score: 4 });
-      expect(matchResultOf(app.simulation, "probe")?.players[0]?.identity).toEqual(expect.any(String));
+      expect(typeof matchResultOf(app.simulation, "probe")?.players[0]?.identity).toBe("string");
       const restarted = new ApplicationMatchRankings();
       await restarted.attach(await PlayerProgressStore.open(join(readString(readObject(app, "inputConfig"), "root"), "player-progress.json")));
       expect(restarted.standings(app.simulation.recipe.match.provider)).toMatchObject([{ matches: 1, wins: 1, score: 4 }]);
@@ -220,7 +220,8 @@ nativeTest(
       for (let index = 0; index < 10; index++) await app.step(50);
       expect(matchResultOf(app.simulation, "probe")).toBeNull();
       const result = matchResultOf(app.simulation, "probe", { kind: "game-module-map-transition", module: native.module });
-      expect(result).toMatchObject({ family: "q2", players: [{ score: 0, won: true, identity: expect.any(String) }] });
+      expect(result).toMatchObject({ family: "q2", players: [{ score: 0, won: true }] });
+      expect(typeof result?.players[0]?.identity).toBe("string");
     } finally {
       await app.close();
       await rm(root, { recursive: true, force: true });

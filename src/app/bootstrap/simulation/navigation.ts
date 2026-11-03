@@ -32,18 +32,16 @@ const zero: Vec3 = { x: 0, y: 0, z: 0 };
 export function botNavigationProfile(player: LocomotionPlayer): NavigationProfile {
   const movement = selectedMovementProfile(player);
   const crouches = movement.kind === "q2-classic" || movement.kind === "q2-rerelease" || movement.kind === "q3";
+  const walking: readonly TravelMode[] = ["walk", "jump", "drop", "swim", "water-jump", "ladder", "mover"];
+  const crouching: readonly TravelMode[] = ["walk", "crouch", "jump", "drop", "swim", "water-jump", "ladder", "mover"];
+  const q3Only: readonly TravelMode[] = movement.kind === "q3" ? ["teleport", "jump-pad"] : [];
   return {
     movement,
     shape: { kind: "box", bounds: player.standingBounds },
     ...(crouches ? ({ crouchedShape: { kind: "box", bounds: playerCrouchedBounds(player) } } satisfies Pick<NavigationProfile, "crouchedShape">) : {}),
     policy: playerTracePolicy(player),
-    capabilities: new Set<TravelMode>([
-      ...(crouches
-        ? (["walk", "crouch", "jump", "drop", "swim", "water-jump", "ladder", "mover"] as const)
-        : (["walk", "jump", "drop", "swim", "water-jump", "ladder", "mover"] as const)),
-      // TFL_DEFAULT includes TFL_TELEPORT and TFL_JUMPPAD; routing leaves selection to the travel flags.
-      ...(movement.kind === "q3" ? (["teleport", "jump-pad"] as const) : []),
-    ]),
+    // TFL_DEFAULT includes TFL_TELEPORT and TFL_JUMPPAD; routing leaves selection to the travel flags.
+    capabilities: new Set<TravelMode>([...(crouches ? crouching : walking), ...q3Only]),
     maximumStep: 18,
     minimumFloorNormal: 0.7,
     maximumDrop: 128,

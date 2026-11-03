@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { QcOpcode } from "../../src/compat/qc/program.ts";
-import { QcAssembler } from "./qc-assembler.ts";
+import { QcAssembler, type QcAsmType } from "./qc-assembler.ts";
 import { copperAvailable, copperProgramPath } from "./corpus.ts";
 
 /**
@@ -27,10 +27,10 @@ export function syntheticCopperProgram(primary = false): Uint8Array {
   const known = cached.get(primary);
   if (known !== undefined) return known;
   const asm = new QcAssembler(5927);
-  const S = "string" as const,
-    F = "float" as const,
-    E = "entity" as const,
-    V = "vector" as const;
+  const S: QcAsmType = "string",
+    F: QcAsmType = "float",
+    E: QcAsmType = "entity",
+    V: QcAsmType = "vector";
   const bits = (value: number): number => new Uint32Array(new Float32Array([value]).buffer)[0] ?? 0;
   asm.builtin("setorigin", 2, [E, V]);
   asm.builtin("setmodel", 3, [E, S]);
@@ -54,13 +54,13 @@ export function syntheticCopperProgram(primary = false): Uint8Array {
   asm.builtin("cvar_set", 72, [S, S]);
 
   for (const name of ["th_stand", "th_walk", "th_run", "th_pain", "th_die", "th_melee", "th_missile"]) asm.defineField(name, "function");
-  for (const [name, type] of [
+  const campaignGlobals: readonly (readonly [string, QcAsmType])[] = [
     ["lastspawn", "entity"],
     ["killed_monsters", F],
     ["framecount", F],
     ["skill", F],
-  ] as const)
-    asm.defineGlobal(name, type);
+  ];
+  for (const [name, type] of campaignGlobals) asm.defineGlobal(name, type);
   for (const [grade, mask] of [8192, 16384, 32768].entries()) asm.defineGlobal(`IT_ARMOR${grade + 1}`, F, bits(mask));
   for (const name of [
     "version",
@@ -95,7 +95,9 @@ export function syntheticCopperProgram(primary = false): Uint8Array {
 
   // Healing: the amount rounds up and the result is held at max_health.
   asm.declare("T_Heal", [E, F, F], fn => {
-    const [target, amount, ignore] = fn.params as [number, number, number];
+    const target = fn.param(0),
+      amount = fn.param(1),
+      ignore = fn.param(2);
     const health = fn.load(target, "health"),
       limit = fn.load(target, "max_health");
     fn.call("ceil", amount);
@@ -138,7 +140,8 @@ export function syntheticCopperProgram(primary = false): Uint8Array {
   // Client stages: autosave through the owner's console, the next intermission spot, and objective cleanup on respawn.
   asm.defineGlobal("isKex");
   asm.declare("autosave", [E, S], fn => {
-    const [target, name] = fn.params as [number, number],
+    const target = fn.param(0),
+      name = fn.param(1),
       skip = fn.fresh();
     fn.branch(fn.global("isKex"), skip);
     fn.call("stuffcmd", target, fn.string("echo Autosaving...; wait; save "));
@@ -150,7 +153,7 @@ export function syntheticCopperProgram(primary = false): Uint8Array {
     fn.ret(fn.global("self"));
   });
   asm.declare("ClearItemEffects", [E], fn => {
-    const [target] = fn.params as [number],
+    const target = fn.param(0),
       items = fn.load(target, "items"),
       effects = fn.load(target, "effects");
     fn.store(target, "items", fn.sub(items, fn.bitAnd(items, fn.float(4194304))));
@@ -173,7 +176,11 @@ export function syntheticCopperProgram(primary = false): Uint8Array {
     "T_Damage",
     [E, E, E, F, F],
     fn => {
-      const [target, inflictor, attacker, damage, dflags] = fn.params as [number, number, number, number, number],
+      const target = fn.param(0),
+        inflictor = fn.param(1),
+        attacker = fn.param(2),
+        damage = fn.param(3),
+        dflags = fn.param(4),
         done = fn.fresh();
       fn.branchNot(fn.load(target, "takedamage"), done);
       fn.call("T_DamageApply", target, inflictor, attacker, damage, dflags);
@@ -185,7 +192,10 @@ export function syntheticCopperProgram(primary = false): Uint8Array {
     "T_DamageApply",
     [E, E, E, F, F],
     fn => {
-      const [target, , attacker, damage, dflags] = fn.params as [number, number, number, number, number];
+      const target = fn.param(0),
+        attacker = fn.param(2),
+        damage = fn.param(3),
+        dflags = fn.param(4);
       for (let spare = 0; spare < 4; spare++) fn.local();
       const save = fn.named("T_DamageApply.save", "float", fn.local()),
         zeroed = fn.fresh(),
@@ -240,7 +250,9 @@ export function syntheticCopperProgram(primary = false): Uint8Array {
   );
   // Armor pickup: refuse unless it protects more than the current armor, then store points, tier and absorption in that order.
   asm.declare("armor_give", [E, F, F, F], fn => {
-    const [who, value, type] = fn.params as [number, number, number, number],
+    const who = fn.param(0),
+      value = fn.param(1),
+      type = fn.param(2),
       refuse = fn.fresh(),
       yellow = fn.fresh(),
       red = fn.fresh(),
@@ -315,10 +327,11 @@ export function syntheticCopperProgram(primary = false): Uint8Array {
     fn.label(none);
     fn.ret(fn.float(0));
   });
-  for (const [name, next] of [
+  const knightFrames: readonly (readonly [string, string])[] = [
     ["knight_stand1", "knight_run1"],
     ["knight_run1", "knight_run1"],
-  ] as const)
+  ];
+  for (const [name, next] of knightFrames)
     asm.declare(name, [], fn => {
       const self = fn.global("self");
       fn.store(self, "nextthink", fn.add(fn.global("time"), fn.float(0.1)));

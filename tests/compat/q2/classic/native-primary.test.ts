@@ -10,6 +10,7 @@ import { openArchive } from "../../../../src/content/archive/index.ts";
 import { openMountPlan } from "../../../../src/content/mounts/index.ts";
 import { createMountIdentity } from "../../../../src/contracts/content.ts";
 import type { ItemId } from "../../../../src/contracts/gameplay.ts";
+import type { GuestCallValue } from "../../../../src/contracts/execution.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { OriginalPickupAdmission, OriginalPickupOffer } from "../../../../src/contracts/original-pickups.ts";
 import { CvarRegistry } from "../../../../src/core/cvars/index.ts";
@@ -299,7 +300,7 @@ test.skipIf(!existsSync(path) || !existsSync(pak))(
           const result = world.source.host.invoke(
             touch,
             classicSignature([q2Pointer, q2Pointer, q2Pointer, q2Pointer]),
-            [world.source.host.edicts.at(slot).address, record.address, null, null].map(value => ({ kind: "pointer" as const, value })),
+            [world.source.host.edicts.at(slot).address, record.address, null, null].map((value): GuestCallValue => ({ kind: "pointer", value })),
           );
           expect(result.kind).toBe("void");
         };

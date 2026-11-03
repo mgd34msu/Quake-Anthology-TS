@@ -1,15 +1,3 @@
 {
-  "src/formats/q3-model/lod.ts": "MD3 LOD registration (tr_model.c). The scene MD3 model has no LOD slots yet (only MD4 selects an LOD in render/scene/models/prepare.ts).",
-  "src/guest/elf/index.ts": "Linux ELF loader. Loads and initializes the supplied lmctf gamei386.so.glibc, but running it as a Q2 game needs about 25 more libc services (fopen, fgets, sscanf, vsprintf, localtime, rand, strncmp, atan2 ...), a linux-i386 branch in the classic guest source, game selection and the classic guest save format (abi is pinned to windows-i386). Not yet wired.",
-  "src/guest/elf/parse.ts": "ELF loader internals; see src/guest/elf/index.ts.",
-  "src/guest/elf/relocate.ts": "ELF loader internals; see src/guest/elf/index.ts.",
-  "src/guest/elf/unwind.ts": "ELF loader internals; see src/guest/elf/index.ts.",
-  "src/guest/runtime/system-v/cxx-data.ts": "System V guest runtime used by the ELF loader. Unwired until the ELF loader is.",
-  "src/guest/runtime/system-v/cxx.ts": "System V guest runtime used by the ELF loader. Unwired until the ELF loader is.",
-  "src/guest/runtime/system-v/index.ts": "System V guest runtime used by the ELF loader. Unwired until the ELF loader is.",
-  "src/guest/runtime/system-v/iostream.ts": "System V guest runtime used by the ELF loader. Unwired until the ELF loader is.",
-  "src/guest/runtime/system-v/libc.ts": "System V guest runtime used by the ELF loader. Unwired until the ELF loader is.",
-  "src/guest/runtime/system-v/locale.ts": "System V guest runtime used by the ELF loader. Unwired until the ELF loader is.",
-  "src/guest/runtime/system-v/runtime.ts": "System V guest runtime used by the ELF loader. Unwired until the ELF loader is.",
-  "src/guest/runtime/system-v/stdio.ts": "System V guest runtime used by the ELF loader. Unwired until the ELF loader is."
+  "src/formats/q3-model/lod.ts": "MD3 LOD registration (tr_model.c). The scene MD3 model has no LOD slots yet (only MD4 selects an LOD in render/scene/models/prepare.ts)."
 }

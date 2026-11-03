@@ -23,7 +23,7 @@ const POINT_CLASSNAMES: ReadonlySet<string> = new Set([
 
 /** The part of the Q2 game services the wave logic reads, so tests supply typed doubles instead of the full entity services. */
 export interface Q2HordeGame {
-  readonly entities: { values(): Iterable<Q2Entity> };
+  readonly entities: { values(): Iterable<Q2Entity, undefined, unknown> };
   readonly host: {
     readonly actors: Pick<Q2FoundationHost["actors"], "resolveSaved" | "referenceSaved">;
     readonly combat: { read(actor: ActorId): { readonly health: number } | null | undefined };

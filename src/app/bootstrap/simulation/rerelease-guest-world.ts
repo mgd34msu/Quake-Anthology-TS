@@ -236,7 +236,7 @@ export class RereleaseGuestWorld {
     map: ClassicGuestMap,
     binding: RereleaseGuestMapServices,
     revisit?: RereleaseGuestRevisit,
-  ): Generator<RereleaseTravelStep, RereleaseGuestWorld> {
+  ): Generator<RereleaseTravelStep, RereleaseGuestWorld, undefined> {
     this.requireRunning();
     this.services.validateMap(binding);
     if (revisit !== undefined && this.services.options.cvars.variableValue("deathmatch") !== 0)

@@ -67,7 +67,7 @@ import { TeamArenaResults, type TeamArenaResultService } from "./team-arena-resu
 import { SeatPlayerDeath, playerDeathMenu } from "./player-death.ts";
 
 /** Translations register here per lowercase language name; an empty catalog leaves every literal as written. */
-const menuCatalogs: MenuCatalogs = new Map();
+const menuCatalogs: MenuCatalogs = new Map<string, ReadonlyMap<string, string>>();
 
 export class ApplicationSeatUi implements ApplicationInputUi {
   readonly controller: NativeUiController;

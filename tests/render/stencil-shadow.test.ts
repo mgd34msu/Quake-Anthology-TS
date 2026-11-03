@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
-import type { RendererImage, RendererResourceOwner, RenderOperation } from "../../src/contracts/render.ts";
+import type { RendererImage, RendererResourceOwner, RenderOperation, SceneCamera } from "../../src/contracts/render.ts";
 import { CPU_OPAQUE_STATE, SoftwareRenderer } from "../../src/render/cpu/index.ts";
 import { stencilShadowVolume } from "../../src/render/scene/models/stencil-shadow.ts";
 import { shadowFinishQuad } from "../../src/render/scene/shadow-geometry.ts";
@@ -45,17 +45,17 @@ test("an edge shared by two lit triangles is interior and a light behind the sur
 });
 
 test("the finish quad covers the view and the CPU renderer darkens exactly the stencilled pixels", () => {
-  const camera = {
+  const camera: SceneCamera = {
     origin: { x: 0, y: 0, z: 0 },
     axis: [
       { x: 1, y: 0, z: 0 },
       { x: 0, y: 1, z: 0 },
       { x: 0, y: 0, z: 1 },
-    ] as const,
+    ],
     projection: perspectiveProjection(90, 90, 1000, 4),
     viewport: { x: 0, y: 0, width: 8, height: 8 },
     clip: { kind: "none" },
-  } as const;
+  };
   const corners = shadowFinishQuad(camera);
   expect(corners.every(corner => corner.w === 10 && Math.abs(corner.x) > corner.w && Math.abs(corner.y) > corner.w)).toBe(true);
   const owner: RendererResourceOwner = { identity: Symbol("stencil"), session: createIdentityOwner("stencil shadow").session, generation: 0 };

@@ -15,7 +15,7 @@ test("Q2 horde spawns waves at authored points and advances when cleared", () =>
   const scheduled: { entity: Q2Entity; delay: number }[] = [];
   const make = (classname: string, origin: Vec3 = { x: 0, y: 0, z: 0 }): Q2Entity => {
     const actor: OwnedActor = actors.allocate("q2:horde-test", `q2:${classname}`);
-    const entity = new Q2Entity(actor, { classname, ordinal: entities.length, values: new Map() });
+    const entity = new Q2Entity(actor, { classname, ordinal: entities.length, values: new Map<string, string>() });
     entities.push(entity);
     health.set(actor.id, 100);
     origins.set(actor.id, origin);

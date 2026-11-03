@@ -817,8 +817,9 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
     const vm = machineFor(await readProgram("rerelease/id1/pak0.pak"));
     const module: ModuleIdentity = { id: "test:qc", artifactPath: vm.program.source, digest: vm.program.digest, revision: "corpus" };
     let hostCounter = 4;
+    const counterFormat: "test:counter" = "test:counter";
     const host = {
-      checkpoint: () => ({ state: { module, format: "test:counter" as const, bytes: new Uint8Array([hostCounter]) }, random: [], callbacks: [] }),
+      checkpoint: () => ({ state: { module, format: counterFormat, bytes: new Uint8Array([hostCounter]) }, random: [], callbacks: [] }),
       restore: (saved: { readonly state: { readonly bytes: Uint8Array } }) => {
         hostCounter = saved.state.bytes[0] ?? 0;
         return undefined;

@@ -29,10 +29,10 @@ test("bot assets leave navigation graphs unread while version 1 saves can still 
   ]);
   const opened: string[] = [];
   const resources = {
-    open: async (path: string): Promise<OpenedResource | null> => {
+    open: async (path: string): Promise<Pick<OpenedResource, "bytes"> | null> => {
       opened.push(path);
       const bytes = contents.get(path);
-      return bytes === undefined ? null : ({ bytes } as OpenedResource);
+      return bytes === undefined ? null : { bytes };
     },
   };
   const files = await loadBotAssetFiles(resources, [...contents.keys()]);

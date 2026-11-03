@@ -128,12 +128,13 @@ function rereleaseServer(): Uint8Array {
   parts.push(1);
   text("Outer Base");
   text('gamemap "*base1"');
-  for (const [name, value] of [
+  const settings: readonly (readonly [string, string])[] = [
     ["skill", "1"],
     ["deathmatch", "0"],
     ["coop", "0"],
     ["g_coop_squad_respawn", "1"],
-  ] as const) {
+  ];
+  for (const [name, value] of settings) {
     text(name);
     text(value);
   }
@@ -155,12 +156,13 @@ function rereleaseLevel(configstringEnd: number): Uint8Array {
   };
   u32(0x32564153);
   u32(1);
-  for (const [index, value] of [
+  const configstrings: readonly (readonly [number, string])[] = [
     [0, "Outer Base"],
     [3, "maps/base1.bsp"],
     [34, "base1"],
     [1500, "#w_blaster"],
-  ] as const) {
+  ];
+  for (const [index, value] of configstrings) {
     u16(index);
     text(value);
   }

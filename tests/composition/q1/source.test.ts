@@ -531,11 +531,12 @@ test("pickup preference reaches actual Q1 source players on admission update res
 
 test("sv_gate_dev_impulses puts the MG3 developer impulses behind cheats on deathmatch servers and defaults to the source behavior", async () => {
   const level = await map("mg3", "hub");
-  for (const [gate, cheats, allowed] of [
+  const gates: readonly (readonly [number, number, boolean])[] = [
     [0, 0, true],
     [1, 0, false],
     [1, 1, true],
-  ] as const) {
+  ];
+  for (const [gate, cheats, allowed] of gates) {
     const world = sourceWorld(level, "mg3", undefined, false, 1, [
         ["sv_gate_dev_impulses", gate],
         ["sv_cheats", cheats],

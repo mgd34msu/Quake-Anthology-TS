@@ -100,7 +100,8 @@ const script: readonly ScriptStep[] = [...repeatStep("idle", 5), ...repeatStep("
 // compared frame by frame from each lane's alignment while both are still on the floor they stood on.
 // Quake III lanes diverge from the fifth frame on (steps of 19 and 16 units against 22 in the native lane at
 // z unchanged, probably a wall slide met at different absolute positions; not investigated, see docs/status.md).
-const comparedFrames = { q1: 8, q3: 4 } as const;
+const comparedFrames: Readonly<Record<"q1" | "q3", number>> = { q1: 8, q3: 4 };
+const movements: readonly ("q1" | "q3")[] = ["q1", "q3"];
 function settled(path: readonly Sample[]): number {
   const steps = path.map((sample, index) => {
     const previous = path[index - 1];
@@ -112,7 +113,7 @@ function settled(path: readonly Sample[]): number {
   return first;
 }
 
-for (const movement of ["q1", "q3"] as const) {
+for (const movement of movements) {
   corpusTest("q2/baseq2/pak0.pak", "q2/baseq2/gamex86.dll")(
     `${movement} movement covers the same displacement in the TypeScript lane and inside the native DLL's Pmove`,
     async () => {

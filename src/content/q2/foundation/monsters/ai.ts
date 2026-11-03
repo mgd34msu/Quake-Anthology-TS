@@ -198,6 +198,8 @@ export function walkMove(context: MonsterContext, yaw: number, distance: number,
   return moved;
 }
 
+const AXES: readonly (keyof Vec3)[] = ["x", "y", "z"];
+
 function sourceMoveStep(context: MonsterContext, yaw: number, distance: number, commit: boolean, relink: boolean): boolean {
   const body = context.game.body(context.entity);
   if (context.state.locomotion === "stationary") return false;
@@ -482,10 +484,10 @@ export function runAi(context: MonsterContext, ai: Extract<MonsterFrame["ai"], s
           self = game.body(entity);
         const overlaps =
           point !== null &&
-          ["x", "y", "z"].every(
+          AXES.every(
             axis =>
-              point.origin[axis as "x"] + point.bounds.min[axis as "x"] <= self.origin[axis as "x"] + self.bounds.max[axis as "x"] &&
-              point.origin[axis as "x"] + point.bounds.max[axis as "x"] >= self.origin[axis as "x"] + self.bounds.min[axis as "x"],
+              point.origin[axis] + point.bounds.min[axis] <= self.origin[axis] + self.bounds.max[axis] &&
+              point.origin[axis] + point.bounds.max[axis] >= self.origin[axis] + self.bounds.min[axis],
           );
         if (!overlaps) {
           state.standGround = false;
@@ -591,10 +593,10 @@ export function runAi(context: MonsterContext, ai: Extract<MonsterFrame["ai"], s
       game.options.edition === "rerelease"
         ? noise !== null &&
           facingIdeal(context) &&
-          ["x", "y", "z"].every(
+          AXES.every(
             axis =>
-              noise.origin[axis as "x"] + noise.bounds.min[axis as "x"] <= self.origin[axis as "x"] + self.bounds.max[axis as "x"] + distance &&
-              noise.origin[axis as "x"] + noise.bounds.max[axis as "x"] >= self.origin[axis as "x"] + self.bounds.min[axis as "x"] - distance,
+              noise.origin[axis] + noise.bounds.min[axis] <= self.origin[axis] + self.bounds.max[axis] + distance &&
+              noise.origin[axis] + noise.bounds.max[axis] >= self.origin[axis] + self.bounds.min[axis] - distance,
           )
         : length(delta) < 64;
     if (arrived) {

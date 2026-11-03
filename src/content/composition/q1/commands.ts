@@ -50,7 +50,7 @@ export function q1CtfWeaponCycle(
   const order: readonly (readonly [ItemId, Q1BaseWeapon | null])[] = [
     [game.weaponItem("axe"), "axe"],
     [grapple, null],
-    ...WEAPONS.filter(weapon => weapon !== "axe").map(weapon => [game.weaponItem(weapon), weapon] as const),
+    ...WEAPONS.filter(weapon => weapon !== "axe").map((weapon): readonly [ItemId, Q1BaseWeapon] => [game.weaponItem(weapon), weapon]),
   ];
   const current = Math.max(
     0,

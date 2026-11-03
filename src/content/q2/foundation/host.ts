@@ -302,7 +302,7 @@ export interface Q2GameServices {
   readonly entities: ReadonlyMap<ActorId, Q2Entity>;
   /** Registers a projectile whose projectile and dodgeable flags are set, for monster dodge checks. */
   markDodgeable(entity: Q2Entity): undefined;
-  dodgeables(): Iterable<Q2Entity>;
+  dodgeables(): Iterable<Q2Entity, undefined, unknown>;
   readonly currentActor: ActorId | null;
   /** level.disguise_violator and its expiry: a disguised player who fired is the next target of every monster. */
   /** game.helpchanged: counts use_target_help firings. */

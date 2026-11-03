@@ -6,7 +6,7 @@ export { physicalInputKey } from "./binding-store.ts";
 import type { CommandContext, CommandDialect } from "../contracts/common.ts";
 import type { SeatId } from "../contracts/identity.ts";
 import type { Vec2, Vec3 } from "../contracts/math.ts";
-import type { InputAction, InputBinding, InputBindingTarget, PhysicalInput, SeatInputEvent, SeatInputFocus } from "../contracts/ui.ts";
+import type { ControllerAxis, InputAction, InputBinding, InputBindingTarget, PhysicalInput, SeatInputEvent, SeatInputFocus } from "../contracts/ui.ts";
 import { CommandUsageError, type CommandBuffer, type CommandInvocation } from "../core/commands/index.ts";
 import { commandSeparatorOffset, sourceCommandText } from "../core/commands/text.ts";
 import { InputButton } from "./buttons.ts";
@@ -302,7 +302,8 @@ export class SeatInput {
         this.held.delete(key);
       }
     // A stick held while the device vanished would otherwise keep repeating in the menu until it closes.
-    for (const axis of ["left-x", "left-y"] as const)
+    const menuAxes: readonly ControllerAxis[] = ["left-x", "left-y"];
+    for (const axis of menuAxes)
       this.uiBinding.callback({ kind: "controller-axis", seat: this.seat, timeMilliseconds: time, device, axis, value: 0 }, this.currentFocus);
     this.gamepad.clear();
     this.gamepad.resetGyroCalibration();

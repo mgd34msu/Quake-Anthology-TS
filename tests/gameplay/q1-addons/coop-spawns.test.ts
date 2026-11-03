@@ -42,7 +42,9 @@ test("MG coop respawn restores the team's weapons recorded on the checkpoint and
     for (const weapon of literal(["rocketlauncher", "lightning"])) game.host.inventory.give(owner, game.weaponItem(weapon), 1);
     const checkpoint = spawn("info_player_coop", { origin: "128 0 0", targetname: "cp1" });
     game.named.use(spawn("trigger_activate_coop_spawns", { target: "cp1" }), "mg:coop_spawns_use")(player.id, player.id);
-    expect(checkpoint.text("coop.weapons").split(" ")).toEqual(expect.arrayContaining(["lightning", "rocketlauncher"]));
+    const remembered = checkpoint.text("coop.weapons").split(" ");
+    expect(remembered).toContain("lightning");
+    expect(remembered).toContain("rocketlauncher");
     for (const weapon of literal(["rocketlauncher", "lightning"])) game.host.inventory.consume(owner, game.weaponItem(weapon), 1);
     game.host.inventory.consume(owner, "q1:ammo/rockets", game.host.inventory.count(player.id, "q1:ammo/rockets"));
     game.host.inventory.consume(owner, "q1:ammo/cells", game.host.inventory.count(player.id, "q1:ammo/cells"));

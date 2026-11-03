@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
+import type { Vec3 } from "../../contracts/math.ts";
 import type { BodyTable } from "../../contracts/world.ts";
 import type { GameplayAuthority } from "../../world/gameplay/authority.ts";
 import type { SessionActorRegistry, SourceActorSlots } from "../../world/actors/index.ts";
@@ -133,7 +134,7 @@ export class QcBorrowedActors {
     const first = offset === undefined ? store.word : offset,
       index = store.word - first;
     const velocity = { x: body.velocity.x, y: body.velocity.y, z: body.velocity.z };
-    const axes = ["x", "y", "z"] as const;
+    const axes: readonly (keyof Vec3)[] = ["x", "y", "z"];
     for (let word = 0; word < store.after.byteLength / 4; word++) {
       const axis = axes[index + word];
       if (axis !== undefined) velocity[axis] = view.getFloat32(word * 4, true);

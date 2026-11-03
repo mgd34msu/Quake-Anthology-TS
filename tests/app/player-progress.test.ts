@@ -36,7 +36,8 @@ test("version 1 progress files still load and the next write upgrades them to ve
     await store.record({ kind: "ranked-match", source: "q3", participant: "Host", event: "m:2", map: "q3dm1", score: 5, won: true, rules: "q3:ffa" });
     const reopened = await PlayerProgressStore.open(file);
     expect(reopened.all().map(event => event.kind)).toEqual(["match-completed", "ranked-match"]);
-    expect(JSON.parse(await readFile(file, "utf8")).version).toBe(2);
+    const saved: unknown = JSON.parse(await readFile(file, "utf8"));
+    expect(saved).toMatchObject({ version: 2 });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
