@@ -21,7 +21,7 @@ modcmd PRODUCT/COMPONENT_ID <command>
 That component's commands, cvars, and `exec` scripts use its own source rules and
 files. Disabling the component removes its pending commands and aliases.
 See [component console commands](mod-compatibility.md#component-console-commands)
-for declaration details and [console source comparison](console-source-parity.md)
+for declaration details and console source comparison
 for command parity status.
 
 ## Configure the LLM

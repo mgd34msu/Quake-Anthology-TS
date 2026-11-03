@@ -83,7 +83,7 @@ Use `--renderer cpu` for software rendering. Gamma defaults to `1`; higher
 values brighten the final image. The accepted range is `0.5` through `3`.
 
 The [playing guide](playing.md) covers explicit game, map, and movement selections.
-The [installed-build record](execution-status.md#installed-executable-and-recent-fixes)
+The installed-build record
 identifies the local delivered executable and its verification limits. Building
 current source does not by itself qualify every game or platform.
 
@@ -103,4 +103,4 @@ A focused passing check does not establish full gameplay compatibility.
 
 Update the relevant user guide when commands, settings, features, or directory
 requirements change. Keep implementation evidence in the
-[status documents](functional-targets/status.md), and keep the main README concise.
+status documents, and keep the main README concise.

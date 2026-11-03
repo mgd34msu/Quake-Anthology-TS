@@ -54,7 +54,6 @@ maintain this project. Record the hash of the tree you use when you regenerate.
 
 ## Others
 
-- `docs/functional-targets/remaining-source-rows.md` and `.json` were produced by a one-off script (`group-remaining.ts`, with its input `docs/completion-status.json`) that is no longer in the tree; the inventory is retained and cannot be regenerated (`docs/functional-targets/README.md`).
 - `tools/profile-frame.ts` needs `QTS_TEST_CORPUS`; it no longer has a default path.
 
 ## Tables read from the shipped rerelease DLL (no generator)

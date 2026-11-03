@@ -3,6 +3,7 @@
 /.artifacts/
 /build/
 /.goodvibes/
+/docs/dev/
 
 # Local runtime data and generated output.
 /qfiles/

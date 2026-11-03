@@ -78,7 +78,7 @@ flood gate, bounded challenge lifetimes (30 s), a movement time budget per clien
 bounded decompression for downloads and Quake II stream data, and a failure backoff on
 rcon password attempts (comparison with a timing-safe digest). The mixed-game (`qts://`)
 transport authenticates a join with a stateless HMAC cookie. See the audit tracker
-[NET](docs/reviews/2026-11-01-full-audit/remediation/NET.md) for each control and the
+NET for each control and the
 items deliberately left open.
 
 Things to know before you host:

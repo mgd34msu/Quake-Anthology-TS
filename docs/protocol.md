@@ -40,7 +40,7 @@ Quake III key authorization is off unless the archived cvar `cl_authorizeKey` is
 
 Per-protocol limits (connectionless flood gate, per-IP caps, challenge expiry of 30 s, bounded
 inflate, download limits) are described in [SECURITY.md](../SECURITY.md) and
-the [NET remediation tracker](reviews/2026-11-01-full-audit/remediation/NET.md).
+the NET remediation tracker.
 
 ## Mixed-game transport (`qts://`)
 

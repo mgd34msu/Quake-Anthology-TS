@@ -62,7 +62,7 @@ program's callbacks in the source's order, then bots, mirrored guest state and n
 publication; each local seat's presentation then reads the resulting snapshot
 independently and submits draw commands to the renderer. Guest code (DLL, QVM) is stepped
 asynchronously inside the step but its results are applied in a fixed order. The
-older [tick-execution.md](tick-execution.md) describes the cycle at 1.0.0 and omits the
+older tick-execution.md describes the cycle at 1.0.0 and omits the
 foreign-provider branch and the native-character and guest-monster steps added later.
 
 ## Layering rule

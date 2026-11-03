@@ -22,7 +22,7 @@ script refuses it, the build accepts it).
   fault restarts the map, a dedicated server exits after repeated faults), network hardening
   (connection and flood limits, bounded inflate, rcon backoff, download limits), guest memory
   and file-write limits, LLM credential handling, crash-log redaction and many correctness
-  fixes. See [the remediation status](docs/reviews/2026-11-01-full-audit/REMEDIATION.md).
+  fixes. See the remediation status.
 
 ### Performance
 - Guest write observers are indexed by backing page (PERF1).

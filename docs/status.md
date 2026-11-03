@@ -1,13 +1,10 @@
 # Project status
 
-This is the one maintained status page. Every other status, plan, checklist and
-comparison page in this directory is a dated record; each carries a banner that
-points back here. When this page and one of those disagree, this page is right
-unless the code says otherwise.
+This is the one maintained status page. When it and the code disagree, the code is right.
 
 Last reviewed against the tree at `f855f940` plus the 2026-11-01 audit remediation
-(see [the audit](reviews/2026-11-01-full-audit/README.md) and its
-[remediation status](reviews/2026-11-01-full-audit/REMEDIATION.md)).
+(see the audit and its
+remediation status).
 
 ## Where the project is
 
@@ -19,7 +16,7 @@ Last reviewed against the tree at `f855f940` plus the 2026-11-01 audit remediati
 - The T01 to T23 functional targets were accepted in source for the 1.0.0 scope. Acceptance was
   an implementation judgement made on specific dated builds; it is not a claim that every
   original game, mod, device or campaign works. The per-target history is in
-  [functional-targets/status.md](functional-targets/status.md), which stops at 1.0.0.
+  functional-targets/status.md, which stops at 1.0.0.
 - Release notes: [docs/releases/](releases/) (one page per tag, 1.0.0 to 1.2.6).
 
 ## What to use for what
@@ -41,7 +38,7 @@ audit finding; none has a tracked issue yet, so this list is the tracker.
 
 ### Native Quake II guests with foreign providers
 
-Carried over from [native-interposition-report.md](native-interposition-report.md), re-checked
+Carried over from native-interposition-report.md, re-checked
 at HEAD and worked on by audit DOCS3-001 to DOCS3-006:
 
 - Done (DOCS3-001): the touch list handed to the guest `pmove_t` now carries the planes of the
@@ -114,8 +111,8 @@ at HEAD and worked on by audit DOCS3-001 to DOCS3-006:
 
 ### Documentation
 
-- The completion ledger ([completion-status.md](completion-status.md),
-  [functional-targets/remaining-source-rows.md](functional-targets/remaining-source-rows.md),
+- The completion ledger (completion-status.md,
+  functional-targets/remaining-source-rows.md,
   `remaining-source-rows.json`) was re-derived on 2026-11-02: each of the 184 requirements the
   2026-09-15 ledger left open was checked against the code. 164 are now `done`, 20 stay open
   with a current gap and none is an open owner question; none is descoped. The 293 rows that were
@@ -128,22 +125,3 @@ at HEAD and worked on by audit DOCS3-001 to DOCS3-006:
   `#Lnnn` line anchors in source links were removed because they were not pinned to a
   commit and at least 40 percent pointed at blank or unrelated lines (audit DOCS-009). The
   claims those pages make ("passed N assertions") cannot be re-checked from the tree.
-
-## Reading order for the dated records
-
-Older pages stay in place so links keep working. They are history, not guidance:
-
-| Page | Covers | Cutoff |
-| --- | --- | --- |
-| [project-plan.md](project-plan.md), [source-assessment.md](source-assessment.md), [verification-plan.md](verification-plan.md) | The original plan before implementation | Pre-1.0 |
-| [project-status-2026-09-11.md](project-status-2026-09-11.md), [project-status-current.md](project-status-current.md) | Status at two September commits | 2026-09 |
-| [completion-status.md](completion-status.md), [implementation-checklist.md](implementation-checklist.md), [implementation-priorities.md](implementation-priorities.md) | The requirement ledger and its ordering | 2026-09-15 |
-| [execution-status.md](execution-status.md), [remaining-work.md](remaining-work.md) | Installed-build evidence and the 1.0.0 patch list | 1.0.0 |
-| [comparison-q1.md](comparison-q1.md), [comparison-q2.md](comparison-q2.md), [comparison-q3.md](comparison-q3.md), [menu-source-comparison.md](menu-source-comparison.md), [source-inventory-reconciliation.md](source-inventory-reconciliation.md) | Source-to-port comparisons | 2026-09 to 2026-10 |
-| [tick-execution.md](tick-execution.md), [functional-targets/](functional-targets/README.md) | Frame-cycle description and target plans | 1.0.0 |
-
-The `verification/` directory, `work-packages.json`, `dependency-graph.mmd`,
-`validate-plan.ts` and `completion-status.json` that these pages cite were deleted in
-commit `949c337c`. Paths such as `../the Q1 reference port/...` are placeholders left by a
-path scrub, and bare `src/...` paths in the comparison pages often name donor-project files,
-not files in this tree.

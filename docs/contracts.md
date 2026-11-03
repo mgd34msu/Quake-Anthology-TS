@@ -1,6 +1,6 @@
 # Shared engine contracts
 
-`src/contracts` defines the boundaries consumed by the imported implementations. The source selections are recorded in [reference contracts](reference-contracts.md). These declarations establish ownership and data shapes. Runtime fidelity remains work for the corresponding implementation packages.
+`src/contracts` defines the boundaries consumed by the imported implementations. The source selections are recorded in reference contracts. These declarations establish ownership and data shapes. Runtime fidelity remains work for the corresponding implementation packages.
 
 | File | Exports and owner |
 | --- | --- |
