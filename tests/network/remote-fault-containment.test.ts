@@ -146,7 +146,7 @@ test.skipIf(!q1)("map changes release the previous simulation", async () => {
     }
     await Bun.sleep(0); Bun.gc(true); Bun.gc(true);
     // The collector is conservative about the stack, so one recent world may survive; the old chain must not.
-    expect(worlds.filter(world => world.deref() !== undefined).length).toBeLessThanOrEqual(2);
+    expect(worlds.filter(world => world.deref() !== undefined).length).toBeLessThanOrEqual(1);
   } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
 }, 180000);
 

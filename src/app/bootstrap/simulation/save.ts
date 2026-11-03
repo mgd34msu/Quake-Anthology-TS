@@ -3,7 +3,7 @@ import { readModule } from "../../../persistence/execution.ts";
 import { decodeQ2RereleaseNativeSave } from "./native-q2-rerelease-save.ts";
 import { decodeQ2ClassicOriginalSave } from "../../../persistence/q2-classic-guest.ts";
 import { isDeepStrictEqual } from "node:util";
-import type { QuakeCCheckpoint, QvmCheckpoint } from "../../../contracts/execution.ts";
+import type { QuakeCCheckpoint } from "../../../contracts/execution.ts";
 import type { Q3ArsenalRuntimeState } from "../../../content/q3/foundation/arsenal.ts";
 import type { ClientMovementOptions } from "../../../content/q3/team-arena/movement-host.ts";
 import type { ProviderCheckpoint, SaveImage } from "../../../contracts/session.ts";
@@ -12,6 +12,7 @@ import { readQ2AttackCheckpoint } from "../../../persistence/q2-foundation.ts";
 import { SaveReader, decodeCheckpointValue } from "../../../persistence/value.ts";
 import { decodeApplicationBotsCheckpoint, type DecodedApplicationBotsCheckpoint } from "./bots.ts";
 import { savedQ3GuestClients } from "./q3/guest-runtime.ts";
+import type { Q3GuestCheckpoint } from "./q3/engine.ts";
 import { saveProviderContract, validateSaveProviderOwner } from "../../../persistence/provider-ownership.ts";
 
 export function simulationProviderCheckpoint(image: SaveImage, schema: ProviderCheckpoint["schema"]): ProviderCheckpoint {
@@ -46,16 +47,18 @@ export function savedBotCheckpoint(image: SaveImage): DecodedApplicationBotsChec
   return bots;
 }
 
-export function simulationGuestCheckpoint(image: SaveImage): QuakeCCheckpoint | QvmCheckpoint | null {
+export function simulationGuestCheckpoint(image: SaveImage): QuakeCCheckpoint | Q3GuestCheckpoint | null {
   const executions = image.recipe.execution.filter(module => module.role === "server-game");
   const execution = executions[0];
   if (executions.length !== 1 || execution === undefined) throw new Error("Save requires exactly one selected server execution");
-  if (execution.kind !== "quakec" && execution.kind !== "qvm") {
+  const q3Native = execution.kind === "native" && execution.api.kind === "q3-qagame";
+  if (execution.kind !== "quakec" && execution.kind !== "qvm" && !q3Native) {
     if (image.guests.length !== 0) throw new Error("Selected source cannot restore guest memory providers");
     return null;
   }
-  const checkpoint = image.guests[0], name = execution.kind === "quakec" ? "QuakeC" : "QVM";
-  if (image.guests.length !== 1 || checkpoint === undefined || checkpoint.kind !== execution.kind || checkpoint.kind !== "quakec" && checkpoint.kind !== "qvm")
+  const checkpoint = image.guests[0], name = execution.kind === "quakec" ? "QuakeC" : q3Native ? "Native Q3" : "QVM";
+  const kind = q3Native ? "native-guest" : execution.kind;
+  if (image.guests.length !== 1 || checkpoint === undefined || checkpoint.kind !== kind || checkpoint.kind !== "quakec" && checkpoint.kind !== "qvm" && checkpoint.kind !== "native-guest")
     throw new Error(`${name} save requires exactly one complete guest checkpoint`);
   if (execution.kind === "qvm" && (execution.api.kind !== "q3-qagame" || checkpoint.kind !== "qvm"
     || execution.api.version !== ((checkpoint.abiProfile ?? "q3-modern") === "q3-modern" ? 8 : 7)))
@@ -63,8 +66,14 @@ export function simulationGuestCheckpoint(image: SaveImage): QuakeCCheckpoint | 
   const mount = execution.artifact.provenance.mount.identity;
   const expected = { id: execution.owner.provider, artifactPath: execution.artifact.requestedPath,
     digest: execution.artifact.digest, revision: execution.kind === "quakec" ? execution.artifact.digest : `${mount.id}:${mount.generation}` };
+  if (checkpoint.kind === "native-guest") {
+    if (execution.kind !== "native" || execution.owner.provider !== image.recipe.map.entities.provider || !isDeepStrictEqual(checkpoint.module, expected)
+      || !isDeepStrictEqual(checkpoint.runtimeState.module, expected) || !isDeepStrictEqual(checkpoint.abi, execution.profile))
+      throw new Error("Native Q3 checkpoint differs from the selected artifact and profile");
+    return checkpoint;
+  }
   if (execution.owner.provider !== image.recipe.map.entities.provider || !isDeepStrictEqual(checkpoint.module, expected)
-    || !isDeepStrictEqual(checkpoint.hostState.module, expected) || !isDeepStrictEqual(checkpoint.api, execution.api))
+    || checkpoint.kind === "qvm" && !isDeepStrictEqual(checkpoint.hostState.module, expected) || !isDeepStrictEqual(checkpoint.api, execution.api))
     throw new Error(`${name} checkpoint differs from the selected artifact and API`);
   return checkpoint;
 }
@@ -116,9 +125,9 @@ export function simulationQuakeCCheckpoint(image: SaveImage): QuakeCCheckpoint |
   return checkpoint?.kind === "quakec" ? checkpoint : null;
 }
 
-export function simulationQvmCheckpoint(image: SaveImage): QvmCheckpoint | null {
+export function simulationQ3GuestCheckpoint(image: SaveImage): Q3GuestCheckpoint | null {
   const checkpoint = simulationGuestCheckpoint(image);
-  return checkpoint?.kind === "qvm" ? checkpoint : null;
+  return checkpoint?.kind === "qvm" || checkpoint?.kind === "native-guest" ? checkpoint : null;
 }
 
 export function validateSimulationSave(image: SaveImage): void {
@@ -134,8 +143,8 @@ export function validateSimulationSave(image: SaveImage): void {
   const guest = simulationGuestCheckpoint(image);
   const native = nativeQ2OriginalSave(image) ?? nativeQ2RereleaseSave(image);
   if (native !== null && simulationSaveReader(image).field("players").list(value => value.value).length !== 0) throw new Error("Native Q2 players must remain source-owned");
-  if (guest?.kind === "qvm" && simulationSaveReader(image).field("players").list(value => value.value).length !== 0)
-    throw new Error("QVM players must remain owned by the saved guest client records");
+  if ((guest?.kind === "qvm" || guest?.kind === "native-guest") && simulationSaveReader(image).field("players").list(value => value.value).length !== 0)
+    throw new Error("Q3 guest players must remain owned by the saved guest client records");
   const execution = image.recipe.execution.find(module => module.role === "server-game");
   const bots = savedBotCheckpoint(image);
   if (bots !== null && execution?.kind !== "typescript") throw new Error("Saved bot services have no supported source owner");
@@ -195,7 +204,7 @@ export function simulationSaveReader(image: SaveImage): SaveReader {
 }
 export function savedSimulationSettings(image: SaveImage) {
   const reader = simulationSaveReader(image), settings = reader.field("settings");
-  const guest = simulationQvmCheckpoint(image);
+  const guest = simulationQ3GuestCheckpoint(image);
   return { skill: settings.field("skill").choice(0, 1, 2, 3), mode: settings.field("mode").choice("singleplayer", "coop", "deathmatch"),
     maxClients: settings.field("maxClients").integer(1), seed: settings.field("seed").integer(0),
     initialSpawnPoint: settings.field("initialSpawnPoint").value === undefined ? "" : settings.field("initialSpawnPoint").string(),

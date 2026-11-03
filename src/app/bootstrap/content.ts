@@ -15,7 +15,7 @@ import { findContentPath } from "../../content/mounts/paths.ts";
 import { userProductDirectory } from "../../content/user-data.ts";
 import { defaultAddonContentRoots, defaultUserContentRoot } from "../../content/user-data.ts";
 import { prepareQuakeCSource, type PreparedQuakeCSource } from "./simulation/quakec-source.ts";
-import { assertQ3GuestRecipe, prepareQ3Game } from "./simulation/q3/guest-artifact.ts";
+import { assertQ3GuestRecipe, prepareQ3Game, prepareQ3NativeGame } from "./simulation/q3/guest-artifact.ts";
 import type { PreparedQ3Game } from "./simulation/q3/guest-artifact.ts";
 import { resolveLaunchResource, prepareLaunchMountPlan } from "../../content/catalog/launch.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
@@ -164,6 +164,16 @@ function selectedQ2GameLibrary(catalog: InstalledCatalog, options: Pick<Applicat
     && product.expectation.requiredPrograms.includes(library) ? library : undefined;
 }
 
+/** vm_game 0 and a native qagame in the mod's directory select the native module; every other case runs the bytecode. */
+function selectedQ3NativeGame(catalog: InstalledCatalog, options: Pick<ApplicationOptions, "product" | "vmGame">):
+  { readonly path: string; readonly profile: Extract<ExecutionSelection, { readonly kind: "native" }>["profile"] } | undefined {
+  if (options.vmGame !== 0) return undefined;
+  const path = catalog.require(options.product).expectation.nativePrograms?.[0];
+  if (path === undefined) return undefined;
+  return path.endsWith(".dll") ? { path, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" } }
+    : { path, profile: { kind: "linux-i386", image: "elf32", pointerBytes: 4, call: "system-v-i386" } };
+}
+
 function selectedQuakeCProgram(catalog: InstalledCatalog, options: Pick<ApplicationOptions, "product" | "quakeCProgram">): string | undefined {
   if (options.quakeCProgram !== undefined) return options.quakeCProgram;
   const product = sourceProgramProduct(catalog, options.product);
@@ -242,6 +252,7 @@ function selectedApplicationPreset(catalog: InstalledCatalog, options: Applicati
   const { quakeworld, q3Guest } = source;
   const nativeProgram = selectedQuakeCProgram(catalog, options);
   const q2GameLibrary = selectedQ2GameLibrary(catalog, options);
+  const q3NativeGame = q3Guest ? selectedQ3NativeGame(catalog, options) : undefined;
   const { source: provider, match, rules } = applicationSourceSelection(catalog, options);
   // Generic CTF on a NetQuake Q1 world runs the same-edition ThreeWave
   // program: the match role already mounts that product, so execution
@@ -270,8 +281,9 @@ function selectedApplicationPreset(catalog: InstalledCatalog, options: Applicati
     presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: product.id, hud: provider, effects: provider, audio: provider },
     engineBehavior: provider, combat: provider, inventory: provider, match, transition: provider,
     execution: [q2GameLibrary !== undefined ? { kind: "native", owner: provider, role: "server-game", artifact: { content: product.id, path: q2GameLibrary },
-      ...(rerelease ? { api: { kind: "q2-rerelease-game", version: 2023 }, profile: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" } } : { api: { kind: "q2-classic-game", version: 3 }, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" } }) } : q3Guest ? { kind: "qvm", owner: provider, role: "server-game", artifact: { content: product.id, path: "vm/qagame.qvm" },
-      api: { kind: "q3-qagame", version: 8 } } : quakeworld ? { kind: "quakec", owner: provider, role: "server-game", artifact: { content: product.id, path: "qwprogs.dat" },
+      ...(rerelease ? { api: { kind: "q2-rerelease-game", version: 2023 }, profile: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" } } : { api: { kind: "q2-classic-game", version: 3 }, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" } }) } : q3Guest ? (q3NativeGame !== undefined ? { kind: "native", owner: provider, role: "server-game", artifact: { content: product.id, path: q3NativeGame.path },
+      api: { kind: "q3-qagame", version: 8 }, profile: q3NativeGame.profile } : { kind: "qvm", owner: provider, role: "server-game", artifact: { content: product.id, path: "vm/qagame.qvm" },
+      api: { kind: "q3-qagame", version: 8 } }) : quakeworld ? { kind: "quakec", owner: provider, role: "server-game", artifact: { content: product.id, path: "qwprogs.dat" },
       api: { kind: "q1-quakeworld", programVersion: 6, systemCrc: 54730 } } : nativeProgram !== undefined
         ? { kind: "quakec", owner: provider, role: "server-game", artifact: { content: product.id, path: nativeProgram },
           api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } } : execution(provider, family, rerelease, programProduct.id === product.id ? provider.provider : sourceProgramImplementation(programProduct.expectation))],
@@ -493,6 +505,12 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
         throw new Error("QuakeC requires matching source actors and validated artifact; native network maps must belong to the source content and QuakeWorld requires dedicated operation");
       continue;
     }
+    if (module.kind === "native" && module.role === "server-game" && module.api.kind === "q3-qagame") {
+      if (options.network.kind !== "native-server" && options.network.kind !== "offline")
+        throw new Error("A native Q3 module requires offline local or dedicated Q3 server operation");
+      assertQ3GuestRecipe(recipe, module);
+      continue;
+    }
     if (module.kind === "native" && module.role === "server-game" && (module.api.kind === "q2-classic-game" && module.profile.kind === "windows-i386" || module.api.kind === "q2-rerelease-game" && module.profile.kind === "windows-x86-64")) {
       const product = catalog.product(recipe.map.entities.content);
       if (product.expectation.family !== "q2" || (module.api.kind === "q2-rerelease-game" ? product.expectation.edition !== "rerelease" : product.expectation.edition !== "classic") || recipe.execution.length !== 1
@@ -545,8 +563,10 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
       prepared = await prepareQuakeCSource(execution, mounts, world.entities, sourceContent);
     } else if (presentationSource?.kind !== "unified" && execution?.kind === "quakec") prepared = await prepareQuakeCSource(execution, mounts, world.entities);
     const q3Execution = recipe.execution.find(module => module.kind === "qvm" && module.role === "server-game");
-    const q3Prepared = presentationSource?.kind !== "unified" && q3Execution?.kind === "qvm" && q3Execution.role === "server-game" ? await prepareQ3Game(q3Execution, mounts) : null;
-    const q2Execution = recipe.execution.find(module => module.kind === "native" && module.role === "server-game");
+    const q3NativeExecution = recipe.execution.find(module => module.kind === "native" && module.role === "server-game" && module.api.kind === "q3-qagame");
+    const q3Prepared = presentationSource?.kind === "unified" ? null : q3Execution?.kind === "qvm" && q3Execution.role === "server-game" ? await prepareQ3Game(q3Execution, mounts)
+      : q3NativeExecution?.kind === "native" && q3NativeExecution.role === "server-game" ? await prepareQ3NativeGame(q3NativeExecution, mounts) : null;
+    const q2Execution = recipe.execution.find(module => module.kind === "native" && module.role === "server-game" && module.api.kind !== "q3-qagame");
     const q2Prepared = presentationSource?.kind !== "unified" && q2Execution?.kind === "native" ? await prepareQ2Guest(q2Execution, mounts) : null;
     if (q2Prepared !== null) prepareNativeQ2Map(world, q2Prepared.execution.api.kind === "q2-rerelease-game" ? "rerelease" : "classic", options.mode);
     const loaded = new LoadedApplicationContent(catalog, recipe, world, mounts, prepared, pure, q3Prepared, q2Prepared, product.q3Product, mapSidecars.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0));

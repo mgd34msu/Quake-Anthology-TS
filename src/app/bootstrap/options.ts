@@ -32,6 +32,8 @@ export interface ApplicationOptions {
   readonly map: string;
   readonly quakeCProgram?: string;
   readonly q2GameLibrary?: string;
+  /** id's vm_game: 0 runs a mod's native qagame module when it ships one, falling back to bytecode; 1 and 2 run bytecode. */
+  readonly vmGame?: 0 | 1 | 2;
   readonly weaponBehavior?: { readonly product: string; readonly id: string };
   readonly mods?: readonly ModSelection[];
   readonly movement: GameFamily;
@@ -212,6 +214,10 @@ export function parseApplicationCommand(argv: readonly string[], search: Content
         const path = normalizeResourcePath(value);
         if (!path.endsWith(".dll")) throw new Error("--q2-game requires a mounted .dll artifact");
         options = { ...options, q2GameLibrary: path }; break;
+      }
+      case "--vm-game": {
+        if (value !== "0" && value !== "1" && value !== "2") throw new Error("--vm-game requires 0 (native module), 1 (interpreted) or 2 (compiled)");
+        options = { ...options, vmGame: Number(value) as 0 | 1 | 2 }; break;
       }
       case "--progs": {
         const path = normalizeResourcePath(value);

@@ -21,7 +21,7 @@ interface PreparedQ3GameBase {
   readonly items?: QvmItemLayout;
   readonly primary: QvmPrimaryProfile;
   /** The retail product this qagame ships with, when its bytes are known. */
-  readonly product: string | undefined;
+  readonly product: NonNullable<QvmModuleOptions['artifact']['known']>['product'] | undefined;
 }
 /** A qagame bytecode artifact, run by the interpreter. */
 export interface PreparedQ3Qvm extends PreparedQ3GameBase {

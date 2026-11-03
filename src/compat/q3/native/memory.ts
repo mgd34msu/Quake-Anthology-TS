@@ -8,12 +8,11 @@ import type { Q3GameMemory } from "../../qvm/game-memory.ts";
 
 const writers = ["setInt8", "setUint8", "setInt16", "setUint16", "setInt32", "setUint32", "setFloat32", "setFloat64", "setBigInt64", "setBigUint64"] as const;
 
-/** A copy of bytes the module mapped read-only. Reads see them; a store through it faults, as a store to those pages does in the module's own process. */
-class ReadOnlyView extends DataView {
-  constructor(buffer: ArrayBufferLike, byteOffset: number, byteLength: number, private readonly address: bigint) {
-    super(buffer, byteOffset, byteLength);
-    for (const name of writers) Object.defineProperty(this, name, { value: () => { throw new RangeError(`Native module memory at 0x${address.toString(16)} is read-only`); } });
-  }
+/** A view of a copy of bytes the module mapped read-only. Reads see them; a store through it faults, as a store to those pages does in the module's own process. */
+function readOnlyView(buffer: ArrayBufferLike, byteOffset: number, byteLength: number): DataView {
+  const view = new DataView(buffer, byteOffset, byteLength);
+  for (const name of writers) Object.defineProperty(view, name, { value: () => { throw new RangeError("Native module memory is read-only"); } });
+  return view;
 }
 
 /**
@@ -59,7 +58,7 @@ export class NativeGameMemory implements Q3GameMemory {
   pointerWord(address: number | null): number { return address === null ? 0 : address | 0; }
   viewAt(address: number, length: number): DataView {
     const pointer = this.required(address | 0), bytes = this.bytes(pointer, length);
-    return this.readOnly.has(bytes) ? new ReadOnlyView(bytes.buffer, bytes.byteOffset, bytes.byteLength, pointer.byteOffset) : new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    return this.readOnly.has(bytes) ? readOnlyView(bytes.buffer, bytes.byteOffset, bytes.byteLength) : new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
 
   pointer(word: number): Uint8Array | null {
@@ -94,7 +93,7 @@ export class NativeGameMemory implements Q3GameMemory {
 
   regionView(region: Uint8Array, offset = 0, length = region.byteLength - offset): DataView {
     if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset + length > region.byteLength) throw new RangeError("Native game region view exceeds its region");
-    return this.readOnly.has(region) ? new ReadOnlyView(region.buffer, region.byteOffset + offset, length, 0n) : new DataView(region.buffer, region.byteOffset + offset, length);
+    return this.readOnly.has(region) ? readOnlyView(region.buffer, region.byteOffset + offset, length) : new DataView(region.buffer, region.byteOffset + offset, length);
   }
   regionWrite(region: Uint8Array, bytes: Uint8Array): void { this.writable(region).set(bytes); }
   regionFill(region: Uint8Array, start: number, length: number, value: number): void {

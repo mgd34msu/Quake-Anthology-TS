@@ -10,6 +10,8 @@ export interface ProductExpectation {
   readonly baseProduct: string | null;
   readonly requiredContentArchives: readonly string[];
   readonly requiredPrograms: readonly string[];
+  /** Native game modules a mod ships alongside or instead of bytecode (Q3 qagamex86.dll, qagamei386.so), loose in its directory. */
+  readonly nativePrograms?: readonly string[];
   readonly mapWitness: string | null;
   readonly unresolvedReason: string | null;
 }

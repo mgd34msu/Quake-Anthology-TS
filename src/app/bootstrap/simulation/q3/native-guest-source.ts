@@ -56,7 +56,7 @@ export async function prepareQ3Native(execution: NativeExecution, mounts: Mounte
     if (pe.abi.kind !== "windows-i386" || execution.profile.kind !== "windows-i386") throw new Error("Native Q3 1.32 modules require the Windows i386 profile");
   } else if (execution.profile.kind === "windows-i386" || execution.profile.kind === "windows-x86-64") throw new Error("Native ELF module declared a Windows profile");
   else if (profile === "q3-elf" && execution.profile.kind !== "linux-i386") throw new Error("Native Q3 1.32 modules require the i386 profile");
-  if (profile !== "quake-live-elf" && execution.api.version !== 7 && execution.api.version !== 8) throw new Error("Native Q3 server games implement game API 7 or 8");
+  if (profile !== "quake-live-elf" && execution.api.version !== 8) throw new Error("Native Q3 server games implement the 1.32 game API (version 8)");
   const reference = execution.artifact;
   return { execution, bytes, profile, module: { id: execution.owner.provider, artifactPath: reference.requestedPath, digest: reference.digest,
     revision: `${reference.provenance.mount.identity.id}:${reference.provenance.mount.identity.generation}` } };
@@ -276,10 +276,11 @@ export class Q3NativeGuestSource implements Q3GameEngine {
     if (this.hostState === undefined) throw new Error("Native Q3 host has not bound checkpoint services");
     if (layoutOf(this.memory) !== this.baseline) throw new Error("Native Q3 module allocated memory after startup; its process cannot be saved");
     const host = this.hostState.checkpoint();
-    const regions = this.memory.mappings().filter(mapping => mapping.label !== STACK_LABEL && writable(mapping.permissions)).map(mapping => {
+    const regions = this.memory.mappings().flatMap(mapping => {
+      if (mapping.label === STACK_LABEL || mapping.permissions !== "read-write" && mapping.permissions !== "read-write-execute") return [];
       const address = this.memory.pointer(mapping.base);
       if (address === null) throw new Error("Native Q3 mapping has no address");
-      return { base: mapping.base, permissions: mapping.permissions, bytes: this.memory.copy(address, mapping.byteLength) };
+      return [{ base: mapping.base, permissions: mapping.permissions, bytes: this.memory.copy(address, mapping.byteLength) }];
     });
     return { kind: "native-guest", module: this.prepared.module, random: host.random, callbacks: host.callbacks, abi: this.abi, regions,
       processorLayout: { ...PROCESSOR_LAYOUT, pointerBytes: this.memory.pointerBytes }, processorState: this.state.registers.checkpoint(), runtimeState: { ...host.state, bytes: host.state.bytes.slice() } };

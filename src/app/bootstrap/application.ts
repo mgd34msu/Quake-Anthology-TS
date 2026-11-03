@@ -1620,7 +1620,7 @@ export class Application {
       const commands = create({ dialect: "q3", cvars: guest.state.cvars,
         context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => this.host.print(text),
         serverGame: invocation => {
-          if (guest.game.module.interpreter.isActive) throw new Error("Nested Q3 guest console exports are unsupported");
+          if (guest.engine.active) throw new Error("Nested Q3 guest console exports are unsupported");
           const name = invocation.argv[0]; if (name === undefined) return false;
           queue(name, invocation.args, null, invocation.source); return true;
         } });
@@ -1629,7 +1629,7 @@ export class Application {
       bindings.push(owner => { owner.unregister("exec"); return () => {}; });
       register(commands, "exec", invocation => {
         if (invocation.source.producer?.instance !== undefined) { invocation.executeScript(); return undefined; }
-        if (guest.game.module.interpreter.isActive) throw new Error("Q3 guest immediate exec is unsupported; append the script command");
+        if (guest.engine.active) throw new Error("Q3 guest immediate exec is unsupported; append the script command");
         queue("exec", invocation.args, null, { session: invocation.source.session, origin: invocation.source.origin });
         return undefined;
       });
@@ -2118,7 +2118,7 @@ export class Application {
     const client = this.ownership.kind === "borrowed" ? this.ownership.client : null;
     const owner = client?.renderer.owner ?? { identity: Symbol("application renderer"), session: this.session.session, generation: 0 };
     const rootImages = client?.renderer.images ?? new SceneImageRegistry(owner);
-    const assets = createWorldAssets(this.content, { owner: owner, images: rootImages }, text => { this.host.print(text); }, this.imageSettings);
+    const assets = createWorldAssets(this.content, { owner: owner, images: rootImages }, this.hostPrinter(), this.imageSettings);
     let renderer: NativeRenderer | null = null, input: ApplicationInput | null = null, audio: ApplicationAudio | null = null;
     let art: NativeUiArt | null = null;
     let effects: ApplicationEffects | null = null;
@@ -2180,7 +2180,7 @@ export class Application {
       const actions = { ...this.inputActions(), ...(this.configurationScripts === null ? {} : { scripts: this.configurationScripts }) };
       const inputArguments: Parameters<typeof ApplicationInput.open> = [renderer.window, players, this.options, movementDialect(this.options, this.simulation.recipe), this.simulation,
         configuration === null ? actions : { ...actions, configuration, startupReader: () => configuration.read },
-        () => performance.now(), this.inputConfig, undefined, undefined, this.preparedStartup ?? undefined];
+        performanceNow, this.inputConfig, undefined, undefined, this.preparedStartup ?? undefined];
       input = client === null ? await ApplicationInput.open(...inputArguments)
         : await ApplicationInput.prepareForClient(client, new Set([client.imageSettings.cvars, client.prepared.source, client.prepared.movement,
           client.prepared.fallback, ...client.prepared.seats.flatMap(seat => [seat.cvars, seat.mouse.cvars])]), ...inputArguments);
@@ -2192,8 +2192,7 @@ export class Application {
         this.guestBrowser = await this.openGuestBrowser();
         this.publishLocalGuestSnapshots();
       }
-      audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text),
-        { ...await loadAudioSettings(this.inputConfig), musicControls: this.musicControls, q3TeamGame: () => this.simulation.teamGame(), deferOutput: client !== null });
+      audio = this.createWorldAudio(this.content, this.options, await loadAudioSettings(this.inputConfig), client !== null);
       if (this.imageSettings?.cvars.find("volume") !== undefined) {
         if (this.preparedStartup === null) {
           this.imageSettings.cvars.set("volume", String(audio.effectsVolume));
@@ -2228,36 +2227,22 @@ export class Application {
         if (restoring && sourceClient?.kind === "qvm") await sourceClient.client.prepare(this.presentationFrames);
         const nativeSeat = await this.prepareNativeQ2Seat(local, assets, this.simulation, this.clientCvars.get(local.player.seat.id));
         if (nativeSeat !== null) nativeQ2.set(local.player.seat.id, nativeSeat);
-        const ui = await this.createSeatUi(local, menuArt, inputOwner, operation => native.mutateWindow(operation), this.simulation, font, audioOwner, typography, rerelease, this.content, this.options, sourceClient?.kind === "qvm");
+        const ui = await this.createSeatUi(local, menuArt, inputOwner, windowMutator(native), this.simulation, font, audioOwner, typography, rerelease, this.content, this.options, sourceClient?.kind === "qvm");
         const presentation = await this.createWorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient, rerelease, nativeSeat);
         if (client === null) local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
       }
       this.graphical = { renderer, assets, input, audio, effects, art, presentations, q3, rerelease, nativeQ2,
-        selectedQ3Presentations: new ApplicationSelectedQ3Presentations({ assets, audio, queries: this.simulation.scene,
-          print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
-          clock: { now: () => this.presentationMilliseconds ?? this.elapsed, frameNumber: () => this.presentationFrames }, hardware: () => q3Hardware(native.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
-        modPresentations: new ApplicationModPresentations({ assets, audio, input, queueCommand: request => { this.requestedCommands.admit(request); }, renderer: native, queries: this.simulation.scene,
-          presentationMedia: componentMediaControl(this.simulation.events, audio, assets),
-          systemCinematics: (_source, presentation, scope) => this.systemCinematics(this.simulation, this.content, assets, audioOwner, native, presentation.local.player.seat.id, inputOwner, scope),
-          print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
-          clock: { now: () => this.presentationMilliseconds ?? this.elapsed, frameNumber: () => this.presentationFrames } }) };
+        ...this.createPresentationServices(assets, audio, input, this.simulation, this.content, native, this.presentationClock) };
       if (save !== undefined) {
         await this.restoreComponentClients(save, this.graphical, this.simulation);
         this.graphical.modPresentations.publishRestored();
       }
       this.refreshApplicationTools();
-      this.capture = client?.capture ?? new ApplicationCapture(inputCaptureServices(input, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.host.print(text)), renderer);
+      this.capture = client?.capture ?? this.createApplicationCapture(input, renderer);
       if (client === null) {
         this.capture.activate();
-        const video = new ApplicationVideoRestart(renderer, {
-          renderWorker: () => (this.imageSettings?.cvars.variableValue("r_smp") ?? 0) !== 0,
-          capture: () => this.capture, prepare: () => this.prepareVideoRestart(),
-          publishWindow: window => { const current = this.graphical; if (current === null) throw new Error("Video input has retired"); current.input.publishWindow(window); },
-          published: renderer => { this.launchOptions = { ...this.launchOptions, renderer }; },
-          settled: () => {}, print: (text, source) => { if (this.graphical === null) this.host.print(text); else this.graphical.input.print(text, source); }, failed: error => this.closeFailedWorld(error),
-        });
-        video.register(input.commands); this.ownedVideoRestart = video;
+        this.ownedVideoRestart = this.createVideoRestart(renderer, input);
       }
       if (q3.size === 0) await audio.startWorldMusic();
     } catch (error) {
@@ -2730,7 +2715,7 @@ export class Application {
       if (localGuest === null || seat === undefined || browser === null) throw new Error("Local guest client services are not prepared");
       const { state, cvars } = seat;
       const keys = await this.prepareKeys(assets.content, simulation);
-      const primaryArtifact = assets.content.preparedQ3Game?.artifact;
+      const prepared = assets.content.preparedQ3Game, primaryArtifact = prepared?.kind === "qvm" ? prepared.artifact : undefined;
       const equipmentProfile = primaryArtifact === undefined ? null : q3GrappleProfile(primaryArtifact);
       const client = await ApplicationQ3Client.create({ saveFontData: () => (input.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0, renderSettings: () => q3RendererSettings(input.sharedCvars), kind: "qvm", keys, localServer: true, source: state.source, connection: state, cvars,
         equipmentWeapon: () => {
@@ -2917,7 +2902,7 @@ export class Application {
       const preset = applicationPreset(this.content.catalog, options, { movement: this.content.recipe.movement, character: this.content.recipe.character.definition });
       recipe = await resolveLaunch({ catalog: this.content.catalog, preset, choice: presetChoice(preset.id) });
     } else recipe = await resolveApplicationTravel(this.content, options.map);
-    if (save !== undefined && recipe.execution.some(module => module.kind === "qvm" && module.role === "server-game")) {
+    if (save !== undefined && recipe.execution.some(module => module.role === "server-game" && (module.kind === "qvm" || module.kind === "native" && module.api.kind === "q3-qagame"))) {
       const { botSkill, ...savedOptions } = options;
       options = savedOptions;
     }
@@ -3068,7 +3053,7 @@ export class Application {
     const monsterNavigation = await preloadApplicationMonsterNavigation(content);
     const modTravel = save === undefined ? await previousSimulation.checkpointModsForTravel() : undefined;
     const continueQ3Clock = save === undefined && q3 !== null && content.recipe.map.entities.provider.startsWith("q3:")
-      && !content.recipe.execution.some(module => module.kind === "qvm" && module.role === "server-game");
+      && !content.recipe.execution.some(module => module.role === "server-game" && (module.kind === "qvm" || module.kind === "native" && module.api.kind === "q3-qagame"));
     const destinationSourceMilliseconds = continueQ3Clock && q3 !== null ? q3.host.now() : tx.initialSourceMilliseconds;
 
     tx.monsterNavigation = monsterNavigation;
@@ -3352,7 +3337,7 @@ export class Application {
       this.restoreSourceInputAngles(input, nextSimulation);
       input.resumeCommands(Math.max(previous.input.nextCommandSequence,
         ...players.map(player => (nextSimulation.movementPlayer(player.actor)?.lastSequence ?? -1) + 1)));
-      const audio = this.createWorldAudio(content, tx.options, nextSimulation, await loadAudioSettings(this.inputConfig));
+      const audio = this.createWorldAudio(content, tx.options, await loadAudioSettings(this.inputConfig), true, nextSimulation);
       audio.bindHaptics(input);
       staged.audio = audio;
       await audio.prepareEnvironment(nextSimulation.scene);
@@ -3394,7 +3379,7 @@ export class Application {
         presentations.push(presentation);
       }
       staged.graphical = { renderer: previous.renderer, input, audio, effects, art: staged.art, assets: staged.assets, presentations, q3: q3Clients, rerelease, nativeQ2: staged.nativeQ2,
-        ...this.createPresentationServices(staged, audio, input, current, content, sharedRenderer, destinationSourceMilliseconds) };
+        ...this.createPresentationServices(staged.assets, audio, input, current, content, sharedRenderer, this.stagedClock(staged, destinationSourceMilliseconds)) };
       if (save !== undefined) await this.restoreComponentClients(save, staged.graphical, nextSimulation);
       // The seat, audio and modding closures above share this scope for the life of the new world.
       previous = null;
@@ -3402,16 +3387,14 @@ export class Application {
   }
 
   /** Audio is built in a synchronous method: its closures live as long as the world, and an async stage's scope also holds the previous world (AUDIT-001). */
-  private createWorldAudio(content: LoadedApplicationContent, options: ApplicationOptions, simulation: SharedSimulation, settings: Awaited<ReturnType<typeof loadAudioSettings>>): ApplicationAudio {
+  private createWorldAudio(content: LoadedApplicationContent, options: ApplicationOptions, settings: Awaited<ReturnType<typeof loadAudioSettings>>, deferOutput: boolean, simulation?: SharedSimulation): ApplicationAudio {
     return new ApplicationAudio(content, () => this.elapsed, options.seed, options.characterModel, this.hostPrinter(),
-      { ...settings, musicControls: this.musicControls, q3TeamGame: () => simulation.teamGame(), deferOutput: true });
+      { ...settings, musicControls: this.musicControls, q3TeamGame: () => (simulation ?? this.simulation).teamGame(), deferOutput });
   }
 
   /** Source and component presentation services for a staged world, built where their closures cannot capture an async stage's scope. */
-  private createPresentationServices(staged: WorldReplacement, audio: ApplicationAudio, input: ApplicationInput, current: SharedSimulation, content: LoadedApplicationContent,
-    sharedRenderer: NativeRenderer, destinationSourceMilliseconds: number): Pick<GraphicalApplication, "selectedQ3Presentations" | "modPresentations"> {
-    const assets = staged.assets;
-    if (assets === null) throw new Error("Staged world has no assets");
+  private createPresentationServices(assets: ApplicationAssets, audio: ApplicationAudio, input: ApplicationInput, current: SharedSimulation, content: LoadedApplicationContent,
+    sharedRenderer: NativeRenderer, modClock: () => number): Pick<GraphicalApplication, "selectedQ3Presentations" | "modPresentations"> {
     return { selectedQ3Presentations: new ApplicationSelectedQ3Presentations({ assets, audio, queries: current.scene,
       print: this.hostPrinter(), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
       clock: { now: () => this.presentationMilliseconds ?? this.elapsed, frameNumber: () => this.presentationFrames }, hardware: () => q3Hardware(sharedRenderer.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
@@ -3419,7 +3402,30 @@ export class Application {
       presentationMedia: componentMediaControl(current.events, audio, assets),
       systemCinematics: (_source, presentation, scope) => this.systemCinematics(current, content, assets, audio, sharedRenderer, presentation.local.player.seat.id, input, scope),
       print: this.hostPrinter(), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
-      clock: { now: () => staged.committed ? this.presentationMilliseconds ?? this.elapsed : destinationSourceMilliseconds, frameNumber: () => this.presentationFrames } }) };
+      clock: { now: modClock, frameNumber: () => this.presentationFrames } }) };
+  }
+
+  /** The clock before the staged world commits is the destination's start time. */
+  private stagedClock(staged: WorldReplacement, destinationSourceMilliseconds: number): () => number {
+    return () => staged.committed ? this.presentationMilliseconds ?? this.elapsed : destinationSourceMilliseconds;
+  }
+
+  private readonly presentationClock = (): number => this.presentationMilliseconds ?? this.elapsed;
+
+  private createApplicationCapture(input: ApplicationInput, renderer: NativeRenderer): ApplicationCapture {
+    return new ApplicationCapture(inputCaptureServices(input, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, this.hostPrinter()), renderer);
+  }
+
+  private createVideoRestart(renderer: NativeRenderer, input: ApplicationInput): ApplicationVideoRestart {
+    const video = new ApplicationVideoRestart(renderer, {
+      renderWorker: () => (this.imageSettings?.cvars.variableValue("r_smp") ?? 0) !== 0,
+      capture: () => this.capture, prepare: () => this.prepareVideoRestart(),
+      publishWindow: window => { const current = this.graphical; if (current === null) throw new Error("Video input has retired"); current.input.publishWindow(window); },
+      published: renderer => { this.launchOptions = { ...this.launchOptions, renderer }; },
+      settled: () => {}, print: (text, source) => { if (this.graphical === null) this.host.print(text); else this.graphical.input.print(text, source); }, failed: error => this.closeFailedWorld(error),
+    });
+    video.register(input.commands);
+    return video;
   }
 
   private hostPrinter(): (text: string) => undefined { return text => this.host.print(text); }

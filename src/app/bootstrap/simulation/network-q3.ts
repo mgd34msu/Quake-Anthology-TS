@@ -33,7 +33,7 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
   const state = guest ? source.state : source.host.serverState, cvars = state.cvars;
   const product = guest ? 'baseq3' : source.options.product;
   const maxClients = simulation.options.maxClients;
-  const entityCount = () => guest ? source.game.data.numEntities : nativeSource().pool.numEntities;
+  const entityCount = () => guest ? source.engine.data.numEntities : nativeSource().pool.numEntities;
   const sharedEntity = (number: number) => guest ? source.records.entity(number) : nativeSource().pool.at(number);
   const linked = (number: number) => guest ? source.records.entity(number).r.linked : nativeSource().pool.at(number).inuse && nativeSource().pool.at(number).r.linked;
   if (mode === 'new') cvars.register('fs_game', guest ? cvars.variableString('fs_game') : product === 'missionpack' ? 'missionpack' : '', CvarFlag.SystemInfo);
@@ -224,7 +224,7 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
       if (options.content.q3Product?.restriction.kind === 'demo') info = put(info, 'sv_keywords', `demo ${q3InfoValue(info, 'sv_keywords')}`);
       const rows = guest ? source.players().map(player => {
         const ps = source.records.player(player.sourceEntity), name = q3InfoValue(state.getUserinfo(player.sourceEntity) ?? '', 'name');
-        return `${ps.persistent[0] ?? 0} ${source.game.data.playerPing(player.sourceEntity)} "${name}"\n`;
+        return `${ps.persistent[0] ?? 0} ${source.engine.data.playerPing(player.sourceEntity)} "${name}"\n`;
       }) : simulation.players().map(actor => { const client = nativeSource().records.byActor(actor)?.client; return client == null ? '' : `${client.ps.persistant.get(0)} ${client.ps.ping} "${client.pers.netname}"\n`; });
       let players = '';
       for (const row of rows) { if (players.length + row.length >= 16384) break; players += row; }
