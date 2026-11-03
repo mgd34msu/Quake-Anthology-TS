@@ -19,6 +19,8 @@ export class DemoLibrary {
   constructor(
     readonly root: string,
     private readonly mounts: DemoLibraryMounts,
+    /** The stock game's own folders, where its demos are recorded; the user store stays as the fallback for earlier recordings. */
+    private readonly nativeRoots: readonly string[] = [],
   ) {}
   async list(): Promise<readonly DemoLibraryEntry[]> {
     const names = new Map<string, string>();
@@ -38,26 +40,35 @@ export class DemoLibrary {
     ] satisfies readonly (readonly [string, string])[]) {
       for (const name of await this.mounts.listFiles(directory, extension)) add(directory === "" ? name : `${directory}/${name}`);
     }
-    const scan = async (directory: string): Promise<void> => {
-      const entries = await readdir(join(this.root, directory), { withFileTypes: true }).catch((error: unknown) => {
+    const scan = async (directory: string, root: string, shallow = false): Promise<void> => {
+      if (shallow && directory !== "" && directory.toLowerCase() !== "demos") return;
+      const entries = await readdir(join(root, directory), {
+        withFileTypes: true,
+      }).catch((error: unknown) => {
         if (isMissingFile(error)) return [];
         throw error;
       });
       for (const entry of entries) {
         const path = directory === "" ? entry.name : `${directory}/${entry.name}`;
-        if (entry.isDirectory()) await scan(path);
+        if (entry.isDirectory()) await scan(path, root, shallow);
         else if (entry.isFile()) add(path);
       }
     };
-    await scan("");
+    await scan("", this.root);
+    for (const root of this.nativeRoots) {
+      // Native game folders also hold the game's own files; only demo locations are listed.
+      await scan("", root, true);
+    }
     return [...names.values()].sort((a, b) => a.localeCompare(b)).map(id => ({ id, label: id, family: demoFamily(id, "q1") }));
   }
   async read(path: string): Promise<Uint8Array | undefined> {
     const normalized = normalizeResourcePath(path);
-    try {
-      return await readFile(join(this.root, normalized));
-    } catch (error) {
-      if (!isMissingFile(error)) throw error;
+    for (const root of [...this.nativeRoots, this.root]) {
+      try {
+        return await readFile(join(root, normalized));
+      } catch (error) {
+        if (!isMissingFile(error)) throw error;
+      }
     }
     return this.mounts.read(normalized);
   }

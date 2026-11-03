@@ -149,10 +149,17 @@ There are no timed or mid-level automatic saves. Loading an existing save does
 not overwrite it with a new autosave. The legacy `sv_autosave_interval` variable
 is accepted for old configuration files but no longer schedules saves.
 
-`save NAME` writes the shared format, including supported mixed-game state.
-For an ordinary singleplayer NetQuake source session, export original Quake saves
-with `save NAME v5` or `save NAME v6`. Mixed compositions need shared saves because
-the original formats cannot retain their extra state.
+In a stock game, `save NAME` writes where the original does: Quake `<gamedir>/NAME.sav` in
+the original format (v5, v6 in the rerelease) with an engine sidecar `NAME.qtsave` beside
+it, so the original game can load the slot and this engine restores everything; Quake II,
+Quake III and the rerelease Quake II cannot be written in their original formats, so the
+engine's own format goes under the original's `save` folder (see
+[save-format.md](save-format.md#where-saves-live)). Mixed compositions write the shared
+format, including mixed-game state, in the user store. `save NAME v5` or `v6` still
+exports an original Quake save explicitly. Demos, screenshots and server logs of a stock
+game likewise go into the game's own folders with the original names, and demos and
+saves from earlier versions are moved there on first launch
+([content-layout.md](content-layout.md#where-files-are-read-and-written)).
 
 `load NAME` detects the format. If an original save matches several installed
 products, use `load NAME PRODUCT_ID` to select its source. The console commands

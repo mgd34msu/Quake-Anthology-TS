@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { mkdir, readdir, stat } from "node:fs/promises";
-import { basename, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
+import type { NativeSaveLayout } from "../../settings/native-saves.ts";
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
 import { kexQ2SaveRestorable, readKexQ2SaveArchive } from "../../persistence/kex-q2-save.ts";
 import { readSavedGame, readSaveHeader } from "../../persistence/saved-game.ts";
@@ -45,11 +46,23 @@ export class StartupSaves {
   private current: StartupSaveList = { rows: [], error: null };
   private paths = new Map<string, string>();
   /** Parsed row details keyed by file identity; refresh runs on every menu open and save. */
-  private readonly rowCache = new Map<string, { readonly mtimeMs: number; readonly size: number; readonly row: StartupSaveRow }>();
+  private readonly rowCache = new Map<
+    string,
+    {
+      readonly mtimeMs: number;
+      readonly size: number;
+      readonly row: StartupSaveRow;
+    }
+  >();
   constructor(
     private readonly catalog: InstalledCatalog,
     readonly directory: string,
     readonly externalDirectories: readonly string[] = [],
+    /** Stock games' own save folders, which hold saves the original names and formats; scanned to the given depth. */
+    private readonly nativeFolders: readonly {
+      readonly root: string;
+      readonly depth: number;
+    }[] = [],
   ) {}
   get list(): StartupSaveList {
     return this.current;
@@ -61,11 +74,11 @@ export class StartupSaves {
     if (row.unavailable !== null) throw new Error(row.unavailable);
     return path;
   }
-  async namedPath(name: string): Promise<string> {
+  async namedPath(name: string, native: NativeSaveLayout | null = null): Promise<string> {
     const label = name.trim();
     if (!/^[\p{L}\p{N} _-]{1,48}$/u.test(label)) throw new Error("Use 1-48 letters, numbers, spaces, - or _.");
-    await mkdir(this.directory, { recursive: true });
-    const path = join(this.directory, `${label}.sav`);
+    const path = native === null ? join(this.directory, `${label}.sav`) : native.locate(label);
+    await mkdir(dirname(path), { recursive: true });
     if (await Bun.file(path).exists()) throw new Error("Name exists. Select its slot to overwrite.");
     return path;
   }
@@ -75,12 +88,13 @@ export class StartupSaves {
       paths = new Map<string, string>();
     const seen = new Set<string>();
     let error: string | null = null;
-    const scan = async (directory: string, collect: (path: string) => void): Promise<void> => {
+    const scan = async (directory: string, collect: (path: string) => void, depth = Infinity): Promise<void> => {
       try {
         for (const entry of await readdir(directory, { withFileTypes: true })) {
           const path = join(directory, entry.name);
-          if (entry.isDirectory()) await scan(path, collect);
-          else if (entry.isFile() && (entry.name.toLowerCase().endsWith(".sav") || entry.name.toLowerCase().endsWith(".pak.gz"))) collect(path);
+          if (entry.isDirectory()) {
+            if (depth > 0) await scan(path, collect, depth - 1);
+          } else if (entry.isFile() && (entry.name.toLowerCase().endsWith(".sav") || entry.name.toLowerCase().endsWith(".pak.gz"))) collect(path);
         }
       } catch (cause) {
         if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return;
@@ -100,6 +114,19 @@ export class StartupSaves {
         seen.add(path);
         files.push({ path, id: `external/${index}/${relative(root, path)}` });
       });
+    for (const [index, folder] of this.nativeFolders.entries())
+      await scan(
+        folder.root,
+        path => {
+          if (seen.has(path)) return;
+          seen.add(path);
+          files.push({
+            path,
+            id: `native/${index}/${relative(folder.root, path)}`,
+          });
+        },
+        folder.depth,
+      );
     for (const { path, id } of files) {
       const identity = await stat(path).catch(() => null);
       const cached = identity === null ? undefined : this.rowCache.get(path);
@@ -109,7 +136,12 @@ export class StartupSaves {
         continue;
       }
       const remember = (row: StartupSaveRow): StartupSaveRow => {
-        if (identity !== null) this.rowCache.set(path, { mtimeMs: identity.mtimeMs, size: identity.size, row });
+        if (identity !== null)
+          this.rowCache.set(path, {
+            mtimeMs: identity.mtimeMs,
+            size: identity.size,
+            row,
+          });
         return row;
       };
       if (path.toLowerCase().endsWith(".pak.gz")) {
@@ -156,7 +188,16 @@ export class StartupSaves {
           game = `${product.expectation.title} (${product.expectation.edition})`;
           if (product.availability.kind !== "installed") unavailable = "Required game content is not installed.";
           paths.set(id, path);
-          rows.push(remember({ id, label, map, game, savedAtMilliseconds, unavailable }));
+          rows.push(
+            remember({
+              id,
+              label,
+              map,
+              game,
+              savedAtMilliseconds,
+              unavailable,
+            }),
+          );
           continue;
         }
         const save = await readSavedGame(path);

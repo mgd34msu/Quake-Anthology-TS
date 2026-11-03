@@ -45,7 +45,10 @@ export function assertLoadPathAllowed(
   directory: string,
   path: string,
   source: Pick<CommandContext, "origin" | "producer"> | undefined,
-  options: { readonly allowAnyPath: boolean; readonly trustedDirectories: readonly string[] },
+  options: {
+    readonly allowAnyPath: boolean;
+    readonly trustedDirectories: readonly string[];
+  },
 ): void {
   if (options.allowAnyPath) return;
   const inside = (root: string): boolean => {
@@ -64,18 +67,18 @@ export function assertLoadPathAllowed(
   );
 }
 
-export function containedSaveName(directory: string, path: string): string {
+export function containedSaveName(directory: string, path: string, extension = ".sav"): string {
   const name = relative(resolve(directory), resolve(path));
   if (isAbsolute(name) || name === ".." || name.startsWith(`..${sep}`)) throw new RangeError(`Save path is outside the save directory: ${resolve(directory)}`);
   const parts = containedFileParts(name);
   if (parts.some(part => part.replace(/\.sav$/i, "").toLowerCase() === "current")) throw new RangeError("The current slot is reserved for transition state");
-  if (!name.toLowerCase().endsWith(".sav")) throw new RangeError("Save path must end in .sav");
+  if (!name.toLowerCase().endsWith(extension)) throw new RangeError(`Save path must end in ${extension}`);
   return name;
 }
 
 /** Commit through a held parent descriptor so directory replacement cannot redirect a save. */
-export async function writeContainedSave(directory: string, path: string, bytes: Uint8Array): Promise<void> {
-  const name = containedSaveName(directory, path);
+export async function writeContainedSave(directory: string, path: string, bytes: Uint8Array, extension = ".sav"): Promise<void> {
+  const name = containedSaveName(directory, path, extension);
   await mkdir(directory, { recursive: true });
   const parent = openContainedParent(directory, name, true);
   const temporary = `/proc/self/fd/${parent.descriptor}/.${parent.leaf}.${crypto.randomUUID()}.tmp`;

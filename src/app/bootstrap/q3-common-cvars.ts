@@ -26,6 +26,7 @@ export function q3ServerCvarDefinitions(settings: { readonly maxClients: number;
     ["sv_floodProtect", "1", CvarFlag.Archive | CvarFlag.ServerInfo],
     ["sv_strictAuth", "1", CvarFlag.Archive],
     ["bot_enable", "1", CvarFlag.None],
+    ["logfile", "0", CvarFlag.Temporary],
   ] satisfies readonly (readonly [string, string, number])[];
   return [...common.map(([name, value, flags]) => ({ name, value, flags })), ...collisionMapCvarDefinitions];
 }

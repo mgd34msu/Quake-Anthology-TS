@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { ImageLevel } from "../../contracts/render.ts";
-import { FrameCapture } from "../../capture/index.ts";
+import { FrameCapture, type ScreenshotNaming } from "../../capture/index.ts";
 import { registerConsoleCommands, type ConfigurationWriteStarted } from "../../console/commands.ts";
 import { archivedBindings } from "../../input/bindings.ts";
 import { consoleConfigRoot, seatConsoleConfig } from "./config-scripts.ts";
@@ -15,6 +15,12 @@ export function applicationCaptureRoot(userContentRoot: string | undefined): str
   return consoleConfigRoot(userContentRoot);
 }
 
+export const defaultNaming: ScreenshotNaming = {
+  directory: "screenshots",
+  prefix: "shot",
+  digits: 4,
+};
+
 export interface ApplicationCaptureServices {
   readonly commands: CommandBuffer;
   readonly configurationWriteStarted?: ConfigurationWriteStarted;
@@ -22,6 +28,7 @@ export interface ApplicationCaptureServices {
   input(seat: SeatId): SeatInput | null;
   canChat(): boolean;
   root(): string;
+  naming?(): ScreenshotNaming;
   mapName(): string;
   write(operation: () => Promise<void>): Promise<void>;
   print(text: string): void;
@@ -30,7 +37,8 @@ export interface ApplicationCaptureServices {
 export function inputCaptureServices(input: ApplicationInput, root: string, mapName: () => string, print: (text: string) => void): ApplicationCaptureServices {
   return {
     commands: input.commands,
-    root: () => root,
+    root: () => input.scripts.native?.layout.directory ?? root,
+    naming: () => input.scripts.native?.layout.screenshots ?? defaultNaming,
     mapName,
     print,
     console: seat => input.locals.find(local => local.player.seat.id.equals(seat))?.console ?? null,
@@ -78,8 +86,10 @@ export class ApplicationCapture {
   }
 
   private currentFrameCapture(): FrameCapture {
-    const root = this.services.root();
-    if (this.frameCapture === null || this.frameCapture.root !== root) this.frameCapture = new FrameCapture(root, { readRgba: () => this.readFrame() });
+    const root = this.services.root(),
+      naming = this.services.naming?.() ?? defaultNaming;
+    if (this.frameCapture === null || this.frameCapture.root !== root || this.frameCapture.naming !== naming)
+      this.frameCapture = new FrameCapture(root, { readRgba: () => this.readFrame() }, naming);
     return this.frameCapture;
   }
 

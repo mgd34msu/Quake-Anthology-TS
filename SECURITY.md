@@ -49,13 +49,17 @@ What is isolated:
   source.
 - **QVM bytecode and QuakeC** run in interpreters (`src/compat/qvm`, `src/compat/qc`) that
   expose only the engine's system-call surface.
-- **Game folders are written only for stock-game configuration.** A stock game (all components
-  from one product or mod) reads and writes its own `config.cfg` or `q3config.cfg` in its game
-  folder, or the rerelease files under Saved Games, as the original does. Nothing else is
-  written into an install: saves, other settings, downloads and the crash log go under
-  `~/.local/share/quake-typescript/`. `--user-content-root` may not be a game install. Because
-  those config files run as scripts at startup, treat write access to a game folder as
-  code-execution-adjacent, as with the originals.
+- **Game folders are written only by stock games.** A stock game (all components from one
+  product or mod) writes what the original writes, with the original names: `config.cfg` or
+  `q3config.cfg`, demos, screenshots and level shots, `listip.cfg`, `qconsole.log`, `games.log`,
+  saves and the files its game module creates, in its game folder, or the rerelease files under
+  Saved Games. Mixed combinations, downloads, other settings and the crash log stay under
+  `~/.local/share/quake-typescript/`. On first launch after the update, earlier demos and
+  saves of stock games are moved from there into the game folders; the move never overwrites a
+  different file. `--user-content-root` may not be a game install. Because the config files run
+  as scripts at startup (as does `listip.cfg` when executed), treat write access to a game
+  folder as code-execution-adjacent, as with the originals. Tests redirect these writes with
+  `QTS_TEST_GAME_WRITE_ROOT`.
 
 What is **not** isolated:
 

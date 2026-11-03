@@ -6,19 +6,38 @@ code in `src/persistence`; the schema is the TypeScript in `src/contracts/sessio
 
 ## Where saves live
 
-`~/.local/share/quake-typescript/saves/`, or `saves/` inside a custom `--user-content-root`. `save NAME` adds `.sav` when the name has no
-extension. A relative name resolves inside that directory. The reserved name `current` is used
-for internal level-transition state and cannot be a user slot. Autosaves are written on level
-entry only ([playing.md](playing.md#save-and-load)).
+A stock game (every component from one product or mod) saves where the original does
+([content-layout.md](content-layout.md#where-files-are-read-and-written)). `save NAME` with a plain
+name writes:
 
-Saves stay in this directory even for stock games. The shared format is not id's `.sav` or
-`.ssv`, so it is not written under the original names in a game folder; use `save NAME v5` or
-`v6` to export a Quake save the original reads. A stock game's configuration, by contrast, is
-written to its native file ([content-layout.md](content-layout.md#where-files-are-read-and-written)).
+| Game | Location | Format |
+| --- | --- | --- |
+| Quake (classic) | `<gamedir>/NAME.sav` | NetQuake v5 |
+| Quake rerelease | `Saved Games/.../Quake/NAME.sav` | v6 |
+| Quake II (classic) | `<gamedir>/save/NAME/qts.sav` | shared container |
+| Quake II rerelease | `Saved Games/.../Quake II/<gamedir>/save/NAME.sav` | shared container |
+| Quake III | `<gamedir>/save/NAME.sav` | shared container |
+
+For Quake the original format cannot hold mixed or engine-only state, so the engine writes
+that state beside it as `NAME.qtsave` in the same folder. The sidecar is the shared container
+behind the signature `QTSIDE1\n` and the SHA-256 of the `NAME.sav` it belongs to. Loading
+`NAME.sav` restores everything from the sidecar while the hash still matches; if the original
+game has rewritten the slot, the sidecar is ignored and the original file loads. When the
+original format cannot be produced (a state the v5/v6 writer rejects), the shared container is
+written to `NAME.sav` instead. Quake II and Quake III cannot be written in id's save formats
+(`server.ssv`, `game.ssv`, the rerelease `.pak.gz`), so the shared container goes under the
+original's folder and naming; the original games do not read those files.
+
+`~/.local/share/quake-typescript/saves/` (or `saves/` inside a custom `--user-content-root`)
+remains the location for mixed combinations, for autosaves, for names that include a path and
+for saves made by earlier versions, all of which are still read. A relative name there resolves
+inside that directory. `save NAME` adds `.sav` when the name has no extension. The reserved
+name `current` is used for internal level-transition state and cannot be a user slot.
+Autosaves are written on level entry only ([playing.md](playing.md#save-and-load)).
 
 ## Commands
 
-- `save NAME [shared|v5|v6]` writes the shared format by default. `v5` and `v6` export the
+- `save NAME [shared|v5|v6]` writes the shared format by default; in a stock game's own save folder the default is that game's native choice above. `v5` and `v6` export the
   active singleplayer NetQuake source in its original format and are not available for mixed
   compositions.
 - `load NAME [SOURCE_PRODUCT]` detects the format. Name the source product when an original

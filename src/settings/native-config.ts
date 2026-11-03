@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { GameFamily } from "../contracts/content.ts";
 import { nightdiveAddonDirectories } from "../content/roots.ts";
+import type { ScreenshotNaming } from "../capture/index.ts";
 import { writeAtomic } from "../core/files/atomic.ts";
 
 /**
@@ -37,22 +38,74 @@ export interface NativeConfigLayout {
   readonly script: "config.cfg" | "q3config.cfg";
   /** Files in the order the original executes them. */
   readonly files: readonly NativeConfigFile[];
+  /**
+   * The folder the original writes its demos, screenshots, logs and saves into: the game folder, or the Saved Games
+   * folder for the rerelease. Writes go to `directory`; reads also look in `fallbacks`.
+   */
+  readonly directory: string;
+  readonly fallbacks: readonly string[];
+  /** Where the original puts unnamed screenshots, beneath `directory`. */
+  readonly screenshots: ScreenshotNaming;
 }
 
 export type NativeBindings = readonly (readonly [key: string, command: string])[];
 
-/** Key names the rerelease engine writes in place of this engine's. */
-const KEX_KEYS: ReadonlyMap<string, string> = new Map([
+/**
+ * Key names the rerelease engine writes in place of this engine's, from the key table in its executable. The first
+ * name for a key is the one written back. Keypad digits follow the layout of the keypad navigation keys.
+ */
+const KEX_KEY_PAIRS: readonly (readonly [kex: string, ours: string])[] = [
   ["mouse_left", "mouse1"],
   ["mouse_right", "mouse2"],
   ["mouse_middle", "mouse3"],
+  ["mouse_misc1", "mouse4"],
+  ["mouse_misc2", "mouse5"],
   ["mouse_wheel_up", "mwheelup"],
   ["mouse_wheel_down", "mwheeldown"],
   ["lshift", "shift"],
   ["lctrl", "ctrl"],
   ["lalt", "alt"],
-]);
-const KEX_KEYS_BACK: ReadonlyMap<string, string> = new Map([...KEX_KEYS].map(([kex, ours]) => [ours, kex]));
+  ["up", "uparrow"],
+  ["down", "downarrow"],
+  ["left", "leftarrow"],
+  ["right", "rightarrow"],
+  ["pageup", "pgup"],
+  ["pagedown", "pgdn"],
+  ["insert", "ins"],
+  ["delete", "del"],
+  ["caps_lock", "capslock"],
+  ["kp_0", "kp_ins"],
+  ["kp_1", "kp_end"],
+  ["kp_2", "kp_downarrow"],
+  ["kp_3", "kp_pgdn"],
+  ["kp_4", "kp_leftarrow"],
+  ["kp_6", "kp_rightarrow"],
+  ["kp_7", "kp_home"],
+  ["kp_8", "kp_uparrow"],
+  ["kp_9", "kp_pgup"],
+  ["kp_period", "kp_del"],
+  ["kp_divide", "kp_slash"],
+  ["kp_mul", "kp_star"],
+  ...Array.from({ length: 32 }, (_, index): readonly [string, string] => [`joy_${index}`, `joy${index + 1}`]),
+];
+/** Names the rerelease also accepts for a key; they are read but never written. */
+const KEX_KEY_ALIASES: readonly (readonly [kex: string, ours: string])[] = [
+  ["rshift", "shift"],
+  ["rctrl", "ctrl"],
+  ["ralt", "alt"],
+  ["numlock", "kp_numlock"],
+  ["grave", "`"],
+  ["backquote", "`"],
+  ["minus", "-"],
+  ["equals", "="],
+  ["comma", ","],
+  ["period", "."],
+  ["slash", "/"],
+  ["backslash", "\\"],
+  ["quote", "'"],
+];
+const KEX_KEYS: ReadonlyMap<string, string> = new Map([...KEX_KEY_PAIRS, ...KEX_KEY_ALIASES]);
+const KEX_KEYS_BACK: ReadonlyMap<string, string> = new Map(KEX_KEY_PAIRS.map(([kex, ours]) => [ours, kex]));
 /** The rerelease Quake binds actions with a leading star where this engine uses plus commands. */
 const KEX_COMMANDS: ReadonlyMap<string, string> = new Map([
   ["*in_attack", "+attack"],
@@ -60,6 +113,11 @@ const KEX_COMMANDS: ReadonlyMap<string, string> = new Map([
   ["*in_down", "+movedown"],
   ["*in_forward", "+forward"],
   ["*in_jump", "+jump"],
+  ["*in_left", "+left"],
+  ["*in_lookdown", "+lookdown"],
+  ["*in_lookup", "+lookup"],
+  ["*in_right", "+right"],
+  ["*in_strafe", "+strafe"],
   ["*in_moveleft", "+moveleft"],
   ["*in_moveright", "+moveright"],
   ["*in_speed", "+speed"],
@@ -68,14 +126,39 @@ const KEX_COMMANDS: ReadonlyMap<string, string> = new Map([
 ]);
 const KEX_COMMANDS_BACK: ReadonlyMap<string, string> = new Map([...KEX_COMMANDS].map(([kex, ours]) => [ours, kex]));
 
+/** GLQuake writes quakeNN.tga beside the game, Quake II scrnshot/quakeNN, Quake III screenshots/shotNNNN. */
+function screenshotNaming(family: GameFamily): ScreenshotNaming {
+  switch (family) {
+    case "q1":
+      return { directory: "", prefix: "quake", digits: 2 };
+    case "q2":
+      return { directory: "scrnshot", prefix: "quake", digits: 2 };
+    case "q3":
+      return { directory: "screenshots", prefix: "shot", digits: 4 };
+  }
+}
+
 function savedGamesRoot(family: GameFamily, home: string): string | null {
   return nightdiveAddonDirectories(home).find(root => root.family === family)?.root ?? null;
 }
 
-function placed(file: { name: string; real: string | null; alt: string | null; binds: boolean }, readsRedirect: boolean): NativeConfigFile | null {
+function placed(
+  file: {
+    name: string;
+    real: string | null;
+    alt: string | null;
+    binds: boolean;
+  },
+  readsRedirect: boolean,
+): NativeConfigFile | null {
   const path = file.real ?? file.alt;
   if (path === null) return null;
-  return { name: file.name, path, binds: file.binds, ...(file.alt === null ? {} : { redirected: file.alt, readsRedirect }) };
+  return {
+    name: file.name,
+    path,
+    binds: file.binds,
+    ...(file.alt === null ? {} : { redirected: file.alt, readsRedirect }),
+  };
 }
 
 /**
@@ -91,10 +174,25 @@ export function nativeConfigLayout(product: NativeConfigProduct, home: string = 
   const classicAlt = (name: string): string | null => (redirect === undefined ? null : join(redirect, product.contentDirectory, name));
   const classic = (name: "config.cfg" | "q3config.cfg", format: NativeConfigFormat): NativeConfigLayout | null => {
     const file = placed(
-      { name, real: product.looseRoot === null || exclusive ? null : join(product.looseRoot, name), alt: classicAlt(name), binds: true },
+      {
+        name,
+        real: product.looseRoot === null || exclusive ? null : join(product.looseRoot, name),
+        alt: classicAlt(name),
+        binds: true,
+      },
       readsRedirect,
     );
-    return file === null ? null : { format, script: name, files: [file] };
+    if (file === null) return null;
+    const directory = dirname(file.redirected ?? file.path);
+    const fallbacks = dirname(file.path) === directory ? [] : [dirname(file.path)];
+    return {
+      format,
+      script: name,
+      files: [file],
+      directory,
+      fallbacks,
+      screenshots: screenshotNaming(product.family),
+    };
   };
   if (product.family === "q3") return classic("q3config.cfg", "quake3");
   if (!rerelease) return classic("config.cfg", product.family === "q1" ? "quake" : "quake2");
@@ -121,7 +219,16 @@ export function nativeConfigLayout(product: NativeConfigProduct, home: string = 
           at("keybinds.cfg", basename(product.contentDirectory), true),
         ]
   ).filter((file): file is NativeConfigFile => file !== null);
-  return { format: product.family === "q1" ? "kex-quake" : "kex-quake2", script: "config.cfg", files };
+  const directory = alt ?? real;
+  if (directory === null) return null;
+  return {
+    format: product.family === "q1" ? "kex-quake" : "kex-quake2",
+    script: "config.cfg",
+    files,
+    directory,
+    fallbacks: alt !== null && real !== null ? [real] : [],
+    screenshots: screenshotNaming(product.family),
+  };
 }
 
 interface CvarLine {

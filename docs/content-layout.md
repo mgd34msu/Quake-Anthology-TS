@@ -100,7 +100,7 @@ writes its own configuration with the original name, format and location:
 | Game | Native configuration |
 | --- | --- |
 | Quake (WinQuake/GLQuake), mods | `<gamedir>/config.cfg` (`Id1`, `hipnotic`, ...) |
-| QuakeWorld | `qw/config.cfg` (assumed from the client's `com_gamedir`; not confirmed) |
+| QuakeWorld | `qw/config.cfg`: the QuakeWorld client writes `config.cfg` into `com_gamedir`, which is the `qw` folder (`q1-quakeworld` has content directory `q1/qw`; `tests/settings/native-files.test.ts` checks the path). id's source is not in this repository, so this follows that behavior rather than a quoted line. |
 | Quake II, mods | `<gamedir>/config.cfg` (`baseq2`, `xatrix`, ...) |
 | Quake III, Team Arena, mods | `<gamedir>/q3config.cfg` (`baseq3`, `missionpack`, ...) |
 | Quake rerelease | `Saved Games/Nightdive Studios/Quake/kexengine.cfg` |
@@ -117,6 +117,49 @@ variables the files do not name remain in the user store. A file that holds only
 the id header or comments does not override anything. Saved Games folders under
 Proton or a native profile are located as described above. These game folders
 are therefore written; install them where your account can write.
+
+A stock game also writes everything else the original writes, in the same folder
+and with the original name:
+
+| File | Quake | QuakeWorld | Quake II | Quake III |
+| --- | --- | --- | --- | --- |
+| Demos | `<gamedir>/NAME.dem` | `<gamedir>/NAME.qwd` | `<gamedir>/demos/NAME.dm2` | `<gamedir>/demos/NAME.dm_68` |
+| Screenshots | `<gamedir>/quakeNN.tga` | `<gamedir>/quakeNN.tga` | `<gamedir>/scrnshot/quakeNN.tga` | `<gamedir>/screenshots/shotNNNN.tga` or `.jpg` |
+| Level shots | | | | `<gamedir>/levelshots/MAP.tga` |
+| Logs | | | | `<gamedir>/qconsole.log` with `logfile` 1 (2 flushes each write); `<gamedir>/games.log` from `g_log` |
+| Server `writeip` | `<gamedir>/listip.cfg` | `<gamedir>/listip.cfg` | `<gamedir>/listip.cfg` | |
+| Saves | `<gamedir>/NAME.sav` | none | `<gamedir>/save/NAME/qts.sav` | `<gamedir>/save/NAME.sav` |
+
+Quake and Quake II numbering starts at 00 and keeps counting past 99; Quake III
+stops at `shot9999`. The `screenshot`, `screenshotJPEG` and `screenshotPNG`
+commands choose the extension; the engine does not write PCX. The console log is implemented for Quake III only. In the
+rerelease the same files go beneath the Saved Games folder: Quake saves go to
+`NAME.sav` in the Quake folder (the rerelease's own `s1.sav` sits there), Quake II
+saves to `<gamedir>/save/`, beside the rerelease's own `saveN.pak.gz`.
+Quake II classic games whose guest module writes files (its `save/` folders and
+`game` state) write into the same folder.
+
+Menus and the front end list demos and saves from these folders as well as the
+user store. Earlier versions kept a stock game's demos and saves in the user store;
+on the first launch after the update they are moved into the native folders. The
+move copies each file beside its destination, renames it into place and only then
+removes the original, never overwrites a different file already there, and can be
+interrupted and rerun. Whatever stays behind (autosaves, original-format saves,
+screenshots, which the old layout shared between games) is still read from the
+user store.
+
+Not yet moved to the native folders: client downloads (maps, sounds, models, PK3s
+a server sends) still go to the user store's product folder, because the catalog
+mounts that folder as the writable overlay of a running session.
+
+The stock-versus-mixed decision is made in one place, `stockGameFolders` in
+`src/app/bootstrap/native-settings.ts`; every writer of demos, screenshots, logs,
+`listip.cfg`, game-module files and saves asks it. It answers with the game's own
+folder when every component comes from one product or mod, and with nothing for
+a mixed combination, which then writes under the user store's product folder.
+Two parts of the owner's split are not done yet: mixed combinations share the
+engine-behavior product's user folder instead of a folder keyed per combination,
+and downloads are not routed to the owning component's game folder.
 
 **Mixed combinations** (components from different products, such as a Quake II
 map with Quake movement) keep to the user store, keyed by the component that owns

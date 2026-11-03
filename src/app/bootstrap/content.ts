@@ -16,6 +16,7 @@ export interface ApplicationContentSource {
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { findContentPath } from "../../content/mounts/paths.ts";
+import { migrateNativeData } from "./native-migration.ts";
 import { userProductDirectory } from "../../content/user-data.ts";
 import { defaultAddonContentRoots, defaultUserContentRoot } from "../../content/user-data.ts";
 import { prepareQuakeCSource, type PreparedQuakeCSource } from "./simulation/quakec-source.ts";
@@ -830,6 +831,7 @@ export async function loadApplicationContent(
       addonContentRoots: options.addonContentRoots ?? defaultAddonContentRoots(),
       ...(remote === undefined ? {} : { remoteContent: remote }),
     }));
+  await migrateNativeData(catalog, options);
   const product = await prepareQ3ApplicationProduct(catalog, restoredRecipe?.map.entities.content ?? options.product, options);
   catalog = product.catalog;
   if (product.q3Product !== null) options = { ...options, q3Product: product.q3Product };

@@ -54,7 +54,9 @@ export interface ConsoleScriptEntry {
 }
 
 async function configNames(root: string, prefix = ""): Promise<string[]> {
-  const entries = await readdir(join(root, prefix), { withFileTypes: true }).catch((error: unknown) => {
+  const entries = await readdir(join(root, prefix), {
+    withFileTypes: true,
+  }).catch((error: unknown) => {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
     throw error;
   });
@@ -113,6 +115,11 @@ export async function readConsoleScript(options: {
   }
   const path = await findContentPath(options.settings.root, name);
   if (path !== null) return (await readFile(path)).toString("latin1");
+  if (options.native !== undefined) {
+    // Scripts the game itself writes into its folder (listip.cfg) are read back from there.
+    const written = await findContentPath(options.native.layout.directory, name);
+    if (written !== null && (await stat(written)).isFile()) return (await readFile(written)).toString("latin1");
+  }
   const bytes = await (options.mountedScript ?? options.mounted)?.(name);
   return bytes === undefined ? undefined : Buffer.from(bytes).toString("latin1");
 }

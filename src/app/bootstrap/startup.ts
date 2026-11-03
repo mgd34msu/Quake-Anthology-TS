@@ -38,7 +38,7 @@ import { readAudioOutputCvars, writeAudioOutputCvars } from "./audio/output-sett
 import { applyAudioOutputSettings } from "./shared-setting-cvars.ts";
 import { ApplicationVideoRestart } from "./video-restart.ts";
 import { MusicControls } from "../../audio/music.ts";
-import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
+import { ApplicationCapture, applicationCaptureRoot, defaultNaming } from "./capture.ts";
 import { SeatConsole } from "../../console/session.ts";
 import { registerDiscoveryCommands } from "../../console/discovery.ts";
 import { drawConsole } from "../../console/draw.ts";
@@ -90,7 +90,7 @@ import { ApplicationImageSettings } from "./image-settings.ts";
 import { bindNativeVideoSettings, bindRendererSettings } from "../../ui/settings/services.ts";
 import { sharedBindingActions } from "../../ui/settings/action-catalog.ts";
 import { StartupInputProfile } from "./startup-input-profile.ts";
-import { stockNativeConfig } from "./native-settings.ts";
+import { nativeFolders, nativeSaveFolders, stockNativeConfig } from "./native-settings.ts";
 import { ClientSourcePublicationError, type ClientBootstrap, type ClientSourceLifetime } from "./client-bootstrap.ts";
 import {
   configurationDialect,
@@ -115,8 +115,17 @@ type StartupAction =
   | { readonly kind: "lobby-host"; readonly selection: StartupLaunch }
   | { readonly kind: "frontend" }
   | { readonly kind: "play" }
-  | { readonly kind: "preset"; readonly id: string; readonly skill: number; readonly arenaMap?: string }
-  | { readonly kind: "load"; readonly path: string; readonly sourceProduct?: string };
+  | {
+      readonly kind: "preset";
+      readonly id: string;
+      readonly skill: number;
+      readonly arenaMap?: string;
+    }
+  | {
+      readonly kind: "load";
+      readonly path: string;
+      readonly sourceProduct?: string;
+    };
 type StartupDisplay = Pick<ApplicationOptions, "renderer" | "gamma" | "width" | "height" | "hidden">;
 interface StartupGraphics {
   readonly audio: StartupAudio;
@@ -136,7 +145,9 @@ interface StartupGraphics {
 /** The front end has a native window and input seat, but no gameplay world or player. */
 export class StartupApplication {
   private readonly identity = createIdentityOwner("startup-client");
-  private readonly session = new EngineSession(this.identity, { kind: "local" });
+  private readonly session = new EngineSession(this.identity, {
+    kind: "local",
+  });
   private graphics: StartupGraphics | null = null;
   private imageSettings: ApplicationImageSettings | null = null;
   private game: Application | null = null;
@@ -157,7 +168,10 @@ export class StartupApplication {
   private client: ClientBootstrap | null = null;
   private readonly lobby: ApplicationLocalLobby;
   private lobbySelection: StartupLaunch | null = null;
-  private lobbyTransition: { run(): Promise<void>; cancel(error: Error): void } | null = null;
+  private lobbyTransition: {
+    run(): Promise<void>;
+    cancel(error: Error): void;
+  } | null = null;
   private lobbyPoll: Promise<void> | null = null;
   private lobbySource: ClientSourceLifetime | null = null;
   private readonly matchRankings: ApplicationMatchRankings;
@@ -173,21 +187,34 @@ export class StartupApplication {
   private pendingDemo: ClientDemoIntent | null = null;
   private initialConfiguration = true;
   private activeDemo: DemoRequest | null = null;
-  private frontendMovie: { readonly movie: CampaignCinematic; readonly images: SceneImageRegistry } | null = null;
+  private frontendMovie: {
+    readonly movie: CampaignCinematic;
+    readonly images: SceneImageRegistry;
+  } | null = null;
   private pendingMovie: ScreenCinematicRequest | null = null;
   private movieGeneration = 0;
   private readonly moviePreparations = new Set<Promise<void>>();
 
-  private gtv: { readonly source: RemoteApplication; readonly id: number; readonly label: string } | null = null;
+  private gtv: {
+    readonly source: RemoteApplication;
+    readonly id: number;
+    readonly label: string;
+  } | null = null;
   private gtvId = 0;
   private gtvAbort: AbortController | null = null;
   private gtvPreparation: Promise<void> | null = null;
   private recording: ClientDemoRecording | null = null;
   private recordingOwner: ClientSourceLifetime | null = null;
   private serverRecordingOwner: Application | null = null;
-  private serverRecordingPreparation: { readonly source: Application; readonly feed: ClientRecordingFeed } | null = null;
+  private serverRecordingPreparation: {
+    readonly source: Application;
+    readonly feed: ClientRecordingFeed;
+  } | null = null;
   private recordingRoot: string | null = null;
-  private recordingPreparation: { readonly source: ClientSourceLifetime; readonly feed: ClientRecordingFeed } | null = null;
+  private recordingPreparation: {
+    readonly source: ClientSourceLifetime;
+    readonly feed: ClientRecordingFeed;
+  } | null = null;
   private pendingRecording: DemoRecordingIntent | null = null;
 
   private readonly releaseSourceCommands = new CleanupStack();
@@ -195,7 +222,9 @@ export class StartupApplication {
 
   private constructor(
     readonly model: StartupSelectionModel,
-    private readonly host: ApplicationHost & { readonly localLobbies?: LocalLobbyService },
+    private readonly host: ApplicationHost & {
+      readonly localLobbies?: LocalLobbyService;
+    },
     saveDirectory: string,
     private readonly entry: "menu" | "run",
   ) {
@@ -213,7 +242,10 @@ export class StartupApplication {
         return { endpoint, wire };
       },
       join: async lobby => {
-        await this.stageLobbyLaunch({ kind: "initial", options: this.lobbyJoinOptions(lobby) });
+        await this.stageLobbyLaunch({
+          kind: "initial",
+          options: this.lobbyJoinOptions(lobby),
+        });
         this.lobbySource = this.remote;
       },
       leave: async () => {
@@ -229,7 +261,12 @@ export class StartupApplication {
           this.print(`Could not save controls: ${error instanceof Error ? error.message : String(error)}\n`),
         );
     };
-    this.saves = new StartupSaves(model.catalog, saveDirectory, host.externalSaveDirectories ?? nightdiveAddonDirectories().map(root => root.root));
+    this.saves = new StartupSaves(
+      model.catalog,
+      saveDirectory,
+      host.externalSaveDirectories ?? nightdiveAddonDirectories().map(root => root.root),
+      nativeSaveFolders(model.catalog, model.options.nativeConfigRoot),
+    );
     this.addons = new AddonLibrary({
       edition: model.catalog.products.some(product => product.expectation.id === "q1-classic-id1" && product.availability.kind === "installed")
         ? "classic"
@@ -237,7 +274,12 @@ export class StartupApplication {
       root: model.options.userContentRoot ?? defaultUserContentRoot(),
       changed: async () => {
         await model.refreshCatalog();
-        this.saves = new StartupSaves(model.catalog, saveDirectory, host.externalSaveDirectories ?? nightdiveAddonDirectories().map(root => root.root));
+        this.saves = new StartupSaves(
+          model.catalog,
+          saveDirectory,
+          host.externalSaveDirectories ?? nightdiveAddonDirectories().map(root => root.root),
+          nativeSaveFolders(model.catalog, model.options.nativeConfigRoot),
+        );
         this.refreshSaves = true;
       },
       launch: (product, map) => {
@@ -281,7 +323,10 @@ export class StartupApplication {
   private frontendRoutingState(router: InputRouter): string {
     return JSON.stringify({
       keyboard: router.keyboardSeat()?.index ?? null,
-      controllers: router.inputs.map(input => ({ seat: input.seat.index, controller: router.controllerSelection(input.seat) })),
+      controllers: router.inputs.map(input => ({
+        seat: input.seat.index,
+        controller: router.controllerSelection(input.seat),
+      })),
     });
   }
 
@@ -300,7 +345,11 @@ export class StartupApplication {
       if (prepared === undefined) throw new Error("Frontend routing refers to a retired seat");
       const path = `input/seat-${input.seat.index + 1}.json`,
         saved = await settings.loadSeat(path);
-      if (saved !== null) await settings.saveSeat(path, { ...saved, controller: router.controllerSelection(input.seat) });
+      if (saved !== null)
+        await settings.saveSeat(path, {
+          ...saved,
+          controller: router.controllerSelection(input.seat),
+        });
       else
         await settings.saveSeat(path, {
           version: 1,
@@ -417,7 +466,11 @@ export class StartupApplication {
     }
     const seat = primary.id,
       client = primarySeat.client.id;
-    const owner = { identity: Symbol("startup renderer"), session: identity.session, generation: 0 };
+    const owner = {
+      identity: Symbol("startup renderer"),
+      session: identity.session,
+      generation: 0,
+    };
     const images = new SceneImageRegistry(owner);
     const installed = this.model.catalog.products.filter(product => product.availability.kind === "installed");
     const product = installed.find(product => product.expectation.id === options.product) ?? installed[0];
@@ -460,7 +513,14 @@ export class StartupApplication {
       if (fontSource.kind !== "resource") throw new Error("Startup font has no mounted resource identity");
       art = await loadNativeUiArt(fontSource.resource.id, images, loadMenuArtImage, { frames: false });
       startupStamp("ui-art");
-      renderer = await NativeRenderer.open({ ...options, renderWorker: imageSettings.cvars.variableValue("r_smp") !== 0 }, owner, images);
+      renderer = await NativeRenderer.open(
+        {
+          ...options,
+          renderWorker: imageSettings.cvars.variableValue("r_smp") !== 0,
+        },
+        owner,
+        images,
+      );
       startupStamp("renderer");
       const native = renderer;
       await imageSettings.refreshDisplay(renderer);
@@ -483,7 +543,13 @@ export class StartupApplication {
         theme:
           themeProduct === undefined || themeMounts === null
             ? null
-            : { source: { content: themeProduct.id, ...themeProduct.expectation }, mounts: themeMounts },
+            : {
+                source: {
+                  content: themeProduct.id,
+                  ...themeProduct.expectation,
+                },
+                mounts: themeMounts,
+              },
         mounts: mounted,
         source: { content: product.id, ...product.expectation },
         seat,
@@ -501,7 +567,11 @@ export class StartupApplication {
       const activeAudio = audio;
       const currentAudio = (): StartupAudio["engine"] => this.client?.output.current ?? activeAudio.engine;
       const accessibility = new SeatUiPreferences(seat, imageSettings.cvars);
-      characterTurntable = new CharacterTurntable({ catalog: () => this.model.catalog, images, print: this.host.print });
+      characterTurntable = new CharacterTurntable({
+        catalog: () => this.model.catalog,
+        images,
+        print: this.host.print,
+      });
       const activeTurntable = characterTurntable;
       menu = new StartupMenu({
         lobby: {
@@ -518,7 +588,10 @@ export class StartupApplication {
             const content = await loadApplicationContent(selected.options, selected.recipe, undefined, this.model.catalog);
             try {
               const composition = await buildUnifiedComposition(content);
-              this.lobbySelection = { options: selected.options, recipe: content.recipe };
+              this.lobbySelection = {
+                options: selected.options,
+                recipe: content.recipe,
+              };
               return { composition };
             } finally {
               await content.close();
@@ -561,7 +634,12 @@ export class StartupApplication {
               },
             }),
         playPreset: (id, skill, arenaMap) => {
-          this.pending = { kind: "preset", id, skill, ...(arenaMap === undefined ? {} : { arenaMap }) };
+          this.pending = {
+            kind: "preset",
+            id,
+            skill,
+            ...(arenaMap === undefined ? {} : { arenaMap }),
+          };
         },
         play: () => {
           this.pending = { kind: "play" };
@@ -634,7 +712,11 @@ export class StartupApplication {
               if (primary === undefined) throw new Error("Renderer selection requires the retained primary seat");
               client.prepared.commands.append(`vid_restart ${backend}\n`, {
                 session: client.session.session,
-                origin: { kind: "local-seat", seat: primary.seat.id, client: primary.client.id },
+                origin: {
+                  kind: "local-seat",
+                  seat: primary.seat.id,
+                  client: primary.client.id,
+                },
               });
             },
           }),
@@ -657,9 +739,21 @@ export class StartupApplication {
           reset: () => (this.client?.prepared ?? initial.prepared).resetBindings(primary.id),
         },
       );
-      input.setFocus({ kind: "menu", menu: activeMenu.controller.activeMenu ?? "menu:startup:main", control: null }, performance.now());
+      input.setFocus(
+        {
+          kind: "menu",
+          menu: activeMenu.controller.activeMenu ?? "menu:startup:main",
+          control: null,
+        },
+        performance.now(),
+      );
       router = new InputRouter({
-        seats: [{ input, controller: (await settings.loadSeat(`input/seat-${seat.index + 1}.json`))?.controller ?? { kind: "automatic" } }],
+        seats: [
+          {
+            input,
+            controller: (await settings.loadSeat(`input/seat-${seat.index + 1}.json`))?.controller ?? { kind: "automatic" },
+          },
+        ],
         keyboardSeat: seat,
         controllers,
         now: () => performance.now(),
@@ -688,7 +782,10 @@ export class StartupApplication {
         activeRouter = router,
         pads = controllers;
       let consoleText = new SeatTextPresentation(seat, activeFont.font);
-      const provider: ProviderReference = { provider: `${product.expectation.family}:official`, content: product.id };
+      const provider: ProviderReference = {
+        provider: `${product.expectation.family}:official`,
+        content: product.id,
+      };
       const presentation: PresentationSelection = {
         doppler: { kind: "source" },
         environment: { kind: "audio-content" },
@@ -701,7 +798,13 @@ export class StartupApplication {
         audio: activeAudio,
         imageSettings,
         inputProfile,
-        display: { renderer: options.renderer, gamma: options.gamma, width: options.width, height: options.height, hidden: options.hidden },
+        display: {
+          renderer: options.renderer,
+          gamma: options.gamma,
+          width: options.width,
+          height: options.height,
+          hidden: options.hidden,
+        },
         renderer: native,
         menu: activeMenu,
         router: activeRouter,
@@ -710,7 +813,14 @@ export class StartupApplication {
         captionCommands: (captions, viewport, timeMilliseconds) => {
           const primary = this.client?.locals[0];
           return activeMenu.captionCommands(captions, {
-            binding: { seat: primary?.seat.id ?? seat, client: primary?.client.id ?? client, viewport, safeArea: viewport, hudScale: 1, presentation },
+            binding: {
+              seat: primary?.seat.id ?? seat,
+              client: primary?.client.id ?? client,
+              viewport,
+              safeArea: viewport,
+              hudScale: 1,
+              presentation,
+            },
             timeMilliseconds,
           });
         },
@@ -728,7 +838,14 @@ export class StartupApplication {
           const primary = this.client?.locals[0];
           activeMenu.draw(
             {
-              binding: { seat: primary?.seat.id ?? seat, client: primary?.client.id ?? client, viewport, safeArea: viewport, hudScale: 1, presentation },
+              binding: {
+                seat: primary?.seat.id ?? seat,
+                client: primary?.client.id ?? client,
+                viewport,
+                safeArea: viewport,
+                hudScale: 1,
+                presentation,
+              },
               timeMilliseconds: performance.now(),
             },
             command => builder.command(command),
@@ -807,7 +924,10 @@ export class StartupApplication {
         {
           commands: initial.prepared.commands,
           configurationWriteStarted: (source, path) => this.configurationWriteStarted?.(source, path),
-          root: () => applicationCaptureRoot(this.captureClient().configuration.current.options.userContentRoot),
+          root: () =>
+            this.captureClient().configuration.current.scripts.native?.layout.directory ??
+            applicationCaptureRoot(this.captureClient().configuration.current.options.userContentRoot),
+          naming: () => this.captureClient().configuration.current.scripts.native?.layout.screenshots ?? defaultNaming,
           mapName: () => this.captureClient().source.current?.captureMap ?? "menu",
           console: seat => {
             const client = this.captureClient(),
@@ -936,7 +1056,9 @@ export class StartupApplication {
         },
         source: { current: null },
         sourceProfile: { current: configuration.selection.source },
-        configuration: { current: { scripts: initial.scripts, options: initial.options } },
+        configuration: {
+          current: { scripts: initial.scripts, options: initial.options },
+        },
         activateFrontend: configuration => this.activateFrontend(configuration),
         routeCommand: (name, args, source) => this.routeCommand(name, args, source),
         dispatchApplicationRequest: request => this.dispatchApplicationRequest(request),
@@ -1115,7 +1237,11 @@ export class StartupApplication {
       dedicated: false,
       current: source =>
         this.activeDemo !== null
-          ? { kind: "demo", family: this.activeDemo.family, request: this.activeDemo }
+          ? {
+              kind: "demo",
+              family: this.activeDemo.family,
+              request: this.activeDemo,
+            }
           : this.game !== null
             ? { kind: "local", family: family() }
             : this.remote !== null
@@ -1185,7 +1311,10 @@ export class StartupApplication {
           this.print(`Usage: ${name}\n`);
           return true;
         }
-        this.pendingRecording = { kind: name === "serverstop" ? "serverstop" : name === "mvdstop" ? "mvdstop" : "stop", source };
+        this.pendingRecording = {
+          kind: name === "serverstop" ? "serverstop" : name === "mvdstop" ? "mvdstop" : "stop",
+          source,
+        };
       }
       prepared?.noteWorldAction();
       return true;
@@ -1198,7 +1327,12 @@ export class StartupApplication {
         this.print("Usage: cinematic <name> [loop|hold]\n");
         return true;
       }
-      this.pendingMovie = { name: selected, loop: mode === "loop" || mode === "2", hold: mode === "hold" || mode === "1", silent: false };
+      this.pendingMovie = {
+        name: selected,
+        loop: mode === "loop" || mode === "2",
+        hold: mode === "hold" || mode === "1",
+        silent: false,
+      };
       prepared?.noteWorldAction();
       return true;
     }
@@ -1281,7 +1415,10 @@ export class StartupApplication {
             : dialect === "q3"
               ? "q3-client"
               : "q2-client";
-      this.pending = { kind: "initial", options: { ...options, network: { kind, remote } } };
+      this.pending = {
+        kind: "initial",
+        options: { ...options, network: { kind, remote } },
+      };
       return true;
     }
     if (this.game === null && (name === "map" || (prepared?.commands.dialect === "q3" && ["devmap", "spmap", "spdevmap"].includes(name)))) {
@@ -1305,17 +1442,34 @@ export class StartupApplication {
         const { teamArenaSkirmish: _teamArenaSkirmish, ...rest } = options;
         this.pending = {
           kind: "initial",
-          options: { ...rest, q3MapLaunch: launch, mode: launch.singlePlayer ? "singleplayer" : "deathmatch", map: mapName, network: { kind: "offline" } },
+          options: {
+            ...rest,
+            q3MapLaunch: launch,
+            mode: launch.singlePlayer ? "singleplayer" : "deathmatch",
+            map: mapName,
+            network: { kind: "offline" },
+          },
         };
-      } else this.pending = { kind: "initial", options: { ...options, map: mapName, network: { kind: "offline" } } };
+      } else
+        this.pending = {
+          kind: "initial",
+          options: { ...options, map: mapName, network: { kind: "offline" } },
+        };
       return true;
     }
     if (this.game === null && name === "load") {
       try {
         const request = parseLoadRequest(args);
         const path = saveCommandPath(this.saves.directory, request.name);
-        assertLoadPathAllowed(this.saves.directory, path, source, { allowAnyPath: options.allowLoadPaths === true, trustedDirectories: [] });
-        this.pending = { kind: "load", path, ...(request.sourceProduct === undefined ? {} : { sourceProduct: request.sourceProduct }) };
+        assertLoadPathAllowed(this.saves.directory, path, source, {
+          allowAnyPath: options.allowLoadPaths === true,
+          trustedDirectories: [],
+        });
+        this.pending = {
+          kind: "load",
+          path,
+          ...(request.sourceProduct === undefined ? {} : { sourceProduct: request.sourceProduct }),
+        };
       } catch (error) {
         this.print(`${error instanceof Error ? error.message : String(error)}\n`);
       }
@@ -1349,7 +1503,11 @@ export class StartupApplication {
       const remote = await RemoteApplication.openDemoBorrowed(
         client,
         options,
-        { ...this.host, saveDirectory: this.saves.directory, serverBrowser: browser },
+        {
+          ...this.host,
+          saveDirectory: this.saves.directory,
+          serverBrowser: browser,
+        },
         { resource, timedemo: intent.request.timedemo },
         reason => this.demos?.complete(intent.request, reason),
       );
@@ -1403,7 +1561,10 @@ export class StartupApplication {
     const client = this.captureClient(),
       platform = client.platform.current;
     return platform?.kind === "world"
-      ? platform.input.locals.map(local => ({ seat: local.player.seat, input: local.input }))
+      ? platform.input.locals.map(local => ({
+          seat: local.player.seat,
+          input: local.input,
+        }))
       : client.locals.slice(0, 1).map(local => ({ seat: local.seat, input: local.prepared.input }));
   }
 
@@ -1416,7 +1577,14 @@ export class StartupApplication {
     this.releaseMenuInput = null;
     const prepared = client.prepared,
       input = local.prepared.input;
-    const context: CommandContext = { session: local.seat.id.session, origin: { kind: "local-seat", seat: local.seat.id, client: local.client.id } };
+    const context: CommandContext = {
+      session: local.seat.id.session,
+      origin: {
+        kind: "local-seat",
+        seat: local.seat.id,
+        client: local.client.id,
+      },
+    };
     const candidate = new SeatConsole({
       staged: true,
       seat: local.seat.id,
@@ -1434,7 +1602,13 @@ export class StartupApplication {
       },
       focus: focus => {
         input.setFocus(
-          focus.kind === "game" ? { kind: "menu", menu: graphics.menu.controller.activeMenu ?? "menu:startup:main", control: null } : focus,
+          focus.kind === "game"
+            ? {
+                kind: "menu",
+                menu: graphics.menu.controller.activeMenu ?? "menu:startup:main",
+                control: null,
+              }
+            : focus,
           performance.now(),
         );
         client.inputDevices.activate(graphics.router);
@@ -1492,7 +1666,10 @@ export class StartupApplication {
       try {
         const profiles = await listServerProfiles(store);
         if (revision !== generation || this.closed) return;
-        entries = profiles.map(profile => ({ id: profile.path, label: profile.name }));
+        entries = profiles.map(profile => ({
+          id: profile.path,
+          label: profile.name,
+        }));
         status = `${entries.length} server profiles`;
       } catch (error) {
         if (revision === generation) status = error instanceof Error ? error.message : String(error);
@@ -1523,10 +1700,20 @@ export class StartupApplication {
     const client = this.captureClient(),
       errors: unknown[] = [];
     for (const close of [
-      () => client.renderer.execute({ owner: client.renderer.owner, sequence: this.frames, commands: [] }),
+      () =>
+        client.renderer.execute({
+          owner: client.renderer.owner,
+          sequence: this.frames,
+          commands: [],
+        }),
       () => current.movie.close(this.frames),
       () => current.images.close(),
-      () => client.renderer.execute({ owner: client.renderer.owner, sequence: this.frames, commands: [] }),
+      () =>
+        client.renderer.execute({
+          owner: client.renderer.owner,
+          sequence: this.frames,
+          commands: [],
+        }),
     ]) {
       try {
         close();
@@ -1544,7 +1731,14 @@ export class StartupApplication {
     const configuration = client.configuration.current,
       scripts = configuration.scripts,
       output = client.output.current;
-    const context: CommandContext = { session: client.session.session, origin: { kind: "local-seat", seat: seat.seat.id, client: seat.client.id } };
+    const context: CommandContext = {
+      session: client.session.session,
+      origin: {
+        kind: "local-seat",
+        seat: seat.seat.id,
+        client: seat.client.id,
+      },
+    };
     this.closeFrontendMovie();
     const generation = this.movieGeneration;
     const assertCurrent = (): void => {
@@ -1608,7 +1802,11 @@ export class StartupApplication {
           },
           commands: (timeline, viewport) =>
             client.captionCommands(
-              captions.active(timeline, { subtitles: preferences.values.captions, soundCaptions: preferences.values.captions, speakers: true }),
+              captions.active(timeline, {
+                subtitles: preferences.values.captions,
+                soundCaptions: preferences.values.captions,
+                speakers: true,
+              }),
               viewport,
               timeline.elapsedMilliseconds,
             ),
@@ -1625,7 +1823,12 @@ export class StartupApplication {
       for (const close of [
         () => prepared?.close(this.frames),
         () => images.close(),
-        () => client.renderer.execute({ owner: client.renderer.owner, sequence: this.frames, commands: [] }),
+        () =>
+          client.renderer.execute({
+            owner: client.renderer.owner,
+            sequence: this.frames,
+            commands: [],
+          }),
       ]) {
         try {
           close();
@@ -1642,11 +1845,18 @@ export class StartupApplication {
   }
 
   private playerProgressLibrary(): LibraryMenuService {
-    let cached: { readonly descriptor: ClientBootstrap["configuration"]["current"]; readonly store: Promise<PlayerProgressStore> } | null = null;
+    let cached: {
+      readonly descriptor: ClientBootstrap["configuration"]["current"];
+      readonly store: Promise<PlayerProgressStore>;
+    } | null = null;
     return new PlayerProgressLibrary(
       async () => {
         const descriptor = this.captureClient().configuration.current;
-        if (cached?.descriptor !== descriptor) cached = { descriptor, store: PlayerProgressStore.open(join(descriptor.scripts.root, "player-progress.json")) };
+        if (cached?.descriptor !== descriptor)
+          cached = {
+            descriptor,
+            store: PlayerProgressStore.open(join(descriptor.scripts.root, "player-progress.json")),
+          };
         const selected = cached;
         try {
           const store = await selected.store;
@@ -1683,7 +1893,10 @@ export class StartupApplication {
         const name = entry.id.slice(entry.id.lastIndexOf("/") + 1).toLowerCase();
         const tier = /^tier([1-7])\.roq$/.exec(name)?.[1] ?? (name === "end.roq" || name === "demoend.roq" ? "8" : null);
         return tier !== null && gameAtoi(infoValueForKey(videos, `tier${tier}`)) === 0
-          ? { ...entry, unavailable: "Complete the single-player tier to unlock" }
+          ? {
+              ...entry,
+              unavailable: "Complete the single-player tier to unlock",
+            }
           : entry;
       });
     };
@@ -1711,7 +1924,10 @@ export class StartupApplication {
       activate: id => {
         if (visibleEntries().some(entry => entry.id === id && entry.unavailable === undefined)) invoke("cinematic", [id]);
       },
-      stop: { label: "Stop movie", activate: () => invoke("stopcinematic", []) },
+      stop: {
+        label: "Stop movie",
+        activate: () => invoke("stopcinematic", []),
+      },
     };
   }
 
@@ -1720,12 +1936,23 @@ export class StartupApplication {
       descriptor = client.configuration.current,
       primary = client.locals[0];
     if (primary === undefined) throw new Error("Demo library requires a local seat");
-    const context: CommandContext = { session: client.session.session, origin: { kind: "local-seat", seat: primary.seat.id, client: primary.client.id } };
+    const context: CommandContext = {
+      session: client.session.session,
+      origin: {
+        kind: "local-seat",
+        seat: primary.seat.id,
+        client: primary.client.id,
+      },
+    };
     const root = descriptor.scripts.root;
-    return new DemoLibrary(root, {
-      read: path => descriptor.scripts.readMounted(path),
-      listFiles: (directory, extension) => descriptor.scripts.listMounted(directory, extension, context),
-    });
+    return new DemoLibrary(
+      root,
+      {
+        read: path => descriptor.scripts.readMounted(path),
+        listFiles: (directory, extension) => descriptor.scripts.listMounted(directory, extension, context),
+      },
+      nativeFolders(descriptor.scripts.native),
+    );
   }
 
   private demoLibraryMenu(): LibraryMenuService {
@@ -1739,7 +1966,11 @@ export class StartupApplication {
       const parsed = readStartupCommand([`+${name}`, ...args], 0);
       client.prepared.commands.append(`${parsed.text}\n`, {
         session: client.session.session,
-        origin: { kind: "local-seat", seat: local.seat.id, client: local.client.id },
+        origin: {
+          kind: "local-seat",
+          seat: local.seat.id,
+          client: local.client.id,
+        },
       });
     };
     return {
@@ -1755,7 +1986,11 @@ export class StartupApplication {
           .then(
             list => {
               if (request !== generation || this.closed || client.configuration.current !== descriptor) return;
-              entries = list.map(entry => ({ id: entry.id, label: entry.label, detail: entry.family.toUpperCase() }));
+              entries = list.map(entry => ({
+                id: entry.id,
+                label: entry.label,
+                detail: entry.family.toUpperCase(),
+              }));
               status = `${entries.length} demos`;
             },
             (error: unknown) => {
@@ -1836,7 +2071,11 @@ export class StartupApplication {
         if (seat === undefined) throw new Error("Configuration library has no local seat");
         const files = await scripts.list(seat.context);
         if (revision !== generation || this.closed || client.configuration.current.scripts !== scripts) return;
-        entries = files.map(file => ({ id: file.name, label: file.name, detail: file.kind === "seat" ? "Current player" : "Selected game" }));
+        entries = files.map(file => ({
+          id: file.name,
+          label: file.name,
+          detail: file.kind === "seat" ? "Current player" : "Selected game",
+        }));
         status = message ?? `${entries.length} configuration files`;
       } catch (error) {
         if (revision === generation && !this.closed && this.client?.configuration.current === descriptor)
@@ -1871,7 +2110,10 @@ export class StartupApplication {
         void refresh();
       },
       activate: path => submit("exec", path),
-      create: { label: "Save config", submit: path => submit("writeconfig", path) },
+      create: {
+        label: "Save config",
+        submit: path => submit("writeconfig", path),
+      },
     };
   }
 
@@ -2002,7 +2244,11 @@ export class StartupApplication {
     const copy = (owner: CvarRegistry): CvarRegistry => {
       const prior = copies.get(owner);
       if (prior !== undefined) return prior;
-      const cvars = new CvarRegistry({ dialect: owner.dialect, context: seatContexts.get(owner) ?? owner.context, print: this.host.print });
+      const cvars = new CvarRegistry({
+        dialect: owner.dialect,
+        context: seatContexts.get(owner) ?? owner.context,
+        print: this.host.print,
+      });
       owner.prepareTransfer(cvars);
       copies.set(owner, cvars);
       return cvars;
@@ -2010,11 +2256,18 @@ export class StartupApplication {
     const source = copy(prepared.source),
       movement = copy(prepared.movement),
       fallback = copy(prepared.fallback);
-    const seats = prepared.seats.map(seat => ({ ...seat, cvars: copy(seat.cvars), mouse: new MouseSettings(copy(seat.mouse.cvars)) }));
+    const seats = prepared.seats.map(seat => ({
+      ...seat,
+      cvars: copy(seat.cvars),
+      mouse: new MouseSettings(copy(seat.mouse.cvars)),
+    }));
     const routing = new ApplicationConsoleRouting({
       fallback,
       sourceDialect: () => source.dialect,
-      server: () => ({ cvars: source, sharedNames: source.snapshots().map(variable => variable.name) }),
+      server: () => ({
+        cvars: source,
+        sharedNames: source.snapshots().map(variable => variable.name),
+      }),
       seat: id => seats.find(seat => seat.id.equals(id) && seat.cvars.dialect === source.dialect)?.cvars ?? null,
       input: id => seats.find(seat => (id === null || seat.id.equals(id)) && seat.mouse.cvars.dialect === source.dialect)?.mouse.cvars ?? null,
       movement: () => movement,
@@ -2031,7 +2284,13 @@ export class StartupApplication {
         this.frontendCommand(name, args, context);
         return undefined;
       },
-      { source, movement, fallback, scripts, read: (name, context) => scripts.read(name, context) },
+      {
+        source,
+        movement,
+        fallback,
+        scripts,
+        read: (name, context) => scripts.read(name, context),
+      },
     );
     this.frontendRouting?.close();
     this.frontendRouting = routing;
@@ -2056,7 +2315,10 @@ export class StartupApplication {
 
   private lobbyJoinOptions(lobby: Extract<Lobby, { readonly phase: "playing" }>): ApplicationOptions {
     if (lobby.endpoint.kind === "loopback") throw new Error("This lobby endpoint requires an in-process transport");
-    const selected = applicationOptionsForRecipe(this.model.options, { catalog: this.model.catalog, recipe: lobby.composition.composition.recipe });
+    const selected = applicationOptionsForRecipe(this.model.options, {
+      catalog: this.model.catalog,
+      recipe: lobby.composition.composition.recipe,
+    });
     const remote = addressKey(lobby.endpoint);
     const seats = lobby.members.find(member => member.account.id === this.lobby.account.id)?.seats;
     if (seats === undefined) throw new Error("The local client is not a member of this lobby");
@@ -2065,13 +2327,20 @@ export class StartupApplication {
     if (lobby.wire.kind === "unified") return { ...base, network: { kind: "unified-client", remote } };
     const transport = lobby.endpoint.kind === "ipx" ? this.model.options.networkTransport : undefined;
     if (lobby.endpoint.kind === "ipx" && (transport === undefined || transport.kind === "udp")) throw new Error("Choose an IPX transport to join this lobby");
-    const native = { ...base, ...(transport === undefined ? {} : { networkTransport: transport }) };
+    const native = {
+      ...base,
+      ...(transport === undefined ? {} : { networkTransport: transport }),
+    };
     const protocol = lobby.wire.protocol;
     switch (protocol.kind) {
       case "q1-netquake":
       case "q1-fitzquake":
       case "q1-rmq":
-        return { ...native, q1Protocol: protocol, network: { kind: "q1-client", remote } };
+        return {
+          ...native,
+          q1Protocol: protocol,
+          network: { kind: "q1-client", remote },
+        };
       case "q1-quakeworld":
         return { ...native, network: { kind: "qw-client", remote } };
       case "q1-quakeworld-donor-wide":
@@ -2082,7 +2351,11 @@ export class StartupApplication {
       case "q2-rerelease":
       case "q2-kex":
       case "q2-private-classic":
-        return { ...native, q2Protocol: protocol, network: { kind: "q2-client", remote } };
+        return {
+          ...native,
+          q2Protocol: protocol,
+          network: { kind: "q2-client", remote },
+        };
       case "q2-kex-demo":
         throw new Error("This lobby advertises a recorded-only Quake II protocol");
       case "q3":
@@ -2136,9 +2409,16 @@ export class StartupApplication {
             action.kind === "lobby-host"
               ? { ...action.selection, image: undefined }
               : action.kind === "initial"
-                ? { options: action.options, recipe: undefined, image: undefined }
+                ? {
+                    options: action.options,
+                    recipe: undefined,
+                    image: undefined,
+                  }
                 : action.kind === "preset"
-                  ? { ...(await this.model.resolvePreset(action.id, action.skill, action.arenaMap)), image: undefined }
+                  ? {
+                      ...(await this.model.resolvePreset(action.id, action.skill, action.arenaMap)),
+                      image: undefined,
+                    }
                   : action.kind === "play"
                     ? { ...(await this.model.resolve()), image: undefined }
                     : await (async () => {
@@ -2161,12 +2441,25 @@ export class StartupApplication {
                         ).length;
                         if (seats < 1 || seats > 4) throw new Error("This saved game requires between 1 and 4 local players.");
                         const { botSkill: _botSkill, ...options } = saved.options;
-                        return { recipe: image.recipe, image, options: { ...options, skill: settings.skill, mode: settings.mode, seed: settings.seed, seats } };
+                        return {
+                          recipe: image.recipe,
+                          image,
+                          options: {
+                            ...options,
+                            skill: settings.skill,
+                            mode: settings.mode,
+                            seed: settings.seed,
+                            seats,
+                          },
+                        };
                       })();
           loading?.menu.setStatus("Preparing world...", true);
           const game = await Application.openBorrowed(
             client,
-            { ...selected.options, renderer: loading?.display.renderer ?? selected.options.renderer },
+            {
+              ...selected.options,
+              renderer: loading?.display.renderer ?? selected.options.renderer,
+            },
             {
               ...this.host,
               ...(action.kind === "lobby-host"
@@ -2282,7 +2575,10 @@ export class StartupApplication {
       async (): Promise<void> => {
         const address = await resolveAddress(request.address, 27910);
         if (abort.signal.aborted) throw new Error("GTV connection canceled");
-        const options = { ...this.model.options, renderer: this.graphics?.display.renderer ?? this.model.options.renderer };
+        const options = {
+          ...this.model.options,
+          renderer: this.graphics?.display.renderer ?? this.model.options.renderer,
+        };
         const remote = await RemoteApplication.openGtvBorrowed(
           client,
           options,
@@ -2298,7 +2594,11 @@ export class StartupApplication {
           {
             host: addressHost(address),
             port: address.port,
-            identity: { username: request.username, password: request.password, version: "quake-typescript" },
+            identity: {
+              username: request.username,
+              password: request.password,
+              version: "quake-typescript",
+            },
             signal: abort.signal,
           },
         );
@@ -2355,7 +2655,10 @@ export class StartupApplication {
       if (browser === null) throw new Error("Startup browser is unavailable");
       const remote = await RemoteApplication.openBorrowed(
         client,
-        { ...options, renderer: this.graphics?.display.renderer ?? options.renderer },
+        {
+          ...options,
+          renderer: this.graphics?.display.renderer ?? options.renderer,
+        },
         {
           ...this.host,
           saveDirectory: this.saves.directory,
@@ -2551,7 +2854,10 @@ export class StartupApplication {
       graphics.menu.setStatus(this.saves.list.error ?? "");
     }
     await graphics.imageSettings.refreshDisplay(graphics.renderer);
-    this.model.setDisplay({ ...graphics.renderer.window.logicalSize, gamma: graphics.renderer.outputGamma });
+    this.model.setDisplay({
+      ...graphics.renderer.window.logicalSize,
+      gamma: graphics.renderer.outputGamma,
+    });
     graphics.draw();
     await client.capture.drain();
   }

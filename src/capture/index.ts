@@ -11,6 +11,17 @@ import { encodeJpeg } from "../formats/images/jpeg-encoder.ts";
 import { settingsPath, writeAtomic } from "../core/files/atomic.ts";
 
 export type ScreenshotFormat = "tga" | "png" | "jpg";
+/** Where an unnamed screenshot goes and what it is called: the original game's folder, prefix and digits. */
+export interface ScreenshotNaming {
+  readonly directory: string;
+  readonly prefix: string;
+  readonly digits: number;
+}
+const Q3_SCREENSHOTS: ScreenshotNaming = {
+  directory: "screenshots",
+  prefix: "shot",
+  digits: 4,
+};
 export interface FrameReadback {
   readRgba(): ImageLevel | Promise<ImageLevel>;
 }
@@ -71,6 +82,9 @@ export interface CaptureResult {
   readonly height: number;
   readonly byteLength: number;
 }
+function joinFolder(directory: string, name: string): string {
+  return directory === "" ? name : `${directory}/${name}`;
+}
 export class FrameCapture {
   private writes: Promise<void> = Promise.resolve();
   private write<T>(operation: () => Promise<T>): Promise<T> {
@@ -81,11 +95,16 @@ export class FrameCapture {
     );
     return result;
   }
+  /** The original Quake 3 stops at shot9999; the Quake and Quake II names only pad to two digits and keep counting. */
+  private get limit(): number {
+    return this.naming.digits >= 4 ? 10 ** this.naming.digits : 1_000_000;
+  }
   /** First unnamed screenshot index to try per format, so a recording does not rescan earlier files. */
   private readonly nextShot = new Map<ScreenshotFormat, number>();
   constructor(
     readonly root: string,
     private readonly readback: FrameReadback,
+    readonly naming: ScreenshotNaming = Q3_SCREENSHOTS,
   ) {}
   async screenshot(options: { readonly format?: ScreenshotFormat; readonly name?: string; readonly quality?: number } = {}): Promise<CaptureResult> {
     const format = options.format ?? "png",
@@ -94,12 +113,15 @@ export class FrameCapture {
     return this.write(async () => {
       let path: string;
       if (options.name !== undefined) {
-        path = settingsPath(this.root, `screenshots/${options.name}.${format}`);
+        path = settingsPath(this.root, joinFolder(this.naming.directory, `${options.name}.${format}`));
         await writeAtomic(path, bytes);
       } else {
         path = "";
-        for (let index = this.nextShot.get(format) ?? 0; index < 10000; index++) {
-          const candidate = settingsPath(this.root, `screenshots/shot${String(index).padStart(4, "0")}.${format}`);
+        for (let index = this.nextShot.get(format) ?? 0; index < this.limit; index++) {
+          const candidate = settingsPath(
+            this.root,
+            joinFolder(this.naming.directory, `${this.naming.prefix}${String(index).padStart(this.naming.digits, "0")}.${format}`),
+          );
           if (index === (this.nextShot.get(format) ?? 0)) await mkdir(dirname(candidate), { recursive: true });
           let file: FileHandle;
           try {
@@ -117,9 +139,14 @@ export class FrameCapture {
           this.nextShot.set(format, index + 1);
           break;
         }
-        if (path === "") throw new Error("No free screenshot filename between shot0000 and shot9999");
+        if (path === "") throw new Error(`No free screenshot filename after ${this.naming.prefix}${"9".repeat(this.naming.digits)}`);
       }
-      return { path, width: image.width, height: image.height, byteLength: bytes.length };
+      return {
+        path,
+        width: image.width,
+        height: image.height,
+        byteLength: bytes.length,
+      };
     });
   }
   async levelshot(mapName: string, gamma: Uint8Array | null = null): Promise<CaptureResult> {
@@ -129,7 +156,12 @@ export class FrameCapture {
     const path = settingsPath(this.root, `levelshots/${map}.tga`);
     return this.write(async () => {
       await writeAtomic(path, bytes);
-      return { path, width: image.width, height: image.height, byteLength: bytes.length };
+      return {
+        path,
+        width: image.width,
+        height: image.height,
+        byteLength: bytes.length,
+      };
     });
   }
 }

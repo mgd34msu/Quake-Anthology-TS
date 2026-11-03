@@ -17,11 +17,50 @@ export function decodeSavedGame(bytes: Uint8Array): SavedGame {
     throw new SaveFormatError("q1", "save has no valid singleplayer world");
   return { kind: "q1-source", data };
 }
-export async function readSavedGame(path: string): Promise<SavedGame> {
-  return decodeSavedGame(await Bun.file(path).bytes());
+
+/**
+ * A save in the original format cannot hold everything this engine keeps (mixed or engine-only state), so the engine
+ * writes that state beside it: `NAME.qtsave`, the shared container behind a signature and the SHA-256 of the
+ * original-format file it belongs to. Loading the original file restores from the sidecar while the two still match.
+ */
+const SIDECAR_SIGNATURE = new TextEncoder().encode("QTSIDE1\n");
+const SIDECAR_EXTENSION = ".qtsave";
+export function sidecarPath(path: string): string {
+  return path.replace(/\.sav$/i, SIDECAR_EXTENSION);
 }
-export async function writeSavedGame(directory: string, path: string, save: SavedGame): Promise<void> {
+function digest(bytes: Uint8Array): Uint8Array {
+  return new Uint8Array(new Bun.CryptoHasher("sha256").update(bytes).digest());
+}
+function encodeSidecar(native: Uint8Array, image: SaveImage): Uint8Array {
+  const body = encodeSaveImage(image),
+    out = new Uint8Array(SIDECAR_SIGNATURE.length + 32 + body.length);
+  out.set(SIDECAR_SIGNATURE, 0);
+  out.set(digest(native), SIDECAR_SIGNATURE.length);
+  out.set(body, SIDECAR_SIGNATURE.length + 32);
+  return out;
+}
+function decodeSidecar(bytes: Uint8Array, native: Uint8Array): SaveImage | null {
+  const header = SIDECAR_SIGNATURE.length + 32;
+  if (bytes.length <= header || !SIDECAR_SIGNATURE.every((byte, index) => bytes[index] === byte)) return null;
+  const expected = digest(native);
+  if (!expected.every((byte, index) => bytes[SIDECAR_SIGNATURE.length + index] === byte)) return null;
+  return decodeSaveImage(bytes.subarray(header));
+}
+export async function readSavedGame(path: string): Promise<SavedGame> {
+  const bytes = await Bun.file(path).bytes();
+  if (bytes[0] !== 81 || bytes[1] !== 84) {
+    const sidecar = Bun.file(sidecarPath(path));
+    if (await sidecar.exists()) {
+      const image = decodeSidecar(await sidecar.bytes(), bytes);
+      if (image !== null) return { kind: "shared", image };
+    }
+  }
+  return decodeSavedGame(bytes);
+}
+export async function writeSavedGame(directory: string, path: string, save: SavedGame, sidecar?: SaveImage): Promise<void> {
   const bytes = save.kind === "shared" ? encodeSaveImage(save.image) : encodeQ1Save(save.data);
   await writeContainedSave(directory, path, bytes);
+  if (sidecar !== undefined && save.kind === "q1-source")
+    await writeContainedSave(directory, sidecarPath(path), encodeSidecar(bytes, sidecar), SIDECAR_EXTENSION);
 }
 export { readSaveHeader, type SaveHeader } from "./save-image.ts";
