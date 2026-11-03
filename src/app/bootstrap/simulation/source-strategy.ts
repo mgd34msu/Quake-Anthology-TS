@@ -28,6 +28,12 @@ import { itemAt } from "../../../content/q3/base/shared/items.ts";
 import { dropQ3TeleportObjectives } from "../../../content/q3/team-arena/client-events.ts";
 import { dropFlag as dropQ1CtfFlag } from "../../../content/q1/addons/ctf/flags.ts";
 import { Q2Ctf } from "../../../content/q2/multiplayer/ctf/index.ts";
+import { WEAPONS as Q1_WEAPONS } from "../../../content/q1/foundation/types.ts";
+import { Q2RereleasePlayers } from "../../../content/q2/rerelease/players.ts";
+import type { Q2WeaponEvent } from "../../../content/q2/foundation/weapons/index.ts";
+import type { SaveImage } from "../../../contracts/session.ts";
+import { captureQ2Product } from "../../../content/composition/q2/index.ts";
+import { encodeCheckpointValue, encodeQ1FoundationCheckpoint } from "../../../persistence/index.ts";
 import { MoveType } from "../../../movement/q3/constants.ts";
 import { seconds } from "./actor-execution.ts";
 import { quakeCFreeMovement } from "./quakec-client-adapter.ts";
@@ -81,6 +87,19 @@ export interface SourceStrategyHost {
   setWorldGravity(gravity: number): void;
   health(actor: ActorId): number;
   body(actor: ActorId): { readonly origin: Vec3 } | null;
+  sourceOf(actor: ActorId): { readonly provider: ProviderId; readonly slot: number } | null;
+  readonly q2ServerRegistry: CvarRegistry | null;
+  readonly q1Campaign: Pick<Extract<SimulationTravel["source"], { readonly kind: "q1" }>, "flags" | "skill">;
+  assertOutputConsumed(): void;
+  q3ArsenalsComplete(): boolean;
+  q3RuntimeBytes(): Uint8Array;
+  qvmDeclaration(): string | null;
+  requireOwned(actor: ActorId): OwnedActor;
+  sharedTravelState(actor: ActorId): CarriedShared | null;
+  readonly q1Restart: boolean;
+  /** The actors the map's entity provider owns. */
+  entityActors(): readonly OwnedActor[];
+  hasInventory(actor: ActorId): boolean;
   nativeWeapons(): NativePrimaryWeapons;
   qvmWeapons(): QvmPrimaryWeapons;
   nativePlayer(): NativePrimaryPlayer;
@@ -110,6 +129,16 @@ export interface OriginalPlayer {
   teleport(actor: ActorId, origin: Vec3, velocity: Vec3, angles: Vec3, holdMilliseconds: number): void;
 }
 
+type Q2MatchDamageEffects = ReturnType<Of<"q2">["product"]["match"]["sourceEffects"]>;
+type CarriedShared = Extract<CarriedPlayerState, { readonly kind: "shared" }>;
+type SaveProvider = SaveImage["providers"][number];
+type TravelLandmark = NonNullable<Extract<SimulationTravel["source"], { readonly kind: "q2" }>["landmark"]>;
+/** What a source needs to describe the level change a campaign travel captures. */
+export interface TravelContext {
+  readonly serverFlags: number | null;
+  readonly landmark: TravelLandmark | null;
+}
+export interface InventoryCoverage { readonly actors: readonly OwnedActor[]; readonly legacy: boolean }
 export interface EquipmentSuppression { readonly quad: boolean; readonly quadFire: boolean; readonly haste: boolean }
 export type SupplyFamily = "q1" | "q2" | "q3";
 type SpawnPoint = { readonly origin: Vec3; readonly angles: Vec3 };
@@ -256,6 +285,65 @@ export interface SourceStrategy {
   stepsHandGrenades(): boolean;
   /** The source's teleport toggle bits for the actor, or null when it keeps none. */
   teleportBits(actor: ActorId): number | null;
+
+  // Combat and monsters.
+  /** Whether the source marks the actor notarget; null when the source keeps no such flag for it. */
+  notarget(actor: ActorId): boolean | null;
+  cloakAlpha(actor: ActorId): number | null;
+  godMode(actor: ActorId): boolean;
+  /** Runs the source's own handling of a Q2 weapon event; false when the source has none. */
+  weaponEvent(event: Q2WeaponEvent): boolean;
+  hasEnemy(target: ActorId): boolean;
+  teamDamageEnabled(matchProvider: string): boolean;
+  matchDamageEffects(): Q2MatchDamageEffects;
+  /** Reports weapon noise to the monsters; throws `message` when the source has none yet. */
+  requiredMonsterNoise(actor: ActorId, origin: Vec3, secondary: boolean | undefined, message: string): undefined;
+  /** Throws `message` unless the source is a Q2 game. */
+  requireQ2(message: string): void;
+  pushed(actor: ActorId, velocity: Vec3): void;
+  setEntityGravity(actor: ActorId, gravity: number): void;
+  monstersSearching(player: ActorId | null): boolean;
+  /** The Q1 game that owns weapon selection when no selected arsenal does. */
+  q1Game(): Of<"q1">["game"] | null;
+  selectWeapon(actor: OwnedActor, item: ItemId): boolean;
+  /** The source's connected clients in its own order; null when the shared session order applies. */
+  connectedClients(): readonly ClientId[] | null;
+  /** The source's player actors in its own order; null when the shared session order applies. */
+  playerActors(): readonly ActorId[] | null;
+
+  // Saves, restore and travel.
+  /** Throws `message` while the source world is still loading. */
+  requireLoaded(message: string): void;
+  /** Throws unless the source can save at this frame. */
+  assertSaveReady(): void;
+  /** Whether the guest's own save projects its selected monsters instead of recreating them. */
+  projectsMonsters(): boolean;
+  /** Whether selected monsters on this source restore as copied shared state. */
+  usesGuestMonsters(): boolean;
+  /** Whether the source gamecode rebuilds the actor itself on restore. */
+  reconstructsActor(actor: ActorId): boolean;
+  /** Adds the source's own checkpoint providers. */
+  checkpointProviders(add: (schema: SaveProvider["schema"], bytes: Uint8Array) => void, providers: SaveProvider[]): void;
+  checkpointGuests(): SaveImage["guests"];
+  /** Source-specific fields of the simulation checkpoint. */
+  checkpointExtras(): Readonly<Record<string, number | string | null>>;
+  nativeClients(): readonly { readonly clientSlot: number; readonly phase: string; readonly userinfo: string }[] | null;
+  sourceCvarSnapshots(): readonly { readonly name: string; readonly value: string }[];
+  /** The primary QVM interface digest a save must match; null when the source has none. */
+  expectedDeclaration(): string | null;
+  legacyCombat(): Of<"q3-qvm">["combat"];
+  /** Throws unless the source has the storage a saved inventory projection of `kind` needs. */
+  requireInventoryProjection(kind: "qvm" | "native"): void;
+  /** The actors whose inventory the source's own storage owns; null when the source keeps none. */
+  inventoryCoverage(projected: { readonly native: boolean; readonly qvm: boolean }): InventoryCoverage | null;
+  travelSource(context: TravelContext): SimulationTravel["source"];
+  /** The clients that carry through a campaign travel, in the source's own order; null for the shared player order. */
+  travelers(): readonly { readonly client: ClientId; readonly actor: ActorId }[] | null;
+  travelPlayerState(actor: ActorId): CarriedPlayerState;
+  guestHealth(actor: ActorId): number | null;
+  setGuestHealth(actor: ActorId, health: number): void;
+  /** Guest players whose pending travel carry may land, with whether they are in the world. */
+  guestTravelPlayers(): readonly { readonly actor: ActorId; readonly client: ClientId; readonly alive: boolean }[];
 }
 
 function joinInfo(values: Iterable<readonly [string, string]>): string {
@@ -356,9 +444,51 @@ class LoadingStrategy implements SourceStrategy {
   playerAvailable(_actor: ActorId): boolean | null { return null; }
   stepsHandGrenades(): boolean { return true; }
   teleportBits(_actor: ActorId): number | null { return null; }
+
+  notarget(_actor: ActorId): boolean | null { return null; }
+  cloakAlpha(_actor: ActorId): number | null { return null; }
+  godMode(_actor: ActorId): boolean { return false; }
+  weaponEvent(_event: Q2WeaponEvent): boolean { return false; }
+  hasEnemy(_target: ActorId): boolean { return false; }
+  teamDamageEnabled(_matchProvider: string): boolean { return false; }
+  matchDamageEffects(): Q2MatchDamageEffects { throw new Error("Q2 match damage requires its source runtime"); }
+  requiredMonsterNoise(_actor: ActorId, _origin: Vec3, _secondary: boolean | undefined, message: string): undefined { throw new Error(message); }
+  requireQ2(message: string): void { throw new Error(message); }
+  pushed(_actor: ActorId, _velocity: Vec3): void { /* only a Q2 source keeps the previous velocity */ }
+  setEntityGravity(_actor: ActorId, _gravity: number): void { /* only a Q2 source keeps entity gravity */ }
+  monstersSearching(_player: ActorId | null): boolean { return false; }
+  q1Game(): Of<"q1">["game"] | null { return null; }
+  selectWeapon(_actor: OwnedActor, _item: ItemId): boolean { return false; }
+  connectedClients(): readonly ClientId[] | null { return null; }
+  playerActors(): readonly ActorId[] | null { return null; }
+
+  requireLoaded(message: string): void { throw new Error(message); }
+  assertSaveReady(): void { /* the source has no extra save conditions */ }
+  projectsMonsters(): boolean { return false; }
+  usesGuestMonsters(): boolean { return false; }
+  reconstructsActor(_actor: ActorId): boolean { return false; }
+  checkpointProviders(_add: (schema: SaveProvider["schema"], bytes: Uint8Array) => void, _providers: SaveProvider[]): void { /* the shared providers cover the source */ }
+  checkpointGuests(): SaveImage["guests"] { return []; }
+  checkpointExtras(): Readonly<Record<string, number | string | null>> { return {}; }
+  nativeClients(): ReturnType<SourceStrategy["nativeClients"]> { return null; }
+  sourceCvarSnapshots(): readonly { readonly name: string; readonly value: string }[] { return []; }
+  expectedDeclaration(): string | null { return null; }
+  legacyCombat(): Of<"q3-qvm">["combat"] { return null; }
+  requireInventoryProjection(kind: "qvm" | "native"): void { throw new Error(kind === "qvm" ? "Saved QVM inventory requires qualified source storage" : "Saved native inventory requires qualified source storage"); }
+  inventoryCoverage(_projected: { readonly native: boolean; readonly qvm: boolean }): InventoryCoverage | null { return null; }
+  travelSource(_context: TravelContext): SimulationTravel["source"] { throw new Error("Source campaign travel requires its native source file lifecycle"); }
+  travelers(): ReturnType<SourceStrategy["travelers"]> { return null; }
+  travelPlayerState(_actor: ActorId): CarriedPlayerState { throw new Error("Source campaign travel requires its native source file lifecycle"); }
+  guestHealth(_actor: ActorId): number | null { return null; }
+  setGuestHealth(_actor: ActorId, _health: number): void { /* only a QVM guest keeps a health stat outside the shared combat view */ }
+  guestTravelPlayers(): readonly { readonly actor: ActorId; readonly client: ClientId; readonly alive: boolean }[] { return []; }
 }
 
-class Q1Strategy extends LoadingStrategy {
+class LoadedStrategy extends LoadingStrategy {
+  override requireLoaded(_message: string): void { /* the source has loaded */ }
+}
+
+class Q1Strategy extends LoadedStrategy {
   constructor(private readonly source: Of<"q1">, private readonly host: SourceStrategyHost) { super(); }
   override userinfo(actor: ActorId): string | null { return joinInfo(this.source.composition.clients.require(actor).userinfo); }
   override storeUserinfo(actor: ActorId, _client: ClientId, userinfo: string): void {
@@ -471,9 +601,28 @@ class Q1Strategy extends LoadingStrategy {
   override allowsAutoSwitch(actor: ActorId): boolean { return this.source.game.player(actor)?.autoSwitch !== "never"; }
   override cvars(): CvarRegistry { return this.source.cvars; }
   override q1PowerupExpires(actor: ActorId, powerup: Q1Powerup): number { return this.source.game.player(actor)?.powerups.get(powerup) ?? 0; }
+  override notarget(actor: ActorId): boolean { return this.source.composition.noTarget(actor); }
+  override godMode(actor: ActorId): boolean { return this.source.composition.clients.get(actor)?.godMode ?? false; }
+  override q1Game(): Of<"q1">["game"] { return this.source.game; }
+  override selectWeapon(actor: OwnedActor, item: ItemId): boolean {
+    const game = this.source.game;
+    const weapon = [...Q1_WEAPONS, ...game.registeredWeapons.keys()].find(value => game.weaponItem(value) === item);
+    return weapon !== undefined && game.selectWeapon(actor, weapon);
+  }
+
+  override checkpointProviders(add: (schema: SaveProvider["schema"], bytes: Uint8Array) => void): void {
+    add("world:source-cvars", encodeCheckpointValue(this.source.cvars.captureSaveState()));
+    add("q1:foundation", encodeQ1FoundationCheckpoint(this.source.game.capture()));
+  }
+  override sourceCvarSnapshots(): readonly { readonly name: string; readonly value: string }[] { return this.source.cvars.snapshots().map(value => ({ name: value.name, value: value.value })); }
+  override travelSource(): SimulationTravel["source"] { return { kind: "q1", flags: this.host.q1Campaign.flags, skill: this.host.q1Campaign.skill }; }
+  override travelPlayerState(actor: ActorId): CarriedPlayerState {
+    const composition = this.source.composition;
+    return { kind: "q1", carry: this.host.q1Restart ? composition.newTravel() : composition.captureTravel(this.host.requireOwned(actor)) };
+  }
 }
 
-class QuakeCStrategy extends LoadingStrategy {
+class QuakeCStrategy extends LoadedStrategy {
   constructor(private readonly source: Of<"quakec">, private readonly host: SourceStrategyHost) { super(); }
   override userinfo(actor: ActorId): string | null {
     const client = this.host.playerClient(actor);
@@ -574,9 +723,17 @@ class QuakeCStrategy extends LoadingStrategy {
     return { owner: this.host.entitiesProvider, transform: (attacker, amount) => game.damageAmount(attacker, amount) };
   }
   override equipmentSuppression(): EquipmentSuppression { return { quad: true, quadFire: false, haste: false }; }
+  override notarget(actor: ActorId): boolean | null { return this.source.game.notarget(actor); }
+  override connectedClients(): readonly ClientId[] | null { return this.source.game.kind === "netquake" ? this.source.game.connectedClientIdentities() : null; }
+
+  override usesGuestMonsters(): boolean { return true; }
+  override checkpointGuests(): SaveImage["guests"] { return [this.source.game.checkpoint()]; }
+  override travelSource(): SimulationTravel["source"] { return this.source.game.captureTravel(); }
+  // Same-dialect QC destinations travel through program parms in the source record; the shared snapshot serves every other destination.
+  override travelPlayerState(actor: ActorId): CarriedPlayerState { return this.host.sharedTravelState(actor) ?? { kind: "quakec" }; }
 }
 
-class Q2Strategy extends LoadingStrategy {
+class Q2Strategy extends LoadedStrategy {
   constructor(private readonly source: Of<"q2">, private readonly host: SourceStrategyHost) { super(); }
   override userinfo(actor: ActorId): string | null { return this.source.players.states.get(actor)?.userinfo ?? null; }
   override storeUserinfo(actor: ActorId, _client: ClientId, userinfo: string): void {
@@ -678,9 +835,51 @@ class Q2Strategy extends LoadingStrategy {
     return powerup === "quad" ? powers.quadUntil : powerup === "invulnerability" ? powers.invulnerabilityUntil : powerup === "suit" ? powers.enviroUntil : 0;
   }
   override monsterNoise(actor: ActorId, origin: Vec3, secondary: boolean | undefined): undefined { return this.source.monsters.reportNoise(actor, origin, secondary); }
+  override requiredMonsterNoise(actor: ActorId, origin: Vec3, secondary: boolean | undefined): undefined { return this.source.monsters.reportNoise(actor, origin, secondary); }
+  override requireQ2(): void { /* the source is Q2 */ }
+  override cloakAlpha(actor: ActorId): number | null {
+    return this.source.players instanceof Q2RereleasePlayers ? this.source.players.cloakAlpha(actor, this.source.game.host.now()) : null;
+  }
+  override weaponEvent(event: Q2WeaponEvent): boolean { this.source.players.weaponEvent(event); return true; }
+  override hasEnemy(target: ActorId): boolean { return (this.source.game.entity(target)?.enemy ?? null) !== null; }
+  override teamDamageEnabled(matchProvider: string): boolean {
+    return matchProvider === "q2:ctf" || matchProvider === "q2:lmctf" || (this.source.game.options.deathmatchFlags & (64 | 128)) !== 0;
+  }
+  override matchDamageEffects(): Q2MatchDamageEffects { return this.source.product.match.sourceEffects(this.source.game); }
+  override pushed(actor: ActorId, velocity: Vec3): void { const state = this.source.players.states.get(actor); if (state !== undefined) state.oldVelocity = velocity; }
+  override setEntityGravity(actor: ActorId, gravity: number): void { const entity = this.source.game.entity(actor); if (entity !== null) entity.gravity = gravity; }
+  override monstersSearching(player: ActorId | null): boolean {
+    const source = this.source, host = this.host;
+    for (const entity of source.game.entities.values()) {
+      if ((entity.serverFlags & 4) === 0 || host.health(entity.actor.id) <= 0) continue;
+      const state = source.monsters.context(entity.actor.id)?.state;
+      if (player === null ? entity.enemy !== null && !source.game.host.isPlayer(entity.enemy) : entity.enemy === null || !sameActor(entity.enemy, player)) continue;
+      if (state?.lostSight && host.timeSeconds > state.trailTime + 5) continue;
+      return true;
+    } return false;
+  }
+
+  override checkpointProviders(add: (schema: SaveProvider["schema"], bytes: Uint8Array) => void, providers: SaveProvider[]): void {
+    const registry = this.host.q2ServerRegistry;
+    if (registry !== null) add("world:source-cvars", encodeCheckpointValue(registry.captureSaveState()));
+    providers.push(...captureQ2Product(this.source.product));
+  }
+  override travelSource(context: TravelContext): SimulationTravel["source"] {
+    const source = this.source;
+    return { kind: "q2", serverFlags: context.serverFlags ?? source.game.counters.serverFlags,
+      ...(source.product.match.source instanceof Q2Lmctf ? { lmctf: source.product.match.source.captureTravel() } : {}),
+      ...(source.product.rerelease === null ? {} : { rerelease: structuredClone(source.product.rerelease.entities.campaign) }),
+      landmark: context.landmark };
+  }
+  override travelPlayerState(actor: ActorId): CarriedPlayerState {
+    const source = this.source;
+    this.host.requireOwned(actor);
+    const entity = source.game.entity(actor); if (entity === null) throw new Error("Q2 travel player entity is missing");
+    return { kind: "q2", carry: source.product.match.source instanceof Q2Lmctf ? { ...source.players.saveCarry(entity, source.game), score: 0 } : source.players.saveCarry(entity, source.game) };
+  }
 }
 
-class Q2NativeStrategy extends LoadingStrategy {
+class Q2NativeStrategy extends LoadedStrategy {
   constructor(private readonly source: Of<"q2-native">, private readonly host: SourceStrategyHost) { super(); }
   override userinfo(actor: ActorId): string | null {
     const slot = this.host.nativeQ2Client(actor).slot + 1;
@@ -719,10 +918,26 @@ class Q2NativeStrategy extends LoadingStrategy {
   override sourceInventory(actor: ActorId): InventoryStateBinding | null { return this.source.game.services.sourceInventory(this.host.nativeQ2Client(actor).slot + 1); }
   override playerAvailable(actor: ActorId): boolean { return this.host.playerClient(actor) !== null && this.host.nativeAvailable(actor); }
   override stepsHandGrenades(): boolean { return false; }
+  override notarget(actor: ActorId): boolean | null {
+    const source = this.host.sourceOf(actor);
+    return source?.provider === this.source.game.module.id ? this.source.game.services.notarget(source.slot) : null;
+  }
+  override connectedClients(): readonly ClientId[] { return [...this.source.clients.keys()]; }
+  override playerActors(): readonly ActorId[] { return [...this.source.clients.values()].map(actor => actor.id); }
   override teleportBits(actor: ActorId): number { return this.source.game.playerState(this.host.nativeQ2Client(actor).slot + 1).movement.flags & 32; }
+
+  override projectsMonsters(): boolean { return true; }
+  override usesGuestMonsters(): boolean { return true; }
+  override reconstructsActor(actor: ActorId): boolean { return this.host.sourceOf(actor)?.provider === this.source.game.module.id; }
+  override checkpointExtras(): Readonly<Record<string, number | string | null>> { return this.source.game.services.hasSourceInventory ? { nativeInventoryProjection: 1 } : {}; }
+  override nativeClients() { return this.source.game.clients.map(client => ({ clientSlot: client.slot - 1, phase: client.phase, userinfo: client.userinfo })); }
+  override requireInventoryProjection(): void { if (!this.source.game.services.hasSourceInventory) throw new Error("Saved native inventory requires qualified source storage"); }
+  override inventoryCoverage(projected: { readonly native: boolean; readonly qvm: boolean }): InventoryCoverage | null {
+    return this.source.game.services.hasSourceInventory ? { actors: [...this.source.clients.values()], legacy: !projected.native } : null;
+  }
 }
 
-class Q3Strategy extends LoadingStrategy {
+class Q3Strategy extends LoadedStrategy {
   constructor(private readonly source: Of<"q3">, private readonly host: SourceStrategyHost) { super(); }
   override userinfo(actor: ActorId): string | null {
     const client = this.host.playerClient(actor);
@@ -828,9 +1043,21 @@ class Q3Strategy extends LoadingStrategy {
   }
   override runsQ3Powerups(): boolean { return true; }
   override equipmentSuppression(): EquipmentSuppression { return { quad: false, quadFire: false, haste: true }; }
+  override notarget(actor: ActorId): boolean { return ((this.source.game.records.byActor(actor)?.flags ?? 0) & 32) !== 0; }
+
+  override assertSaveReady(): void {
+    this.host.assertOutputConsumed();
+    if (!this.host.q3ArsenalsComplete()) throw new Error("Q3 save requires completed client admission");
+  }
+  override checkpointProviders(add: (schema: SaveProvider["schema"], bytes: Uint8Array) => void): void {
+    add("q3:native", this.source.game.captureNativeBytes());
+    add("world:q3-runtime", this.host.q3RuntimeBytes());
+  }
+  override travelSource(): SimulationTravel["source"] { return { kind: "shared" }; }
+  override travelPlayerState(actor: ActorId): CarriedPlayerState { return this.host.sharedTravelState(actor) ?? { kind: "quakec" }; }
 }
 
-class Q3QvmStrategy extends LoadingStrategy {
+class Q3QvmStrategy extends LoadedStrategy {
   constructor(private readonly source: Of<"q3-qvm">, private readonly host: SourceStrategyHost) { super(); }
   override userinfo(actor: ActorId): string | null {
     const client = this.host.playerClient(actor);
@@ -870,11 +1097,50 @@ class Q3QvmStrategy extends LoadingStrategy {
   override runsQ3Powerups(): boolean { return true; }
   override equipmentSuppression(): EquipmentSuppression { return NATIVE_SUPPRESSION; }
   override ownsEquipmentPlayers(): boolean { return true; }
+  override notarget(actor: ActorId): boolean | null { return this.source.combat?.notarget(actor) ?? null; }
+  override connectedClients(): readonly ClientId[] { return this.source.game.players().map(player => player.client); }
+  override playerActors(): readonly ActorId[] { return this.source.game.players().map(player => player.actor); }
   override teleportBits(actor: ActorId): number { return this.source.game.records.player(this.source.game.records.requireSlot(actor)).flags & 4; }
   override playerAvailable(actor: ActorId): boolean {
     const player = this.source.game.players().find(entry => entry.actor.equals(actor)); if (player === undefined) return false;
     const state = this.source.game.records.player(player.sourceEntity);
     return this.source.weapons?.available(actor) ?? ((state.stats[0] ?? 0) > 0 && state.movementType !== MoveType.PM_SPECTATOR && state.movementType !== MoveType.PM_INTERMISSION && state.movementType !== MoveType.PM_SPINTERMISSION);
+  }
+  override assertSaveReady(): void { this.host.assertOutputConsumed(); }
+  override projectsMonsters(): boolean { return true; }
+  override usesGuestMonsters(): boolean { return true; }
+  override checkpointGuests(): SaveImage["guests"] { return [this.source.game.checkpoint()]; }
+  override checkpointExtras(): Readonly<Record<string, number | string | null>> {
+    return { qvmPrimaryDeclaration: this.host.qvmDeclaration(), ...(this.source.combat !== null ? { qvmArmorProjection: 1 } : {}), ...(this.source.inventory !== null ? { qvmInventoryProjection: 1 } : {}) };
+  }
+  override expectedDeclaration(): string | null { return this.host.qvmDeclaration(); }
+  override legacyCombat(): Of<"q3-qvm">["combat"] { return this.source.combat; }
+  override setMaxHealth(actor: ActorId, health: number): void { this.host.qvmWeapons().setMaxHealth(actor, health); }
+  override requireInventoryProjection(): void { if (this.source.inventory === null) throw new Error("Saved QVM inventory requires qualified source storage"); }
+  override inventoryCoverage(projected: { readonly native: boolean; readonly qvm: boolean }): InventoryCoverage | null {
+    const source = this.source, host = this.host;
+    if (projected.qvm || source.inventory === null) return null;
+    return { legacy: true, actors: host.entityActors().filter(actor => {
+      const slot = source.game.records.slot(actor.id);
+      return slot !== null && slot < source.game.engine.data.numClients && host.hasInventory(actor.id);
+    }) };
+  }
+  override travelSource(): SimulationTravel["source"] { return { kind: "shared" }; }
+  override travelers(): readonly { readonly client: ClientId; readonly actor: ActorId }[] { return this.source.game.players().map(player => ({ client: player.client, actor: player.actor })); }
+  override travelPlayerState(actor: ActorId): CarriedPlayerState { return this.host.sharedTravelState(actor) ?? { kind: "quakec" }; }
+  override guestHealth(actor: ActorId): number | null {
+    const slot = this.source.game.records.slot(actor);
+    return slot === null ? null : this.source.game.records.player(slot).stats[0] ?? null;
+  }
+  override setGuestHealth(actor: ActorId, health: number): void {
+    const game = this.source.game, slot = game.records.slot(actor);
+    if (slot === null) return;
+    const state = game.records.player(slot);
+    game.engine.data.writePlayerState(slot, { ...state, stats: state.stats.map((value, index) => index === 0 ? health : value) });
+  }
+  override guestTravelPlayers(): readonly { readonly actor: ActorId; readonly client: ClientId; readonly alive: boolean }[] {
+    const game = this.source.game;
+    return game.players().map(player => ({ actor: player.actor, client: player.client, alive: (game.records.player(player.sourceEntity).stats[0] ?? 0) > 0 }));
   }
 }
 
