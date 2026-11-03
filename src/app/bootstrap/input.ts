@@ -27,7 +27,10 @@ import type { InputBinding, SeatInputEvent, SeatInputFocus } from "../../contrac
 import { CommandBuffer, type CommandCvarRouting } from "../../core/commands/index.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
 import { SeatConsole } from "../../console/session.ts";
-import { archivedBindingPairs, defaultBindings, registerBindingCommands, registerWheelCommands } from "../../input/bindings.ts";
+import { archivedBindingPairs, defaultBindings, physicalInputName, registerBindingCommands, registerWheelCommands } from "../../input/bindings.ts";
+import type { BindingScope } from "../../ui/settings/bindings.ts";
+import { noteLocalForm } from "./native-settings.ts";
+import { absorbSession } from "../../settings/native-config.ts";
 import type { WeaponBindingItem } from "../../input/weapon-bindings.ts";
 import { InputRouter } from "../../input/router.ts";
 import { SeatInput, registerInputCommands } from "../../input/seat.ts";
@@ -793,6 +796,7 @@ export class ApplicationInput {
         readScript: (name, source) => this.startup?.readScript(name, source) ?? this.scripts.read(name, source),
         onScriptComplete: event => this.startup?.onScriptComplete(event),
         allowCommand: command => this.startup?.allowCommand(command) ?? true,
+        localForm: form => noteLocalForm(this.scripts.layers, form),
         ...(this.consoleRouting === null ? {} : { cvarRouting: this.consoleRouting }),
         print,
         forwardToServer: invocation => {
@@ -1189,6 +1193,20 @@ export class ApplicationInput {
   canResetBindings(id: SeatId): boolean {
     return this.startup?.seats.some(seat => seat.id.equals(id) && seat.authoredBindings !== null) ?? false;
   }
+  /** The in-game binding menu's choice to keep edits to this game; they reach the layers when the game saves. */
+  bindingScope(): BindingScope | undefined {
+    const layers = this.scripts.layers;
+    if (layers === undefined) return undefined;
+    return {
+      available: () => true,
+      local: () => this.bindingsLocal,
+      setLocal: local => {
+        this.bindingsLocal = local;
+      },
+      noteLocal: physical => layers.noteLocalBind(physicalInputName(physical)),
+    };
+  }
+  private bindingsLocal = false;
   resetBindings(id: SeatId): void {
     if (this.startup === undefined) throw new Error("Authored binding defaults are unavailable");
     this.startup.resetBindings(id);
@@ -1576,11 +1594,21 @@ export class ApplicationInput {
   /** A stock game writes its own configuration file the way the original does at quit. */
   private async saveNativeConfig(): Promise<void> {
     const native = this.scripts.native,
+      layers = this.scripts.layers,
       primary = this.locals[0];
-    if (native === null || primary === undefined) return;
+    if (primary === undefined) return;
     const seat = primary.player.seat;
     const source: CommandContext = { session: seat.id.session, origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } };
-    await this.scripts.write(() => native.write(archivedBindingPairs(primary.input), this.commands.archiveCommands(source)));
+    const context = { resetValue: (name: string) => this.commands.findCvar(name, source)?.resetValue };
+    if (native !== null) {
+      await this.scripts.write(() => native.write(archivedBindingPairs(primary.input), this.commands.archiveCommands(source), context));
+      return;
+    }
+    // A mixed combination has no file to write, but its changes reach the high level through the same layers.
+    if (layers?.isReady === true)
+      await this.scripts.write(async () => {
+        await absorbSession(layers, layers.format, archivedBindingPairs(primary.input), this.commands.archiveCommands(source), context);
+      });
   }
 
   close(): undefined {

@@ -14,12 +14,13 @@ import type { InputBinding } from "../../contracts/ui.ts";
 import { CvarRegistry, type CvarArchiveEntry } from "../../core/cvars/index.ts";
 import { CommandBuffer, asciiFold, type CommandInvocation, type CommandCvarRouting, type CommandBufferOptions } from "../../core/commands/index.ts";
 import { SeatInput, physicalInputKey } from "../../input/seat.ts";
-import { archivedBindings, defaultBindings, registerBindingCommands, type BindingCommandSeat } from "../../input/bindings.ts";
+import { archivedBindingPairs, archivedBindings, defaultBindings, registerBindingCommands, type BindingCommandSeat } from "../../input/bindings.ts";
 import { MouseSettings } from "../../input/mouse-settings.ts";
 import { ConfigStore, type SeatSettings } from "../../settings/config.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
 import { StartupConfig, type StartupConfigOptions } from "./startup-config.ts";
 import type { ConsoleScriptFiles } from "./config-scripts.ts";
+import { noteLocalForm } from "./native-settings.ts";
 
 export interface PreparedSeat {
   readonly context: CommandContext;
@@ -144,6 +145,7 @@ export class PreparedStartup {
       onScriptComplete: event => this.currentStartup?.onScriptComplete(event),
       print: (text, source) => this.print(text, source),
       allowCommand: command => this.allowCommand(command),
+      localForm: form => noteLocalForm(this.scripts?.layers, form),
       forwardToServer: invocation => {
         this.worldAction = true;
         return this.forward(invocation.argv[0] ?? "", invocation.args, invocation.source);
@@ -500,6 +502,7 @@ export class PreparedStartup {
         applySelectedDefaults: () => {
           if (seat === undefined) return;
           seat.authoredBindings = applySelectedBindingDefaults(seat.input, seat.selectedBindings ?? defaultBindings(0, this.options.movementDialect));
+          if (index === 0) this.scripts.layers?.noteDefaultBinds(archivedBindingPairs(seat.input));
           seat.collectingBindings = true;
         },
         applyArchive: () => {

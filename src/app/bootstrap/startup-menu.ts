@@ -1956,8 +1956,13 @@ export class StartupMenu {
     this.gyroMenu = menu.root;
     this.disposers.push(menu.dispose);
   }
-  bindInput(input: SeatInput, actions: () => readonly BindingAction[], reset?: import("../../ui/settings/bindings.ts").BindingReset): void {
-    const menu = registerBindingMenus(this.controller, input, actions, reset);
+  bindInput(
+    input: SeatInput,
+    actions: () => readonly BindingAction[],
+    reset?: import("../../ui/settings/bindings.ts").BindingReset,
+    scope?: import("../../ui/settings/bindings.ts").BindingScope,
+  ): void {
+    const menu = registerBindingMenus(this.controller, input, actions, reset, scope);
     this.bindingMenu = menu.root;
     this.disposers.push(menu.dispose);
   }

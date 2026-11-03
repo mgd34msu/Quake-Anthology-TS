@@ -2,6 +2,7 @@
 import { SharedCvarMirror } from "../../core/cvars/mirror.ts";
 import type { CommandDialect } from "../../contracts/common.ts";
 import { CvarFlag, Q2CvarFlag, type CvarRegistry } from "../../core/cvars/index.ts";
+import { registerConsoleLogCvar } from "./console-log.ts";
 
 export interface FrameTimeControls {
   readonly timescale: number;
@@ -67,6 +68,7 @@ export function registerFrameTimeCvars(cvars: CvarRegistry): void {
     register("fixedtime", "0", q2 ? Q2CvarFlag.Cheat : CvarFlag.Cheat);
     if (!q2) register("com_cameraMode", "0", CvarFlag.Cheat);
   }
+  registerConsoleLogCvar(cvars);
 }
 
 export function readFrameTimeControls(cvars: CvarRegistry): FrameTimeControls {

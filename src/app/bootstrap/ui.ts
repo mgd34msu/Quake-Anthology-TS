@@ -281,6 +281,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       local.input,
       () => sharedBindingActions(local.builder.dialect, this.guestUi ? [] : simulation.playerUi(local.player.actor).items, input.bindingCapabilities),
       { available: () => input.canResetBindings(seat), reset: () => input.resetBindings(seat) },
+      input.bindingScope?.(),
     );
     const bindingMenu: SettingBinding = {
       id: "ui:input:bindings",

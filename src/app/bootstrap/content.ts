@@ -14,8 +14,7 @@ export interface ApplicationContentSource {
   readonly family: DemoFamily;
 }
 import { mkdir } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
-import { findContentPath } from "../../content/mounts/paths.ts";
+import { basename, dirname, resolve } from "node:path";
 import { migrateNativeData } from "./native-migration.ts";
 import { userProductDirectory } from "../../content/user-data.ts";
 import { defaultAddonContentRoots, defaultUserContentRoot } from "../../content/user-data.ts";
@@ -39,6 +38,7 @@ import { createMountPlanId, createRecipeId } from "../../contracts/content.ts";
 import type { Q3WorldGeometry } from "../../contracts/scene.ts";
 import {
   discoverInstalledContent,
+  gameDownloadDirectory,
   remoteContentProduct,
   remoteContentSelection,
   expectedProducts,
@@ -77,7 +77,7 @@ export interface RemoteContentMounts {
 }
 
 export async function openRemoteContent(
-  roots: Pick<ApplicationOptions, "corpusRoot" | "userContentRoot" | "q3Product" | "startupCommands">,
+  roots: Pick<ApplicationOptions, "corpusRoot" | "userContentRoot" | "q3Product" | "startupCommands" | "nativeConfigRoot">,
   requested: RemoteContentSelection,
   assertCurrent: () => void,
   generation = 0,
@@ -87,24 +87,37 @@ export async function openRemoteContent(
   const base = expectedProducts.find(product => product.id === selection.base);
   if (base === undefined) throw new Error(`Missing remote base product ${selection.base}`);
   const userRoot = roots.userContentRoot ?? defaultUserContentRoot();
-  const familyRoot = (await findContentPath(userRoot, dirname(base.contentDirectory))) ?? userProductDirectory(userRoot, dirname(base.contentDirectory));
-  assertCurrent();
-  const baseWriteRoot = (await findContentPath(familyRoot, basename(base.contentDirectory))) ?? join(familyRoot, basename(base.contentDirectory));
+  // The original clients download into the game's own folder; the user store is only the fallback for a folder that cannot be written.
+  const folder = async (contentDirectory: string): Promise<string> => {
+    try {
+      return await gameDownloadDirectory(roots.corpusRoot, { family: base.family, contentDirectory }, roots.nativeConfigRoot);
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && (error.code === "EACCES" || error.code === "EROFS" || error.code === "EPERM"))) throw error;
+      const stored = userProductDirectory(userRoot, contentDirectory);
+      await mkdir(stored, { recursive: true });
+      return stored;
+    }
+  };
+  const baseWriteRoot = await folder(base.contentDirectory);
   assertCurrent();
   const writeRoot =
     selection.directory === basename(base.contentDirectory).toLowerCase()
       ? baseWriteRoot
-      : ((await findContentPath(familyRoot, selection.directory)) ?? join(familyRoot, selection.directory));
+      : await folder(`${dirname(base.contentDirectory)}/${selection.directory}`);
   assertCurrent();
-  await mkdir(writeRoot, { recursive: true });
-  assertCurrent();
-  await mkdir(baseWriteRoot, { recursive: true });
-  assertCurrent();
-  let catalog = await discoverInstalledContent({ ...roots, userContentRoot: userRoot, discoverMods: false, remoteContent: selection, generation });
+  let catalog = await discoverInstalledContent({
+    ...roots,
+    userContentRoot: userRoot,
+    ...(roots.nativeConfigRoot === undefined ? {} : { gameWriteRoot: roots.nativeConfigRoot }),
+    discoverMods: false,
+    remoteContent: selection,
+    generation,
+  });
   assertCurrent();
   catalog.require(selection.base);
   let product = catalog.require(remoteContentProduct(selection));
-  if ((product.userContent?.root ?? product.looseRoot) !== writeRoot) throw new Error("Remote download directory does not match its content owner");
+  if (![product.redirectedContent?.root, product.looseRoot, product.userContent?.root].includes(writeRoot))
+    throw new Error("Remote download directory does not match its content owner");
   const policy = await prepareQ3ApplicationProduct(catalog, product.id, roots);
   assertCurrent();
   catalog = policy.catalog;

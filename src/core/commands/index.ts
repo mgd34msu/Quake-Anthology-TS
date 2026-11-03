@@ -81,7 +81,24 @@ export interface CommandBufferOptions {
   readonly maxBufferLength?: number;
   readonly maxCommandLength?: number;
   readonly builtins?: boolean;
+  /** Told of `bind -local`, `unbind -local` and `set -local` (also seta, setu, sets) after the flag is removed; the command then runs as the plain form. */
+  readonly localForm?: (form: LocalForm) => void;
 }
+
+export interface LocalForm {
+  readonly command: "bind" | "unbind" | "set";
+  /** The arguments after the command name, without `-local`. */
+  readonly args: readonly string[];
+  readonly source: CommandContext;
+}
+const LOCAL_FORMS: ReadonlyMap<string, LocalForm["command"]> = new Map([
+  ["bind", "bind"],
+  ["unbind", "unbind"],
+  ["set", "set"],
+  ["seta", "set"],
+  ["setu", "set"],
+  ["sets", "set"],
+]);
 
 interface RegisteredEntry {
   readonly ownership: "world" | "engine";
@@ -1181,6 +1198,13 @@ export class CommandBuffer {
       this.tokens = [];
       return 0;
     }
+    let line = raw;
+    const localCommand = LOCAL_FORMS.get(asciiFold(tokens.argv[0] ?? ""));
+    if (localCommand !== undefined && asciiFold(tokens.argv[1] ?? "") === "-local") {
+      tokens = { argv: [tokens.argv[0] ?? "", ...tokens.argv.slice(2)], argsText: tokens.argsText.replace(/^\s*-local\b\s*/i, "") };
+      line = raw.replace(/^(\s*\S+\s+)-local\b\s*/i, "$1");
+      this.options.localForm?.({ command: localCommand, args: tokens.argv.slice(1), source });
+    }
     const name = tokens.argv[0];
     this.tokens = tokens.argv;
     if (name === undefined) return 0;
@@ -1205,7 +1229,7 @@ export class CommandBuffer {
       argv: tokens.argv,
       args: Object.freeze(tokens.argv.slice(1)),
       argsText: tokens.argsText,
-      raw,
+      raw: line,
       append: (text: string): void => {
         requireActive();
         this.appendFor(text, source);
@@ -1250,7 +1274,7 @@ export class CommandBuffer {
         if (asciiFold(entry.name) !== asciiFold(name)) continue;
         if (this.executionDialect === "q3") this.touch(entry);
         if (entry.handler !== null) entry.handler(command);
-        else if (isQ2(this.executionDialect)) this.dispatch(`cmd ${raw}`, source);
+        else if (isQ2(this.executionDialect)) this.dispatch(`cmd ${line}`, source);
         else if (this.executionDialect === "q3") this.fallback(command);
         else throw new Error("Quake I command registration has a null callback");
         return 1;

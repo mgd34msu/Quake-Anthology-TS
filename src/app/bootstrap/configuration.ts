@@ -26,7 +26,7 @@ import { serverDefinitionsForSelection } from "../../settings/server/index.ts";
 import { PreparedStartup, allowSeatConfigurationCommand, type PreparedClientCommands, type PreparedSeatConfiguration } from "./prepared-startup.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
 import { StartupConfig, type StartupConfigOptions } from "./startup-config.ts";
-import { defaultBindings } from "../../input/bindings.ts";
+import { archivedBindingPairs, defaultBindings, namedPhysicalInput } from "../../input/bindings.ts";
 import { physicalInputKey, type SeatInput } from "../../input/seat.ts";
 import type { CommandCvarRouting } from "../../core/commands/index.ts";
 import type { InputBinding } from "../../contracts/ui.ts";
@@ -43,7 +43,8 @@ import { MouseSettings } from "../../input/mouse-settings.ts";
 import { ConsoleScriptFiles, consoleConfigRoot, sourceScriptReader } from "./config-scripts.ts";
 import { createStartupScriptReader } from "./startup-config.ts";
 import { loadSeatProfile } from "./seat-profile.ts";
-import { stockNativeConfig } from "./native-settings.ts";
+import type { LayerBind, LayerCvar } from "../../settings/layers.ts";
+import { mixedGameLayers, noteLocalForm, stockNativeConfig } from "./native-settings.ts";
 import { TeamArenaLaunchOverrides } from "./team-arena-skirmish.ts";
 
 export interface ConfigurationCommandRequest {
@@ -178,6 +179,11 @@ export async function prepareProfileConfiguration(args: {
     () => content.close(),
   );
   const read = configurationScriptReader(content, options, scripts);
+  // A mixed combination has no native file: it starts from the high level, and its component-keyed store wins over that.
+  const mixedHigh =
+    scripts.native === null && scripts.layers !== undefined
+      ? await scripts.layers.resolve({ binds: new Map<string, LayerBind>(), cvars: new Map<string, LayerCvar>() })
+      : null;
   const requests: ConfigurationCommandRequest[] = [];
   let forward = (request: ConfigurationCommandRequest): void => {
     requests.push(request);
@@ -205,6 +211,7 @@ export async function prepareProfileConfiguration(args: {
         print: host.print,
         allowCommand: command => !active?.restrictSharedConfiguration || allowSeatConfigurationCommand(command, routing, seats, host.print),
         forwardToServer: command => dispatch(command.argv[0] ?? "", command.args, command.source),
+        localForm: form => noteLocalForm(scripts.layers, form),
       },
       seats,
     );
@@ -339,12 +346,28 @@ export async function prepareProfileConfiguration(args: {
           read: (name, context, scope) => (published === undefined ? read(name, context, scope) : published.readConfiguration(name, context, scope)),
           applySelectedDefaults: () => {
             choices.authored = applySelectedBindingDefaults(bindings(), defaults);
+            if (index === 0) scripts.layers?.noteDefaultBinds(archivedBindingPairs(bindings()));
             collectingBindings = true;
             publishChoices(seat.id);
           },
           applyArchive: () => {
             const native = scripts.native;
             const owned = <T extends { readonly name: string }>(entries: readonly T[]): readonly T[] => native?.filterArchive(entries) ?? entries;
+            if (index === 0 && mixedHigh !== null) {
+              const layered = mixedHigh;
+              for (const entry of layered.cvars.values()) {
+                const owner = routing.owner(entry.name, seat.context);
+                if (owner.find(entry.name) !== undefined) owner.setCommandFlags(entry.name, entry.value, "archive");
+              }
+              for (const bind of layered.unbound) {
+                const input = namedPhysicalInput(bind.key);
+                if (input !== null) bindings().unbind(input);
+              }
+              for (const bind of layered.binds) {
+                const input = namedPhysicalInput(bind.key);
+                if (input !== null && bind.command !== null) bindings().bind({ input, target: { kind: "command", text: bind.command } });
+              }
+            }
             if (index === 0) {
               if (args.clientSource === undefined) (published?.source ?? source).applyArchive(owned(args.sourceArchive));
               (published?.movement ?? movement).applyArchive(owned(movementArchive));
@@ -538,9 +561,12 @@ export function legacyConfigurationOptions(
   catalog: InstalledCatalog,
   reference: ContentId,
   components: readonly ContentId[] = [reference],
-): Pick<ConstructorParameters<typeof ConsoleScriptFiles>[0], "legacyConfig" | "native"> {
-  const native = stockNativeConfig(catalog, reference, components, options.nativeConfigRoot);
-  return { ...(native === null ? {} : { native }), ...legacyOnly(options, catalog, reference) };
+): Pick<ConstructorParameters<typeof ConsoleScriptFiles>[0], "legacyConfig" | "native" | "mixedLayers"> {
+  const native = stockNativeConfig(catalog, reference, components, options.nativeConfigRoot, { userContentRoot: options.userContentRoot });
+  return {
+    ...(native === null ? { mixedLayers: mixedGameLayers(catalog, reference, options.userContentRoot) } : { native }),
+    ...legacyOnly(options, catalog, reference),
+  };
 }
 
 function legacyOnly(

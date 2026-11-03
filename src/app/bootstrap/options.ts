@@ -52,6 +52,8 @@ export interface ApplicationOptions {
   readonly gamma: number;
   readonly displayOverrides?: { readonly width?: number; readonly height?: number; readonly gamma?: number };
   readonly dedicated: boolean;
+  /** `-condebug`: Quake appends its console to qconsole.log in the game folder. */
+  readonly consoleDebug?: boolean;
   readonly width: number;
   readonly height: number;
   readonly seats: number;
@@ -113,6 +115,7 @@ Usage: bun run src/main.ts [options]
   --skill 0|1|2|3            Quake I/II gameplay difficulty
   --bot-skill 1|2|3|4|5      Quake III bot difficulty (default 2)
   --dedicated                Run without a window or local seats
+  -condebug                  Quake: append the console to qconsole.log in the game folder
   --listen-unified PORT      Host the selected mixed-game recipe
   --connect-unified ADDRESS  Join a mixed-game server
   --listen PORT              Host the selected game's native source protocol
@@ -216,6 +219,8 @@ export function parseApplicationCommand(argv: readonly string[], search: Content
         "--width",
         "--height",
         "--hidden",
+        "-condebug",
+        "--condebug",
         "--list-content",
       ].includes(flag)
     )
@@ -228,6 +233,10 @@ export function parseApplicationCommand(argv: readonly string[], search: Content
     }
     if (flag === "--dedicated") {
       options = { ...options, dedicated: true };
+      continue;
+    }
+    if (flag === "-condebug" || flag === "--condebug") {
+      options = { ...options, consoleDebug: true };
       continue;
     }
     if (flag === "--hidden") {

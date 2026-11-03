@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { CvarFlag, CvarRegistry } from "../core/cvars/index.ts";
+import { registerSettingAliases } from "../core/cvars/setting-declarations.ts";
 import { defaultMouseTuning } from "./mouse.ts";
 import type { MouseTuning, MouseTuningStore } from "./mouse.ts";
 
@@ -44,6 +45,7 @@ export class MouseSettings implements MouseTuningStore {
         cvars.register(declaration.name, String(declaration.value), CvarFlag.Archive);
       cvars.document(declaration.name, { summary: declaration.summary, usage: `${declaration.name} [value]`, examples: [declaration.example] });
     }
+    registerSettingAliases(cvars, "input");
   }
 
   read(): MouseTuning {

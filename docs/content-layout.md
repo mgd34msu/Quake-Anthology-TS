@@ -126,13 +126,15 @@ and with the original name:
 | Demos | `<gamedir>/NAME.dem` | `<gamedir>/NAME.qwd` | `<gamedir>/demos/NAME.dm2` | `<gamedir>/demos/NAME.dm_68` |
 | Screenshots | `<gamedir>/quakeNN.tga` | `<gamedir>/quakeNN.tga` | `<gamedir>/scrnshot/quakeNN.tga` | `<gamedir>/screenshots/shotNNNN.tga` or `.jpg` |
 | Level shots | | | | `<gamedir>/levelshots/MAP.tga` |
-| Logs | | | | `<gamedir>/qconsole.log` with `logfile` 1 (2 flushes each write); `<gamedir>/games.log` from `g_log` |
+| Logs | `<gamedir>/qconsole.log` with `-condebug` | `<gamedir>/qconsole.log` with `-condebug` | `<gamedir>/qconsole.log` with `logfile` 1 (2 flushes each write) | `<gamedir>/qconsole.log` with `logfile` 1 (2 flushes each write); `<gamedir>/games.log` from `g_log` |
 | Server `writeip` | `<gamedir>/listip.cfg` | `<gamedir>/listip.cfg` | `<gamedir>/listip.cfg` | |
 | Saves | `<gamedir>/NAME.sav` | none | `<gamedir>/save/NAME/qts.sav` | `<gamedir>/save/NAME.sav` |
 
 Quake and Quake II numbering starts at 00 and keeps counting past 99; Quake III
 stops at `shot9999`. The `screenshot`, `screenshotJPEG` and `screenshotPNG`
-commands choose the extension; the engine does not write PCX. The console log is implemented for Quake III only. In the
+commands choose the extension; the engine does not write PCX. One console log writer serves a local game, a dedicated
+server, a client connected to a remote server and the front end; each game supplies only its trigger (`logfile` for
+Quake II and III, the `-condebug` launch flag for Quake and QuakeWorld). In the
 rerelease the same files go beneath the Saved Games folder: Quake saves go to
 `NAME.sav` in the Quake folder (the rerelease's own `s1.sav` sits there), Quake II
 saves to `<gamedir>/save/`, beside the rerelease's own `saveN.pak.gz`.
@@ -148,18 +150,26 @@ interrupted and rerun. Whatever stays behind (autosaves, original-format saves,
 screenshots, which the old layout shared between games) is still read from the
 user store.
 
-Not yet moved to the native folders: client downloads (maps, sounds, models, PK3s
-a server sends) still go to the user store's product folder, because the catalog
-mounts that folder as the writable overlay of a running session.
+**Downloads.** Content a client downloads (maps, sounds, models, pictures, textures,
+PAK and PK3 files a server sends) goes into the game folder that owns it, as the
+original clients do: `id1` or `qw` for Quake and QuakeWorld (skins in `qw`'s base),
+`baseq2`, `baseq3`, or the mod's own folder, created when missing. This holds for
+stock and mixed combinations alike, because a download belongs to the component
+that requested it, not to the engine's settings. The catalog mounts that folder
+like any installed one, so a downloaded file is found after the next content
+refresh. If the game folder cannot be written (a read-only install), downloads go
+to the user store's product folder as before. Downloads that earlier versions
+left in the user store are still read, but they are not moved: that folder also
+holds add-ons and maps you placed yourself, which cannot be told apart from
+downloads.
 
 The stock-versus-mixed decision is made in one place, `stockGameFolders` in
 `src/app/bootstrap/native-settings.ts`; every writer of demos, screenshots, logs,
 `listip.cfg`, game-module files and saves asks it. It answers with the game's own
 folder when every component comes from one product or mod, and with nothing for
 a mixed combination, which then writes under the user store's product folder.
-Two parts of the owner's split are not done yet: mixed combinations share the
-engine-behavior product's user folder instead of a folder keyed per combination,
-and downloads are not routed to the owning component's game folder.
+One part of the owner's split is not done yet: mixed combinations share the
+engine-behavior product's user folder instead of a folder keyed per combination.
 
 **Mixed combinations** (components from different products, such as a Quake II
 map with Quake movement) keep to the user store, keyed by the component that owns
@@ -172,6 +182,71 @@ beside their native file, so a mixed game starts from the latest stock values; t
 reverse does not hold, because a stock game reads its native file first. Files
 saved earlier under the engine-behavior product's folder are still read when the
 movement product's folder has none.
+
+**Settings layers.** Players generally want the same bindings and settings in every
+game, so the engine keeps two levels. The high level is the engine's own
+configuration (`console/layers/high.json`): every binding and the shared settings
+sensitivity, invert pitch, effects and music volume, gamma, fullscreen, resolution
+and field of view. The low level is each game's native file above. Precedence, highest
+first:
+
+1. the game's local overrides (`console/layers/games/<game>.json`);
+2. the high level;
+3. the game's own `default.cfg` and cvar defaults, which sit beneath both.
+
+The high level stores the engine's canonical cvar names (`sensitivity`, `m_pitch`,
+`volume`, `bgmvolume`, `r_gamma`, `fov`, `r_fullscreen`, `r_customwidth`,
+`r_customheight`). `src/settings/setting-spellings.ts` is the one declaration of every
+other spelling a game uses; the same data registers each spelling as a cvar alias of
+the canonical cvar in every dialect (so `vid_gamma`, `s_volume`, `cg_fov`,
+`cl_sensitivity`, `gl_mode` and the rest work in whichever game runs, where the game
+does not define the name itself), and says which native files write that spelling.
+A game without a spelling lacks the setting:
+
+| Game | Sensitivity | m_pitch | Volume / music | Gamma | Fullscreen | Resolution | FOV |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Quake | `sensitivity` | `m_pitch` | `volume` / `bgmvolume` | `gamma` (1 / brightness) | none | `vid_config_x`/`_y` | `fov` |
+| Quake II | `sensitivity` | `m_pitch` | `s_volume` / none | `vid_gamma` (1 / brightness) | `vid_fullscreen` | `gl_mode` index (-1 for widths outside its table) | `fov` |
+| Quake III | `sensitivity` | `m_pitch` | `s_volume` / `s_musicvolume` | `r_gamma` | `r_fullscreen` | `r_customwidth`/`height` with `r_mode` -1 | `cg_fov` |
+| Quake rerelease | `cl_sensitivity` | `m_pitch` | `snd_volume` / `snd_musicvolume` | `gamma` (1 / brightness) | none | `v_width`/`v_height` | `r_fov` |
+| Quake II rerelease | game-local (its own scale) | game-local | `snd_volume` / `s_bgvolume` | none | none | `v_width`/`v_height` | `fov_0` |
+
+Layer files written under the first, separate vocabulary (version 1) are migrated to
+the canonical names when read.
+
+Cvars outside these declarations (Quake II `cl_blend`, Quake III `cg_drawGun`) are the game's
+own and never leave its file.
+
+At startup the native file is read, compared with the record of what the engine
+last wrote to it, and the script the game runs is the effective set: the high level
+mapped into the game's names, plus the game's overrides. A key unbound at a level
+becomes an `unbind` line that cancels a `default.cfg` binding. The first native file
+the engine ever meets seeds an empty high level; a native file that has no record
+yet and differs from the high level becomes overrides. At quit the whole effective
+set is written back, so the original game sees a complete config, and the record is
+refreshed.
+
+Changes made in a running game update the high level and so every game that does not
+override that entry: console `bind`, `unbind`, `set`, `seta` and `cvar` on a mapped cvar,
+menus and sliders, and commands from exec'd scripts such as `autoexec.cfg`. A change
+to an entry this game overrides also ends that override, so the value the player just
+set is the one that stays. The comparison is made at quit against the set the game
+started from and the bindings `default.cfg` left, so unchanged defaults are never
+copied into the high level.
+
+A game-local override comes only from:
+
+- the player hand-editing that game's native file (any binding or mapped variable that
+  differs from the recorded write, unless it equals the high level);
+- `bind -local`, `unbind -local` and `set -local` (also `seta`, `setu`, `sets`), where
+  the flag is removed and the command runs as usual;
+- the "Keep bindings to this game" toggle in the front end and in-game binding menus.
+
+A change in the high level flows to every game without an override of that entry and
+leaves overridden games alone. Mixed combinations start from the high level (mapped
+variables and bindings in the engine-behavior product's dialect) and the component-keyed
+store then wins over it. They have no native file, but their changes at quit go back to
+the high level through the same `absorbSession` code as a stock game's.
 
 **Writable content and engine-wide data** live under
 `~/.local/share/quake-typescript/` (or `--user-content-root X`, which must not be a
@@ -200,10 +275,8 @@ global input tuning, image settings, LLM credentials) stays under the default
 `settings` folder; see
 [credential and preference files](console-and-llm.md#credential-and-preference-files).
 
-Saved games, demos, screenshots, downloads and logs are still written to the
-engine's own folders, not to each game's folders: the shared save format differs
-from id's `.sav` and `.ssv` files, so it is kept apart rather than written under
-the original names.
+Engine-format saved games are kept apart from id's `.sav` and `.ssv` files rather
+than written under the original names where the formats differ.
 
 QVM components write to `.mods/PRODUCT/COMPONENT_ID/` under the user-content root.
 Each name is URL-encoded. Their reads, scripts, and file lists see that component's

@@ -5,6 +5,7 @@ import type { AudioOutputFormat } from "../../audio/output.ts";
 import { audioOutputCvarNames } from "./audio/output-settings.ts";
 import { join } from "node:path";
 import { registerQ1ClientSettings } from "./q1-client-settings.ts";
+import { registerSettingAliases } from "../../core/cvars/setting-declarations.ts";
 import { registerSharedClientSettings, validateFieldOfView } from "./shared-setting-cvars.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import { CommandBuffer } from "../../core/commands/index.ts";
@@ -107,6 +108,7 @@ export class ApplicationImageSettings {
     this.cvars.register("r_customwidth", "0", CvarFlag.Archive);
     this.cvars.register("r_customheight", "0", CvarFlag.Archive);
     this.cvars.register("r_fullscreen", "0", CvarFlag.Archive);
+    registerSettingAliases(this.cvars, "shared");
     this.cvars.register("r_swapInterval", "1", CvarFlag.Archive);
     this.cvars.register("r_smp", "0", CvarFlag.Archive);
     this.cvars.bindValue("r_smp", { validate: value => (value === "0" || value === "1" ? null : "r_smp must be 0 or 1"), changed: () => {} });

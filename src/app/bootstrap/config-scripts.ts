@@ -12,6 +12,7 @@ import { findContentPath, normalizeResourcePath } from "../../content/mounts/pat
 import { defaultUserContentRoot } from "../../content/user-data.ts";
 import { ConfigStore } from "../../settings/config.ts";
 import type { NativeConfig } from "../../settings/native-config.ts";
+import type { GameLayers } from "../../settings/layers.ts";
 
 /** Configuration follows the selected source and its bases, independently of mixed assets. */
 export function sourceScriptReader(catalog: InstalledCatalog, mounts: MountedContent, source: ContentId): (name: string) => Promise<Uint8Array | undefined> {
@@ -95,6 +96,8 @@ export async function readConsoleScript(options: {
   readonly legacyConfig?: LegacyConsoleConfigSources;
   /** A stock game's own configuration files, which answer the saved-configuration script before any user-store copy. */
   readonly native?: NativeConfig;
+  /** The layers of a mixed combination, which has no native file; a stock game's layers belong to `native`. */
+  readonly mixedLayers?: GameLayers;
 }): Promise<string | undefined> {
   const name = normalizeResourcePath(options.name);
   let origin = options.source.origin;
@@ -139,6 +142,10 @@ export class ConsoleScriptFiles {
   }
   get native(): NativeConfig | null {
     return this.options.native ?? null;
+  }
+  /** The settings layers this game reads and writes through: its native file's, or a mixed combination's own. */
+  get layers(): GameLayers | undefined {
+    return this.options.native?.layers ?? this.options.mixedLayers;
   }
   async list(source: CommandContext): Promise<readonly ConsoleScriptEntry[]> {
     this.acquireRead();

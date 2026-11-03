@@ -9,6 +9,14 @@ export interface BindingReset {
   available(): boolean;
   reset(): void;
 }
+/** Whether binding edits stay with the running game instead of reaching the engine's high level and so every game. */
+export interface BindingScope {
+  available(): boolean;
+  local(): boolean;
+  setLocal(local: boolean): void;
+  /** Told of each key a local edit touches. */
+  noteLocal?(input: PhysicalInput): void;
+}
 export interface BindingAction {
   readonly id: string;
   readonly label: string;
@@ -30,6 +38,7 @@ export function registerBindingMenus(
   input: SeatInput,
   source: readonly BindingAction[] | (() => readonly BindingAction[]),
   reset?: BindingReset,
+  scope?: BindingScope,
 ): { readonly root: UiMenuId; dispose(): void } {
   if (!controller.seat.equals(input.seat)) throw new Error("Binding menu belongs to another input seat");
   const root: UiMenuId = "menu:bindings:0",
@@ -58,8 +67,13 @@ export function registerBindingMenus(
   let pending: { readonly physical: PhysicalInput; readonly row: BindingRow; readonly previous: InputBindingTarget } | null = null;
   const targetLabel = (target: InputBindingTarget): string =>
     actions().find(action => bindingMatchesAction(target, action))?.label ?? (target.kind === "command" ? target.text : target.action);
+  const unbindKey = (physical: PhysicalInput): void => {
+    if (scope?.local() === true) scope.noteLocal?.(physical);
+    input.unbind(physical);
+  };
   const assign = (row: BindingRow, physical: PhysicalInput): void => {
-    if (row.physical !== null) input.unbind(row.physical);
+    if (row.physical !== null) unbindKey(row.physical);
+    if (scope?.local() === true) scope.noteLocal?.(physical);
     input.bind({ input: physical, target: row.target });
     selected = `${row.action.id}:${JSON.stringify(physical)}`;
   };
@@ -236,7 +250,7 @@ export function registerBindingMenus(
                         action: {
                           label: "X",
                           activate: () => {
-                            if (row.physical !== null) input.unbind(row.physical);
+                            if (row.physical !== null) unbindKey(row.physical);
                             return undefined;
                           },
                         },
@@ -268,7 +282,7 @@ export function registerBindingMenus(
           enabled: current !== undefined && current.physical !== null,
           visible: true,
           activate: () => {
-            if (current?.physical !== undefined && current.physical !== null) input.unbind(current.physical);
+            if (current?.physical !== undefined && current.physical !== null) unbindKey(current.physical);
             return undefined;
           },
         },
@@ -280,11 +294,27 @@ export function registerBindingMenus(
           enabled: current !== undefined && current.physical !== null,
           visible: true,
           activate: () => {
-            if (current !== undefined)
-              for (const binding of input.bindings) if (bindingMatchesAction(binding.target, current.action)) input.unbind(binding.input);
+            if (current !== undefined) for (const binding of input.bindings) if (bindingMatchesAction(binding.target, current.action)) unbindKey(binding.input);
             return undefined;
           },
         },
+        ...(scope?.available() !== true
+          ? []
+          : [
+              {
+                id: "ui:bindings:local",
+                kind: "toggle",
+                label: "Keep bindings to this game",
+                rect: { x: 156, y: 412, width: 252, height: 28 },
+                enabled: true,
+                visible: true,
+                checked: scope.local(),
+                change: (_seat, checked) => {
+                  scope.setLocal(checked);
+                  return undefined;
+                },
+              } satisfies UiControl,
+            ]),
         ...(reset === undefined
           ? []
           : [

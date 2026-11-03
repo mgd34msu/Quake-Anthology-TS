@@ -6,6 +6,8 @@ import type { GameFamily } from "../contracts/content.ts";
 import { nightdiveAddonDirectories } from "../content/roots.ts";
 import type { ScreenshotNaming } from "../capture/index.ts";
 import { writeAtomic } from "../core/files/atomic.ts";
+import { sameValue, type EffectiveSet, type GameLayers, type LayerCvar, type LayerSnapshot } from "./layers.ts";
+import { fileCvars, settingFor, spellingIn, toCanonical } from "./setting-spellings.ts";
 
 /**
  * The configuration files a stock game keeps in its own folders, with the
@@ -280,12 +282,81 @@ function kexKey(key: string): string {
   return KEX_KEYS_BACK.get(key.toLowerCase()) ?? key.toLowerCase();
 }
 
+/** What the engine knows of the game at quit that the layers cannot see in the files. */
+export interface NativeWriteContext {
+  /** The game's reset value for a cvar. */
+  readonly resetValue?: (name: string) => string | undefined;
+}
+
+/** The keyword a variable line starts with when the layers add one the file lacks. */
+function defaultKeyword(format: NativeConfigFormat): string {
+  switch (format) {
+    case "quake":
+      return "";
+    case "quake2":
+      return "set ";
+    default:
+      return "seta ";
+  }
+}
+
+/**
+ * Take a running game's state into the layers (changes go to the high level unless made with a local form) and answer
+ * the bindings and variable lines to write: the full effective set. Games with a native file and mixed combinations,
+ * which have none, both go through this.
+ */
+export async function absorbSession(
+  layers: GameLayers,
+  format: NativeConfigFormat,
+  bindings: NativeBindings,
+  cvars: readonly string[] | null,
+  context: NativeWriteContext,
+): Promise<{ bindings: NativeBindings; cvars: readonly string[] | null }> {
+  if (!layers.isReady) throw new Error("Settings layers were not read before they were written");
+  // The state is canonical settings: a cvar in any spelling reads as its canonical name and value, and where two
+  // spellings of one setting are archived, the one that differs from its reset value is the player's.
+  const current = new Map<string, LayerCvar>();
+  for (const command of cvars ?? []) {
+    const parsed = cvarLine(command);
+    const canonical =
+      parsed === null || spellingIn(format, settingFor(parsed.name)?.setting.canonical ?? "") === null ? null : toCanonical(parsed.name, parsed.value);
+    if (canonical === null) continue;
+    const reset = context.resetValue?.(canonical.canonical);
+    const kept = current.get(canonical.canonical);
+    if (kept === undefined || (reset !== undefined && sameValue(kept.value, reset)))
+      current.set(canonical.canonical, { name: canonical.canonical, value: canonical.value });
+  }
+  const effective = await layers.absorb({ binds: bindings, cvars: current }, context.resetValue ?? (() => undefined));
+  // Unchanged default.cfg bindings stay in the file; bindings a layer cancels leave it.
+  const cancelled = new Set(effective.unbound.map(bind => bind.key.toLowerCase()));
+  const written = new Map<string, readonly [string, string]>();
+  for (const [key, command] of bindings) if (!cancelled.has(key.toLowerCase())) written.set(key.toLowerCase(), [key, command]);
+  for (const bind of effective.binds) if (bind.command !== null) written.set(bind.key.toLowerCase(), [bind.key, bind.command]);
+  if (cvars === null) return { bindings: [...written.values()], cvars };
+  // The game's file spells each setting its own way: the archived canonical lines give way to the effective set in that spelling.
+  const values = new Map([...current].map(([name, cvar]) => [name, cvar.value]));
+  for (const [name, cvar] of effective.cvars) values.set(name, cvar.value);
+  const wanted = fileCvars(format, values);
+  const lines = cvars.filter(command => {
+    const parsed = cvarLine(command);
+    const setting = parsed === null ? null : settingFor(parsed.name);
+    return setting === null || spellingIn(format, setting.setting.canonical) === null;
+  });
+  const present = new Set(lines.map(command => cvarLine(command)?.name.toLowerCase()));
+  for (const [name, cvar] of wanted) if (!present.has(name)) lines.push(`${defaultKeyword(format)}${cvar.name} "${cvar.value}"`);
+  return { bindings: [...written.values()], cvars: lines };
+}
+
 export class NativeConfig {
   private loadedFiles = 0;
   private names = new Set<string>();
   private bound = false;
 
-  constructor(readonly layout: NativeConfigLayout) {}
+  /** `layers` makes the files one level of the settings layering; without it they are read and written as they are. */
+  constructor(
+    readonly layout: NativeConfigLayout,
+    readonly layers?: GameLayers,
+  ) {}
 
   /** True when the last read found a file that held at least one binding or variable. */
   get loaded(): boolean {
@@ -297,12 +368,38 @@ export class NativeConfig {
     return this.bound;
   }
 
+  /** What the files hold now, in this engine's spelling of keys and commands. */
+  async snapshot(): Promise<LayerSnapshot> {
+    const binds = new Map<string, { key: string; command: string }>();
+    const cvars = new Map<string, LayerCvar>();
+    for (const file of this.layout.files) {
+      const text = await readNative(file);
+      if (text === null) continue;
+      for (const line of lines(text)) {
+        const bind = bindLine(line);
+        if (bind !== null) {
+          const translated = this.translateBind(bind);
+          if (translated !== null) binds.set(translated[0].toLowerCase(), { key: translated[0], command: translated[1] });
+          continue;
+        }
+        const cvar = cvarLine(line);
+        const canonical = cvar === null ? null : toCanonical(cvar.name, cvar.value);
+        if (canonical !== null && spellingIn(this.layout.format, canonical.canonical) !== null)
+          cvars.set(canonical.canonical, { name: canonical.canonical, value: canonical.value });
+      }
+    }
+    return { binds, cvars };
+  }
+
   /** The text the original would execute for its saved configuration, or null when no file holds anything. */
   async readScript(): Promise<string | null> {
     this.loadedFiles = 0;
     this.names = new Set();
     this.bound = false;
     const out: string[] = [];
+    // Positions the layers rewrite: where the first binding stood, and each variable's keyword.
+    let bindAt = -1;
+    const variables: { index: number; cvar: CvarLine }[] = [];
     for (const file of this.layout.files) {
       const text = await readNative(file);
       if (text === null) continue;
@@ -314,6 +411,7 @@ export class NativeConfig {
           if (translated === null) continue;
           useful = true;
           this.bound = true;
+          if (bindAt < 0) bindAt = out.length;
           out.push(`bind "${translated[0]}" "${translated[1]}"`);
           continue;
         }
@@ -321,11 +419,40 @@ export class NativeConfig {
         if (cvar === null) continue;
         useful = true;
         this.names.add(cvar.name.toLowerCase());
+        variables.push({ index: out.length, cvar });
         out.push(line.trim());
       }
       if (useful) this.loadedFiles++;
     }
-    return this.loadedFiles === 0 ? null : `${out.join("\n")}\n`;
+    const layers = this.layers;
+    if (layers === undefined) return this.loadedFiles === 0 ? null : `${out.join("\n")}\n`;
+    const effective = await layers.resolve(await this.snapshot());
+    const merged = this.layered(out, bindAt, variables, effective);
+    if (effective.binds.length > 0) this.bound = true;
+    return merged.length === 0 ? null : `${merged.join("\n")}\n`;
+  }
+
+  /** The script lines with the file's bindings and mapped variables replaced by the effective set, and the rest of it appended. */
+  private layered(out: readonly string[], bindAt: number, variables: readonly { index: number; cvar: CvarLine }[], effective: EffectiveSet): string[] {
+    const replaced = new Map<number, string>();
+    const emitted = new Set<string>();
+    const wanted = fileCvars(this.layout.format, new Map([...effective.cvars].map(([name, cvar]) => [name, cvar.value])));
+    for (const { index, cvar } of variables) {
+      const replacement = wanted.get(cvar.name.toLowerCase());
+      if (replacement === undefined) continue;
+      emitted.add(cvar.name.toLowerCase());
+      replaced.set(index, `${cvar.keyword === "" ? "" : `${cvar.keyword} `}${cvar.name} "${replacement.value}"`);
+    }
+    const binds = [...effective.unbound.map(bind => `unbind "${bind.key}"`), ...effective.binds.map(bind => `bind "${bind.key}" "${bind.command ?? ""}"`)];
+    const merged: string[] = [];
+    if (bindAt < 0) merged.push(...binds);
+    out.forEach((line, index) => {
+      if (index === bindAt) merged.push(...binds);
+      if (bindLine(line) !== null) return;
+      merged.push(replaced.get(index) ?? line);
+    });
+    for (const [name, cvar] of wanted) if (!emitted.has(name)) merged.push(`${defaultKeyword(this.layout.format)}${cvar.name} "${cvar.value}"`);
+    return merged;
   }
 
   /** The bindings the files hold, or null when they hold none. */
@@ -373,11 +500,23 @@ export class NativeConfig {
     }
   }
 
+  private async layeredState(bindings: NativeBindings, cvars: readonly string[] | null, context: NativeWriteContext) {
+    if (this.layers === undefined) return { bindings, cvars };
+    if (!this.layers.isReady) await this.readScript();
+    return absorbSession(this.layers, this.layout.format, bindings, cvars, context);
+  }
+
   /**
    * Write what the original writes at quit: bindings, then archived variables.
-   * `cvars` are archive commands in the dialect's own spelling.
+   * `cvars` are archive commands in the dialect's own spelling. With layers this is the full effective set.
    */
-  async write(bindings: NativeBindings, cvars: readonly string[]): Promise<void> {
+  async write(bindings: NativeBindings, cvars: readonly string[], context: NativeWriteContext = {}): Promise<void> {
+    const state = await this.layeredState(bindings, cvars, context);
+    await this.writeFiles(state.bindings, state.cvars ?? cvars);
+    await this.layers?.recordWritten(await this.snapshot());
+  }
+
+  private async writeFiles(bindings: NativeBindings, cvars: readonly string[]): Promise<void> {
     if (this.layout.format === "kex-quake" || this.layout.format === "kex-quake2") {
       await this.merge(bindings, cvars);
       return;
@@ -389,19 +528,34 @@ export class NativeConfig {
     await writeAtomic(file.redirected ?? file.path, `${text}\n`);
   }
 
-  /** Replace only the bindings, keeping every other line; the front end edits bindings without the game's variables. */
-  async writeBindings(bindings: NativeBindings): Promise<void> {
+  /**
+   * Replace only the bindings, keeping every other line; the front end edits bindings without the game's variables.
+   * A change goes to the high level and so to every game; with `local` it stays this game's override.
+   */
+  async writeBindings(bindings: NativeBindings, options: NativeWriteContext & { readonly local?: boolean } = {}): Promise<void> {
+    const layers = this.layers;
+    if (layers !== undefined) {
+      if (!layers.isReady) await this.readScript();
+      if (options.local === true) {
+        const before = new Map(layers.loaded.binds.map(bind => [bind.key.toLowerCase(), bind.command]));
+        const after = new Map(bindings.map(([key, command]) => [key.toLowerCase(), command]));
+        for (const key of new Set([...before.keys(), ...after.keys()])) if (before.get(key) !== after.get(key)) layers.noteLocalBind(key);
+      }
+      const state = await this.layeredState(bindings, null, options);
+      bindings = state.bindings;
+    }
     if (this.layout.format === "kex-quake" || this.layout.format === "kex-quake2") {
       await this.merge(bindings, null);
-      return;
+    } else {
+      const file = this.layout.files[0];
+      if (file === undefined) return;
+      const existing = (await readNative(file)) ?? "";
+      const kept = lines(existing).filter(line => bindLine(line) === null && !/^\s*unbindall\s*$/i.test(line) && !/^\s*\/\/ generated by quake/i.test(line));
+      const header = this.layout.format === "quake" ? [] : ["// generated by quake, do not modify"];
+      const text = [...header, ...bindings.map(([key, command]) => this.writtenBind(key, command)).filter(line => line !== null), ...kept].join("\n");
+      await writeAtomic(file.redirected ?? file.path, `${text}\n`);
     }
-    const file = this.layout.files[0];
-    if (file === undefined) return;
-    const existing = (await readNative(file)) ?? "";
-    const kept = lines(existing).filter(line => bindLine(line) === null && !/^\s*unbindall\s*$/i.test(line) && !/^\s*\/\/ generated by quake/i.test(line));
-    const header = this.layout.format === "quake" ? [] : ["// generated by quake, do not modify"];
-    const text = [...header, ...bindings.map(([key, command]) => this.writtenBind(key, command)).filter(line => line !== null), ...kept].join("\n");
-    await writeAtomic(file.redirected ?? file.path, `${text}\n`);
+    await layers?.recordWritten(await this.snapshot());
   }
 
   /** The rerelease files hold many variables this engine does not own: update the lines present, keep the rest, and leave variables they do not name in the user store. */
@@ -411,9 +565,10 @@ export class NativeConfig {
       const parsed = cvarLine(command);
       if (parsed !== null) wanted.set(parsed.name.toLowerCase(), parsed);
     }
-    for (const file of this.layout.files) {
+    const missing = new Map(wanted);
+    for (const [index, file] of this.layout.files.entries()) {
       const existing = await readNative(file);
-      if ((existing === null && !file.binds) || (cvars === null && !file.binds)) continue;
+      if ((existing === null && !file.binds && index !== 0) || (cvars === null && !file.binds)) continue;
       const crlf = existing?.includes("\r\n") ?? false;
       const output: string[] = [];
       const bindLines = file.binds ? bindings.map(([key, command]) => this.writtenBind(key, command)).filter(line => line !== null) : [];
@@ -432,10 +587,15 @@ export class NativeConfig {
         const cvar = cvarLine(line);
         const next = cvar === null ? undefined : wanted.get(cvar.name.toLowerCase());
         if (cvar !== null && next !== undefined) {
+          missing.delete(cvar.name.toLowerCase());
           output.push(`${cvar.keyword === "" ? "" : `${cvar.keyword} `}${cvar.name} "${next.value}"`);
         } else output.push(line);
       }
       if (file.binds && !boundHere) output.unshift(...bindLines);
+      // The layered set is complete: variables the file never named go into the first file.
+      if (index === 0 && this.layers !== undefined)
+        for (const cvar of missing.values())
+          if (settingFor(cvar.name) !== null) output.push(`${defaultKeyword(this.layout.format)}${cvar.name} "${cvar.value}"`);
       if (existing === null && output.length === 0) continue;
       await writeAtomic(file.redirected ?? file.path, `${output.join(crlf ? "\r\n" : "\n")}${crlf ? "\r\n" : "\n"}`);
     }

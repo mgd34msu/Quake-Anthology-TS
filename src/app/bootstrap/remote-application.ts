@@ -54,6 +54,7 @@ import { CollisionMapSettings } from "../../world/collision/q3/settings.ts";
 import { createStartupScriptReader } from "./startup-config.ts";
 import { nextActorGeneration } from "../../world/actors/registry.ts";
 import { PresentationTime } from "./frame-clock.ts";
+import { ConsoleLog, consoleLogMode, hostWithConsoleLog } from "./console-log.ts";
 import { readFrameTimeControls, registerFrameTimeCvars, sourceFrameMilliseconds } from "./frame-time.ts";
 import { initializeQ3ClientCvars, q3ClientModel } from "./q3-client/userinfo.ts";
 import { remoteContentSelection, remoteContentProduct, expectedProducts } from "../../content/catalog/index.ts";
@@ -376,6 +377,23 @@ export class RemoteApplication {
   private qwAllSkins = "";
   private qwDownloads: QwDownloadReceiver | null = null;
   private remoteContent: RemoteContentMounts | null = null;
+  private readonly consoleLog = new ConsoleLog(
+    () => consoleLogMode(this.clientCommands?.cvars ?? null, this.options.consoleDebug),
+    () => this.gameFolder(),
+  );
+  private logConsole(text: string): void {
+    this.consoleLog.write(text);
+  }
+  /** Where the original keeps what it writes while connected: the stock game's own folder, else the content's write root. */
+  private gameFolder(): string {
+    const catalog = (this.remoteContent ?? this.mountedContent).catalog;
+    const product = this.remoteContent?.product.id ?? catalog.product(this.options.product).id;
+    return (
+      stockNativeConfig(catalog, product, [product], this.options.nativeConfigRoot)?.layout.directory ??
+      this.remoteContent?.writeRoot ??
+      this.configuration.settings.root
+    );
+  }
   private remoteContentGeneration = 0;
   private peerAdmission: PeerDirectoryAdmission | null = null;
   private pendingAdvance: PendingRemoteAdvance | null = null;
@@ -1054,7 +1072,7 @@ export class RemoteApplication {
         content,
         session,
         renderer,
-        host,
+        hostWithConsoleLog(host, text => application?.logConsole(text)),
         imageSettings,
         launch,
         identity,
@@ -3243,13 +3261,7 @@ export class RemoteApplication {
       recording = "recording" in network ? network.recording : undefined;
     if (recording === undefined) throw new Error("The selected native protocol has no demo recorder");
     return {
-      root:
-        (this.remoteContent === null
-          ? null
-          : stockNativeConfig(this.remoteContent.catalog, this.remoteContent.product.id, [this.remoteContent.product.id], this.options.nativeConfigRoot)?.layout
-              .directory) ??
-        this.remoteContent?.writeRoot ??
-        this.configuration.settings.root,
+      root: this.gameFolder(),
       seed: () => recording.seed(),
       attach: sink => {
         if (
@@ -4714,6 +4726,7 @@ export class RemoteApplication {
     const frontend = this.frontend;
     this.frontend = null;
     for (const close of [
+      () => this.consoleLog.close(),
       () => this.remoteContent?.mounts.close(),
       () => this.qwDownloads?.close(),
       () => this.q3Downloads?.close(),

@@ -576,9 +576,11 @@ for (const transport of ["native", "http"])
     const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--movement", "q2", "--character", "q2", "--dedicated"]);
     if (command.kind !== "run") throw new Error("Missing Q2 launch");
     const temporary = await tempDirectory("q2-mod-downloads-");
-    await mkdir(join(temporary, "q2/+Arena"), { recursive: true });
+    // Downloads land in the game's own folder, which tests redirect beneath this root.
+    const gameWrites = join(temporary, "game-writes");
+    await mkdir(join(gameWrites, "q2/+Arena"), { recursive: true });
     const installed = await loadApplicationContent({ ...command.options, userContentRoot: temporary });
-    const roots = { corpusRoot: installed.catalog.corpusRoot, userContentRoot: temporary };
+    const roots = { corpusRoot: installed.catalog.corpusRoot, userContentRoot: temporary, nativeConfigRoot: gameWrites };
     const selection = remoteContentSelection("q2-classic-baseq2", "+Arena");
     let owner = await openRemoteContent(roots, selection, () => undefined);
     const requests: string[] = [],
@@ -633,8 +635,8 @@ for (const transport of ["native", "http"])
       },
     );
     try {
-      expect(owner.writeRoot).toBe(join(temporary, "q2/+Arena"));
-      expect(owner.baseWriteRoot).toBe(join(temporary, "q2/baseq2"));
+      expect(owner.writeRoot).toBe(join(gameWrites, "q2/+Arena"));
+      expect(owner.baseWriteRoot).toBe(join(gameWrites, "q2/baseq2"));
       if (server !== null) receiver.setHttpServer(new URL(`http://127.0.0.1:${server.port}/`));
       const state: Q2ApplicationGameState = {
         data: { servercount: 1, attractloop: false, gamedir: "+Arena", clientnum: 0, levelname: "Mod assets", serverState: 2 },
@@ -718,7 +720,9 @@ test("RemoteApplication selects stock and unknown Q2 directories before precache
     "240",
   ]);
   if (parsed.kind !== "run") throw new Error("No remote launch");
-  const installed = await loadApplicationContent(parsed.options);
+  const gameWrites = await tempDirectory("q2-remote-writes-");
+  const options = { ...parsed.options, nativeConfigRoot: gameWrites };
+  const installed = await loadApplicationContent(options);
   const mapName = installed.recipe.map.geometry.requestedPath,
     map = await installed.mounts.read(installed.recipe.map.geometry);
   const identity = createIdentityOwner("Q2 remote directory peer");
@@ -768,7 +772,7 @@ test("RemoteApplication selects stock and unknown Q2 directories before precache
   const server = new Q2ServerNetwork({ transport, host, random: () => 12345 });
   let app: RemoteApplication | null = null;
   try {
-    app = await RemoteApplication.open(parsed.options, { print() {} });
+    app = await RemoteApplication.open(options, { print() {} });
     let now = 0;
     for (const next of ["ctf", "+Arena", "baseq2"]) {
       directory = next;
@@ -789,7 +793,7 @@ test("RemoteApplication selects stock and unknown Q2 directories before precache
       expect(app.options.remoteContent).toEqual(remoteContentSelection("q2-classic-baseq2", next));
       expect(app.content).not.toBe(previous);
       expect(app.content.recipe.map.geometry.requestedPath).toBe(mapName);
-      expect(await Bun.file(join(temporary, "q2", next.toLowerCase(), "sound/context-fixture.wav")).bytes()).toEqual(new Uint8Array(sound));
+      expect(await Bun.file(join(gameWrites, "q2", next.toLowerCase(), "sound/context-fixture.wav")).bytes()).toEqual(new Uint8Array(sound));
       if (next === "ctf") expect(app.content.catalog.product(app.content.recipe.map.entities.content).expectation.id).toBe("q2-classic-ctf");
     }
     expect(requests).toEqual(["ctf/sound/context-fixture.wav", "+Arena/sound/context-fixture.wav", "baseq2/sound/context-fixture.wav"]);

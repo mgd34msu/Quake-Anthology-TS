@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { managedAddonHidden, managedAddonTitle, readNightdiveAddons } from "./addons.ts";
-import { open, readdir, stat } from "node:fs/promises";
+import { mkdir, open, readdir, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
-import { basename, dirname, extname, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { createContentId, createMountId, createMountIdentity } from "../../contracts/content.ts";
 import type { ArchiveFormat, ContentDigest, ContentId, ContentMount, GameFamily, MountPlanId, ResolvedMountPlan } from "../../contracts/content.ts";
 import { openArchive } from "../archive/index.ts";
@@ -45,6 +45,8 @@ export interface CatalogProduct {
   readonly archives: readonly CatalogArchive[];
   readonly looseRoot: string | null;
   readonly userContent: { readonly root: string; readonly archives: readonly CatalogArchive[] } | null;
+  /** Where tests redirect the game folder's writes (including downloads); mounted above the user store. Null outside a redirect. */
+  readonly redirectedContent?: { readonly root: string; readonly archives: readonly CatalogArchive[] } | null;
   /** Read-only Nightdive/Steam add-on copy, layered below corpus and user content. */
   readonly addonContent?: { readonly root: string; readonly archives: readonly CatalogArchive[] } | null;
   readonly maps: readonly ContentMap[];
@@ -113,6 +115,35 @@ export interface DiscoverContentOptions {
   readonly generation?: number;
   readonly discoverMods?: boolean;
   readonly remoteContent?: RemoteContentSelection;
+  /** Redirects the game folders' writes, as `QTS_TEST_GAME_WRITE_ROOT` does for sandboxes; defaults to that variable. */
+  readonly gameWriteRoot?: string;
+}
+
+/** The test redirect for writes into game folders, from the option or `QTS_TEST_GAME_WRITE_ROOT`. */
+export function gameWriteRedirect(explicit?: string): string | undefined {
+  const redirect = explicit ?? process.env["QTS_TEST_GAME_WRITE_ROOT"];
+  return redirect === undefined || redirect === "" ? undefined : resolve(redirect);
+}
+
+/**
+ * The folder a product's downloads are written to: the original clients download into the game's own folder
+ * (`id1`, `qw`, `baseq2`, `baseq3`, a mod's folder), never a separate store. Tests redirect it beneath the
+ * redirect root with the same relative layout; the folder is created when missing.
+ */
+export async function gameDownloadDirectory(
+  corpusRoot: string,
+  expectation: Pick<ProductExpectation, "family" | "contentDirectory">,
+  redirect?: string,
+): Promise<string> {
+  const canonical = expectation.contentDirectory;
+  const base = gameWriteRedirect(redirect);
+  const root = base ?? resolve(corpusRoot);
+  const gameRoot = base === undefined ? (resolveGameRoots(root).get(expectation.family) ?? null) : null;
+  const existing =
+    gameRoot === null ? await findContentPath(root, canonical) : await findContentPath(gameRoot, gameRelativePath(canonical, expectation.family));
+  const path = existing ?? (gameRoot === null ? join(root, canonical) : join(gameRoot, gameRelativePath(canonical, expectation.family)));
+  await mkdir(path, { recursive: true });
+  return path;
 }
 
 export interface MountPlanSelection {
@@ -198,11 +229,16 @@ export function orderGameArchives(product: ProductExpectation, archives: readonl
 
 function productDirectories(product: CatalogProduct): readonly { readonly root: string | null; readonly archives: readonly CatalogArchive[] }[] {
   const user = product.userContent,
+    redirected = product.redirectedContent ?? null,
     addon = product.addonContent ?? null;
   const userArchives = new Set(user?.archives ?? []),
+    redirectedArchives = new Set(redirected?.archives ?? []),
     addonArchives = new Set(addon?.archives ?? []);
-  const corpus = { root: product.looseRoot, archives: product.archives.filter(archive => !userArchives.has(archive) && !addonArchives.has(archive)) };
-  return [...(user === null ? [] : [user]), corpus, ...(addon === null ? [] : [addon])];
+  const corpus = {
+    root: product.looseRoot,
+    archives: product.archives.filter(archive => !userArchives.has(archive) && !redirectedArchives.has(archive) && !addonArchives.has(archive)),
+  };
+  return [...(redirected === null ? [] : [redirected]), ...(user === null ? [] : [user]), corpus, ...(addon === null ? [] : [addon])];
 }
 
 /** Resolve a canonical content path against its family's anchored game root, falling back to the canonical corpus path. */
@@ -668,6 +704,7 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
   const corpusRoot = resolve(options.corpusRoot);
   const userContentRoot = options.userContentRoot === undefined ? null : resolve(options.userContentRoot);
   const generation = options.generation ?? 0;
+  const gameWrites = gameWriteRedirect(options.gameWriteRoot);
   if (!Number.isSafeInteger(generation) || generation < 0) throw new RangeError("Catalog generation must be a nonnegative integer");
   const selected = options.remoteContent;
   const stock = options.products ?? expectedProducts;
@@ -770,10 +807,11 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
         ? null
         : ((await anchoredPath(userGameRoots, userContentRoot, expectation.family, expectation.contentDirectory)) ??
           userProductDirectory(userContentRoot, expectation.contentDirectory));
-    const userArchives: CatalogArchive[] = [];
-    const userDiagnostics: string[] = [];
-    if (userRoot !== null) {
-      const entries = await readdir(userRoot, { withFileTypes: true }).catch((error: unknown) => {
+    const scanArchives = async (directory: string | null): Promise<{ readonly archives: CatalogArchive[]; readonly diagnostics: string[] }> => {
+      const archives: CatalogArchive[] = [],
+        diagnostics: string[] = [];
+      if (directory === null) return { archives, diagnostics };
+      const entries = await readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
         if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
         throw error;
       });
@@ -781,12 +819,16 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
         const format = archiveFormat(entry.name);
         if (!entry.isFile() || format === null) continue;
         try {
-          userArchives.push(await inspect(resolve(userRoot, entry.name), format));
+          archives.push(await inspect(resolve(directory, entry.name), format));
         } catch (error: unknown) {
-          userDiagnostics.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
+          diagnostics.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
-    }
+      return { archives, diagnostics };
+    };
+    const { archives: userArchives, diagnostics: userDiagnostics } = await scanArchives(userRoot);
+    const redirectedRoot = gameWrites === undefined ? null : await findContentPath(gameWrites, expectation.contentDirectory);
+    const { archives: redirectedArchives, diagnostics: redirectedDiagnostics } = await scanArchives(redirectedRoot);
     // Sibling-tree and Steam copies are fallbacks, not overlays: an
     // exact-tree corpus copy stands alone.
     const addon = looseRoot === null ? addonDirectories.get(expectation.contentDirectory.toLowerCase()) : undefined;
@@ -812,10 +854,17 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
       );
     const corpusMaps: ContentMap[] = [...archiveMaps(found), ...(looseRoot === null ? [] : await looseMaps(looseRoot))];
     const addonMaps: ContentMap[] = [...archiveMaps(addonArchives), ...(addon === undefined ? [] : await looseMaps(addon.physical))];
-    const allMaps: ContentMap[] = [...archiveMaps(userArchives), ...(userRoot === null ? [] : await looseMaps(userRoot)), ...corpusMaps, ...addonMaps];
+    const allMaps: ContentMap[] = [
+      ...archiveMaps(redirectedArchives),
+      ...(redirectedRoot === null ? [] : await looseMaps(redirectedRoot)),
+      ...archiveMaps(userArchives),
+      ...(userRoot === null ? [] : await looseMaps(userRoot)),
+      ...corpusMaps,
+      ...addonMaps,
+    ];
     const requirements: string[] = [
       ...diagnostics,
-      ...(userModIds.has(expectation.id) ? userDiagnostics : []),
+      ...(userModIds.has(expectation.id) ? [...redirectedDiagnostics, ...userDiagnostics] : []),
       ...(addonModIds.has(expectation.id) ? addonDiagnostics : []),
     ];
     for (const archive of remoteOverlays.has(expectation.id) ? [] : expectation.requiredContentArchives) {
@@ -845,12 +894,13 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
       id,
       expectation,
       availability,
-      archives: [...userArchives, ...found, ...addonArchives],
+      archives: [...redirectedArchives, ...userArchives, ...found, ...addonArchives],
       looseRoot,
       userContent: userRoot === null ? null : { root: userRoot, archives: userArchives },
+      redirectedContent: redirectedRoot === null ? null : { root: redirectedRoot, archives: redirectedArchives },
       addonContent: addon === undefined ? null : { root: addon.physical, archives: addonArchives },
       maps: allMaps,
-      diagnostics: [...diagnostics, ...userDiagnostics, ...addonDiagnostics],
+      diagnostics: [...diagnostics, ...redirectedDiagnostics, ...userDiagnostics, ...addonDiagnostics],
     });
   }
   // An unreadable base remains a requirement even when its filenames are present.

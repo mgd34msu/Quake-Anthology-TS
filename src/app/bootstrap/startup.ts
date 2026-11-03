@@ -90,7 +90,9 @@ import { ApplicationImageSettings } from "./image-settings.ts";
 import { bindNativeVideoSettings, bindRendererSettings } from "../../ui/settings/services.ts";
 import { sharedBindingActions } from "../../ui/settings/action-catalog.ts";
 import { StartupInputProfile } from "./startup-input-profile.ts";
+import { ConsoleLog, consoleLogMode } from "./console-log.ts";
 import { nativeFolders, nativeSaveFolders, stockNativeConfig } from "./native-settings.ts";
+import { defaultBindings } from "../../input/bindings.ts";
 import { ClientSourcePublicationError, type ClientBootstrap, type ClientSourceLifetime } from "./client-bootstrap.ts";
 import {
   configurationDialect,
@@ -398,12 +400,12 @@ export class StartupApplication {
     this.baselineInput = inputKey;
     if (this.graphics !== null) {
       const input = this.graphics.inputProfile.input,
-        native = stockNativeConfig(this.model.catalog, product.id, [product.id], options.nativeConfigRoot);
+        native = stockNativeConfig(this.model.catalog, product.id, [product.id], options.nativeConfigRoot, { userContentRoot: options.userContentRoot });
       // Another product has its own bindings; keeping the previous product's would save them over it.
       this.graphics.inputProfile =
         previousProduct !== null && previousProduct !== options.product
           ? await StartupInputProfile.open(settings, input, movementDialect(options), this.model.bindingItems(), native)
-          : StartupInputProfile.retained(settings, input, native);
+          : StartupInputProfile.retained(settings, input, native, defaultBindings(0, movementDialect(options), this.model.bindingItems()));
     }
   }
 
@@ -553,7 +555,7 @@ export class StartupApplication {
         mounts: mounted,
         source: { content: product.id, ...product.expectation },
         seat,
-        print: this.host.print,
+        print: text => this.print(text),
         preferences: {
           ...this.preferences.audioBaseline,
           ...this.preferences.audioValues,
@@ -570,7 +572,7 @@ export class StartupApplication {
       characterTurntable = new CharacterTurntable({
         catalog: () => this.model.catalog,
         images,
-        print: this.host.print,
+        print: text => this.print(text),
       });
       const activeTurntable = characterTurntable;
       menu = new StartupMenu({
@@ -737,6 +739,13 @@ export class StartupApplication {
         {
           available: () => (this.client?.prepared ?? initial.prepared).seats.find(seat => seat.id.equals(primary.id))?.authoredBindings != null,
           reset: () => (this.client?.prepared ?? initial.prepared).resetBindings(primary.id),
+        },
+        {
+          available: () => this.graphics?.inputProfile.layered === true,
+          local: () => this.graphics?.inputProfile.bindLocal === true,
+          setLocal: local => {
+            if (this.graphics !== null) this.graphics.inputProfile.bindLocal = local;
+          },
         },
       );
       input.setFocus(
@@ -1544,8 +1553,23 @@ export class StartupApplication {
     this.print(`Cannot execute ${name} without an active world.\n`);
   }
 
+  /** The front end's own console output, kept as the selected game would keep it. */
+  private readonly consoleLog = new ConsoleLog(
+    () => consoleLogMode(this.client?.prepared.source ?? null, this.model.options.consoleDebug),
+    () => {
+      const options = this.model.options,
+        product = this.model.catalog.product(options.product);
+      return (
+        stockNativeConfig(this.model.catalog, product.id, [product.id], options.nativeConfigRoot)?.layout.directory ??
+        product.userContent?.root ??
+        userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory)
+      );
+    },
+  );
+
   private print(text: string): undefined {
     this.host.print(text);
+    this.consoleLog.write(text);
     const client = this.client,
       local = client?.locals[0];
     if (client?.platform.current?.kind === "menu" && local !== undefined) client.consoles.get(local.seat)?.print(text);
@@ -2159,6 +2183,13 @@ export class StartupApplication {
           available: () => client.prepared.seats.find(seat => seat.id.equals(primary.id))?.authoredBindings != null,
           reset: () => client.prepared.resetBindings(primary.id),
         },
+        {
+          available: () => this.graphics?.inputProfile.layered === true,
+          local: () => this.graphics?.inputProfile.bindLocal === true,
+          setLocal: local => {
+            if (this.graphics !== null) this.graphics.inputProfile.bindLocal = local;
+          },
+        },
       );
       graphics.menu.bindGyro(graphics.controllerSettings.ui(primary.id));
     }
@@ -2247,7 +2278,7 @@ export class StartupApplication {
       const cvars = new CvarRegistry({
         dialect: owner.dialect,
         context: seatContexts.get(owner) ?? owner.context,
-        print: this.host.print,
+        print: text => this.print(text),
       });
       owner.prepareTransfer(cvars);
       copies.set(owner, cvars);
@@ -2874,6 +2905,7 @@ export class StartupApplication {
     if (this.closed) return;
     this.closed = true;
     this.stopping = true;
+    this.consoleLog.close();
     this.lobbyTransition?.cancel(new Error("Startup closed before lobby launch"));
     this.lobbyTransition = null;
     const errors: unknown[] = [];

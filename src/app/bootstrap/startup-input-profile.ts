@@ -8,19 +8,27 @@ import { defaultMouseTuning } from "../../input/mouse.ts";
 import type { ConfigStore, SeatSettings } from "../../settings/config.ts";
 import type { NativeConfig } from "../../settings/native-config.ts";
 import type { WeaponBindingItem } from "../../input/weapon-bindings.ts";
+import type { InputBinding } from "../../contracts/ui.ts";
 
 /** The front end edits the same first-seat profile that gameplay loads. */
 export class StartupInputProfile {
   private baseline = "";
   private gamepadBaseline = "";
+  /** Binding edits made in the front end stay with this game instead of reaching every game. */
+  bindLocal = false;
+  /** Whether a native file's layers take this profile's binding edits. */
+  get layered(): boolean {
+    return this.native?.layers !== undefined;
+  }
   private constructor(
     private readonly settings: ConfigStore,
     readonly input: SeatInput,
     private readonly native: NativeConfig | null = null,
   ) {}
 
-  static retained(settings: ConfigStore, input: SeatInput, native: NativeConfig | null = null): StartupInputProfile {
+  static retained(settings: ConfigStore, input: SeatInput, native: NativeConfig | null = null, defaults: readonly InputBinding[] = []): StartupInputProfile {
     const profile = new StartupInputProfile(settings, input, native);
+    native?.layers?.noteDefaultBinds(archivedBindingPairs({ bindings: defaults }));
     profile.baseline = JSON.stringify(input.bindings);
     profile.gamepadBaseline = JSON.stringify(input.gamepad.tuning);
     return profile;
@@ -34,6 +42,7 @@ export class StartupInputProfile {
     native: NativeConfig | null = null,
   ): Promise<StartupInputProfile> {
     const profile = new StartupInputProfile(settings, input, native);
+    native?.layers?.noteDefaultBinds(archivedBindingPairs({ bindings: defaultBindings(0, dialect, items) }));
     const saved = await settings.loadSeat("input/seat-1.json");
     const own = await native?.readBindings();
     input.unbindAll();
@@ -77,7 +86,7 @@ export class StartupInputProfile {
     });
     const selected = history === undefined ? preferences : { ...preferences, history: [...history] };
     if (bindingsChanged || gamepadChanged || JSON.stringify(selected) !== JSON.stringify(baseline)) await this.settings.saveSeat("input/seat-1.json", selected);
-    if (bindingsChanged && this.native !== null) await this.native.writeBindings(archivedBindingPairs(this.input));
+    if (bindingsChanged && this.native !== null) await this.native.writeBindings(archivedBindingPairs(this.input), { local: this.bindLocal });
     this.baseline = current;
     this.gamepadBaseline = gamepadCurrent;
   }

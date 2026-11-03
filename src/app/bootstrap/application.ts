@@ -87,7 +87,7 @@ import {
   type PreparedProfileConfiguration,
   type ConfigurationCommandRequest,
 } from "./configuration.ts";
-import { hostWithConsoleLog } from "./console-log.ts";
+import { AppendLog, ConsoleLog, consoleLogMode, hostWithConsoleLog } from "./console-log.ts";
 import { nativeSaveLayout, insideNativeSaves, type NativeSaveLayout } from "../../settings/native-saves.ts";
 import { nativeFolders, nativeSaveFolders, stockGameFolders, recipeComponents, stockGameDirectory, stockNativeConfig } from "./native-settings.ts";
 import { SeatInput } from "../../input/seat.ts";
@@ -135,7 +135,6 @@ import type { Q3GuestOutput } from "./simulation/q3/guest-runtime.ts";
 import { serviceLoading } from "./loading.ts";
 import { UserFileStore } from "../../core/files/writable.ts";
 import { settingsPath, writeAtomic } from "../../core/files/atomic.ts";
-import type { WritableBinaryFile } from "../../core/files/writable.ts";
 import { setImmediate } from "node:timers/promises";
 import { runFrameLoop } from "./frame-loop.ts";
 import type { LlmCommandRequester } from "../../console/llm.ts";
@@ -747,15 +746,11 @@ export class Application {
     });
   }
   private archivePersistence = false;
-  private consoleLog: {
-    readonly sync: boolean;
-    readonly file: WritableBinaryFile;
-  } | null = null;
-  private gameLog: {
-    readonly name: string;
-    readonly sync: boolean;
-    readonly file: WritableBinaryFile;
-  } | null = null;
+  private readonly consoleLog = new ConsoleLog(
+    () => consoleLogMode(this.sourceCvars(), this.options.consoleDebug),
+    () => Application.gameFilesRoot(this.options, this.content),
+  );
+  private readonly gameLog = new AppendLog();
   private dedicatedConsole: DedicatedConsole | null = null;
   private dedicatedCommands: CommandBuffer | null = null;
   private readonly requestedCommands = new EventRing<ApplicationCommandRequest>(16384);
@@ -2951,41 +2946,17 @@ export class Application {
     const name = source.host.cvars.variableString("g_log");
     if (name === "") return;
     const sync = source.host.cvars.variableValue("g_logSync") !== 0;
-    if (this.gameLog === null || this.gameLog.name !== name || this.gameLog.sync !== sync) {
-      this.closeGameLog();
-      const file = new UserFileStore(Application.gameFilesRoot(this.options, this.content)).open(name, sync ? "append-sync" : "append", text =>
-        this.host.print(text),
-      );
-      if (file === null) {
-        this.host.print(`WARNING: Couldn't open logfile: ${name}\n`);
-        return;
-      }
-      this.gameLog = { name, sync, file };
-    }
-    this.gameLog.file.write(new TextEncoder().encode(line));
+    if (!this.gameLog.write(Application.gameFilesRoot(this.options, this.content), name, sync, line, text => this.host.print(text)))
+      this.host.print(`WARNING: Couldn't open logfile: ${name}\n`);
   }
-  /** The `logfile` variable (Quake III, Quake II): console output is appended to qconsole.log in the game folder. */
   private logConsole(text: string): void {
-    const mode = this.sourceCvars()?.find("logfile")?.integerValue ?? 0;
-    if (mode === 0) {
-      this.closeConsoleLog();
-      return;
-    }
-    if (this.consoleLog === null || this.consoleLog.sync !== mode >= 2) {
-      this.closeConsoleLog();
-      const file = new UserFileStore(Application.gameFilesRoot(this.options, this.content)).open("qconsole.log", mode >= 2 ? "append-sync" : "append");
-      if (file === null) return;
-      this.consoleLog = { sync: mode >= 2, file };
-    }
-    this.consoleLog.file.write(new TextEncoder().encode(text));
+    this.consoleLog.write(text);
   }
   private closeConsoleLog(): void {
-    this.consoleLog?.file.close();
-    this.consoleLog = null;
+    this.consoleLog.close();
   }
   private closeGameLog(): void {
-    this.gameLog?.file.close();
-    this.gameLog = null;
+    this.gameLog.close();
   }
 
   private async sourceActions(events: readonly SimulationPresentationEvent[] = this.sourceEvents): Promise<void> {
