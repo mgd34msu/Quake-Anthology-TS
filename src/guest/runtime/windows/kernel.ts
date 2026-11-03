@@ -24,7 +24,7 @@ export function installKernel(host: WindowsServiceHost): void {
   const pointerSecret = (width === 4 ? BigInt(pointerSecretView.getUint32(0, true)) : pointerSecretView.getBigUint64(0, true)) | 1n;
   for (const name of ["EncodePointer", "DecodePointer"]) service(name, ["pointer"], "pointer", (_context, args) => ptr(memory.pointer((pointer(args, 0)?.byteOffset ?? 0n) ^ pointerSecret)));
   const processHeap = memory.allocate({ byteLength: 16, label: "Windows process heap" });
-  const heaps = new Set<bigint>([processHeap.byteOffset]);
+  const heaps = host.heaps; heaps.add(processHeap.byteOffset);
   service("GetProcessHeap", [], "pointer", () => ptr(processHeap));
   service("GetLastError", [], "uint32", () => u32(host.lastError));
   service("SetLastError", ["uint32"], "void", (_context, args) => { host.lastError = Number(integer(args, 0)); return done(); });
@@ -96,7 +96,7 @@ export function installKernel(host: WindowsServiceHost): void {
     return ptr(address);
   });
   service("HeapDestroy", ["pointer"], "int32", (_context, args) => { const heap = pointer(args, 0); if (heap === null || heap.byteOffset === processHeap.byteOffset || !heaps.delete(heap.byteOffset)) return bool(false); host.destroyHeap(heap.byteOffset); memory.unmap(heap, 16); return bool(true); });
-  const reservations = new Map<bigint, { readonly address: GuestAddress; readonly size: number }>();
+  const reservations = host.reservations;
   service("VirtualAlloc", ["pointer", host.pointerStorage, "uint32", "uint32"], "pointer", (context, args) => {
     const requested = pointer(args, 0), size = count(args, 1), flags = Number(integer(args, 2)), protection = Number(integer(args, 3));
     if (size === 0 || (flags & ~(0x1000 | 0x2000 | 0x100000)) !== 0 || ![1, 2, 4, 0x10, 0x20, 0x40].includes(protection)) throw new UnsupportedWindowsImport("kernel32.dll", "VirtualAlloc", context, "unsupported allocation flags/protection");
@@ -127,7 +127,7 @@ export function installKernel(host: WindowsServiceHost): void {
     }
     host.lastError = 87; return bool(false);
   });
-  const tls = new Set<number>();
+  const tls = host.tlsIndices;
   const dynamicTls = memory.allocate({ byteLength: 1024 * width, alignment: 16n, label: "Windows expansion TLS slots" });
   writePointer(memory, memory.offset(host.teb, width === 4 ? 0xf94n : 0x1780n), dynamicTls);
   const tlsSlot = (index: number): GuestAddress => index < 64 ? memory.offset(host.teb, (width === 4 ? 0xe10n : 0x1480n) + BigInt(index * width)) : memory.offset(dynamicTls, BigInt((index - 64) * width));

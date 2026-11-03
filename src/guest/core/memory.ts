@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import type { GuestAddress, ModuleIdentity } from "../../contracts/execution.ts";
+import type { GuestAddress, GuestAllocatorImage, ModuleIdentity } from "../../contracts/execution.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type {
   GuestAccess, GuestAllocationOptions, GuestMapOptions, GuestMapping, GuestMemorySnapshot,
@@ -693,6 +693,25 @@ export class SparseGuestMemory implements MappedGuestMemory {
     if (value !== null) this.#owned(value, 0, "write");
     const raw = value?.byteOffset ?? 0n;
     return this.pointerBytes === 4 ? this.writeUint32(address, Number(raw)) : this.writeUint64(address, raw);
+  }
+
+  allocatorImage(): GuestAllocatorImage {
+    return { hints: [...this.#allocationHints].map(([alignment, hint]) => ({ alignment, base: hint.base, byteLength: hint.byteLength })),
+      slabs: this.#slabs.map(slab => ({ base: slab.base, used: slab.used.slice(), next: slab.next })), freePages: [...this.#freePages] };
+  }
+  /** Replaces the allocation cursor and pool state; the mappings they describe must already exist. */
+  restoreAllocator(image: GuestAllocatorImage): undefined {
+    for (const slab of image.slabs) {
+      if (slab.used.byteLength !== pagesPerSlab || !Number.isSafeInteger(slab.next) || slab.next < 0 || slab.next > pagesPerSlab) throw new RangeError("Invalid guest allocator slab");
+      this.check(this.#address(slab.base), pageBytes * pagesPerSlab, "read");
+    }
+    for (const page of image.freePages) if (!Number.isSafeInteger(page) || page < 0 || page >= image.slabs.length * pagesPerSlab) throw new RangeError("Invalid guest allocator free page");
+    this.#allocationHints.clear();
+    for (const hint of image.hints) this.#allocationHints.set(hint.alignment, { base: hint.base, byteLength: hint.byteLength });
+    this.#slabs.length = 0;
+    for (const slab of image.slabs) this.#slabs.push({ base: slab.base, used: slab.used.slice(), next: slab.next });
+    this.#freePages.length = 0; this.#freePages.push(...image.freePages);
+    return undefined;
   }
 
   checkpoint(): GuestMemorySnapshot {

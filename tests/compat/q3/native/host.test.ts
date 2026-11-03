@@ -107,17 +107,27 @@ const ql = { table: SYNTHETIC_ELF.data, imports: SYNTHETIC_ELF.data + 0x80, time
 function quakeLiveElf(): Uint8Array {
   const c = new CodeBuilder(), table: Record<string, number> = {};
   const fn = (name: string): void => { table[name] = c.mark(name); };
-  fn("dllEntry");
-  c.raw(0xc7, 0x02).u32(10).raw(0x48, 0x8d, 0x05).rip(ql.table).raw(0x48, 0x89, 0x07).raw(0x48, 0x89, 0x35).rip(ql.imports).raw(0xc3);
   fn("Shutdown"); c.raw(0xc3);
   fn("RunFrame"); c.raw(0x89, 0x3d).rip(ql.time).raw(0xc3);
   fn("RegisterCvars"); c.raw(0x48, 0x83, 0xec, 0x08, 0x48, 0x8d, 0x3d).rip(ql.text).raw(0x48, 0x8b, 0x05).rip(ql.imports).raw(0xff, 0x90).u32(2 * 8).raw(0x48, 0x83, 0xc4, 0x08, 0xc3);
   fn("Init"); c.raw(0x89, 0x3d).rip(ql.time).raw(0xc3);
   fn("ConsoleCommand"); c.raw(0x48, 0x83, 0xec, 0x08, 0x48, 0x8b, 0x05).rip(ql.imports).raw(0xff, 0x90).u32(20 * 8).raw(0x48, 0x83, 0xc4, 0x08, 0xc3);
-  const slots = ["Shutdown", "RunFrame", "RegisterCvars", "Init", "ConsoleCommand"];
-  const bytes = syntheticElfModule({ width: 8, code: c.finish(), exports: [{ name: "dllEntry", offset: table["dllEntry"] ?? 0 }],
-    relative: slots.map((name, index) => ({ at: ql.table + index * 8, addend: SYNTHETIC_ELF.code + (table[name] ?? 0) })) });
+  // ClientBegin, ClientCommand, ClientThink, ClientConnect, ClientUserinfoChanged and ClientDisconnect each report their client number as a server command.
+  const clientExports = ["ClientBegin", "ClientCommand", "ClientThink", "ClientConnect", "ClientUserinfoChanged", "ClientDisconnect"];
+  clientExports.forEach((name, index) => {
+    fn(name);
+    if (name === "ClientConnect") { c.raw(0x31, 0xc0, 0xc3); return; }
+    c.raw(0x48, 0x83, 0xec, 0x08, 0x48, 0x8d, 0x35).rip(ql.text + 0x30 * (index + 1)).raw(0x48, 0x8b, 0x05).rip(ql.imports).raw(0xff, 0x90).u32(24 * 8).raw(0x48, 0x83, 0xc4, 0x08, 0xc3);
+  });
+  const slots = ["Shutdown", "RunFrame", "RegisterCvars", "Init", "ConsoleCommand", "ClientBegin", "ClientCommand", "ClientThink", "ClientConnect", "ClientUserinfoChanged", "ClientDisconnect"];
+  // dllEntry builds the eleven-word export table itself: the synthetic ELF's relocation area holds only eight entries.
+  fn("dllEntry");
+  c.raw(0xc7, 0x02).u32(10).raw(0x48, 0x8d, 0x05).rip(ql.table).raw(0x48, 0x89, 0x07).raw(0x48, 0x89, 0x35).rip(ql.imports);
+  slots.forEach((name, index) => { c.raw(0x48, 0x8d, 0x05).rip(SYNTHETIC_ELF.code + c.offsetOf(name)).raw(0x48, 0x89, 0x05).rip(ql.table + index * 8); });
+  c.raw(0xc3);
+  const bytes = syntheticElfModule({ width: 8, code: c.finish(), exports: [{ name: "dllEntry", offset: table["dllEntry"] ?? 0 }] });
   bytes.set(new TextEncoder().encode("hello from the synthetic Quake Live module\0"), ql.text);
+  clientExports.forEach((name, index) => bytes.set(new TextEncoder().encode(`${name}\0`), ql.text + 0x30 * (index + 1)));
   return bytes;
 }
 
@@ -133,7 +143,17 @@ test("a native Quake Live ELF module runs through the same host and engine servi
     harness.arguments = ["say", "hi"];
     expect(await source.consoleCommandAsync(["say", "hi"])).toBe(true);
     expect(await source.consoleCommandAsync([])).toBe(false);
-    await expect(source.clientBeginAsync(0)).rejects.toThrow("outside the verified API 10 table");
+    expect(await source.clientConnectAsync(2, true, false)).toBeNull();
+    events.length = 0;
+    await source.clientBeginAsync(1);
+    harness.arguments = ["team", "red"];
+    await source.clientCommandAsync(2, ["team", "red"]);
+    source.clientCommand(2, ["team", "blue"]);
+    await source.clientThinkAsync(3);
+    await source.clientUserinfoChangedAsync(1);
+    await source.clientDisconnectAsync(3);
+    await source.botFrameAsync(800);
+    expect(events).toEqual(["1:ClientBegin", "2:ClientCommand", "2:ClientCommand", "3:ClientThink", "1:ClientUserinfoChanged", "3:ClientDisconnect"]);
     expect(source.coverage.map(call => call.name)).toEqual(expect.arrayContaining(["Printf", "Argc"]));
   } finally { await harness.close(); }
 });

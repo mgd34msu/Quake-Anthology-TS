@@ -68,7 +68,7 @@ export interface SourceStrategyHost {
 export type CarriedPlayerState = SimulationTravel["players"][number]["state"];
 export type PlayerBindings = Pick<PlayerMovementHost, "netQuake" | "sourceClient" | "quakeWorld">;
 type Q3NativeClient = NonNullable<ReturnType<Of<"q3">["game"]["records"]["nativeByActor"]>>["client"];
-type Q2Entity = ReturnType<Of<"q2">["game"]["attachPlayer"]>;
+type Q2Entity = ReturnType<Of<"q2">["game"]["attachPlayer"]> | null;
 type Moved = ReturnType<MovementPlayer["move"]>;
 
 /** One command batch the Q1 pre-think phase reads. */
@@ -406,7 +406,7 @@ class Q2Strategy extends LoadingStrategy {
     const model = player.character === "q2" ? player.characterAppearance.provider.split("/").at(-1) ?? "male" : "male";
     source.product.admit(actor, { slot: client.slot, userinfo: userinfo ?? `\\name\\Player ${client.slot + 1}\\skin\\${model}/grunt\\fov\\90`, initializeInventory: false, useQ2Weapons: this.host.usesQ2Weapons() }, travel?.source.kind === "q2" && travel.source.landmark?.clientSlot === client.slot ? { ...travel.source.landmark, player: actor.id } : null);
   }
-  override admitCarry(actor: OwnedActor, entity: Q2Entity, carried: CarriedPlayerState | undefined): boolean {
+  override admitCarry(_actor: OwnedActor, entity: Q2Entity, carried: CarriedPlayerState | undefined): boolean {
     if (carried?.kind !== "q2") return false;
     if (entity !== null) this.source.players.restoreCarry(entity, this.source.game, carried.carry);
     return true;

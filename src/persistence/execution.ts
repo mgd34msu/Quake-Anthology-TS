@@ -55,6 +55,22 @@ function readCallback(reader: SaveReader): SavedGuestCallbackBinding {
     result: reader.field("result").value === "void" ? "void" : readValueLayout(reader.field("result")) };
 }
 function readPrivate(reader: SaveReader): GuestPrivateState { return { module: readModule(reader.field("module")), format: namespaced(reader.field("format")), bytes: reader.field("bytes").bytes() }; }
+function readRegionPermissions(reader: SaveReader): GuestRegionPermissions { return reader.choice("none", "read", "read-write", "read-execute", "read-write-execute", "execute"); }
+/** Version 1 native images have no version field and no heap image: the process layout is the one startup produces. */
+function readNativeHeap(reader: SaveReader): NativeGuestHeapImage | null {
+  const version = reader.field("version");
+  if (version.value === undefined) return null;
+  version.literal(2);
+  const heap = reader.field("heap");
+  return { layout: heap.field("layout").list(mapping => ({ base: mapping.field("base").bigint(), byteLength: mapping.field("byteLength").integer(1), permissions: readRegionPermissions(mapping.field("permissions")), label: mapping.field("label").string() })),
+    allocator: { hints: heap.field("allocator").field("hints").list(hint => ({ alignment: hint.field("alignment").bigint(), base: hint.field("base").bigint(), byteLength: hint.field("byteLength").integer(1) })),
+      slabs: heap.field("allocator").field("slabs").list(slab => ({ base: slab.field("base").bigint(), used: slab.field("used").bytes(), next: slab.field("next").integer(0) })),
+      freePages: heap.field("allocator").field("freePages").list(page => page.integer(0)) },
+    blocks: heap.field("blocks").list(block => ({ base: block.field("base").bigint(), size: block.field("size").integer(0), heap: block.field("heap").bigint() })),
+    windows: heap.field("windows").value === null ? null : { heaps: heap.field("windows").field("heaps").list(value => value.bigint()),
+      reservations: heap.field("windows").field("reservations").list(entry => ({ base: entry.field("base").bigint(), size: entry.field("size").integer(1) })),
+      tls: heap.field("windows").field("tls").list(value => value.integer(0)), lastError: heap.field("windows").field("lastError").integer(0) } };
+}
 export function readGuest(reader: SaveReader): GuestCheckpoint {
   const common = { module: readModule(reader.field("module")), random: reader.field("random").list(readRandom), callbacks: reader.field("callbacks").list(readCallback) };
   switch (reader.field("kind").choice("typescript", "quakec", "qvm", "native-guest")) {
@@ -73,8 +89,9 @@ export function readGuest(reader: SaveReader): GuestCheckpoint {
       return { ...common, kind: "qvm", api, abiProfile: reader.field("abiProfile").value === undefined ? "q3-modern" : reader.field("abiProfile").choice("q3-modern", "q3-1.16n-base"), data: reader.field("data").bytes(), instructionIndex: reader.field("instructionIndex").integer(), programStack: reader.field("programStack").integer(0),
         operandStack: reader.field("operandStack").list(value => value.integer()), hostState: readPrivate(reader.field("hostState")) };
     }
-    case "native-guest": return { ...common, kind: "native-guest", abi: readNativeAbi(reader.field("abi")), regions: reader.field("regions").list(region => ({
-      base: region.field("base").bigint(), permissions: region.field("permissions").choice("read", "read-write", "read-execute", "read-write-execute"), bytes: region.field("bytes").bytes() })),
+    case "native-guest": return { ...common, kind: "native-guest", version: 2, abi: readNativeAbi(reader.field("abi")), regions: reader.field("regions").list(region => ({
+      base: region.field("base").bigint(), permissions: readRegionPermissions(region.field("permissions")), bytes: region.field("bytes").bytes() })),
+      heap: readNativeHeap(reader),
       processorLayout: readLayout(reader.field("processorLayout")), processorState: reader.field("processorState").bytes(), runtimeState: readPrivate(reader.field("runtimeState")) };
   }
 }

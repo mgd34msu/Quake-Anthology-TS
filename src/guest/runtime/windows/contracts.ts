@@ -44,6 +44,10 @@ export interface WindowsServiceHost {
   readonly processId: number;
   readonly threadId: number;
   lastError: number;
+  /** Heap handles (the process heap and every HeapCreate), VirtualAlloc reservations and TlsAlloc indices: tables a game extends while it runs. */
+  readonly heaps: Set<bigint>;
+  readonly reservations: Map<bigint, { readonly address: GuestAddress; readonly size: number }>;
+  readonly tlsIndices: Set<number>;
   register(library: string, name: string, signature: GuestCallSignature, invoke: WindowsImportImplementation): void;
   service(library: string, name: string, parameters: readonly GuestStorage[], result: GuestStorage | "void", invoke: WindowsImportImplementation): void;
   allocate(size: number, heap?: bigint): GuestAddress | null;

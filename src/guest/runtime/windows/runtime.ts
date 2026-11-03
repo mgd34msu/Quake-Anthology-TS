@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import type { GuestAddress, GuestCallContext, GuestCallResult, GuestCallValue, GuestStorage, NativeCallAbi } from "../../../contracts/execution.ts";
+import type { GuestAddress, GuestCallContext, GuestCallResult, GuestCallValue, GuestStorage, NativeCallAbi, NativeHeapBlock, WindowsHeapTables } from "../../../contracts/execution.ts";
 import { GuestCallRunner } from "../../abi/index.ts";
 import type { GuestCallSignature, GuestImage, GuestImport, GuestImportResolution, GuestImportResolver, GuestHostCallback, MappedGuestMemory } from "../../core/index.ts";
 import { bindPeImports, resolvePeExport } from "../../pe/index.ts";
@@ -35,6 +35,9 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
   readonly #prepared = new Set<PeImage>();
   readonly #initialized = new Set<PeImage>();
   readonly #allocations = new Map<bigint, HeapAllocation>();
+  readonly heaps = new Set<bigint>();
+  readonly reservations = new Map<bigint, { readonly address: GuestAddress; readonly size: number }>();
+  readonly tlsIndices = new Set<number>();
   readonly #tlsBlocks = new Map<PeImage, GuestAddress>();
   readonly #cfgTargets = new Set<bigint>();
   #cfgCheck: GuestAddress | null = null;
@@ -178,6 +181,26 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
     this.memory.unmap(allocation.address, nativeAllocationBytes(allocation.size)); this.#allocations.delete(address.byteOffset); return true;
   }
   allocationSize(address: GuestAddress, heap = 0n): number | null { const entry = this.#allocations.get(address.byteOffset); return entry?.heap === heap ? entry.size : null; }
+  /** The runtime's heap table and kernel tables, for a process image: the memory they describe is saved with the mappings. */
+  heapState(): { readonly blocks: readonly NativeHeapBlock[]; readonly tables: WindowsHeapTables } {
+    return { blocks: [...this.#allocations.values()].map(entry => ({ base: entry.address.byteOffset, size: entry.size, heap: entry.heap })),
+      tables: { heaps: [...this.heaps], reservations: [...this.reservations.values()].map(entry => ({ base: entry.address.byteOffset, size: entry.size })),
+        tls: [...this.tlsIndices], lastError: this.lastError } };
+  }
+  /** Rebinds the saved tables to this process's addresses; every block must lie in a mapping already restored. */
+  restoreHeapState(blocks: readonly NativeHeapBlock[], tables: WindowsHeapTables): void {
+    const pointer = (base: bigint): GuestAddress => {
+      const address = this.memory.pointer(base);
+      if (address === null) throw new Error("Saved Windows heap address is null");
+      return address;
+    };
+    this.#allocations.clear();
+    for (const block of blocks) { const address = pointer(block.base); this.memory.check(address, 1, "read"); this.#allocations.set(block.base, { address, size: block.size, heap: block.heap }); }
+    this.heaps.clear(); for (const heap of tables.heaps) this.heaps.add(heap);
+    this.reservations.clear(); for (const entry of tables.reservations) this.reservations.set(entry.base, { address: pointer(entry.base), size: entry.size });
+    this.tlsIndices.clear(); for (const index of tables.tls) this.tlsIndices.add(index);
+    this.lastError = tables.lastError;
+  }
   destroyHeap(heap: bigint): void { for (const entry of this.#allocations.values()) if (entry.heap === heap) this.free(entry.address, heap); }
   prepareImage(image: PeImage): void {
     if (this.#prepared.has(image)) return;

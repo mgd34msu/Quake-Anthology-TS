@@ -160,10 +160,47 @@ export interface GuestPrivateState {
   readonly format: `${string}:${string}`;
   readonly bytes: Uint8Array;
 }
+export type GuestRegionPermissions = "none" | "read" | "read-write" | "read-execute" | "read-write-execute" | "execute";
 export interface GuestMemoryRegion {
   readonly base: bigint;
-  readonly permissions: "read" | "read-write" | "read-execute" | "read-write-execute";
+  readonly permissions: GuestRegionPermissions;
   readonly bytes: Uint8Array;
+}
+export interface GuestMappingRecord {
+  readonly base: bigint;
+  readonly byteLength: number;
+  readonly permissions: GuestRegionPermissions;
+  readonly label: string;
+}
+/** The allocation cursor and the pooled-page bookkeeping of a guest address space: they decide where the next allocation lands. */
+export interface GuestAllocatorImage {
+  readonly hints: readonly { readonly alignment: bigint; readonly base: bigint; readonly byteLength: number }[];
+  readonly slabs: readonly { readonly base: bigint; readonly used: Uint8Array; readonly next: number }[];
+  readonly freePages: readonly number[];
+}
+/** A live block of the runtime's own heap table (HeapAlloc / malloc), which guest code frees by address. */
+export interface NativeHeapBlock {
+  readonly base: bigint;
+  readonly size: number;
+  /** Windows heap handle that owns the block; zero for the System V heap. */
+  readonly heap: bigint;
+}
+/** Windows kernel tables a game may extend after startup. */
+export interface WindowsHeapTables {
+  readonly heaps: readonly bigint[];
+  readonly reservations: readonly { readonly base: bigint; readonly size: number }[];
+  readonly tls: readonly number[];
+  readonly lastError: number;
+}
+/**
+ * The part of a native process that game code can change after startup: its mappings, the allocator behind them, and the runtime's heap table.
+ * Version 1 images carry none of it, meaning the layout is the one startup produces.
+ */
+export interface NativeGuestHeapImage {
+  readonly layout: readonly GuestMappingRecord[];
+  readonly allocator: GuestAllocatorImage;
+  readonly blocks: readonly NativeHeapBlock[];
+  readonly windows: WindowsHeapTables | null;
 }
 interface CheckpointBase {
   readonly module: ModuleIdentity;
@@ -203,6 +240,9 @@ export interface QvmCheckpoint extends CheckpointBase {
 }
 export interface NativeGuestCheckpoint extends CheckpointBase {
   readonly kind: "native-guest";
+  /** Version 2 adds the heap image; saves written before it read as version 2 with a null heap. */
+  readonly version: 2;
+  readonly heap: NativeGuestHeapImage | null;
   readonly abi: NativeAbi;
   readonly regions: readonly GuestMemoryRegion[];
   /** Layout includes registers, flags, x87 control/tag state, and SSE control/registers. */

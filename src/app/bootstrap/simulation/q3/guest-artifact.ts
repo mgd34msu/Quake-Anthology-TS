@@ -73,7 +73,7 @@ export async function prepareQ3Game(execution: Q3GameExecution, mounts: MountedC
 /** A native qagame is a black box to the original-source bindings: no declared primary interface, so the shared providers own weapons, items and combat around it. */
 export async function prepareQ3NativeGame(execution: Q3NativeGameExecution, mounts: MountedContent): Promise<PreparedQ3NativeGame> {
   const image = await prepareQ3Native(execution, mounts);
-  if (image.profile === 'quake-live-elf') throw new Error('Quake Live table-interface modules expose no verified game entry points for the server game');
+  if (image.profile === 'quake-live-elf') throw new Error('Quake Live table-interface modules are not served by the server game: their 64-bit entity and client records are not located through G_LOCATE_GAME_DATA, and no Quake Live binary exists here to verify the layouts');
   return { kind: 'native', execution, image, module: image.module, resource: execution.artifact, weapons: baseQ3GuestWeapons, product: undefined,
     primary: { declaration: null, input: null, weapons: null, inventory: null, pickups: null, combat: null } };
 }

@@ -21,6 +21,8 @@ export interface NativeQ3ModuleOptions {
 }
 
 /** Quake Live game API 10, checked against both supplied ELF entry functions.
+ * The export table is eleven pointers: ShutdownGame, RunFrame, RegisterCvars, InitGame, ConsoleCommand, then ClientBegin, ClientCommand and
+ * ClientThink, ClientConnect (verified at slot 8) and ClientUserinfoChanged and ClientDisconnect, in g_public.h's relative order.
  * Official Q3's dllEntry(syscall)/vmMain interface is a different profile.
  * The caller owns image loading/CRT initialization and the shared guest process.
  */
@@ -66,6 +68,11 @@ export class QuakeLiveGameModule {
     if (result.kind !== "int32") throw new TypeError("Quake Live ConsoleCommand returned the wrong ABI type");
     return result.value !== 0;
   }
+  clientBegin(client: number): void { this.call(5, ["int32"], "void", [{ kind: "int32", value: client }]); }
+  clientCommand(client: number): void { this.call(6, ["int32"], "void", [{ kind: "int32", value: client }]); }
+  clientThink(client: number): void { this.call(7, ["int32"], "void", [{ kind: "int32", value: client }]); }
+  clientUserinfoChanged(client: number): void { this.call(9, ["int32"], "void", [{ kind: "int32", value: client }]); }
+  clientDisconnect(client: number): void { this.call(10, ["int32"], "void", [{ kind: "int32", value: client }]); }
   clientConnect(client: number, firstTime: boolean, isBot: boolean): GuestAddress | null {
     const result = this.call(8, ["int32", "int32", "int32"], "pointer", [client, Number(firstTime), Number(isBot)].map(value => ({ kind: "int32", value })));
     if (result.kind !== "pointer") throw new TypeError("Quake Live ClientConnect returned the wrong ABI type");

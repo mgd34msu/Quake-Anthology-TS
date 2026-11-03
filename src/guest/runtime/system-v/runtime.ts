@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import type { GuestAddress, GuestCallContext, GuestCallResult, GuestCallValue, GuestStorage, ModuleIdentity, NativeCallAbi } from "../../../contracts/execution.ts";
+import type { GuestAddress, GuestCallContext, GuestCallResult, GuestCallValue, GuestStorage, ModuleIdentity, NativeCallAbi, NativeHeapBlock } from "../../../contracts/execution.ts";
 import type { GuestCallRunner } from "../../abi/index.ts";
 import type { GuestCallSignature, GuestHostCallback, GuestImage, GuestImport, GuestImportResolution, GuestImportResolver, MappedGuestMemory } from "../../core/index.ts";
 import { inspectElf, loadElf } from "../../elf/index.ts";
@@ -149,6 +149,16 @@ export class SystemVGuestRuntime implements GuestImportResolver, SystemVServiceH
     const entry = this.#heap.get(address.byteOffset);
     if (entry === undefined) throw new Error("System V free of a non-live allocation");
     this.memory.unmap(entry.address, entry.size); this.#heap.delete(address.byteOffset);
+  }
+  heapState(): readonly NativeHeapBlock[] { return [...this.#heap.values()].map(entry => ({ base: entry.address.byteOffset, size: entry.size, heap: 0n })); }
+  /** Rebinds the saved heap table to this process's addresses; every block must lie in a mapping already restored. */
+  restoreHeapState(blocks: readonly NativeHeapBlock[]): void {
+    this.#heap.clear();
+    for (const block of blocks) {
+      const address = this.memory.pointer(block.base);
+      if (address === null) throw new Error("Saved System V heap address is null");
+      this.memory.check(address, 1, "read"); this.#heap.set(block.base, { address, size: block.size });
+    }
   }
   allocationSize(address: GuestAddress): number | null { this.memory.offset(address, 0n); return this.#heap.get(address.byteOffset)?.size ?? null; }
   invoke(context: GuestCallContext, target: GuestAddress, parameters: readonly GuestStorage[], result: GuestStorage | "void", args: readonly GuestCallValue[]): GuestCallResult {

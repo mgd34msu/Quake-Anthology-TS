@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { ResolvedExecutionModule } from "../../../../contracts/content.ts";
-import type { GuestAddress, GuestCallContext, ModuleIdentity, NativeGuestCheckpoint } from "../../../../contracts/execution.ts";
+import type { GuestAddress, GuestCallContext, GuestMappingRecord, ModuleIdentity, NativeGuestCheckpoint, NativeGuestHeapImage, NativeHeapBlock, WindowsHeapTables } from "../../../../contracts/execution.ts";
 import type { MountedContent } from "../../../../content/mounts/index.ts";
 import { GuestCallRunner } from "../../../../guest/abi/index.ts";
 import { inspectElf } from "../../../../guest/elf/index.ts";
@@ -75,6 +75,11 @@ export interface Q3NativeGuestOptions {
 }
 
 type Phase = "created" | "running" | "closed";
+/** The runtime's own heap tables, which move with the mappings they describe. */
+interface HeapTables {
+  capture(): { readonly blocks: readonly NativeHeapBlock[]; readonly windows: WindowsHeapTables | null };
+  restore(blocks: readonly NativeHeapBlock[], windows: WindowsHeapTables | null): void;
+}
 interface Lifecycle {
   readonly imports: QuakeLiveGameImports | null;
   initialize(levelTime: number, randomSeed: number, restart: boolean): Promise<void>;
@@ -104,12 +109,12 @@ export class Q3NativeGuestSource implements Q3GameEngine {
   readonly kind = "native";
   readonly data: QvmGameData;
   private phase: Phase = "created";
-  private readonly baseline: string;
+  private readonly baseline: ReadonlySet<string>;
   private constructor(readonly prepared: Q3NativeImage, readonly memory: SparseGuestMemory, readonly runner: GuestCallRunner, private readonly lifecycle: Lifecycle,
     data: QvmGameData, private readonly files: Set<WindowsFile>, private readonly state: GuestProcessorState, private readonly hostState: QvmHostState | undefined,
-    private readonly abi: NativeGuestCheckpoint["abi"], private readonly detach: () => void) {
+    private readonly abi: NativeGuestCheckpoint["abi"], private readonly detach: () => void, private readonly heap: HeapTables) {
     this.data = data;
-    this.baseline = layoutOf(memory);
+    this.baseline = new Set(describedMappings(memory).map(mappingKey));
   }
 
   static create(options: Q3NativeGuestOptions): Q3NativeGuestSource {
@@ -193,7 +198,9 @@ export class Q3NativeGuestSource implements Q3GameEngine {
         runtime.initialize(image, { context, instructionBudget: budget });
         syscalls = new NativeQ3Syscalls(callbacks, image.abi, trap);
         const game = new Quake3VmModule({ image, runner, context, instructionBudget: budget }, syscalls.address);
-        return new Q3NativeGuestSource(prepared, memory, runner, q3Lifecycle(game), data, files, state, options.hostState, image.abi, () => runtime.detach(image, { context, instructionBudget: budget }));
+        return new Q3NativeGuestSource(prepared, memory, runner, q3Lifecycle(game), data, files, state, options.hostState, image.abi, () => runtime.detach(image, { context, instructionBudget: budget }),
+          { capture: () => { const state = runtime.heapState(); return { blocks: state.blocks, windows: state.tables }; },
+            restore: (blocks, tables) => { if (tables === null) throw new Error("Native Q3 checkpoint carries no Windows heap tables"); runtime.restoreHeapState(blocks, tables); } });
       }
       const sentinel = memory.map({ base: 0x30000n, byteLength: 4096, permissions: "read-execute", bytes: new Uint8Array([0xcc]) });
       const nowSeconds = (): bigint => BigInt(Math.trunc((options.services?.milliseconds() ?? 0) / 1000));
@@ -204,15 +211,15 @@ export class Q3NativeGuestSource implements Q3GameEngine {
       const image = runtime.load({ bytes, module, loadBias: width === 4 ? 0x10000000n : 0x100000000n });
       runtime.initialize(image, { context, instructionBudget: budget });
       const finalize = (): void => runtime.finalize(image, { context, instructionBudget: budget });
+      const heap: HeapTables = { capture: () => ({ blocks: runtime.heapState(), windows: null }), restore: blocks => { runtime.restoreHeapState(blocks); } };
       if (prepared.profile === "q3-elf") {
         syscalls = new NativeQ3Syscalls(callbacks, image.abi, trap);
         const game = new Quake3VmModule({ image, runner, context, instructionBudget: budget }, syscalls.address);
-        return new Q3NativeGuestSource(prepared, memory, runner, q3Lifecycle(game), data, files, state, options.hostState, image.abi, finalize);
+        return new Q3NativeGuestSource(prepared, memory, runner, q3Lifecycle(game), data, files, state, options.hostState, image.abi, finalize, heap);
       }
       if (options.services === undefined) throw new Error("A Quake Live native module needs the engine services behind its import table");
       const imports = new QuakeLiveGameImports(memory, callbacks, image.abi, { ...options.services, commandArguments: argv });
       const game = new QuakeLiveGameModule({ image, runner, context, instructionBudget: budget }, imports.address);
-      const unverified = (name: string) => (): never => { throw new Error(`Quake Live export ${name} is outside the verified API 10 table`); };
       const lifecycle: Lifecycle = { imports,
         initialize: async (levelTime, seed, restart) => { game.registerCvars(); game.initialize(levelTime, seed, restart); },
         shutdown: async restart => { game.shutdown(restart); },
@@ -220,13 +227,21 @@ export class Q3NativeGuestSource implements Q3GameEngine {
           const address = game.clientConnect(client, firstTime, isBot);
           return address === null ? null : readString(memory, address);
         },
-        clientBegin: unverified("ClientBegin"), clientUserinfoChanged: unverified("ClientUserinfoChanged"), clientDisconnect: unverified("ClientDisconnect"),
-        clientCommand: unverified("ClientCommand"), clientCommandNow: unverified("ClientCommand"), clientThink: unverified("ClientThink"),
+        clientBegin: async client => { game.clientBegin(client); },
+        clientUserinfoChanged: async client => { game.clientUserinfoChanged(client); },
+        clientDisconnect: async client => { game.clientDisconnect(client); },
+        clientCommand: (client, values) => withArguments(values, async () => { game.clientCommand(client); }),
+        clientCommandNow: (client, values) => {
+          const previous = argumentsOf.current; argumentsOf.current = values;
+          try { game.clientCommand(client); } finally { argumentsOf.current = previous; }
+        },
+        clientThink: async client => { game.clientThink(client); },
         runFrame: async time => { game.runFrame(time); },
         consoleCommand: values => withArguments(values, async () => game.consoleCommand()),
-        botFrame: unverified("BotAIStartFrame"),
+        // The API 10 table has no bot frame export.
+        botFrame: async () => {},
       };
-      return new Q3NativeGuestSource(prepared, memory, runner, lifecycle, data, files, state, options.hostState, image.abi, finalize);
+      return new Q3NativeGuestSource(prepared, memory, runner, lifecycle, data, files, state, options.hostState, image.abi, finalize, heap);
     } catch (error) {
       try { releaseMemory(memory); closeFiles(files); } catch (cleanup) { throw new AggregateError([error, cleanup], "Native Q3 guest construction and cleanup failed"); }
       throw error;
@@ -266,24 +281,31 @@ export class Q3NativeGuestSource implements Q3GameEngine {
   botFrameAsync(time: number): Promise<void> { return this.live(() => this.lifecycle.botFrame(time)); }
 
   /**
-   * The process image between calls: every writable mapping the module or its runtime owns, the processor registers, and the server game's record.
-   * The runtime's own bookkeeping is rebuilt deterministically on restore, so a process whose mappings changed since startup (a heap block
-   * allocated by game code) cannot be saved.
+   * The process image between calls: the writable mappings the module or its runtime owns, every mapping startup did not create (heap blocks
+   * and reservations game code made), the allocator and heap tables behind them, the processor registers, and the server game's record.
+   * The runtime's own other bookkeeping is rebuilt deterministically on restore.
    */
   checkpoint(): NativeGuestCheckpoint {
     if (this.phase !== "running") throw new Error("Native Q3 checkpoint requires an initialized game");
     if (this.runner.depth !== 0) throw new Error("Native Q3 checkpoint requires a completed game call");
     if (this.hostState === undefined) throw new Error("Native Q3 host has not bound checkpoint services");
-    if (layoutOf(this.memory) !== this.baseline) throw new Error("Native Q3 module allocated memory after startup; its process cannot be saved");
-    const host = this.hostState.checkpoint();
-    const regions = this.memory.mappings().flatMap(mapping => {
-      if (mapping.label === STACK_LABEL || mapping.permissions !== "read-write" && mapping.permissions !== "read-write-execute") return [];
+    const host = this.hostState.checkpoint(), layout = describedMappings(this.memory);
+    const regions = layout.filter(mapping => writable(mapping.permissions) || !this.baseline.has(mappingKey(mapping))).map(mapping => {
       const address = this.memory.pointer(mapping.base);
       if (address === null) throw new Error("Native Q3 mapping has no address");
-      return [{ base: mapping.base, permissions: mapping.permissions, bytes: this.memory.copy(address, mapping.byteLength) }];
+      return { base: mapping.base, permissions: mapping.permissions, bytes: this.readable(address, mapping, () => this.memory.copy(address, mapping.byteLength)) };
     });
-    return { kind: "native-guest", module: this.prepared.module, random: host.random, callbacks: host.callbacks, abi: this.abi, regions,
+    const tables = this.heap.capture();
+    return { kind: "native-guest", version: 2, module: this.prepared.module, random: host.random, callbacks: host.callbacks, abi: this.abi, regions,
+      heap: { layout, allocator: this.memory.allocatorImage(), blocks: tables.blocks, windows: tables.windows },
       processorLayout: { ...PROCESSOR_LAYOUT, pointerBytes: this.memory.pointerBytes }, processorState: this.state.registers.checkpoint(), runtimeState: { ...host.state, bytes: host.state.bytes.slice() } };
+  }
+
+  /** Runs `access` with the mapping temporarily readable and writable, then returns it to its own permissions. */
+  private readable<T>(address: GuestAddress, mapping: GuestMappingRecord, access: () => T): T {
+    if (writable(mapping.permissions)) return access();
+    this.memory.protect(address, mapping.byteLength, "read-write");
+    try { return access(); } finally { this.memory.protect(address, mapping.byteLength, mapping.permissions); }
   }
 
   /** Overlays a saved process image on this freshly started, identical process, then restores the server game's record from it. */
@@ -294,17 +316,46 @@ export class Q3NativeGuestSource implements Q3GameEngine {
     const saved = checkpoint.module, module = this.prepared.module;
     if (saved.id !== module.id || saved.digest !== module.digest || saved.revision !== module.revision || saved.artifactPath !== module.artifactPath
       || checkpoint.abi.kind !== this.abi.kind || checkpoint.runtimeState.module.digest !== module.digest) throw new Error("Native Q3 checkpoint belongs to a different module");
-    const targets = this.memory.mappings().filter(mapping => mapping.label !== STACK_LABEL && writable(mapping.permissions));
-    if (targets.length !== checkpoint.regions.length) throw new Error("Native Q3 checkpoint memory layout differs from the started module");
-    for (const region of checkpoint.regions) {
-      const target = targets.find(mapping => mapping.base === region.base);
-      if (target === undefined || target.permissions !== region.permissions || target.byteLength !== region.bytes.byteLength) throw new Error("Native Q3 checkpoint memory layout differs from the started module");
-    }
-    for (const region of checkpoint.regions) {
-      const address = this.memory.pointer(region.base);
+    const layoutError = (): never => { throw new Error("Native Q3 checkpoint memory layout differs from the started module"); };
+    const current = describedMappings(this.memory);
+    // A checkpoint without a heap image (version 1) records a process whose layout is the one startup produces.
+    const image: NativeGuestHeapImage | null = checkpoint.heap;
+    const wanted = image === null ? current : image.layout;
+    if (image === null && current.filter(mapping => writable(mapping.permissions)).length !== checkpoint.regions.length) layoutError();
+    const regions = new Map(checkpoint.regions.map(region => [region.base, region]));
+    if (regions.size !== checkpoint.regions.length) layoutError();
+    const shape = (mapping: GuestMappingRecord): string => `${mapping.base}:${mapping.byteLength}:${mapping.label}`;
+    const wantedShapes = new Map(wanted.map(mapping => [shape(mapping), mapping]));
+    const haveShapes = new Map(current.map(mapping => [shape(mapping), mapping]));
+    const at = (base: bigint): GuestAddress => {
+      const address = this.memory.pointer(base);
       if (address === null) throw new Error("Native Q3 mapping has no address");
-      this.memory.write(address, region.bytes);
+      return address;
+    };
+    for (const mapping of current) {
+      if (!wantedShapes.has(shape(mapping))) this.memory.unmap(at(mapping.base), mapping.byteLength);
     }
+    for (const mapping of wanted) {
+      const have = haveShapes.get(shape(mapping));
+      if (have === undefined) this.memory.map({ base: mapping.base, byteLength: mapping.byteLength, permissions: "read-write", label: mapping.label });
+      else if (have.permissions !== mapping.permissions) this.memory.protect(at(mapping.base), mapping.byteLength, mapping.permissions);
+    }
+    const wantedByBase = new Map(wanted.map(mapping => [mapping.base, mapping]));
+    for (const region of checkpoint.regions) {
+      const target = wantedByBase.get(region.base);
+      if (target === undefined || target.permissions !== region.permissions || target.byteLength !== region.bytes.byteLength) layoutError();
+    }
+    for (const mapping of wanted) {
+      const region = regions.get(mapping.base), created = !haveShapes.has(shape(mapping));
+      if (region === undefined) {
+        if (created || writable(mapping.permissions) && image === null) layoutError();
+        continue;
+      }
+      const address = at(mapping.base);
+      if (created) { this.memory.write(address, region.bytes); if (mapping.permissions !== "read-write") this.memory.protect(address, mapping.byteLength, mapping.permissions); }
+      else this.readable(address, mapping, () => this.memory.write(address, region.bytes));
+    }
+    if (image !== null) { this.memory.restoreAllocator(image.allocator); this.heap.restore(image.blocks, image.windows); }
     this.state.registers.restore(checkpoint.processorState);
     this.phase = "running";
     this.hostState.restore({ state: checkpoint.runtimeState, random: checkpoint.random, callbacks: checkpoint.callbacks });
@@ -332,9 +383,11 @@ export class Q3NativeGuestSource implements Q3GameEngine {
   }
 }
 
-function layoutOf(memory: SparseGuestMemory): string {
-  return memory.mappings().map(mapping => `${mapping.base}:${mapping.byteLength}:${mapping.permissions}`).join(",");
+/** Every mapping except the call stack, which holds nothing between calls. */
+function describedMappings(memory: SparseGuestMemory): GuestMappingRecord[] {
+  return memory.mappings().filter(mapping => mapping.label !== STACK_LABEL).map(({ base, byteLength, permissions, label }) => ({ base, byteLength, permissions, label }));
 }
+const mappingKey = (mapping: GuestMappingRecord): string => `${mapping.base}:${mapping.byteLength}:${mapping.permissions}:${mapping.label}`;
 /** The Quake Live table interface never locates game data through G_LOCATE_GAME_DATA; any access to this memory is a defect. */
 function unlocatedMemory(): Q3GameMemory {
   const refuse = (): never => { throw new Error("The Quake Live table interface locates no Q3 game data"); };
